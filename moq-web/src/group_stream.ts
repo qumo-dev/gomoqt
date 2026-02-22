@@ -6,7 +6,8 @@ import type { GroupMessage } from "./internal/message/mod.ts";
 import { readFull, readVarint, writeVarint } from "./internal/message/mod.ts";
 import { GroupErrorCode } from "./error.ts";
 import { GroupSequence } from "./alias.ts";
-import { ByteSink, ByteSinkFunc, ByteSource } from "./frame.ts";
+import { ByteSink, ByteSinkFunc, ByteSource, Frame } from "./frame.ts";
+import { EOFError } from "@okdaichi/golikejs/io";
 
 export class GroupWriter {
 	readonly sequence: GroupSequence;
@@ -88,6 +89,9 @@ export class GroupReader {
 	async readFrame(sink: ByteSink | ByteSinkFunc): Promise<Error | undefined> {
 		// Read length prefix as varint
 		const [len, , err1] = await readVarint(this.#reader);
+		// err1 may be an EOFError coming from the underlying stream.  We
+		// propagate it verbatim so callers can detect a normal end‑of‑stream
+		// and break out of their read loops (see `frames()` below).
 		if (err1) {
 			return err1;
 		}
@@ -126,5 +130,29 @@ export class GroupReader {
 		);
 		this.#cancelFunc(reason);
 		await this.#reader.cancel(code);
+	}
+
+	// frames returns an async generator that yields decoded frames from the
+	// group stream.  It mirrors the Go `GroupReader.Frames` helper, giving
+	// callers a simple `for await` interface and hiding EOF errors.
+	//
+	// The `buf` argument is optional; if provided the same buffer will be
+	// reused for each iteration (this avoids allocations but means the
+	// consumer should copy data out if they need to keep it).  Passing a
+	// buffer is analogous to supplying a scratch frame in the Go helper.
+	public async *frames(buf?: Frame): AsyncGenerator<Frame> {
+		if (!buf) {
+			buf = new Frame(new ArrayBuffer(0));
+		}
+		while (true) {
+			const err = await this.readFrame(buf);
+			if (err instanceof EOFError) {
+				return; // normal termination
+			}
+			if (err) {
+				throw err;
+			}
+			yield buf;
+		}
 	}
 }

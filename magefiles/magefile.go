@@ -258,7 +258,13 @@ func (Interop) Client(lang string) error {
 		return err
 	}
 
-	return sh.RunV("go", "run", ".", "-lang", lang)
+	// Allow overriding server address via INTEROP_ADDR env var (e.g. INTEROP_ADDR=localhost:9001)
+	addr := os.Getenv("INTEROP_ADDR")
+	args := []string{"run", ".", "-lang", lang}
+	if addr != "" {
+		args = append(args, "-addr", addr)
+	}
+	return sh.RunV("go", args...)
 }
 
 // Default runs the interop client with Go (same as Client go)

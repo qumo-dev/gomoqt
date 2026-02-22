@@ -355,4 +355,58 @@ Deno.test("GroupReader", async (t) => {
 			assertEquals(result2, payloads[1]);
 		},
 	);
+
+	await t.step("readFrame returns EOFError when stream closes immediately", async () => {
+		const rs = new MockReceiveStream({
+			id: 42n,
+			read: spy(async () => [0, new EOFError()]),
+		});
+		const gr = new GroupReader(background(), rs, new GroupMessage({ sequence: 1 }));
+		const fr = new Frame(new ArrayBuffer(1));
+		const err = await gr.readFrame(fr);
+		assertInstanceOf(err, EOFError);
+	});
+
+	await t.step("frames() async iterator yields frames then terminates", async () => {
+		const payloads = [
+			new Uint8Array([1, 2, 3]),
+			new Uint8Array([4, 5]),
+		];
+		// encode buffers
+		const encoderWritten: Uint8Array[] = [];
+		const ms = { write: spy(async (p: Uint8Array): Promise<[number, Error | undefined]> => { encoderWritten.push(new Uint8Array(p)); return [p.length, undefined]; }) };
+		for (const pl of payloads) {
+			await writeVarint(ms, pl.length);
+			await ms.write(pl);
+		}
+		const total = encoderWritten.reduce((a, b) => a + b.length, 0);
+		const data = new Uint8Array(total);
+		let off = 0;
+		for (const d of encoderWritten) { data.set(d, off); off += d.length; }
+
+		let readOffset = 0;
+		const rs = new MockReceiveStream({
+			id: 99n,
+			read: spy(async (p: Uint8Array) => {
+				if (readOffset >= data.length) {
+					return [0, new EOFError()] as [number, Error | undefined];
+				}
+				const n = Math.min(p.length, data.length - readOffset);
+				p.set(data.subarray(readOffset, readOffset + n));
+				readOffset += n;
+				return [n, undefined] as [number, Error | undefined];
+			}),
+		});
+		const gr = new GroupReader(background(), rs, new GroupMessage({ sequence: 1 }));
+		const got: Uint8Array[] = [];
+		for await (const f of gr.frames()) {
+			const arr = new Uint8Array(f.byteLength);
+			f.copyTo(arr);
+			got.push(arr);
+		}
+		assertEquals(got.length, payloads.length);
+		for (let i = 0; i < payloads.length; i++) {
+			assertEquals(got[i], payloads[i]);
+		}
+	});
 });
