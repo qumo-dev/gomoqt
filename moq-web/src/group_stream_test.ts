@@ -2,27 +2,29 @@ import { assertEquals, assertInstanceOf } from "@std/assert";
 import { spy } from "@std/testing/mock";
 import { GroupReader, GroupWriter } from "./group_stream.ts";
 import { GroupMessage, writeVarint } from "./internal/message/mod.ts";
+import { Buffer } from "@okdaichi/golikejs/bytes";
 import { Frame } from "./frame.ts";
 import { background, withCancelCause } from "@okdaichi/golikejs/context";
 import { GroupErrorCode } from "./error.ts";
 import { SendStream } from "./internal/webtransport/mod.ts";
 import { ReceiveStream } from "./internal/webtransport/mod.ts";
 import { EOFError } from "@okdaichi/golikejs/io";
-import { MockReceiveStream, MockSendStream } from "./mock_stream_test.ts";
 
 Deno.test("GroupWriter", async (t) => {
 	await t.step(
 		"writeFrame writes correct bytes and returns undefined",
 		async () => {
 			const [ctx] = withCancelCause(background());
-			const writtenData: Uint8Array[] = [];
-			const writer = new MockSendStream({
+			const buf = new Buffer(new ArrayBuffer(0));
+			const writeSpy = spy(buf.write.bind(buf));
+			const writer: SendStream = {
 				id: 1n,
-				write: spy(async (p: Uint8Array) => {
-					writtenData.push(new Uint8Array(p));
-					return [p.length, undefined] as [number, Error | undefined];
-				}),
-			});
+				write: writeSpy,
+				close: async () => {},
+				cancel: async (_code: number) => {},
+				closed: () => new Promise<void>(() => {}),
+			};
+			// track each write by spying; data is stored in buf
 			const msg = new GroupMessage({ sequence: 1, subscribeId: 0 });
 			const gw = new GroupWriter(ctx, writer, msg);
 			const data = new Uint8Array([1, 2, 3]);
@@ -30,15 +32,9 @@ Deno.test("GroupWriter", async (t) => {
 			frame.write(data);
 			const err = await gw.writeFrame(frame);
 			assertEquals(err, undefined);
-			assertEquals(writtenData.length, 2);
-			const allData = new Uint8Array(
-				writtenData.reduce((a, b) => a + b.length, 0),
-			);
-			let offset = 0;
-			for (const d of writtenData) {
-				allData.set(d, offset);
-				offset += d.length;
-			}
+			// two writes: length prefix + payload
+			assertEquals(writeSpy.calls.length, 2);
+			const allData = buf.bytes();
 			assertEquals(
 				allData.subarray(allData.length - 3),
 				new Uint8Array([1, 2, 3]),
@@ -48,12 +44,14 @@ Deno.test("GroupWriter", async (t) => {
 
 	await t.step("writeFrame returns an error if write fails", async () => {
 		const [ctx] = withCancelCause(background());
-		const writer = new MockSendStream({
+		// failure writer that always returns an error
+		const writer: SendStream = {
 			id: 1n,
-			write: spy(async (_p: Uint8Array) => {
-				return [0, new Error("fail")] as [number, Error | undefined];
-			}),
-		});
+			write: spy(async (_p: Uint8Array) => [0, new Error("fail")]),
+			close: async () => {},
+			cancel: async (_code: number) => {},
+			closed: () => new Promise<void>(() => {}),
+		};
 		const msg = new GroupMessage({ sequence: 1, subscribeId: 0 });
 		const gw = new GroupWriter(ctx, writer, msg);
 		const data = new Uint8Array([1]);
@@ -68,12 +66,13 @@ Deno.test("GroupWriter", async (t) => {
 		async () => {
 			const [ctx] = withCancelCause(background());
 			let closeCalls = 0;
-			const writer = new MockSendStream({
+			const writer: SendStream = {
 				id: 2n,
-				close: spy(async () => {
-					closeCalls++;
-				}),
-			});
+				write: async (p: Uint8Array) => [p.length, undefined],
+				close: spy(async () => { closeCalls++; }),
+				cancel: async (_code: number) => {},
+				closed: () => new Promise<void>(() => {}),
+			};
 			const msg = new GroupMessage({ sequence: 1, subscribeId: 0 });
 			const gw = new GroupWriter(ctx, writer, msg);
 			await gw.close();
@@ -108,12 +107,13 @@ Deno.test("GroupWriter", async (t) => {
 			cancelFunc(new Error("already canceled"));
 			await new Promise((r) => setTimeout(r, 0));
 			let closeCalls = 0;
-			const writer = new MockSendStream({
+			const writer: SendStream = {
 				id: 5n,
-				close: spy(async () => {
-					closeCalls++;
-				}),
-			});
+				write: async (p: Uint8Array) => [p.length, undefined],
+				close: spy(async () => { closeCalls++; }),
+				cancel: async (_code: number) => {},
+				closed: () => new Promise<void>(() => {}),
+			};
 			const msg = new GroupMessage({ sequence: 1, subscribeId: 0 });
 			const gw = new GroupWriter(ctx, writer, msg);
 			await gw.close();
@@ -128,12 +128,13 @@ Deno.test("GroupWriter", async (t) => {
 			cancelFunc(new Error("already canceled"));
 			await new Promise((r) => setTimeout(r, 0));
 			const cancelCalls: number[] = [];
-			const writer = new MockSendStream({
+			const writer: SendStream = {
 				id: 6n,
-				cancel: spy(async (code: number) => {
-					cancelCalls.push(code);
-				}),
-			});
+				write: async (p: Uint8Array) => [p.length, undefined],
+				close: async () => {},
+				cancel: spy(async (code: number) => { cancelCalls.push(code); }),
+				closed: () => new Promise<void>(() => {}),
+			};
 			const msg = new GroupMessage({ sequence: 1, subscribeId: 0 });
 			const gw = new GroupWriter(ctx, writer, msg);
 			await gw.cancel(GroupErrorCode.SubscribeCanceled);
@@ -148,37 +149,25 @@ Deno.test("GroupReader", async (t) => {
 		async () => {
 			const [ctx] = withCancelCause(background());
 			const payload = new Uint8Array([10, 20, 30]);
-			const encoderWrittenData: Uint8Array[] = [];
+			// use Buffer from golikejs/bytes to collect encoded bytes
+			const buf = new Buffer(new ArrayBuffer(0));
 			const ms = {
-				write: spy(
-					async (p: Uint8Array): Promise<[number, Error | undefined]> => {
-						encoderWrittenData.push(new Uint8Array(p));
-						return [p.length, undefined];
-					},
-				),
+				write: spy(async (p: Uint8Array): Promise<[number, Error | undefined]> => {
+					return buf.write(p);
+				}),
 			};
 			await writeVarint(ms, payload.length);
 			await ms.write(payload);
-			const total = encoderWrittenData.reduce((a, b) => a + b.length, 0);
-			const data = new Uint8Array(total);
-			let off = 0;
-			for (const d of encoderWrittenData) {
-				data.set(d, off);
-				off += d.length;
-			}
-			let readOffset = 0;
-			const rs = new MockReceiveStream({
+			const data = buf.bytes();
+			// use Buffer as a simple receive stream
+			const bufSrc = new Buffer(new ArrayBuffer(0));
+			bufSrc.write(data);
+			const rs: ReceiveStream = {
 				id: 8n,
-				read: spy(async (p: Uint8Array) => {
-					if (readOffset >= data.length) {
-						return [0, new EOFError()] as [number, Error | undefined];
-					}
-					const n = Math.min(p.length, data.length - readOffset);
-					p.set(data.subarray(readOffset, readOffset + n));
-					readOffset += n;
-					return [n, undefined] as [number, Error | undefined];
-				}),
-			});
+				read: spy(bufSrc.read.bind(bufSrc)),
+				cancel: async (_code: number) => {},
+				closed: () => new Promise<void>(() => {}),
+			};
 			const msg = new GroupMessage({ sequence: 1, subscribeId: 0 });
 			const gr = new GroupReader(ctx, rs, msg);
 			const frame = new Frame(new ArrayBuffer(10));
@@ -195,12 +184,12 @@ Deno.test("GroupReader", async (t) => {
 	await t.step("cancel cancels underlying stream", async () => {
 		const [ctx] = withCancelCause(background());
 		const cancelCalls: number[] = [];
-		const rs = new MockReceiveStream({
+		const rs: ReceiveStream = {
 			id: 4n,
-			cancel: spy(async (code: number) => {
-				cancelCalls.push(code);
-			}),
-		});
+			read: async () => [0, new EOFError()],
+			cancel: spy(async (code: number) => { cancelCalls.push(code); }),
+			closed: () => new Promise<void>(() => {}),
+		};
 		const msg = new GroupMessage({ sequence: 1, subscribeId: 0 });
 		const gr = new GroupReader(ctx, rs, msg);
 		await gr.cancel(GroupErrorCode.ExpiredGroup);
@@ -213,12 +202,12 @@ Deno.test("GroupReader", async (t) => {
 			const [ctx, cancelFunc] = withCancelCause(background());
 			cancelFunc(new Error("already canceled"));
 			const cancelCalls: number[] = [];
-			const rs = new MockReceiveStream({
+			const rs: ReceiveStream = {
 				id: 7n,
-				cancel: spy(async (code: number) => {
-					cancelCalls.push(code);
-				}),
-			});
+				read: async () => [0, new EOFError()],
+				cancel: spy(async (code: number) => { cancelCalls.push(code); }),
+				closed: () => new Promise<void>(() => {}),
+			};
 			const msg = new GroupMessage({ sequence: 1, subscribeId: 0 });
 			const gr = new GroupReader(ctx, rs, msg);
 			await gr.cancel(GroupErrorCode.ExpiredGroup);
@@ -294,14 +283,12 @@ Deno.test("GroupReader", async (t) => {
 				new Uint8Array(512).fill(2), // Second frame (larger)
 			];
 
-			const encoderWrittenData: Uint8Array[] = [];
+			// use Buffer to accumulate two encoded frames
+			const buf = new Buffer(new ArrayBuffer(0));
 			const ms = {
-				write: spy(
-					async (p: Uint8Array): Promise<[number, Error | undefined]> => {
-						encoderWrittenData.push(new Uint8Array(p));
-						return [p.length, undefined];
-					},
-				),
+				write: spy(async (p: Uint8Array): Promise<[number, Error | undefined]> => {
+					return await buf.write(p);
+				}),
 			};
 
 			// Encode both frames
@@ -310,27 +297,16 @@ Deno.test("GroupReader", async (t) => {
 				await ms.write(payload);
 			}
 
-			const total = encoderWrittenData.reduce((a, b) => a + b.length, 0);
-			const data = new Uint8Array(total);
-			let off = 0;
-			for (const d of encoderWrittenData) {
-				data.set(d, off);
-				off += d.length;
-			}
+			const data = buf.bytes();
 
-			let readOffset = 0;
-			const rs = new MockReceiveStream({
+			const bufSrc = new Buffer(new ArrayBuffer(0));
+			bufSrc.write(data);
+			const rs: ReceiveStream = {
 				id: 9n,
-				read: spy(async (p: Uint8Array) => {
-					if (readOffset >= data.length) {
-						return [0, new EOFError()] as [number, Error | undefined];
-					}
-					const n = Math.min(p.length, data.length - readOffset);
-					p.set(data.subarray(readOffset, readOffset + n));
-					readOffset += n;
-					return [n, undefined] as [number, Error | undefined];
-				}),
-			});
+				read: spy(bufSrc.read.bind(bufSrc)),
+				cancel: async (_code: number) => {},
+				closed: () => new Promise<void>(() => {}),
+			};
 
 			const msg = new GroupMessage({ sequence: 1, subscribeId: 0 });
 			const gr = new GroupReader(ctx, rs, msg);
@@ -357,10 +333,12 @@ Deno.test("GroupReader", async (t) => {
 	);
 
 	await t.step("readFrame returns EOFError when stream closes immediately", async () => {
-		const rs = new MockReceiveStream({
+		const rs: ReceiveStream = {
 			id: 42n,
 			read: spy(async () => [0, new EOFError()]),
-		});
+			cancel: async (_code: number) => {},
+			closed: () => new Promise<void>(() => {}),
+		};
 		const gr = new GroupReader(background(), rs, new GroupMessage({ sequence: 1 }));
 		const fr = new Frame(new ArrayBuffer(1));
 		const err = await gr.readFrame(fr);
@@ -372,31 +350,23 @@ Deno.test("GroupReader", async (t) => {
 			new Uint8Array([1, 2, 3]),
 			new Uint8Array([4, 5]),
 		];
-		// encode buffers
-		const encoderWritten: Uint8Array[] = [];
-		const ms = { write: spy(async (p: Uint8Array): Promise<[number, Error | undefined]> => { encoderWritten.push(new Uint8Array(p)); return [p.length, undefined]; }) };
+		// encode buffers using Buffer
+		const buf = new Buffer(new ArrayBuffer(0));
+		const ms = { write: spy(async (p: Uint8Array): Promise<[number, Error | undefined]> => { return await buf.write(p); }) };
 		for (const pl of payloads) {
 			await writeVarint(ms, pl.length);
 			await ms.write(pl);
 		}
-		const total = encoderWritten.reduce((a, b) => a + b.length, 0);
-		const data = new Uint8Array(total);
-		let off = 0;
-		for (const d of encoderWritten) { data.set(d, off); off += d.length; }
+		const data = buf.bytes();
 
-		let readOffset = 0;
-		const rs = new MockReceiveStream({
+		const bufSrc = new Buffer(new ArrayBuffer(0));
+		bufSrc.write(data);
+		const rs: ReceiveStream = {
 			id: 99n,
-			read: spy(async (p: Uint8Array) => {
-				if (readOffset >= data.length) {
-					return [0, new EOFError()] as [number, Error | undefined];
-				}
-				const n = Math.min(p.length, data.length - readOffset);
-				p.set(data.subarray(readOffset, readOffset + n));
-				readOffset += n;
-				return [n, undefined] as [number, Error | undefined];
-			}),
-		});
+			read: spy(bufSrc.read.bind(bufSrc)),
+			cancel: async (_code: number) => {},
+			closed: () => new Promise<void>(() => {}),
+		};
 		const gr = new GroupReader(background(), rs, new GroupMessage({ sequence: 1 }));
 		const got: Uint8Array[] = [];
 		for await (const f of gr.frames()) {
