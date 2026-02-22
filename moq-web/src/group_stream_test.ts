@@ -151,13 +151,8 @@ Deno.test("GroupReader", async (t) => {
 			const payload = new Uint8Array([10, 20, 30]);
 			// use Buffer from golikejs/bytes to collect encoded bytes
 			const buf = new Buffer(new ArrayBuffer(0));
-			const ms = {
-				write: spy(async (p: Uint8Array): Promise<[number, Error | undefined]> => {
-					return buf.write(p);
-				}),
-			};
-			await writeVarint(ms, payload.length);
-			await ms.write(payload);
+			await writeVarint(buf, payload.length);
+			buf.write(payload);
 			const data = buf.bytes();
 			// use Buffer as a simple receive stream
 			const bufSrc = new Buffer(new ArrayBuffer(0));
@@ -285,16 +280,11 @@ Deno.test("GroupReader", async (t) => {
 
 			// use Buffer to accumulate two encoded frames
 			const buf = new Buffer(new ArrayBuffer(0));
-			const ms = {
-				write: spy(async (p: Uint8Array): Promise<[number, Error | undefined]> => {
-					return await buf.write(p);
-				}),
-			};
 
 			// Encode both frames
 			for (const payload of payloads) {
-				await writeVarint(ms, payload.length);
-				await ms.write(payload);
+				await writeVarint(buf, payload.length);
+				buf.write(payload);
 			}
 
 			const data = buf.bytes();
@@ -352,10 +342,9 @@ Deno.test("GroupReader", async (t) => {
 		];
 		// encode buffers using Buffer
 		const buf = new Buffer(new ArrayBuffer(0));
-		const ms = { write: spy(async (p: Uint8Array): Promise<[number, Error | undefined]> => { return await buf.write(p); }) };
 		for (const pl of payloads) {
-			await writeVarint(ms, pl.length);
-			await ms.write(pl);
+			await writeVarint(buf, pl.length);
+			buf.write(pl);
 		}
 		const data = buf.bytes();
 
@@ -379,4 +368,4 @@ Deno.test("GroupReader", async (t) => {
 			assertEquals(got[i], payloads[i]);
 		}
 	});
-});
+})
