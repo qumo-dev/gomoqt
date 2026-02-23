@@ -9,14 +9,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [v0.10.5] - 2026-02-20
 
+### Added
+
+- Allow overriding server address in interop client via `INTEROP_ADDR` environment variable (daichiDeskTop)
+- Add magefile for build automation and environment setup (daichiDeskTop)
+
+### Changed
+
+- Simplify `GroupReader`/`GroupWriter` tests by using `Buffer` for encoding (OkutaniDaichi0106)
+- Refactor `GroupReader` tests to add EOFError handling and `frames()` async iterator (OkutaniDaichi0106)
+- Remove unused logger parameter from `acceptSessionStream` function (daichiDeskTop)
+- Simplify verbose comments to focus on spec/behaviour (daichiDeskTop)
+- Add regression tests for webtransport-go v0.10.0 compatibility and server shutdown (daichiDeskTop)
+
 ### Fixed
 
-- **webtransport/webtransportgo:** call `ConfigureHTTP3Server(wtserver.H3)` in `NewServer()`.  
-  Without this, `H3.ConnContext` is `nil` and `Server.Upgrade()` cannot retrieve the QUIC connection from the HTTP request context, returning `"webtransport: missing QUIC connection"` on every WebTransport upgrade attempt.  
-  `ConfigureHTTP3Server` performs three necessary steps:
-  - sets `H3.AdditionalSettings[settingsEnableWebtransport] = 1` (WebTransport protocol negotiation)
-  - sets `H3.EnableDatagrams = true` (HTTP/3-level datagram support)
-  - installs `H3.ConnContext` to inject `*quic.Conn` into each HTTP/3 request context so `Upgrade` can retrieve it
+- Call `ConfigureHTTP3Server(wtserver.H3)` in `NewServer()` (daichiDeskTop)
+  - **webtransport/webtransportgo:** without this, `H3.ConnContext` is `nil` and `Server.Upgrade()` cannot retrieve the QUIC connection from the HTTP request context, returning `"webtransport: missing QUIC connection"` on every WebTransport upgrade attempt.
+  - `ConfigureHTTP3Server` performs three necessary steps:
+    - sets `H3.AdditionalSettings[settingsEnableWebtransport] = 1` (WebTransport protocol negotiation)
+    - sets `H3.EnableDatagrams = true` (HTTP/3-level datagram support)
+    - installs `H3.ConnContext` to inject `*quic.Conn` into each HTTP/3 request context so `Upgrade` can retrieve it
 
 
 ## [v0.10.4] - 2026-02-20
