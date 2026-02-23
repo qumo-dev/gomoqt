@@ -3,7 +3,6 @@ package moqt
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"slices"
 	"sync"
 
@@ -75,21 +74,19 @@ func (r *response) AwaitAccepted() error {
 
 var _ SetupResponseWriter = (*responseWriter)(nil)
 
-func newResponseWriter(conn quic.Connection, sessStr *sessionStream, connLogger *slog.Logger, server *Server) *responseWriter {
+func newResponseWriter(conn quic.Connection, sessStr *sessionStream, server *Server) *responseWriter {
 	return &responseWriter{
 		sessionStream: sessStr,
 		conn:          conn,
-		connLogger:    connLogger,
 		server:        server,
 	}
 }
 
 type responseWriter struct {
 	*sessionStream
-	conn       quic.Connection
-	connLogger *slog.Logger
-	server     *Server
-	onceSetup  sync.Once
+	conn      quic.Connection
+	server    *Server
+	onceSetup sync.Once
 }
 
 func (w *responseWriter) SelectVersion(v Version) error {
@@ -129,7 +126,7 @@ func (w *responseWriter) accept(mux *TrackMux) (*Session, error) {
 	}
 
 	var sess *Session
-	sess = newSession(w.conn, w.sessionStream, mux, w.connLogger, func() { w.server.removeSession(sess) })
+	sess = newSession(w.conn, w.sessionStream, mux, func() { w.server.removeSession(sess) })
 	w.server.addSession(sess)
 
 	return sess, nil

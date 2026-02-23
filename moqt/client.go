@@ -73,6 +73,14 @@ func (c *Client) init() {
 	})
 }
 
+// log returns Client.Logger if set, otherwise a discard logger.
+func (c *Client) log() *slog.Logger {
+	if c.Logger != nil {
+		return c.Logger
+	}
+	return slog.New(slog.DiscardHandler)
+}
+
 // Dial establishes a new session to the specified URL using either WebTransport (https scheme) or QUIC (moqt scheme).
 // The provided TrackMux is used to route incoming service tracks if non-nil.
 // Dial returns the newly created Session or an error.
@@ -109,21 +117,18 @@ func generateSessionID() string {
 // It performs the WebTransport handshake and initializes a MOQ session stream.
 // `host` should be host:port and `path` is the path used for session setup.
 func (c *Client) DialWebTransport(ctx context.Context, host, path string, mux *TrackMux) (*Session, error) {
-	var clientLogger *slog.Logger
-	if c.Logger != nil {
-		clientLogger = c.Logger.With(
-			"host", host,
-		)
-	} else {
-		clientLogger = slog.New(slog.DiscardHandler)
-
-	}
-
 	if c.shuttingDown() {
 		return nil, ErrClientClosed
 	}
 
 	c.init()
+
+	var baseLogger *slog.Logger
+	if c.Logger != nil {
+		baseLogger = c.Logger
+	} else {
+		baseLogger = slog.New(slog.DiscardHandler)
+	}
 
 	dialTimeout := c.Config.setupTimeout()
 	dialCtx, cancelDial := context.WithTimeout(ctx, dialTimeout)
@@ -142,21 +147,22 @@ func (c *Client) DialWebTransport(ctx context.Context, host, path string, mux *T
 		return nil, err
 	}
 
-	connLogger := clientLogger.With(
+	connLogger := baseLogger.With(
 		"transport", "webtransport",
 		"local_address", conn.LocalAddr(),
 		"remote_address", conn.RemoteAddr(),
 		"quic_version", conn.ConnectionState().Version,
 		"alpn", conn.ConnectionState().TLS.NegotiatedProtocol,
 	)
+	connLogger.Info("connection established")
 
-	sessStream, err := openSessionStream(conn, path, webTransportExtensions(), connLogger)
+	sessStream, err := openSessionStream(conn, path, webTransportExtensions())
 	if err != nil {
 		return nil, err
 	}
 
 	var sess *Session
-	sess = newSession(conn, sessStream, mux, connLogger, func() { c.removeSession(sess) })
+	sess = newSession(conn, sessStream, mux, func() { c.removeSession(sess) })
 	c.addSession(sess)
 
 	return sess, nil
@@ -172,13 +178,6 @@ func (c *Client) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux)
 	}
 
 	c.init()
-
-	var clientLogger *slog.Logger
-	if c.Logger == nil {
-		clientLogger = slog.New(slog.DiscardHandler)
-	} else {
-		clientLogger = c.Logger
-	}
 
 	dialTimeout := c.Config.setupTimeout()
 	dialCtx, cancelDial := context.WithTimeout(ctx, dialTimeout)
@@ -197,22 +196,13 @@ func (c *Client) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux)
 		return nil, err
 	}
 
-	connLogger := clientLogger.With(
-		"transport", "quic",
-		"local_address", conn.LocalAddr(),
-		"remote_address", conn.RemoteAddr(),
-		"quic_version", conn.ConnectionState().Version,
-		"alpn", conn.ConnectionState().TLS.NegotiatedProtocol,
-	)
-	// TODO: Add connection ID
-
-	sessStream, err := openSessionStream(conn, path, quicExtensions(path), connLogger)
+	sessStream, err := openSessionStream(conn, path, quicExtensions(path))
 	if err != nil {
 		return nil, err
 	}
 
 	var sess *Session
-	sess = newSession(conn, sessStream, mux, connLogger, func() { c.removeSession(sess) })
+	sess = newSession(conn, sessStream, mux, func() { c.removeSession(sess) })
 	c.addSession(sess)
 
 	return sess, nil
@@ -236,7 +226,6 @@ func openSessionStream(
 	conn quic.Connection,
 	path string,
 	extensions *Extension,
-	connLogger *slog.Logger,
 ) (*sessionStream, error) {
 	stream, err := conn.OpenStream()
 	if err != nil {

@@ -112,11 +112,15 @@ func (s *Server) init() {
 		} else {
 			s.wtServer = webtransportgo.NewServer(checkOrigin)
 		}
-
-		if s.Logger != nil {
-			s.Logger = s.Logger.With("address", s.Addr)
-		}
 	})
+}
+
+// log returns Server.Logger if set, otherwise a discard logger.
+func (s *Server) log() *slog.Logger {
+	if s.Logger != nil {
+		return s.Logger
+	}
+	return slog.New(slog.DiscardHandler)
 }
 
 // ServeQUICListener accepts connections on the provided QUIC listener and handles them using the Server's configuration.
@@ -195,22 +199,17 @@ func (s *Server) HandleWebTransport(w http.ResponseWriter, r *http.Request) erro
 
 	s.init()
 
+	if r.TLS == nil {
+		s.log().Warn("connection rejected: plain HTTP is not supported; use HTTPS",
+			"remote_address", r.RemoteAddr,
+		)
+		http.Error(w, "plain HTTP is not supported; use HTTPS", http.StatusUpgradeRequired)
+		return fmt.Errorf("plain HTTP connection from %s", r.RemoteAddr)
+	}
+
 	conn, err := s.wtServer.Upgrade(w, r)
 	if err != nil {
 		return fmt.Errorf("failed to upgrade connection: %w", err)
-	}
-
-	var connLogger *slog.Logger
-	if s.Logger != nil {
-		connLogger = s.Logger.With(
-			"local_address", conn.LocalAddr(),
-			"remote_address", conn.RemoteAddr(),
-			"alpn", conn.ConnectionState().TLS.NegotiatedProtocol,
-			"quic_version", conn.ConnectionState().Version,
-		)
-		// TODO: Add connection ID
-	} else {
-		connLogger = slog.New(slog.DiscardHandler)
 	}
 
 	acceptCtx, cancelAccept := context.WithTimeout(r.Context(), s.Config.setupTimeout())
@@ -223,14 +222,10 @@ func (s *Server) HandleWebTransport(w http.ResponseWriter, r *http.Request) erro
 	// Set the path for the session
 	sessStr.Path = r.URL.Path
 
-	rsp := newResponseWriter(conn, sessStr, connLogger, s)
+	rsp := newResponseWriter(conn, sessStr, s)
 	req := sessStr.SetupRequest
 
-	if s.SetupHandler != nil {
-		s.SetupHandler.ServeMOQ(rsp, req)
-	} else {
-		DefaultRouter.ServeMOQ(rsp, req)
-	}
+	s.serveSetup(rsp, req)
 
 	return nil
 }
@@ -242,19 +237,6 @@ func (s *Server) handleNativeQUIC(conn quic.Connection) error {
 
 	s.init()
 
-	var connLogger *slog.Logger
-	if s.Logger != nil {
-		connLogger = s.Logger.With(
-			"local_address", conn.LocalAddr(),
-			"remote_address", conn.RemoteAddr(),
-			"alpn", conn.ConnectionState().TLS.NegotiatedProtocol,
-			"quic_version", conn.ConnectionState().Version,
-		)
-		// TODO: Add connection ID
-	} else {
-		connLogger = slog.New(slog.DiscardHandler)
-	}
-
 	acceptCtx, cancelAccept := context.WithTimeout(conn.Context(), s.Config.setupTimeout())
 	defer cancelAccept()
 	sessStr, err := acceptSessionStream(acceptCtx, conn)
@@ -262,16 +244,29 @@ func (s *Server) handleNativeQUIC(conn quic.Connection) error {
 		return fmt.Errorf("moq: failed to accept session stream: %w", err)
 	}
 
-	rsp := newResponseWriter(conn, sessStr, connLogger, s)
+	rsp := newResponseWriter(conn, sessStr, s)
 	req := sessStr.SetupRequest
 
-	if s.SetupHandler != nil {
-		s.SetupHandler.ServeMOQ(rsp, req)
-	} else {
-		DefaultRouter.ServeMOQ(rsp, req)
-	}
+	s.serveSetup(rsp, req)
 
 	return nil
+}
+
+// serveSetup dispatches the setup request to the configured handler, recovering
+// from any panic the handler may raise and logging it as a server-level error.
+func (s *Server) serveSetup(w SetupResponseWriter, req *SetupRequest) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			s.log().Error("panic in setup handler", "panic", rec)
+			_ = w.Reject(SetupFailedErrorCode)
+		}
+	}()
+
+	if s.SetupHandler != nil {
+		s.SetupHandler.ServeMOQ(w, req)
+	} else {
+		DefaultRouter.ServeMOQ(w, req)
+	}
 }
 
 func acceptSessionStream(acceptCtx context.Context, conn quic.Connection) (*sessionStream, error) {

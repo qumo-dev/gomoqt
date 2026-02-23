@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
 	"sync"
 	"testing"
@@ -73,7 +72,7 @@ func BenchmarkSession_Subscribe(b *testing.B) {
 			})
 
 			mux := NewTrackMux()
-			session := newSession(conn, sessStream, mux, slog.New(slog.DiscardHandler), nil)
+			session := newSession(conn, sessStream, mux, nil)
 
 			// Pre-generate paths
 			paths := make([]BroadcastPath, size)
@@ -150,7 +149,7 @@ func BenchmarkSession_ConcurrentSubscribe(b *testing.B) {
 			})
 
 			mux := NewTrackMux()
-			session := newSession(conn, sessStream, mux, slog.New(slog.DiscardHandler), nil)
+			session := newSession(conn, sessStream, mux, nil)
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -190,7 +189,7 @@ func BenchmarkSession_TrackReaderOperations(b *testing.B) {
 	})
 
 	mux := NewTrackMux()
-	session := newSession(conn, sessStream, mux, slog.New(slog.DiscardHandler), nil)
+	session := newSession(conn, sessStream, mux, nil)
 
 	b.ReportAllocs()
 
@@ -240,7 +239,7 @@ func BenchmarkSession_TrackWriterOperations(b *testing.B) {
 	})
 
 	mux := NewTrackMux()
-	session := newSession(conn, sessStream, mux, slog.New(slog.DiscardHandler), nil)
+	session := newSession(conn, sessStream, mux, nil)
 
 	b.ReportAllocs()
 
@@ -295,7 +294,7 @@ func BenchmarkSession_MapLookup(b *testing.B) {
 			})
 
 			mux := NewTrackMux()
-			session := newSession(conn, sessStream, mux, slog.New(slog.DiscardHandler), nil)
+			session := newSession(conn, sessStream, mux, nil)
 
 			// Pre-populate with track readers
 			for i := range size {
@@ -361,7 +360,7 @@ func BenchmarkSession_MemoryAllocation(b *testing.B) {
 				})
 
 				mux := NewTrackMux()
-				session := newSession(conn, sessStream, mux, slog.New(slog.DiscardHandler), nil)
+				session := newSession(conn, sessStream, mux, nil)
 
 				// Create many track readers
 				for j := range size {
@@ -410,7 +409,7 @@ func BenchmarkSession_ContextCancellation(b *testing.B) {
 		})
 
 		mux := NewTrackMux()
-		session := newSession(conn, sessStream, mux, slog.New(slog.DiscardHandler), nil)
+		session := newSession(conn, sessStream, mux, nil)
 
 		// Cancel context
 		cancel()

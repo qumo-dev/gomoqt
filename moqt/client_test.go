@@ -125,7 +125,7 @@ func TestClient_ShutdownContextCancel(t *testing.T) {
 		Path:             "path",
 		ClientExtensions: NewExtension(),
 	})
-	sess := newSession(mockConn, sessStream, NewTrackMux(), slog.Default(), nil)
+	sess := newSession(mockConn, sessStream, NewTrackMux(), nil)
 	c.addSession(sess)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -349,7 +349,7 @@ func TestClient_openSession(t *testing.T) {
 			if extProvider == nil {
 				extProvider = func() *Extension { return &Extension{} }
 			}
-			_, err := openSessionStream(conn, "/path", extProvider(), slog.Default())
+			_, err := openSessionStream(conn, "/path", extProvider())
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -648,7 +648,7 @@ func TestClient_OpenSession_NilExtensions(t *testing.T) {
 
 	// Expect panic when extensions is nil
 	assert.Panics(t, func() {
-		_, _ = openSessionStream(mockConn, "/test", nil, slog.Default())
+		_, _ = openSessionStream(mockConn, "/test", nil)
 	})
 }
 
@@ -704,7 +704,7 @@ func TestClient_OpenSession_Success(t *testing.T) {
 	extensions := func() *Extension {
 		return NewExtension()
 	}
-	sessStream, err := openSessionStream(mockConn, "/test", extensions(), slog.Default())
+	sessStream, err := openSessionStream(mockConn, "/test", extensions())
 	require.NoError(t, err)
 	require.NotNil(t, sessStream)
 
@@ -984,7 +984,7 @@ func TestClient_Shutdown_Timeout(t *testing.T) {
 		Path:             "path",
 		ClientExtensions: NewExtension(),
 	})
-	sess := newSession(mockConn, sessStream, NewTrackMux(), slog.Default(), nil)
+	sess := newSession(mockConn, sessStream, NewTrackMux(), nil)
 	c.addSession(sess)
 
 	// Create a context that times out quickly

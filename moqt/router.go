@@ -80,9 +80,8 @@ func (r *SetupRouter) Handler(pattern string) SetupHandler {
 
 func (r *SetupRouter) ServeMOQ(w SetupResponseWriter, req *SetupRequest) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-
 	handler := r.Handler(req.Path)
+	r.mu.RUnlock()
 	if handler == nil {
 		handler = RejectSetupHandler
 	}

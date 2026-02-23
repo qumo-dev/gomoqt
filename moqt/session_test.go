@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log/slog"
 	"net"
 	"testing"
 	"time"
@@ -49,7 +48,7 @@ func TestNewSession(t *testing.T) {
 				Path:             "test/path",
 				ClientExtensions: NewExtension(),
 			})
-			session := newSession(conn, sessStream, tt.mux, slog.Default(), nil)
+			session := newSession(conn, sessStream, tt.mux, nil)
 
 			if tt.expectOK {
 				assert.NotNil(t, session, "newSession should not return nil")
@@ -90,7 +89,7 @@ func TestNewSessionWithNilMux(t *testing.T) {
 				Path:             "test/path",
 				ClientExtensions: NewExtension(),
 			})
-			session := newSession(conn, sessStream, tt.mux, slog.Default(), nil)
+			session := newSession(conn, sessStream, tt.mux, nil)
 
 			if tt.expectDefault {
 				assert.Equal(t, DefaultMux, session.mux, "should use DefaultMux when nil mux is provided")
@@ -119,7 +118,7 @@ func TestNewSession_WithNilLogger(t *testing.T) {
 		ClientExtensions: NewExtension(),
 	})
 
-	session := newSession(conn, sessStream, NewTrackMux(), nil, nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	assert.NotNil(t, session, "session should be created with nil logger")
 
@@ -153,7 +152,7 @@ func TestNewSession_SessionStreamClosure(t *testing.T) {
 		ClientExtensions: NewExtension(),
 	})
 
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 	assert.NotNil(t, session)
 
 	cancel()
@@ -199,7 +198,7 @@ func TestSession_CloseWithError(t *testing.T) {
 				Path:             "test/path",
 				ClientExtensions: NewExtension(),
 			})
-			session := newSession(conn, sessStream, nil, slog.Default(), nil)
+			session := newSession(conn, sessStream, nil, nil)
 
 			err := session.CloseWithError(tt.code, tt.msg)
 			assert.NoError(t, err, "CloseWithError should not return error")
@@ -266,7 +265,7 @@ func TestSession_Subscribe(t *testing.T) {
 				Path:             "test/path",
 				ClientExtensions: NewExtension(),
 			})
-			session := newSession(conn, sessStream, nil, slog.Default(), nil)
+			session := newSession(conn, sessStream, nil, nil)
 
 			track, err := session.Subscribe(tt.path, tt.name, tt.config)
 
@@ -304,7 +303,7 @@ func TestSession_Subscribe_OpenError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, nil, slog.Default(), nil)
+	session := newSession(conn, sessStream, nil, nil)
 
 	config := &TrackConfig{
 		TrackPriority: TrackPriority(1),
@@ -341,7 +340,7 @@ func TestSession_Subscribe_OpenStreamApplicationError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, nil, slog.Default(), nil)
+	session := newSession(conn, sessStream, nil, nil)
 
 	config := &TrackConfig{TrackPriority: 1}
 
@@ -381,7 +380,7 @@ func TestSession_Subscribe_EncodeStreamTypeError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, nil, slog.Default(), nil)
+	session := newSession(conn, sessStream, nil, nil)
 
 	config := &TrackConfig{TrackPriority: 1}
 
@@ -422,7 +421,7 @@ func TestSession_Subscribe_EncodeStreamTypeStreamError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, nil, slog.Default(), nil)
+	session := newSession(conn, sessStream, nil, nil)
 
 	config := &TrackConfig{TrackPriority: 1}
 
@@ -474,7 +473,7 @@ func TestSession_Subscribe_NilConfig(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, nil, slog.Default(), nil)
+	session := newSession(conn, sessStream, nil, nil)
 
 	// Pass nil config - should use default
 	reader, err := session.Subscribe("/test", "video", nil)
@@ -520,7 +519,7 @@ func TestSession_Subscribe_EncodeSubscribeMessageStreamError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, nil, slog.Default(), nil)
+	session := newSession(conn, sessStream, nil, nil)
 
 	config := &TrackConfig{TrackPriority: 1}
 
@@ -570,7 +569,7 @@ func TestSession_Subscribe_EncodeSubscribeMessageRemoteStreamError(t *testing.T)
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, nil, slog.Default(), nil)
+	session := newSession(conn, sessStream, nil, nil)
 
 	config := &TrackConfig{TrackPriority: 1}
 
@@ -614,7 +613,7 @@ func TestSession_Subscribe_DecodeSubscribeOkStreamError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, nil, slog.Default(), nil)
+	session := newSession(conn, sessStream, nil, nil)
 
 	config := &TrackConfig{TrackPriority: 1}
 
@@ -656,7 +655,7 @@ func TestSession_Subscribe_DecodeSubscribeOkError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, nil, slog.Default(), nil)
+	session := newSession(conn, sessStream, nil, nil)
 
 	config := &TrackConfig{TrackPriority: 1}
 
@@ -684,7 +683,7 @@ func TestSession_Context(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, nil, slog.Default(), nil)
+	session := newSession(conn, sessStream, nil, nil)
 
 	ctx := session.Context()
 	assert.NotNil(t, ctx, "Context should not be nil")
@@ -709,7 +708,7 @@ func TestSession_nextSubscribeID(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, nil, slog.Default(), nil)
+	session := newSession(conn, sessStream, nil, nil)
 
 	id1 := session.nextSubscribeID()
 	id2 := session.nextSubscribeID()
@@ -749,7 +748,7 @@ func TestSession_HandleBiStreams_AcceptError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, nil, slog.Default(), nil)
+	session := newSession(conn, sessStream, nil, nil)
 
 	// Wait for the background goroutine to attempt AcceptStream/AcceptUniStream
 	select {
@@ -782,7 +781,7 @@ func TestSession_HandleUniStreamsAcceptError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, nil, slog.Default(), nil)
+	session := newSession(conn, sessStream, nil, nil)
 
 	// Wait a bit for the background goroutine to try accepting
 	time.Sleep(50 * time.Millisecond)
@@ -813,7 +812,7 @@ func TestSession_ConcurrentAccess(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, nil, slog.Default(), nil)
+	session := newSession(conn, sessStream, nil, nil)
 
 	// Test concurrent access
 	done := make(chan struct{})
@@ -874,7 +873,7 @@ func TestSession_ContextCancellation(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, nil, slog.Default(), nil)
+	session := newSession(conn, sessStream, nil, nil)
 
 	ctx := session.Context()
 	assert.NotNil(t, ctx)
@@ -910,7 +909,7 @@ func TestSession_WithRealMux(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, mux, slog.Default(), nil)
+	session := newSession(conn, sessStream, mux, nil)
 
 	assert.Equal(t, mux, session.mux, "Mux should be set correctly in the session")
 
@@ -936,7 +935,7 @@ func TestSession_GoAway(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	// Test goAway - now it calls updateSession
 	err := session.goAway("test-uri")
@@ -1020,7 +1019,7 @@ func TestSession_AcceptAnnounce(t *testing.T) {
 				Path:             "test/path",
 				ClientExtensions: NewExtension(),
 			})
-			session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+			session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 			announceStream := &MockQUICStream{}
 			tt.setupMocks(conn, announceStream)
@@ -1057,7 +1056,7 @@ func TestSession_AddTrackWriter(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	writer := &TrackWriter{}
 	id := SubscribeID(1)
@@ -1087,7 +1086,7 @@ func TestSession_RemoveTrackWriter(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	writer := &TrackWriter{}
 	id := SubscribeID(1)
@@ -1118,7 +1117,7 @@ func TestSession_RemoveTrackReader(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	reader := &TrackReader{}
 	id := SubscribeID(1)
@@ -1156,7 +1155,7 @@ func TestSession_AddTrackReader(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	reader := &TrackReader{}
 	id := SubscribeID(1)
@@ -1183,7 +1182,7 @@ func TestSession_ProcessBiStream_Announce(t *testing.T) {
 		ClientExtensions: NewExtension(),
 	})
 	mux := NewTrackMux()
-	session := newSession(conn, sessStream, mux, slog.Default(), nil)
+	session := newSession(conn, sessStream, mux, nil)
 
 	// Create a mock stream for ANNOUNCE
 	mockStream := &MockQUICStream{}
@@ -1223,12 +1222,10 @@ func TestSession_ProcessBiStream_Announce(t *testing.T) {
 		return n, err
 	}
 
-	streamLogger := slog.Default().With("stream_id", mockStream.StreamID())
-
 	// This will block, so we run it in a goroutine
 	done := make(chan struct{})
 	go func() {
-		session.processBiStream(mockStream, streamLogger)
+		session.processBiStream(mockStream)
 		close(done)
 	}()
 
@@ -1260,7 +1257,7 @@ func TestSession_ProcessBiStream_Subscribe(t *testing.T) {
 		ClientExtensions: NewExtension(),
 	})
 	mux := NewTrackMux()
-	session := newSession(conn, sessStream, mux, slog.Default(), nil)
+	session := newSession(conn, sessStream, mux, nil)
 
 	// Create a mock stream for SUBSCRIBE
 	mockStream := &MockQUICStream{}
@@ -1308,12 +1305,10 @@ func TestSession_ProcessBiStream_Subscribe(t *testing.T) {
 		}
 	})
 
-	streamLogger := slog.Default().With("stream_id", mockStream.StreamID())
-
 	// This will block in serveTrack, so we run it in a goroutine
 	done := make(chan struct{})
 	go func() {
-		session.processBiStream(mockStream, streamLogger)
+		session.processBiStream(mockStream)
 		close(done)
 	}()
 
@@ -1352,7 +1347,7 @@ func TestSession_ProcessBiStream_InvalidStreamType(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	// Create a mock stream with invalid stream type
 	mockStream := &MockQUICStream{}
@@ -1372,11 +1367,9 @@ func TestSession_ProcessBiStream_InvalidStreamType(t *testing.T) {
 		return n, nil
 	}
 
-	streamLogger := slog.Default().With("stream_id", mockStream.StreamID())
-
 	done := make(chan struct{})
 	go func() {
-		session.processBiStream(mockStream, streamLogger)
+		session.processBiStream(mockStream)
 		close(done)
 	}()
 
@@ -1406,7 +1399,7 @@ func TestSession_ProcessBiStream_DecodeStreamTypeError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	mockStream := &MockQUICStream{}
 	mockStream.On("StreamID").Return(quic.StreamID(5))
@@ -1414,11 +1407,9 @@ func TestSession_ProcessBiStream_DecodeStreamTypeError(t *testing.T) {
 		return 0, io.ErrUnexpectedEOF
 	}
 
-	streamLogger := slog.Default().With("stream_id", mockStream.StreamID())
-
 	done := make(chan struct{})
 	go func() {
-		session.processBiStream(mockStream, streamLogger)
+		session.processBiStream(mockStream)
 		close(done)
 	}()
 
@@ -1447,10 +1438,10 @@ func TestSession_ProcessBiStream_DecodeAnnounceMessageError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	mockStream := &MockQUICStream{}
-	mockStream.On("StreamID").Return(quic.StreamID(7))
+	mockStream.On("StreamID").Return(quic.StreamID(7)).Maybe()
 	mockStream.On("CancelWrite", mock.Anything).Return().Maybe()
 	mockStream.On("CancelRead", mock.Anything).Return().Maybe()
 
@@ -1468,8 +1459,7 @@ func TestSession_ProcessBiStream_DecodeAnnounceMessageError(t *testing.T) {
 		return 0, io.ErrUnexpectedEOF
 	}
 
-	streamLogger := slog.Default().With("stream_id", mockStream.StreamID())
-	session.processBiStream(mockStream, streamLogger)
+	session.processBiStream(mockStream)
 
 	mockStream.AssertExpectations(t)
 }
@@ -1490,10 +1480,10 @@ func TestSession_ProcessBiStream_DecodeSubscribeMessageError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	mockStream := &MockQUICStream{}
-	mockStream.On("StreamID").Return(quic.StreamID(9))
+	mockStream.On("StreamID").Return(quic.StreamID(9)).Maybe()
 	mockStream.On("CancelWrite", mock.Anything).Return().Maybe()
 	mockStream.On("CancelRead", mock.Anything).Return().Maybe()
 
@@ -1511,8 +1501,7 @@ func TestSession_ProcessBiStream_DecodeSubscribeMessageError(t *testing.T) {
 		return 0, io.ErrUnexpectedEOF
 	}
 
-	streamLogger := slog.Default().With("stream_id", mockStream.StreamID())
-	session.processBiStream(mockStream, streamLogger)
+	session.processBiStream(mockStream)
 
 	mockStream.AssertExpectations(t)
 }
@@ -1533,7 +1522,7 @@ func TestSession_ProcessUniStream_Group(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	// Add a track reader
 	mockTrackStream := &MockQUICStream{}
@@ -1572,9 +1561,7 @@ func TestSession_ProcessUniStream_Group(t *testing.T) {
 	}
 	mockRecvStream.On("Context").Return(context.Background())
 
-	streamLogger := slog.Default().With("stream_id", mockRecvStream.StreamID())
-
-	session.processUniStream(mockRecvStream, streamLogger)
+	session.processUniStream(mockRecvStream)
 
 	// Verify group was enqueued
 	time.Sleep(10 * time.Millisecond)
@@ -1598,11 +1585,11 @@ func TestSession_ProcessUniStream_UnknownSubscribeID(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	// Create a mock receive stream for GROUP with unknown subscribe ID
 	mockRecvStream := &MockQUICReceiveStream{}
-	mockRecvStream.On("StreamID").Return(quic.StreamID(5))
+	mockRecvStream.On("StreamID").Return(quic.StreamID(5)).Maybe()
 	mockRecvStream.On("CancelRead", quic.StreamErrorCode(InvalidSubscribeIDErrorCode)).Return()
 
 	// Prepare StreamType + GroupMessage with unknown subscribe ID
@@ -1626,9 +1613,7 @@ func TestSession_ProcessUniStream_UnknownSubscribeID(t *testing.T) {
 		return n, nil
 	}
 
-	streamLogger := slog.Default().With("stream_id", mockRecvStream.StreamID())
-
-	session.processUniStream(mockRecvStream, streamLogger)
+	session.processUniStream(mockRecvStream)
 
 	mockRecvStream.AssertExpectations(t)
 
@@ -1651,7 +1636,7 @@ func TestSession_ProcessUniStream_InvalidStreamType(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	// Create a mock receive stream with invalid stream type
 	mockRecvStream := &MockQUICReceiveStream{}
@@ -1671,11 +1656,9 @@ func TestSession_ProcessUniStream_InvalidStreamType(t *testing.T) {
 		return n, nil
 	}
 
-	streamLogger := slog.Default().With("stream_id", mockRecvStream.StreamID())
-
 	done := make(chan struct{})
 	go func() {
-		session.processUniStream(mockRecvStream, streamLogger)
+		session.processUniStream(mockRecvStream)
 		close(done)
 	}()
 
@@ -1705,16 +1688,15 @@ func TestSession_ProcessUniStream_DecodeStreamTypeError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	mockRecvStream := &MockQUICReceiveStream{}
-	mockRecvStream.On("StreamID").Return(quic.StreamID(11))
+	mockRecvStream.On("StreamID").Return(quic.StreamID(11)).Maybe()
 	mockRecvStream.ReadFunc = func(p []byte) (int, error) {
 		return 0, io.ErrUnexpectedEOF
 	}
 
-	streamLogger := slog.Default().With("stream_id", mockRecvStream.StreamID())
-	session.processUniStream(mockRecvStream, streamLogger)
+	session.processUniStream(mockRecvStream)
 
 	mockRecvStream.AssertExpectations(t)
 }
@@ -1735,10 +1717,10 @@ func TestSession_ProcessUniStream_DecodeGroupMessageError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	mockRecvStream := &MockQUICReceiveStream{}
-	mockRecvStream.On("StreamID").Return(quic.StreamID(13))
+	mockRecvStream.On("StreamID").Return(quic.StreamID(13)).Maybe()
 
 	var buf bytes.Buffer
 	err := message.StreamTypeGroup.Encode(&buf)
@@ -1754,8 +1736,7 @@ func TestSession_ProcessUniStream_DecodeGroupMessageError(t *testing.T) {
 		return 0, io.ErrUnexpectedEOF
 	}
 
-	streamLogger := slog.Default().With("stream_id", mockRecvStream.StreamID())
-	session.processUniStream(mockRecvStream, streamLogger)
+	session.processUniStream(mockRecvStream)
 
 	mockRecvStream.AssertExpectations(t)
 }
@@ -1776,7 +1757,7 @@ func TestSession_Subscribe_TerminatingSession(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	// Terminate the session
 	err := session.CloseWithError(NoError, "")
@@ -1812,7 +1793,7 @@ func TestSession_AcceptAnnounce_TerminatingSession(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	// Terminate the session
 	err := session.CloseWithError(NoError, "")
@@ -1853,7 +1834,7 @@ func TestSession_AcceptAnnounce_OpenStreamApplicationError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	reader, err := session.AcceptAnnounce("/test/prefix/")
 
@@ -1888,7 +1869,7 @@ func TestSession_AcceptAnnounce_EncodeStreamTypeError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	reader, err := session.AcceptAnnounce("/test/prefix/")
 
@@ -1927,7 +1908,7 @@ func TestSession_AcceptAnnounce_EncodeStreamTypeStreamError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	reader, err := session.AcceptAnnounce("/test/prefix/")
 
@@ -1978,7 +1959,7 @@ func TestSession_AcceptAnnounce_EncodePleaseMessageStreamError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	reader, err := session.AcceptAnnounce("/test/prefix/")
 
@@ -2021,7 +2002,7 @@ func TestSession_AcceptAnnounce_DecodeInitMessageStreamError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	reader, err := session.AcceptAnnounce("/test/prefix/")
 
@@ -2059,7 +2040,7 @@ func TestSession_AcceptAnnounce_DecodeInitMessageError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	reader, err := session.AcceptAnnounce("/test/prefix/")
 
@@ -2085,7 +2066,7 @@ func TestSession_CloseWithError_AlreadyTerminating(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	// First termination
 	err1 := session.CloseWithError(NoError, "first termination")
@@ -2120,7 +2101,7 @@ func TestSession_Terminate_WithApplicationError(t *testing.T) {
 		Path:             "test/path",
 		ClientExtensions: NewExtension(),
 	})
-	session := newSession(conn, sessStream, NewTrackMux(), slog.Default(), nil)
+	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	err := session.CloseWithError(InternalSessionErrorCode, "test error")
 

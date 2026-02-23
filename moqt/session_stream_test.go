@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log/slog"
 	"net"
 	"sync"
 	"testing"
@@ -427,7 +426,7 @@ func TestAccept(t *testing.T) {
 
 			mockServer := &Server{}
 			mockServer.init() // Initialize the server properly
-			rw := newResponseWriter(mockConn, ss, slog.Default(), mockServer)
+			rw := newResponseWriter(mockConn, ss, mockServer)
 
 			// Use new API: SelectVersion, SetExtensions, then Accept
 			err := rw.SelectVersion(tt.version)
@@ -476,7 +475,7 @@ func TestAccept_OnlyOnce(t *testing.T) {
 
 	mockServer := &Server{}
 	mockServer.init() // Initialize the server properly
-	rw := newResponseWriter(mockConn, ss, slog.Default(), mockServer)
+	rw := newResponseWriter(mockConn, ss, mockServer)
 
 	version := Default
 	extensions := NewExtension()
@@ -527,7 +526,7 @@ func TestAccept_ConcurrentCalls(t *testing.T) {
 
 	mockServer := &Server{}
 	mockServer.init() // Initialize the server properly
-	rw := newResponseWriter(mockConn, ss, slog.Default(), mockServer)
+	rw := newResponseWriter(mockConn, ss, mockServer)
 
 	version := Default
 	extensions := NewExtension()
@@ -765,7 +764,7 @@ func TestAccept_NilParameters(t *testing.T) {
 
 	mockServer := &Server{}
 	mockServer.init() // Initialize the server properly
-	rw := newResponseWriter(mockConn, ss, slog.Default(), mockServer)
+	rw := newResponseWriter(mockConn, ss, mockServer)
 
 	version := Default
 
@@ -816,7 +815,7 @@ func TestAccept_MultipleVersions(t *testing.T) {
 
 			mockServer := &Server{}
 			mockServer.init() // Initialize the server properly
-			rw := newResponseWriter(mockConn, ss, slog.Default(), mockServer)
+			rw := newResponseWriter(mockConn, ss, mockServer)
 
 			extensions := NewExtension()
 
@@ -1139,7 +1138,7 @@ func TestAccept_ErrorHandling(t *testing.T) {
 
 			mockServer := &Server{}
 			mockServer.init() // Initialize the server properly
-			rw := newResponseWriter(mockConn, ss, slog.Default(), mockServer)
+			rw := newResponseWriter(mockConn, ss, mockServer)
 
 			// Set version and extensions before Accept
 			err := rw.SelectVersion(tt.version)
@@ -1219,7 +1218,7 @@ func TestAccept_ParameterHandling(t *testing.T) {
 
 			mockServer := &Server{}
 			mockServer.init() // Initialize the server properly
-			rw := newResponseWriter(mockConn, ss, slog.Default(), mockServer)
+			rw := newResponseWriter(mockConn, ss, mockServer)
 
 			extensions := tt.setupParam()
 
@@ -1275,7 +1274,7 @@ func TestAccept_BoundaryVersions(t *testing.T) {
 
 			mockServer := &Server{}
 			mockServer.init()
-			rw := newResponseWriter(mockConn, ss, slog.Default(), mockServer)
+			rw := newResponseWriter(mockConn, ss, mockServer)
 
 			// Set version and extensions before Accept
 			err := rw.SelectVersion(tt.version)
@@ -1363,7 +1362,7 @@ func TestAccept_Race(t *testing.T) {
 
 	mockServer := &Server{}
 	mockServer.init()
-	rw := newResponseWriter(mockConn, ss, slog.Default(), mockServer)
+	rw := newResponseWriter(mockConn, ss, mockServer)
 
 	const numGoroutines = 100
 	var wg sync.WaitGroup
@@ -1473,7 +1472,7 @@ func TestResponseWriter_SessionStream_Sharing(t *testing.T) {
 
 	mockServer := &Server{}
 	mockServer.init()
-	rw := newResponseWriter(mockConn, ss, slog.Default(), mockServer)
+	rw := newResponseWriter(mockConn, ss, mockServer)
 
 	version := Default
 	extensions := NewExtension()
@@ -1596,7 +1595,7 @@ func TestAccept_ParameterEdgeCases(t *testing.T) {
 
 			mockServer := &Server{}
 			mockServer.init()
-			rw := newResponseWriter(mockConn, ss, slog.Default(), mockServer)
+			rw := newResponseWriter(mockConn, ss, mockServer)
 
 			extensions := tt.setupExtensions()
 
@@ -1634,7 +1633,7 @@ func TestSessionStream_Reject(t *testing.T) {
 	sessStr := &sessionStream{
 		stream: mockStream,
 	}
-	w := newResponseWriter(mockConn, sessStr, slog.Default(), nil)
+	w := newResponseWriter(mockConn, sessStr, nil)
 	err := w.Reject(SessionErrorCode(1))
 	assert.NoError(t, err)
 

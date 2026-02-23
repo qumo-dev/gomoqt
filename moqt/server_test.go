@@ -623,7 +623,7 @@ func TestServer_SessionManagement(t *testing.T) {
 				ClientExtensions: NewExtension(),
 			}
 			sessStream := newSessionStream(mockStream, req)
-			session := newSession(mockConn, sessStream, nil, slog.Default(), nil)
+			session := newSession(mockConn, sessStream, nil, nil)
 
 			// Test adding session
 			server.sessMu.Lock()
@@ -940,6 +940,7 @@ func TestServer_HandleWebTransport(t *testing.T) {
 
 			req := &http.Request{
 				URL: &url.URL{Path: "/test"},
+				TLS: &tls.ConnectionState{},
 			}
 
 			wtServer := &MockWebTransportServer{}
@@ -982,6 +983,7 @@ func TestServer_HandleWebTransport_WithNilLogger(t *testing.T) {
 	mockResponseWriter := &MockHTTPResponseWriter{}
 	req := &http.Request{
 		URL: &url.URL{Path: "/test"},
+		TLS: &tls.ConnectionState{},
 	}
 
 	wtServer := &MockWebTransportServer{}
@@ -1125,7 +1127,7 @@ func TestServer_AddRemoveSession(t *testing.T) {
 	sessStream := newSessionStream(mockStream, req)
 
 	// Create session using newSession but quickly close it to avoid long-running goroutines
-	session := newSession(mockConn, sessStream, nil, slog.Default(), nil)
+	session := newSession(mockConn, sessStream, nil, nil)
 
 	// Immediately terminate session to stop goroutines
 	defer func() { _ = session.CloseWithError(NoError, SessionErrorText(NoError)) }()
@@ -1218,7 +1220,7 @@ func TestServer_Shutdown(t *testing.T) {
 					ClientExtensions: NewExtension(),
 				}
 				sessStream := newSessionStream(mockStream, req)
-				session := newSession(mockConn, sessStream, nil, slog.Default(), nil)
+				session := newSession(mockConn, sessStream, nil, nil)
 				server.addSession(session)
 				defer func() { _ = session.CloseWithError(NoError, SessionErrorText(NoError)) }()
 			}
@@ -1569,7 +1571,7 @@ func TestServer_SessionLifecycle(t *testing.T) {
 					ClientExtensions: NewExtension(),
 				}
 				sessStream := newSessionStream(mockStream, req)
-				session := newSession(mockConn, sessStream, nil, slog.Default(), nil)
+				session := newSession(mockConn, sessStream, nil, nil)
 				sessions = append(sessions, session)
 
 				// Add session
@@ -1730,7 +1732,7 @@ func TestServer_EdgeCaseOperations(t *testing.T) {
 					ClientExtensions: NewExtension(),
 				}
 				sessStream := newSessionStream(mockStream, req)
-				session := newSession(mockConn, sessStream, nil, slog.Default(), nil)
+				session := newSession(mockConn, sessStream, nil, nil)
 
 				assert.NotPanics(t, func() {
 					server.removeSession(session)
@@ -1885,6 +1887,7 @@ func TestServer_WebTransportEdgeCases(t *testing.T) {
 
 				req := &http.Request{
 					URL: &url.URL{Path: "/test"},
+					TLS: &tls.ConnectionState{},
 				}
 
 				wtServer := &MockWebTransportServer{}

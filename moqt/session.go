@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"sync"
 	"sync/atomic"
 
@@ -16,27 +15,15 @@ func newSession(
 	conn quic.Connection,
 	sessStream *sessionStream,
 	mux *TrackMux,
-	connLogger *slog.Logger,
 	onClose func(),
 ) *Session {
 	if mux == nil {
 		mux = DefaultMux
 	}
 
-	var sessLogger *slog.Logger
-	if connLogger == nil {
-		sessLogger = slog.New(slog.DiscardHandler)
-	} else {
-		sessLogger = connLogger.With(
-			"session_id", generateSessionID(),
-			"path", sessStream.Path,
-		)
-	}
-
 	sess := &Session{
 		sessionStream: sessStream,
 		ctx:           conn.Context(),
-		logger:        sessLogger,
 		conn:          conn,
 		mux:           mux,
 		trackReaders:  make(map[SubscribeID]*TrackReader),
@@ -77,8 +64,6 @@ type Session struct {
 	ctx context.Context // Context for the session
 
 	wg sync.WaitGroup // WaitGroup for session cleanup
-
-	logger *slog.Logger
 
 	conn quic.Connection
 
@@ -355,14 +340,12 @@ func (sess *Session) handleBiStreams() {
 			return
 		}
 
-		streamLogger := sess.logger
-
 		// Handle the stream
-		go sess.processBiStream(stream, streamLogger)
+		go sess.processBiStream(stream)
 	}
 }
 
-func (sess *Session) processBiStream(stream quic.Stream, streamLogger *slog.Logger) {
+func (sess *Session) processBiStream(stream quic.Stream) {
 	var streamType message.StreamType
 	err := streamType.Decode(stream)
 	if err != nil {
@@ -428,14 +411,12 @@ func (sess *Session) handleUniStreams() {
 			return
 		}
 
-		streamLogger := sess.logger
-
 		// Handle the stream
-		go sess.processUniStream(stream, streamLogger)
+		go sess.processUniStream(stream)
 	}
 }
 
-func (sess *Session) processUniStream(stream quic.ReceiveStream, streamLogger *slog.Logger) {
+func (sess *Session) processUniStream(stream quic.ReceiveStream) {
 	/*
 	 * Get a Stream Type ID
 	 */
