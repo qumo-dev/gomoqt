@@ -69,7 +69,9 @@ Deno.test("GroupWriter", async (t) => {
 			const writer: SendStream = {
 				id: 2n,
 				write: async (p: Uint8Array) => [p.length, undefined],
-				close: spy(async () => { closeCalls++; }),
+				close: spy(async () => {
+					closeCalls++;
+				}),
 				cancel: async (_code: number) => {},
 				closed: () => new Promise<void>(() => {}),
 			};
@@ -110,7 +112,9 @@ Deno.test("GroupWriter", async (t) => {
 			const writer: SendStream = {
 				id: 5n,
 				write: async (p: Uint8Array) => [p.length, undefined],
-				close: spy(async () => { closeCalls++; }),
+				close: spy(async () => {
+					closeCalls++;
+				}),
 				cancel: async (_code: number) => {},
 				closed: () => new Promise<void>(() => {}),
 			};
@@ -132,7 +136,9 @@ Deno.test("GroupWriter", async (t) => {
 				id: 6n,
 				write: async (p: Uint8Array) => [p.length, undefined],
 				close: async () => {},
-				cancel: spy(async (code: number) => { cancelCalls.push(code); }),
+				cancel: spy(async (code: number) => {
+					cancelCalls.push(code);
+				}),
 				closed: () => new Promise<void>(() => {}),
 			};
 			const msg = new GroupMessage({ sequence: 1, subscribeId: 0 });
@@ -182,7 +188,9 @@ Deno.test("GroupReader", async (t) => {
 		const rs: ReceiveStream = {
 			id: 4n,
 			read: async () => [0, new EOFError()],
-			cancel: spy(async (code: number) => { cancelCalls.push(code); }),
+			cancel: spy(async (code: number) => {
+				cancelCalls.push(code);
+			}),
 			closed: () => new Promise<void>(() => {}),
 		};
 		const msg = new GroupMessage({ sequence: 1, subscribeId: 0 });
@@ -200,7 +208,9 @@ Deno.test("GroupReader", async (t) => {
 			const rs: ReceiveStream = {
 				id: 7n,
 				read: async () => [0, new EOFError()],
-				cancel: spy(async (code: number) => { cancelCalls.push(code); }),
+				cancel: spy(async (code: number) => {
+					cancelCalls.push(code);
+				}),
 				closed: () => new Promise<void>(() => {}),
 			};
 			const msg = new GroupMessage({ sequence: 1, subscribeId: 0 });
@@ -368,4 +378,4 @@ Deno.test("GroupReader", async (t) => {
 			assertEquals(got[i], payloads[i]);
 		}
 	});
-})
+});
