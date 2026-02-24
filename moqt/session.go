@@ -93,6 +93,16 @@ func (s *Session) Context() context.Context {
 	return s.ctx
 }
 
+// RemoteAddr returns the remote network address of the peer. It is
+// retrieved directly from the underlying QUIC connection so that callers
+// always get the current value without needing to store a separate copy.
+func (s *Session) RemoteAddr() string {
+	if s == nil || s.conn == nil {
+		return ""
+	}
+	return s.conn.RemoteAddr().String()
+}
+
 // CloseWithError closes the connection with an error code and message.
 func (s *Session) CloseWithError(code SessionErrorCode, msg string) error {
 	if s.terminating() {

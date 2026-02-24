@@ -256,6 +256,7 @@ func openSessionStream(
 		Path:             path,
 		Versions:         DefaultClientVersions,
 		ClientExtensions: extensions,
+		RemoteAddr:       conn.RemoteAddr().String(),
 		ctx:              stream.Context(),
 	}
 

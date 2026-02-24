@@ -103,6 +103,7 @@ type SetupRequest struct {
 	Path             string
 	Versions         []Version
 	ClientExtensions *Extension
+	RemoteAddr       string // remote network address of the client
 
 	ctx context.Context
 }

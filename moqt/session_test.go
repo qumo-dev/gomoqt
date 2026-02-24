@@ -54,6 +54,8 @@ func TestNewSession(t *testing.T) {
 				assert.NotNil(t, session, "newSession should not return nil")
 				assert.Equal(t, tt.mux, session.mux, "mux should be set correctly")
 				assert.NotNil(t, session.trackReaders, "receive group stream queues should not be nil")
+				// remote address method should return connection's address
+				assert.Equal(t, "127.0.0.1:8080", session.RemoteAddr(), "RemoteAddr() should forward to connection")
 			}
 
 			// Cleanup

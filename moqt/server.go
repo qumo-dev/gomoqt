@@ -313,6 +313,7 @@ func acceptSessionStream(acceptCtx context.Context, conn quic.Connection) (*sess
 		Path:             path,
 		Versions:         versions,
 		ClientExtensions: clientParams,
+		RemoteAddr:       conn.RemoteAddr().String(),
 	}
 
 	return newSessionStream(stream, req), nil

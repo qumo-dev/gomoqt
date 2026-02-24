@@ -428,6 +428,8 @@ func TestServer_AcceptSession(t *testing.T) {
 			if tt.expectOK {
 				assert.NoError(t, err, "acceptSessionStream() should not return error")
 				assert.NotNil(t, sessStream, "acceptSessionStream() should return session stream")
+				// RemoteAddr should be copied from the connection
+				assert.Equal(t, mockAddr.String(), sessStream.SetupRequest.RemoteAddr, "setup request should carry remote address")
 			}
 
 			// Cleanup not needed as sessStream doesn't have Terminate method
