@@ -2,6 +2,12 @@
 
 Interop server and clients for testing MOQ Lite with WebTransport and QUIC.
 
+> **TLS details:** the server uses a self-signed certificate checked in under `cmd/interop/server/`.
+> the TypeScript client cannot trust this cert via the usual `mkcert` root bundle when talking
+> over WebTransport, so we pin the certificate by its SHA‑256 hash. The wrapper `run_secure.ts`
+> computes the hash automatically and passes `--insecure --cert-hash` to the client; you don't
+> need to supply it yourself.
+
 ## Run
 
 ### Using Mage (from repository root)
@@ -12,7 +18,7 @@ mage interop:server
 # In another terminal, run the Go client
 mage interop:client go
 
-# Or run the TypeScript client
+# Or run the TypeScript client (wrapper will handle cert pinning)
 mage interop:client ts
 ```
 

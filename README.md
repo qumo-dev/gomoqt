@@ -41,6 +41,7 @@ mage interop:server
 mage interop:client go
 
 # or run the TypeScript client
+# (the secure wrapper will compute and pin the server certificate hash)
 mage interop:client ts
 ```
 
