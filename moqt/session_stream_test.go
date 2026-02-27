@@ -167,6 +167,8 @@ func TestSessionStream_listenUpdates(t *testing.T) {
 
 			ss := newSessionStream(mockStream)
 			ss.handleUpdates()
+			// capture channel early; it may become nil later
+			ch := ss.Updated()
 			readCh := make(chan struct{}, 1)
 			if mockStream.ReadFunc != nil {
 				origRead := mockStream.ReadFunc
@@ -186,17 +188,20 @@ func TestSessionStream_listenUpdates(t *testing.T) {
 			}
 
 			if tt.expectUpdate {
-				select {
-				case <-ss.Updated():
-					ss.mu.Lock()
-					actual := ss.remoteBitrate
-					ss.mu.Unlock()
-					assert.Equal(t, tt.expectBitrate, actual)
-				case <-time.After(500 * time.Millisecond):
-					if name == "valid message" || name == "zero bitrate" {
-						t.Error("expected session update but timed out")
+				// only wait on channel if it wasn't nil when captured
+				if ch != nil {
+					select {
+					case <-ch:
+					case <-time.After(500 * time.Millisecond):
+						if name == "valid message" || name == "zero bitrate" {
+							t.Error("expected session update but timed out")
+						}
 					}
 				}
+				ss.mu.Lock()
+				actual := ss.remoteBitrate
+				ss.mu.Unlock()
+				assert.Equal(t, tt.expectBitrate, actual)
 			}
 
 			mockStream.AssertExpectations(t)
@@ -284,6 +289,10 @@ func TestSessionStream_handleUpdatesAndClose(t *testing.T) {
 	mockStream := &MockQUICStream{}
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF).Maybe()
+
+	// mock stream may have cancellation invoked when closeWithError runs
+	mockStream.On("CancelRead", quic.StreamErrorCode(SessionErrorCode(1))).Return()
+	mockStream.On("CancelWrite", quic.StreamErrorCode(SessionErrorCode(1))).Return()
 
 	ss := newSessionStream(mockStream)
 	ss.handleUpdates()

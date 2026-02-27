@@ -204,9 +204,11 @@ func buildTSClientCmd(ctx context.Context, addr string) (*exec.Cmd, error) {
 
 	// figure out path to moq-web directory relative to project root
 	moqWebDir := filepath.Join(root, "moq-web")
-	if _, statErr := os.Stat(moqWebDir); os.IsNotExist(statErr) {
-		// some invocations (e.g. when cd'ed into cmd/interop) may require backing up
-		moqWebDir = filepath.Join(root, "..", "moq-web")
+	if _, statErr := os.Stat(moqWebDir); statErr != nil {
+		if os.IsNotExist(statErr) {
+			return nil, fmt.Errorf("moq-web directory not found at %s", moqWebDir)
+		}
+		return nil, fmt.Errorf("failed to stat moq-web directory: %w", statErr)
 	}
 
 	args := []string{"run", "--unstable-net", "--allow-all",

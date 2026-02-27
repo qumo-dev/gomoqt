@@ -88,7 +88,9 @@ func (ss *sessionStream) handleUpdates() {
 
 			ss.mu.Lock()
 			if ss.updatedCh != nil {
-				close(ss.updatedCh)
+				ch := ss.updatedCh
+				ss.updatedCh = nil
+				close(ch)
 			}
 			ss.mu.Unlock()
 		}()
@@ -107,11 +109,12 @@ func (ss *sessionStream) Context() context.Context {
 
 func (ss *sessionStream) closeWithError(code SessionErrorCode) {
 	ss.mu.Lock()
-	defer ss.mu.Unlock()
 	if ss.updatedCh != nil {
-		close(ss.updatedCh)
+		ch := ss.updatedCh
 		ss.updatedCh = nil
+		close(ch)
 	}
+	ss.mu.Unlock()
 	ss.stream.CancelRead(quic.StreamErrorCode(code))
 	ss.stream.CancelWrite(quic.StreamErrorCode(code))
 }
