@@ -277,6 +277,35 @@ func TestSessionStream_ConcurrentAccess(t *testing.T) {
 	mockStream.AssertExpectations(t)
 }
 
+// TestSessionStream_handleUpdatesAndClose ensures calling closeWithError after
+// handleUpdates has already closed the updatedCh channel is safe and leaves
+// the reference nil.
+func TestSessionStream_handleUpdatesAndClose(t *testing.T) {
+	mockStream := &MockQUICStream{}
+	mockStream.On("Context").Return(context.Background())
+	mockStream.On("Read", mock.Anything).Return(0, io.EOF).Maybe()
+
+	ss := newSessionStream(mockStream)
+	ss.handleUpdates()
+
+	// give goroutine a moment to observe EOF and close channel
+	time.Sleep(20 * time.Millisecond)
+
+	// should not panic even if updatedCh was closed by handleUpdates
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("panic during closeWithError: %v", r)
+		}
+	}()
+	ss.closeWithError(SessionErrorCode(1))
+
+	if ch := ss.Updated(); ch != nil {
+		t.Errorf("expected updatedCh nil after close, got %v", ch)
+	}
+
+	mockStream.AssertExpectations(t)
+}
+
 // TestSessionStream_listenUpdates_InitialChannelState tests initial state of updatedCh
 func TestSessionStream_listenUpdates_InitialChannelState(t *testing.T) {
 	mockStream := &MockQUICStream{}
