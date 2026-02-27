@@ -34,14 +34,10 @@ QUIC을 통한 효율적인 미디어 스트리밍을 위해 MOQ Lite 사양을 
 # Mage 설치 (Go 1.25+)
 go install github.com/magefile/mage@latest
 
-# Interop 서버 실행 (WebTransport + QUIC)
-mage interop:server
-
-# 다른 터미널에서 Go 클라이언트 실행
-mage interop:client go
-
-# 또는 TypeScript 클라이언트 실행
-mage interop:client ts
+# Docker 컨테이너에서 interop 테스트 실행 (TypeScript 클라이언트 + 서버)
+mage interop:ts
+# 또는 Go 클라이언트를 실행
+mage interop:go
 ```
 
 ## 기능

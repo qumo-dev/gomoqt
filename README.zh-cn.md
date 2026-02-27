@@ -34,14 +34,10 @@
 # 安装 Mage (需要 Go 1.25+)
 go install github.com/magefile/mage@latest
 
-# 启动 Interop 服务器 (WebTransport + QUIC)
-mage interop:server
-
-# 在另一个终端运行 Go 客户端
-mage interop:client go
-
-# 或运行 TypeScript 客户端
-mage interop:client ts
+# 在 Docker 容器中运行 interop 测试（TypeScript 客户端 + 服务器）
+mage interop:ts
+# 或运行 Go 客户端
+mage interop:go
 ```
 
 ## 特性
