@@ -150,8 +150,8 @@ func denoVersion() error {
 	}
 
 	// Format and output versions
-	fmt.Println(
-		"deno: %s, v8: %s, typescript: %s (local) | %d.%d (repository)",
+	fmt.Printf(
+		"deno: %s, v8: %s, typescript: %s (local) | %d.%d (repository)\n",
 		versions["deno"],
 		versions["v8"],
 		versions["typescript"],
