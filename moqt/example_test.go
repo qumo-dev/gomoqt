@@ -24,7 +24,7 @@ func Example() {
 		SetupHandler: moqt.SetupHandlerFunc(func(w moqt.SetupResponseWriter, r *moqt.SetupRequest) {
 			// Select a supported version from the client's request
 			if err := w.SelectVersion(moqt.DefaultServerVersion); err != nil {
-				_ = w.Reject(moqt.UnsupportedVersionErrorCode)
+				w.Reject(moqt.UnsupportedVersionErrorCode)
 				return
 			}
 		}),

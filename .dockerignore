@@ -1,0 +1,9 @@
+.git
+bin
+coverage
+cov
+moq-web/coverage
+moq-web/cov
+**/node_modules
+**/*.log
+**/testdata

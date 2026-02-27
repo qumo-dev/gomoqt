@@ -10,13 +10,11 @@ import (
 	"github.com/okdaichi/gomoqt/quic"
 )
 
-func newSessionStream(stream quic.Stream, req *SetupRequest) *sessionStream {
+func newSessionStream(stream quic.Stream) *sessionStream {
 	ss := &sessionStream{
-		ctx:          context.WithValue(stream.Context(), &biStreamTypeCtxKey, message.StreamTypeSession),
-		stream:       stream,
-		Version:      DefaultServerVersion, // Default version before setup
-		SetupRequest: req,
-		updatedCh:    make(chan struct{}, 1),
+		ctx:       context.WithValue(stream.Context(), &biStreamTypeCtxKey, message.StreamTypeSession),
+		stream:    stream,
+		updatedCh: make(chan struct{}, 1),
 	}
 	return ss
 }
@@ -32,110 +30,21 @@ type sessionStream struct {
 
 	mu sync.Mutex
 
-	// Version of the protocol used in this session
-	Version Version
-
-	// Setup request from the client
-	*SetupRequest
-
-	// Parameters specified by the server
-	ServerExtensions *Extension
-
 	listenOnce sync.Once
 }
 
-func newResponse(sessStr *sessionStream) *response {
+type response struct {
+	sessionStream *sessionStream
+	version       Version
+	extensions    *Extension
+}
+
+func newResponse(sessStr *sessionStream, version Version, extensions *Extension) *response {
 	return &response{
 		sessionStream: sessStr,
+		version:       version,
+		extensions:    extensions,
 	}
-}
-
-type response struct {
-	*sessionStream
-	onceSetup sync.Once
-}
-
-func (r *response) AwaitAccepted() error {
-	var err error
-	r.onceSetup.Do(func() {
-		var sum message.SessionServerMessage
-		err = sum.Decode(r.stream)
-		if err != nil {
-			return
-		}
-		r.Version = Version(sum.SelectedVersion)
-		r.ServerExtensions = &Extension{sum.Parameters}
-
-		r.handleUpdates()
-	})
-
-	return err
-}
-
-var _ SetupResponseWriter = (*responseWriter)(nil)
-
-func newResponseWriter(conn quic.Connection, sessStr *sessionStream, server *Server) *responseWriter {
-	return &responseWriter{
-		sessionStream: sessStr,
-		conn:          conn,
-		server:        server,
-	}
-}
-
-type responseWriter struct {
-	*sessionStream
-	conn      quic.Connection
-	server    *Server
-	onceSetup sync.Once
-}
-
-func (w *responseWriter) SelectVersion(v Version) error {
-	if !slices.Contains(w.Versions, v) {
-		return fmt.Errorf("version %d not supported by client", v)
-	}
-	w.Version = v
-	return nil
-}
-
-func (w *responseWriter) SetExtensions(extensions *Extension) {
-	w.ServerExtensions = extensions
-}
-
-func (w *responseWriter) accept(mux *TrackMux) (*Session, error) {
-	var err error
-	w.onceSetup.Do(func() {
-		// TODO: Implement setup logic if needed
-		var params parameters
-		if w.ServerExtensions != nil {
-			params = w.ServerExtensions.parameters
-		}
-		err = message.SessionServerMessage{
-			SelectedVersion: uint64(w.Version),
-			Parameters:      params,
-		}.Encode(w.stream)
-		if err != nil {
-			return
-		}
-
-		// Start listening for updates
-		w.handleUpdates()
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	var sess *Session
-	sess = newSession(w.conn, w.sessionStream, mux, func() { w.server.removeSession(sess) })
-	w.server.addSession(sess)
-
-	return sess, nil
-}
-
-func (w *responseWriter) Reject(code SessionErrorCode) error {
-	w.stream.CancelWrite(quic.StreamErrorCode(code))
-	w.stream.CancelRead(quic.StreamErrorCode(code))
-	return nil
 }
 
 func (ss *sessionStream) updateSession(bitrate uint64) error {
@@ -179,7 +88,9 @@ func (ss *sessionStream) handleUpdates() {
 
 			ss.mu.Lock()
 			if ss.updatedCh != nil {
-				close(ss.updatedCh)
+				ch := ss.updatedCh
+				ss.updatedCh = nil
+				close(ch)
 			}
 			ss.mu.Unlock()
 		}()
@@ -196,13 +107,106 @@ func (ss *sessionStream) Context() context.Context {
 	return ss.ctx
 }
 
+func (ss *sessionStream) closeWithError(code SessionErrorCode) {
+	ss.mu.Lock()
+	if ss.updatedCh != nil {
+		ch := ss.updatedCh
+		ss.updatedCh = nil
+		close(ch)
+	}
+	ss.mu.Unlock()
+	ss.stream.CancelRead(quic.StreamErrorCode(code))
+	ss.stream.CancelWrite(quic.StreamErrorCode(code))
+}
+
+var _ SetupResponseWriter = (*responseWriter)(nil)
+
+func newResponseWriter(conn quic.Connection, rsp *response, server *Server, clientVersions []Version) *responseWriter {
+	return &responseWriter{
+		response:       rsp,
+		conn:           conn,
+		server:         server,
+		clientVersions: clientVersions,
+	}
+}
+
+type responseWriter struct {
+	// sessionStream *sessionStream
+	conn      quic.Connection
+	server    *Server
+	onceSetup sync.Once
+
+	clientVersions []Version
+	response       *response
+}
+
+func (w *responseWriter) SetExtensions(extensions *Extension) {
+	w.response.extensions = extensions
+}
+
+// SelectVersion is called by a setup handler to record which protocol
+// version the server has agreed to use.  It verifies that the version was
+// advertised by the client in the original SetupRequest.
+func (w *responseWriter) SelectVersion(v Version) error {
+	versions := w.clientVersions
+
+	if versions == nil {
+		return fmt.Errorf("no versions provided by client")
+	}
+	if !slices.Contains(versions, v) {
+		return fmt.Errorf("version %d not supported by client", v)
+	}
+
+	return nil
+}
+
+func (w *responseWriter) Extensions() *Extension {
+	return w.response.extensions
+}
+
+func (w *responseWriter) Version() Version {
+	return w.response.version
+}
+
+func (w *responseWriter) Reject(code SessionErrorCode) {
+	w.response.sessionStream.closeWithError(code)
+}
+
 // Accept accepts a setup request and converts it to an active Session.
 // The function expects a SetupResponseWriter as provided by the server when
 // responding to a client SETUP request. It uses the provided TrackMux to
 // route tracks for the accepted session.
 func Accept(w SetupResponseWriter, r *SetupRequest, mux *TrackMux) (*Session, error) {
-	if rsp, ok := w.(*responseWriter); ok {
-		return rsp.accept(mux)
+	if writer, ok := w.(*responseWriter); ok {
+		var err error
+		rsp := writer.response
+		writer.onceSetup.Do(func() {
+			err = message.SessionServerMessage{
+				SelectedVersion: uint64(rsp.version),
+				Parameters:      rsp.extensions.parameters,
+			}.Encode(rsp.sessionStream.stream)
+			if err != nil {
+				return
+			}
+
+			// Start listening for updates
+			rsp.sessionStream.handleUpdates()
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		server := writer.server
+
+		var sess *Session
+		sess = newSession(
+			writer.conn,
+			rsp.sessionStream,
+			mux,
+			func() { server.removeSession(sess) },
+		)
+		server.addSession(sess)
+		return sess, nil
 	} else {
 		return nil, fmt.Errorf("moq: invalid response writer type %T", w)
 	}

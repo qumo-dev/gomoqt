@@ -115,7 +115,7 @@ func TestPackageHandle(t *testing.T) {
 func TestSetupRequest_Context(t *testing.T) {
 	ctx := context.Background()
 	req := &SetupRequest{
-		ctx: ctx,
+		reqCtx: ctx,
 	}
 	assert.Equal(t, ctx, req.Context())
 }

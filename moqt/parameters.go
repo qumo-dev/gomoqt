@@ -26,7 +26,7 @@ func NewExtension() *Extension {
 // Extension are used during session setup and other protocol operations
 // to exchange configuration options between client and server.
 type Extension struct {
-	parameters
+	parameters parameters
 }
 
 // Clone creates a deep copy of the parameters.

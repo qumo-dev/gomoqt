@@ -214,20 +214,17 @@ func (s *Server) HandleWebTransport(w http.ResponseWriter, r *http.Request) erro
 
 	acceptCtx, cancelAccept := context.WithTimeout(r.Context(), s.Config.setupTimeout())
 	defer cancelAccept()
-	sessStr, err := acceptSessionStream(acceptCtx, conn)
+	req, rsp, err := acceptSessionStream(acceptCtx, conn)
 	if err != nil {
 		return fmt.Errorf("failed to accept session stream: %w", err)
 	}
 
-	// Set the path for the session
-	sessStr.Path = r.URL.Path
+	// Use the path in the HTTP request as the MoQ setup request
+	req.Path = r.URL.Path
 
-	rsp := newResponseWriter(conn, sessStr, s)
-	req := sessStr.SetupRequest
+	responseWriter := newResponseWriter(conn, rsp, s, req.Versions)
 
-	s.serveSetup(rsp, req)
-
-	return nil
+	return s.setupAndServe(responseWriter, req)
 }
 
 func (s *Server) handleNativeQUIC(conn quic.Connection) error {
@@ -239,26 +236,25 @@ func (s *Server) handleNativeQUIC(conn quic.Connection) error {
 
 	acceptCtx, cancelAccept := context.WithTimeout(conn.Context(), s.Config.setupTimeout())
 	defer cancelAccept()
-	sessStr, err := acceptSessionStream(acceptCtx, conn)
+	req, rsp, err := acceptSessionStream(acceptCtx, conn)
 	if err != nil {
 		return fmt.Errorf("moq: failed to accept session stream: %w", err)
 	}
 
-	rsp := newResponseWriter(conn, sessStr, s)
-	req := sessStr.SetupRequest
+	w := newResponseWriter(conn, rsp, s, req.Versions)
 
-	s.serveSetup(rsp, req)
-
-	return nil
+	return s.setupAndServe(w, req)
 }
 
-// serveSetup dispatches the setup request to the configured handler, recovering
+// setupAndServe dispatches the setup request to the configured handler, recovering
 // from any panic the handler may raise and logging it as a server-level error.
-func (s *Server) serveSetup(w SetupResponseWriter, req *SetupRequest) {
+func (s *Server) setupAndServe(w SetupResponseWriter, req *SetupRequest) error {
+	var err error
 	defer func() {
 		if rec := recover(); rec != nil {
+			err = fmt.Errorf("panic in setup handler: %v", rec)
 			s.log().Error("panic in setup handler", "panic", rec)
-			_ = w.Reject(SetupFailedErrorCode)
+			w.Reject(SetupFailedErrorCode)
 		}
 	}()
 
@@ -267,12 +263,14 @@ func (s *Server) serveSetup(w SetupResponseWriter, req *SetupRequest) {
 	} else {
 		DefaultRouter.ServeMOQ(w, req)
 	}
+
+	return err
 }
 
-func acceptSessionStream(acceptCtx context.Context, conn quic.Connection) (*sessionStream, error) {
+func acceptSessionStream(acceptCtx context.Context, conn quic.Connection) (*SetupRequest, *response, error) {
 	stream, err := conn.AcceptStream(acceptCtx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to accept a session stream: %w", err)
+		return nil, nil, fmt.Errorf("failed to accept a session stream: %w", err)
 	}
 
 	var streamType message.StreamType
@@ -280,9 +278,9 @@ func acceptSessionStream(acceptCtx context.Context, conn quic.Connection) (*sess
 	if err != nil {
 		var appErr *quic.ApplicationError
 		if errors.As(err, &appErr) {
-			return nil, &SessionError{ApplicationError: appErr}
+			return nil, nil, &SessionError{ApplicationError: appErr}
 		} else {
-			return nil, fmt.Errorf("moq: failed to receive STREAM_TYPE message: %w", err)
+			return nil, nil, fmt.Errorf("moq: failed to receive STREAM_TYPE message: %w", err)
 		}
 	}
 
@@ -291,10 +289,10 @@ func acceptSessionStream(acceptCtx context.Context, conn quic.Connection) (*sess
 	if err != nil {
 		var appErr *quic.ApplicationError
 		if errors.As(err, &appErr) {
-			return nil, &SessionError{ApplicationError: appErr}
+			return nil, nil, &SessionError{ApplicationError: appErr}
 		}
 
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Get the client parameters
@@ -308,16 +306,20 @@ func acceptSessionStream(acceptCtx context.Context, conn quic.Connection) (*sess
 		versions[i] = Version(v)
 	}
 
-	req := &SetupRequest{
-		ctx:              stream.Context(),
+	r := &SetupRequest{
+		reqCtx:           stream.Context(),
 		Path:             path,
 		Versions:         versions,
 		ClientExtensions: clientParams,
 		RemoteAddr:       conn.RemoteAddr().String(),
 	}
 
-	return newSessionStream(stream, req), nil
-} // ListenAndServe starts the server by listening on the server's Address and serving QUIC connections.
+	rsp := newResponse(newSessionStream(stream), DefaultServerVersion, NewExtension())
+
+	return r, rsp, nil
+}
+
+// ListenAndServe starts the server by listening on the server's Address and serving QUIC connections.
 // TLS configuration must be provided on the Server for ListenAndServe to function properly.
 func (s *Server) ListenAndServe() error {
 	s.init()

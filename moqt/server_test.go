@@ -424,12 +424,13 @@ func TestServer_AcceptSession(t *testing.T) {
 
 			ctx := context.Background()
 
-			sessStream, err := acceptSessionStream(ctx, mockConn)
+			req, rw, err := acceptSessionStream(ctx, mockConn)
 			if tt.expectOK {
 				assert.NoError(t, err, "acceptSessionStream() should not return error")
-				assert.NotNil(t, sessStream, "acceptSessionStream() should return session stream")
+				assert.NotNil(t, req, "acceptSessionStream() should return setup request")
+				assert.NotNil(t, rw, "acceptSessionStream() should return response writer")
 				// RemoteAddr should be copied from the connection
-				assert.Equal(t, mockAddr.String(), sessStream.SetupRequest.RemoteAddr, "setup request should carry remote address")
+				assert.Equal(t, mockAddr.String(), req.RemoteAddr, "setup request should carry remote address")
 			}
 
 			// Cleanup not needed as sessStream doesn't have Terminate method
@@ -462,11 +463,12 @@ func TestServer_AcceptSession_AcceptStreamError(t *testing.T) {
 
 			ctx := context.Background()
 
-			sessStream, err := acceptSessionStream(ctx, mockConn)
+			req, rw, err := acceptSessionStream(ctx, mockConn)
 
 			assert.Error(t, err, "acceptSessionStream() should return an error")
 			assert.Contains(t, err.Error(), tt.expectErr.Error(), "acceptSessionStream() should return wrapped accept error")
-			assert.Nil(t, sessStream, "acceptSessionStream() should return nil session stream on error")
+			assert.Nil(t, req, "acceptSessionStream() should return nil setup request on error")
+			assert.Nil(t, rw, "acceptSessionStream() should return nil response writer on error")
 		})
 	}
 }
@@ -620,11 +622,7 @@ func TestServer_SessionManagement(t *testing.T) {
 			}).Return(nil) // For session.CloseWithError
 			mockConn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-			req := &SetupRequest{
-				Path:             "/test",
-				ClientExtensions: NewExtension(),
-			}
-			sessStream := newSessionStream(mockStream, req)
+			sessStream := newSessionStream(mockStream)
 			session := newSession(mockConn, sessStream, nil, nil)
 
 			// Test adding session
@@ -809,6 +807,12 @@ func TestServer_ServeQUICConn_NativeQUIC(t *testing.T) {
 		Parameters:        make(parameters),
 	}
 	require.NoError(t, scm.Encode(&buf))
+	// also send dummy server response to satisfy awaitAccepted
+	ssm := message.SessionServerMessage{
+		SelectedVersion: 0,
+		Parameters:      make(parameters),
+	}
+	require.NoError(t, ssm.Encode(&buf))
 
 	data := buf.Bytes()
 	mockStream.ReadFunc = func(p []byte) (int, error) {
@@ -832,15 +836,14 @@ func TestServer_ServeQUICConn_NativeQUIC(t *testing.T) {
 	mockConn.On("Context").Return(context.Background())
 	mockConn.On("AcceptStream", mock.Anything).Return(mockStream, nil).Once()
 
-	mockSetupHandler := &MockSetupHandler{}
-	mockSetupHandler.On("ServeMOQ", mock.Anything, mock.Anything).Return()
-
-	server.SetupHandler = mockSetupHandler
+	// since setupAndServe may call w.Reject and sessionStream.closeWithError,
+	// the underlying stream may get CancelRead/CancelWrite invocations.
+	mockStream.On("CancelRead", mock.Anything).Return()
+	mockStream.On("CancelWrite", mock.Anything).Return()
 
 	err := server.ServeQUICConn(mockConn)
 	assert.NoError(t, err)
 
-	mockSetupHandler.AssertExpectations(t)
 }
 
 func TestServer_HandleNativeQUIC_NilLogger(t *testing.T) {
@@ -860,6 +863,12 @@ func TestServer_HandleNativeQUIC_NilLogger(t *testing.T) {
 		Parameters:        make(parameters),
 	}
 	require.NoError(t, scm.Encode(&buf))
+	// include a dummy server response for the handshake
+	ssm := message.SessionServerMessage{
+		SelectedVersion: 0,
+		Parameters:      make(parameters),
+	}
+	require.NoError(t, ssm.Encode(&buf))
 
 	data := buf.Bytes()
 	mockStream.ReadFunc = func(p []byte) (int, error) {
@@ -883,15 +892,13 @@ func TestServer_HandleNativeQUIC_NilLogger(t *testing.T) {
 	mockConn.On("Context").Return(context.Background())
 	mockConn.On("AcceptStream", mock.Anything).Return(mockStream, nil).Once()
 
-	mockSetupHandler := &MockSetupHandler{}
-	mockSetupHandler.On("ServeMOQ", mock.Anything, mock.Anything).Return()
-
-	server.SetupHandler = mockSetupHandler
+	// the default handler may call w.Reject which closes session stream
+	mockStream.On("CancelRead", mock.Anything).Return()
+	mockStream.On("CancelWrite", mock.Anything).Return()
 
 	err := server.handleNativeQUIC(mockConn)
 	assert.NoError(t, err)
 
-	mockSetupHandler.AssertExpectations(t)
 }
 
 func TestServer_HandleNativeQUIC_AcceptStreamError(t *testing.T) {
@@ -1122,15 +1129,8 @@ func TestServer_AddRemoveSession(t *testing.T) {
 	mockConn.On("AcceptStream", mock.Anything).Return(nil, io.EOF)
 	mockConn.On("AcceptUniStream", mock.Anything).Return(nil, io.EOF)
 
-	req := &SetupRequest{
-		Path:             "/test",
-		ClientExtensions: NewExtension(),
-	}
-	sessStream := newSessionStream(mockStream, req)
-
-	// Create session using newSession but quickly close it to avoid long-running goroutines
+	sessStream := newSessionStream(mockStream)
 	session := newSession(mockConn, sessStream, nil, nil)
-
 	// Immediately terminate session to stop goroutines
 	defer func() { _ = session.CloseWithError(NoError, SessionErrorText(NoError)) }()
 
@@ -1216,12 +1216,7 @@ func TestServer_Shutdown(t *testing.T) {
 				mockConn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 				mockConn.On("AcceptStream", mock.Anything).Return(nil, io.EOF)
 				mockConn.On("AcceptUniStream", mock.Anything).Return(nil, io.EOF)
-
-				req := &SetupRequest{
-					Path:             "/test",
-					ClientExtensions: NewExtension(),
-				}
-				sessStream := newSessionStream(mockStream, req)
+				sessStream := newSessionStream(mockStream)
 				session := newSession(mockConn, sessStream, nil, nil)
 				server.addSession(session)
 				defer func() { _ = session.CloseWithError(NoError, SessionErrorText(NoError)) }()
@@ -1568,11 +1563,7 @@ func TestServer_SessionLifecycle(t *testing.T) {
 				mockConn.On("AcceptStream", mock.Anything).Return(nil, io.EOF)
 				mockConn.On("AcceptUniStream", mock.Anything).Return(nil, io.EOF)
 
-				req := &SetupRequest{
-					Path:             "/test",
-					ClientExtensions: NewExtension(),
-				}
-				sessStream := newSessionStream(mockStream, req)
+				sessStream := newSessionStream(mockStream)
 				session := newSession(mockConn, sessStream, nil, nil)
 				sessions = append(sessions, session)
 
@@ -1729,17 +1720,12 @@ func TestServer_EdgeCaseOperations(t *testing.T) {
 				mockConn.On("AcceptStream", mock.Anything).Return(nil, io.EOF)
 				mockConn.On("AcceptUniStream", mock.Anything).Return(nil, io.EOF)
 
-				req := &SetupRequest{
-					Path:             "/test",
-					ClientExtensions: NewExtension(),
-				}
-				sessStream := newSessionStream(mockStream, req)
+				sessStream := newSessionStream(mockStream)
 				session := newSession(mockConn, sessStream, nil, nil)
 
 				assert.NotPanics(t, func() {
 					server.removeSession(session)
 				})
-
 				_ = session.CloseWithError(NoError, SessionErrorText(NoError))
 			},
 		},

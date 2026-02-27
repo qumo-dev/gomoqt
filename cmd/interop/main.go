@@ -3,10 +3,14 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +18,27 @@ import (
 	"sync"
 	"time"
 )
+
+func findRootDir() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+
+	return "", os.ErrNotExist
+}
 
 func main() {
 	addr := flag.String("addr", "localhost:9000", "server address")
@@ -29,7 +54,14 @@ func main() {
 	// Start server in background (run server package under cmd/interop)
 	// Server binds to :port (all interfaces), not hostname:port
 	_, port, _ := strings.Cut(*addr, ":")
-	serverCmd := exec.CommandContext(ctx, "go", "run", "./server", "-addr", ":"+port)
+	// determine project root so we can run the server package regardless of cwd
+	root, err := findRootDir()
+	if err != nil {
+		// fall back to relative path; it will likely fail below
+		root = ""
+	}
+	serverPath := filepath.Join(root, "cmd", "interop", "server")
+	serverCmd := exec.CommandContext(ctx, "go", "run", serverPath, "-addr", ":"+port)
 
 	// Pipe server output so we can reformat and unify logs
 	serverStdout, err := serverCmd.StdoutPipe()
@@ -70,25 +102,31 @@ func main() {
 		}
 	}()
 
-	// Wait for server to be ready
-	time.Sleep(2 * time.Second)
+	// Wait for server to start listening by polling the port.  The server
+	// process is "go run" which may take some time to build inside Docker,
+	// so a fixed sleep is unreliable.
+	{
+		addrToCheck := "localhost:" + port
+		for i := 0; i < 40; i++ { // try up to 20 seconds
+			c, err := net.Dial("tcp", addrToCheck)
+			if err == nil {
+				c.Close()
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
 
 	// Run client and wait for completion
 	slog.Debug(" Starting client...")
 	var clientCmd *exec.Cmd
+	var errClient error
 	if *lang == "ts" {
-		// TypeScript client - run from moq-web directory
-		// Get the directory where this main.go is located, then find moq-web relative to project root
-		wd, _ := os.Getwd()
-		// We're in cmd/interop, so go up two levels to project root, then into moq-web
-		moqWebDir := filepath.Join(wd, "moq-web")
-		// If running from cmd/interop, adjust path
-		if _, err := os.Stat(moqWebDir); os.IsNotExist(err) {
-			moqWebDir = filepath.Join(wd, "..", "..", "moq-web")
+		clientCmd, errClient = buildTSClientCmd(ctx, *addr)
+		if errClient != nil {
+			slog.Error("failed to prepare TypeScript client", "error", errClient)
+			return
 		}
-		clientCmd = exec.CommandContext(ctx, "deno", "run", "--unstable-net", "--allow-all",
-			"cli/interop/run_secure.ts", "--addr", "https://"+*addr)
-		clientCmd.Dir = moqWebDir
 	} else {
 		// Go client
 		clientCmd = exec.CommandContext(ctx, "go", "run", "./client", "-addr", "https://"+*addr)
@@ -142,6 +180,48 @@ func main() {
 	}
 }
 
+// buildTSClientCmd builds the *exec.Cmd to run the TypeScript interop client.
+// It locates the project root, computes the certificate hash for the server
+// cert (used for pinning), and constructs the command invocation with the
+// proper working directory.
+func buildTSClientCmd(ctx context.Context, addr string) (*exec.Cmd, error) {
+	root, err := findRootDir()
+	if err != nil {
+		// fallback to cwd; most tests run from repository root so this should work
+		root, _ = os.Getwd()
+		slog.Warn("could not determine project root, falling back to cwd", "error", err)
+	}
+
+	// compute cert hash (best effort)
+	hash := ""
+	certFile := filepath.Join(root, "cmd", "interop", "server", "localhost.pem")
+	if h, err := computeCertHash(certFile); err == nil {
+		hash = h
+		slog.Debug("computed cert hash", "hash", h)
+	} else {
+		slog.Warn("unable to compute cert hash", "error", err)
+	}
+
+	// figure out path to moq-web directory relative to project root
+	moqWebDir := filepath.Join(root, "moq-web")
+	if _, statErr := os.Stat(moqWebDir); statErr != nil {
+		if os.IsNotExist(statErr) {
+			return nil, fmt.Errorf("moq-web directory not found at %s", moqWebDir)
+		}
+		return nil, fmt.Errorf("failed to stat moq-web directory: %w", statErr)
+	}
+
+	args := []string{"run", "--unstable-net", "--allow-all",
+		"cli/interop/run_secure.ts", "--addr", "https://" + addr}
+	if hash != "" {
+		args = append(args, "--insecure", "--cert-hash", hash)
+	}
+
+	cmd := exec.CommandContext(ctx, "deno", args...)
+	cmd.Dir = moqWebDir
+	return cmd, nil
+}
+
 // streamAndLog reads from reader line by line and logs each line prefixed with
 // the source name. It also notifies channels when specific patterns are found.
 func streamAndLog(source string, r io.Reader) {
@@ -153,4 +233,21 @@ func streamAndLog(source string, r io.Reader) {
 	if err := scanner.Err(); err != nil {
 		slog.Warn("Error reading output stream", "error", err)
 	}
+}
+
+// computeCertHash computes the SHA-256 hash of the first certificate in a PEM file
+// and returns the result in base64. Used for pinning the interop server cert.
+func computeCertHash(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+
+	block, _ := pem.Decode(raw)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return "", fmt.Errorf("no certificate block found in %s", path)
+	}
+
+	h := sha256.Sum256(block.Bytes)
+	return base64.StdEncoding.EncodeToString(h[:]), nil
 }

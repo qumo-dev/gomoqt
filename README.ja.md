@@ -34,14 +34,10 @@ Media over QUIC (MOQ) の Go 実装で、MOQ Lite 仕様に基づき QUIC 上で
 # Mage をインストール (Go 1.25+)
 go install github.com/magefile/mage@latest
 
-# Interop サーバーを起動 (WebTransport + QUIC)
-mage interop:server
-
-# 別ターミナルで Go クライアントを実行
-mage interop:client go
-
-# あるいは TypeScript クライアントを実行
-mage interop:client ts
+# Docker コンテナ内で interop テストを実行（TypeScript クライアント + サーバ）
+mage interop:ts
+# または Go クライアントを実行
+mage interop:go
 ```
 
 ## 機能

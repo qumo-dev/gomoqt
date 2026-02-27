@@ -34,14 +34,10 @@ Diese Implementierung folgt der [MOQ Lite-Spezifikation](https://kixelated.githu
 # Mage installieren (Go 1.25+)
 go install github.com/magefile/mage@latest
 
-# Interop-Server starten (WebTransport + QUIC)
-mage interop:server
-
-# In einem zweiten Terminal: Go-Client starten
-mage interop:client go
-
-# Oder den TypeScript-Client starten
-mage interop:client ts
+# Führen Sie den Interop-Test im Docker‑Container aus
+mage interop:ts    # TypeScript-Client + Server
+mage interop:go    # Go-Client + Server
+```
 ```
 
 ## Funktionen

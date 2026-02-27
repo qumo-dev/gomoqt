@@ -44,10 +44,7 @@ func TestNewSession(t *testing.T) {
 			// Provide a default OpenStream behavior for tests that don't explicitly set it
 			conn.On("OpenStream").Return(nil, io.EOF).Maybe()
 
-			sessStream := newSessionStream(mockStream, &SetupRequest{
-				Path:             "test/path",
-				ClientExtensions: NewExtension(),
-			})
+			sessStream := newSessionStream(mockStream)
 			session := newSession(conn, sessStream, tt.mux, nil)
 
 			if tt.expectOK {
@@ -55,7 +52,7 @@ func TestNewSession(t *testing.T) {
 				assert.Equal(t, tt.mux, session.mux, "mux should be set correctly")
 				assert.NotNil(t, session.trackReaders, "receive group stream queues should not be nil")
 				// remote address method should return connection's address
-				assert.Equal(t, "127.0.0.1:8080", session.RemoteAddr(), "RemoteAddr() should forward to connection")
+				assert.Equal(t, "127.0.0.1:8080", session.RemoteAddr().String(), "RemoteAddr() should forward to connection")
 			}
 
 			// Cleanup
@@ -87,10 +84,7 @@ func TestNewSessionWithNilMux(t *testing.T) {
 			conn.On("AcceptUniStream", mock.Anything).Return(nil, io.EOF) // For handleUniStreams goroutine
 			conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-			sessStream := newSessionStream(mockStream, &SetupRequest{
-				Path:             "test/path",
-				ClientExtensions: NewExtension(),
-			})
+			sessStream := newSessionStream(mockStream)
 			session := newSession(conn, sessStream, tt.mux, nil)
 
 			if tt.expectDefault {
@@ -115,10 +109,7 @@ func TestNewSession_WithNilLogger(t *testing.T) {
 	conn.On("AcceptUniStream", mock.Anything).Return(nil, io.EOF)
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
@@ -149,10 +140,7 @@ func TestNewSession_SessionStreamClosure(t *testing.T) {
 	conn.On("AcceptUniStream", mock.Anything).Return(nil, io.EOF).Maybe()
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080}).Maybe()
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 	assert.NotNil(t, session)
@@ -196,10 +184,7 @@ func TestSession_CloseWithError(t *testing.T) {
 			conn.On("AcceptUniStream", mock.Anything).Return(nil, io.EOF) // For handleUniStreams goroutine
 			conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-			sessStream := newSessionStream(mockStream, &SetupRequest{
-				Path:             "test/path",
-				ClientExtensions: NewExtension(),
-			})
+			sessStream := newSessionStream(mockStream)
 			session := newSession(conn, sessStream, nil, nil)
 
 			err := session.CloseWithError(tt.code, tt.msg)
@@ -263,10 +248,7 @@ func TestSession_Subscribe(t *testing.T) {
 			conn.On("OpenStream").Return(mockTrackStream, nil)
 			conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-			sessStream := newSessionStream(mockStream, &SetupRequest{
-				Path:             "test/path",
-				ClientExtensions: NewExtension(),
-			})
+			sessStream := newSessionStream(mockStream)
 			session := newSession(conn, sessStream, nil, nil)
 
 			track, err := session.Subscribe(tt.path, tt.name, tt.config)
@@ -301,10 +283,7 @@ func TestSession_Subscribe_OpenError(t *testing.T) {
 	conn.On("OpenStream").Return(nil, errors.New("open stream failed"))
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, nil, nil)
 
 	config := &TrackConfig{
@@ -338,10 +317,7 @@ func TestSession_Subscribe_OpenStreamApplicationError(t *testing.T) {
 	conn.On("OpenStream").Return(nil, appErr)
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, nil, nil)
 
 	config := &TrackConfig{TrackPriority: 1}
@@ -378,10 +354,7 @@ func TestSession_Subscribe_EncodeStreamTypeError(t *testing.T) {
 	conn.On("OpenStream").Return(mockTrackStream, nil)
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, nil, nil)
 
 	config := &TrackConfig{TrackPriority: 1}
@@ -419,10 +392,7 @@ func TestSession_Subscribe_EncodeStreamTypeStreamError(t *testing.T) {
 	conn.On("OpenStream").Return(mockTrackStream, nil)
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, nil, nil)
 
 	config := &TrackConfig{TrackPriority: 1}
@@ -471,10 +441,7 @@ func TestSession_Subscribe_NilConfig(t *testing.T) {
 	conn.On("OpenStream").Return(mockTrackStream, nil)
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, nil, nil)
 
 	// Pass nil config - should use default
@@ -517,10 +484,7 @@ func TestSession_Subscribe_EncodeSubscribeMessageStreamError(t *testing.T) {
 	conn.On("OpenStream").Return(mockTrackStream, nil)
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, nil, nil)
 
 	config := &TrackConfig{TrackPriority: 1}
@@ -567,10 +531,7 @@ func TestSession_Subscribe_EncodeSubscribeMessageRemoteStreamError(t *testing.T)
 	conn.On("OpenStream").Return(mockTrackStream, nil)
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, nil, nil)
 
 	config := &TrackConfig{TrackPriority: 1}
@@ -611,10 +572,7 @@ func TestSession_Subscribe_DecodeSubscribeOkStreamError(t *testing.T) {
 	conn.On("OpenStream").Return(mockTrackStream, nil)
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, nil, nil)
 
 	config := &TrackConfig{TrackPriority: 1}
@@ -653,10 +611,7 @@ func TestSession_Subscribe_DecodeSubscribeOkError(t *testing.T) {
 	conn.On("OpenStream").Return(mockTrackStream, nil)
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, nil, nil)
 
 	config := &TrackConfig{TrackPriority: 1}
@@ -681,10 +636,7 @@ func TestSession_Context(t *testing.T) {
 	conn.On("AcceptUniStream", mock.Anything).Return(nil, io.EOF)
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, nil, nil)
 
 	ctx := session.Context()
@@ -706,10 +658,7 @@ func TestSession_nextSubscribeID(t *testing.T) {
 	conn.On("AcceptUniStream", mock.Anything).Return(nil, io.EOF)
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, nil, nil)
 
 	id1 := session.nextSubscribeID()
@@ -746,10 +695,7 @@ func TestSession_HandleBiStreams_AcceptError(t *testing.T) {
 	})
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, nil, nil)
 
 	// Wait for the background goroutine to attempt AcceptStream/AcceptUniStream
@@ -779,10 +725,7 @@ func TestSession_HandleUniStreamsAcceptError(t *testing.T) {
 	conn.On("AcceptUniStream", mock.Anything).Return(nil, errors.New("accept uni stream failed"))
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, nil, nil)
 
 	// Wait a bit for the background goroutine to try accepting
@@ -810,10 +753,7 @@ func TestSession_ConcurrentAccess(t *testing.T) {
 	conn.On("OpenUniStream").Return(&MockQUICSendStream{})
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, nil, nil)
 
 	// Test concurrent access
@@ -871,10 +811,7 @@ func TestSession_ContextCancellation(t *testing.T) {
 	}).Return(nil)
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, nil, nil)
 
 	ctx := session.Context()
@@ -907,10 +844,7 @@ func TestSession_WithRealMux(t *testing.T) {
 
 	mux := NewTrackMux()
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, mux, nil)
 
 	assert.Equal(t, mux, session.mux, "Mux should be set correctly in the session")
@@ -933,10 +867,7 @@ func TestSession_GoAway(t *testing.T) {
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 	mockStream.On("Write", mock.Anything).Return(0, nil)
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	// Test goAway - now it calls updateSession
@@ -1017,10 +948,7 @@ func TestSession_AcceptAnnounce(t *testing.T) {
 			mockStream.On("Context").Return(context.Background())
 			mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-			sessStream := newSessionStream(mockStream, &SetupRequest{
-				Path:             "test/path",
-				ClientExtensions: NewExtension(),
-			})
+			sessStream := newSessionStream(mockStream)
 			session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 			announceStream := &MockQUICStream{}
@@ -1054,10 +982,7 @@ func TestSession_AddTrackWriter(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	writer := &TrackWriter{}
@@ -1084,10 +1009,7 @@ func TestSession_RemoveTrackWriter(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	writer := &TrackWriter{}
@@ -1115,10 +1037,7 @@ func TestSession_RemoveTrackReader(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	reader := &TrackReader{}
@@ -1153,10 +1072,7 @@ func TestSession_AddTrackReader(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	reader := &TrackReader{}
@@ -1179,10 +1095,7 @@ func TestSession_ProcessBiStream_Announce(t *testing.T) {
 	mockSessStream.On("Context").Return(context.Background())
 	mockSessStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockSessStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockSessStream)
 	mux := NewTrackMux()
 	session := newSession(conn, sessStream, mux, nil)
 
@@ -1254,10 +1167,7 @@ func TestSession_ProcessBiStream_Subscribe(t *testing.T) {
 	mockSessStream.On("Context").Return(context.Background())
 	mockSessStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockSessStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockSessStream)
 	mux := NewTrackMux()
 	session := newSession(conn, sessStream, mux, nil)
 
@@ -1345,10 +1255,7 @@ func TestSession_ProcessBiStream_InvalidStreamType(t *testing.T) {
 	mockSessStream.On("Context").Return(context.Background())
 	mockSessStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockSessStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockSessStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	// Create a mock stream with invalid stream type
@@ -1397,10 +1304,7 @@ func TestSession_ProcessBiStream_DecodeStreamTypeError(t *testing.T) {
 	mockSessStream.On("Context").Return(context.Background())
 	mockSessStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockSessStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockSessStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	mockStream := &MockQUICStream{}
@@ -1436,10 +1340,7 @@ func TestSession_ProcessBiStream_DecodeAnnounceMessageError(t *testing.T) {
 	mockSessStream.On("Context").Return(context.Background())
 	mockSessStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockSessStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockSessStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	mockStream := &MockQUICStream{}
@@ -1478,10 +1379,7 @@ func TestSession_ProcessBiStream_DecodeSubscribeMessageError(t *testing.T) {
 	mockSessStream.On("Context").Return(context.Background())
 	mockSessStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockSessStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockSessStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	mockStream := &MockQUICStream{}
@@ -1520,10 +1418,7 @@ func TestSession_ProcessUniStream_Group(t *testing.T) {
 	mockSessStream.On("Context").Return(context.Background())
 	mockSessStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockSessStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockSessStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	// Add a track reader
@@ -1583,10 +1478,7 @@ func TestSession_ProcessUniStream_UnknownSubscribeID(t *testing.T) {
 	mockSessStream.On("Context").Return(context.Background())
 	mockSessStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockSessStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockSessStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	// Create a mock receive stream for GROUP with unknown subscribe ID
@@ -1634,10 +1526,7 @@ func TestSession_ProcessUniStream_InvalidStreamType(t *testing.T) {
 	mockSessStream.On("Context").Return(context.Background())
 	mockSessStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockSessStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockSessStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	// Create a mock receive stream with invalid stream type
@@ -1686,10 +1575,7 @@ func TestSession_ProcessUniStream_DecodeStreamTypeError(t *testing.T) {
 	mockSessStream.On("Context").Return(context.Background())
 	mockSessStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockSessStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockSessStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	mockRecvStream := &MockQUICReceiveStream{}
@@ -1715,10 +1601,7 @@ func TestSession_ProcessUniStream_DecodeGroupMessageError(t *testing.T) {
 	mockSessStream.On("Context").Return(context.Background())
 	mockSessStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockSessStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockSessStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	mockRecvStream := &MockQUICReceiveStream{}
@@ -1755,10 +1638,7 @@ func TestSession_Subscribe_TerminatingSession(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	// Terminate the session
@@ -1791,10 +1671,7 @@ func TestSession_AcceptAnnounce_TerminatingSession(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	// Terminate the session
@@ -1832,10 +1709,7 @@ func TestSession_AcceptAnnounce_OpenStreamApplicationError(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	reader, err := session.AcceptAnnounce("/test/prefix/")
@@ -1867,10 +1741,7 @@ func TestSession_AcceptAnnounce_EncodeStreamTypeError(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	reader, err := session.AcceptAnnounce("/test/prefix/")
@@ -1906,10 +1777,7 @@ func TestSession_AcceptAnnounce_EncodeStreamTypeStreamError(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	reader, err := session.AcceptAnnounce("/test/prefix/")
@@ -1957,10 +1825,7 @@ func TestSession_AcceptAnnounce_EncodePleaseMessageStreamError(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	reader, err := session.AcceptAnnounce("/test/prefix/")
@@ -2000,10 +1865,7 @@ func TestSession_AcceptAnnounce_DecodeInitMessageStreamError(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	reader, err := session.AcceptAnnounce("/test/prefix/")
@@ -2038,10 +1900,7 @@ func TestSession_AcceptAnnounce_DecodeInitMessageError(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	reader, err := session.AcceptAnnounce("/test/prefix/")
@@ -2064,10 +1923,7 @@ func TestSession_CloseWithError_AlreadyTerminating(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	// First termination
@@ -2099,10 +1955,7 @@ func TestSession_Terminate_WithApplicationError(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "test/path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	session := newSession(conn, sessStream, NewTrackMux(), nil)
 
 	err := session.CloseWithError(InternalSessionErrorCode, "test error")
@@ -2111,3 +1964,8 @@ func TestSession_Terminate_WithApplicationError(t *testing.T) {
 	var sessErr *SessionError
 	assert.ErrorAs(t, err, &sessErr)
 }
+
+
+
+
+

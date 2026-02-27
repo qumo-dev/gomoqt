@@ -105,20 +105,22 @@ type SetupRequest struct {
 	ClientExtensions *Extension
 	RemoteAddr       string // remote network address of the client
 
-	ctx context.Context
+	reqCtx context.Context
 }
 
 func (r *SetupRequest) Context() context.Context {
-	return r.ctx
+	return r.reqCtx
 }
 
 // SetupResponseWriter is provided to the SetupHandler to configure the
 // server response to a setup request. Handlers can select the agreed
 // protocol version, provide server extensions, or reject the setup.
 type SetupResponseWriter interface {
-	SelectVersion(v Version) error
+	SelectVersion(version Version) error
+	Version() Version
 	SetExtensions(extensions *Extension)
-	Reject(code SessionErrorCode) error
+	Extensions() *Extension
+	Reject(code SessionErrorCode)
 }
 
 var _ SetupHandler = (*SetupHandlerFunc)(nil)
@@ -132,7 +134,7 @@ func (f SetupHandlerFunc) ServeMOQ(w SetupResponseWriter, r *SetupRequest) {
 }
 
 var RejectSetupFunc func(w SetupResponseWriter, r *SetupRequest) = func(w SetupResponseWriter, r *SetupRequest) {
-	_ = w.Reject(SetupFailedErrorCode)
+	w.Reject(SetupFailedErrorCode)
 }
 
 var RejectSetupHandler SetupHandler = SetupHandlerFunc(RejectSetupFunc)

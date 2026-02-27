@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"sync"
 	"sync/atomic"
 
@@ -67,6 +68,8 @@ type Session struct {
 
 	conn quic.Connection
 
+	transport string // "quic" or "webtransport"
+
 	mux *TrackMux // TODO
 
 	subscribeIDCounter atomic.Uint64
@@ -93,14 +96,28 @@ func (s *Session) Context() context.Context {
 	return s.ctx
 }
 
-// RemoteAddr returns the remote network address of the peer. It is
-// retrieved directly from the underlying QUIC connection so that callers
-// always get the current value without needing to store a separate copy.
-func (s *Session) RemoteAddr() string {
+// LocalAddr returns the local network address.
+// The returned value implements [TransportAddr], which can be used to
+// retrieve the transport protocol ("quic" or "webtransport").
+func (s *Session) LocalAddr() net.Addr {
 	if s == nil || s.conn == nil {
-		return ""
+		return nil
 	}
-	return s.conn.RemoteAddr().String()
+	return &addr{addr: s.conn.LocalAddr(), transport: s.transport}
+}
+
+// RemoteAddr returns the remote network address of the peer.
+// The returned value implements [TransportAddr], which can be used to
+// retrieve the transport protocol ("quic" or "webtransport"):
+//
+//	if ta, ok := sess.RemoteAddr().(moqt.TransportAddr); ok {
+//	    fmt.Println(ta.Transport()) // "quic" or "webtransport"
+//	}
+func (s *Session) RemoteAddr() net.Addr {
+	if s == nil || s.conn == nil {
+		return nil
+	}
+	return &addr{addr: s.conn.RemoteAddr(), transport: s.transport}
 }
 
 // CloseWithError closes the connection with an error code and message.

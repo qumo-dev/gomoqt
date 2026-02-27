@@ -121,10 +121,7 @@ func TestClient_ShutdownContextCancel(t *testing.T) {
 	mockStream.On("CancelWrite", mock.Anything)
 	mockStream.On("Context").Return(context.Background())
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	sess := newSession(mockConn, sessStream, NewTrackMux(), nil)
 	c.addSession(sess)
 
@@ -349,7 +346,8 @@ func TestClient_openSession(t *testing.T) {
 			if extProvider == nil {
 				extProvider = func() *Extension { return &Extension{} }
 			}
-			_, err := openSessionStream(conn, "/path", extProvider())
+			req := &SetupRequest{Path: "/path", ClientExtensions: extProvider()}
+			_, err := openSessionStream(conn, req)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -622,16 +620,17 @@ func TestClient_OpenSession_NilExtensions(t *testing.T) {
 	c.init()
 
 	mockConn := &MockQUICConnection{}
+
+	// prepare a proper encoded server message so decoding completes
+	var buf bytes.Buffer
+	ssm := message.SessionServerMessage{
+		SelectedVersion: uint64(Default),
+		Parameters:      make(parameters),
+	}
+	require.NoError(t, ssm.Encode(&buf))
+
 	mockStream := &MockQUICStream{
-		ReadFunc: func(p []byte) (int, error) {
-			// Return minimal valid SESSION_SERVER response
-			if len(p) >= 2 {
-				p[0] = 0x01 // Message length = 1
-				p[1] = 0x01 // Selected version = 1
-				return 2, nil
-			}
-			return 0, nil
-		},
+		ReadFunc: buf.Read,
 	}
 
 	mockStream.On("StreamID").Return(quic.StreamID(1))
@@ -646,10 +645,10 @@ func TestClient_OpenSession_NilExtensions(t *testing.T) {
 	mockConn.On("AcceptUniStream", mock.Anything).Return(nil, io.EOF)
 	mockConn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-	// Expect panic when extensions is nil
-	assert.Panics(t, func() {
-		_, _ = openSessionStream(mockConn, "/test", nil)
-	})
+	// openSessionStream should handle nil extensions without panicking
+	resp, err := openSessionStream(mockConn, &SetupRequest{Path: "/test", ClientExtensions: nil})
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
 }
 
 // Test for successful openSession with valid response
@@ -704,7 +703,8 @@ func TestClient_OpenSession_Success(t *testing.T) {
 	extensions := func() *Extension {
 		return NewExtension()
 	}
-	sessStream, err := openSessionStream(mockConn, "/test", extensions())
+	req := &SetupRequest{Path: "/test", ClientExtensions: extensions()}
+	sessStream, err := openSessionStream(mockConn, req)
 	require.NoError(t, err)
 	require.NotNil(t, sessStream)
 
@@ -980,10 +980,7 @@ func TestClient_Shutdown_Timeout(t *testing.T) {
 	mockConn.On("AcceptUniStream", mock.Anything).Return(nil, io.EOF)
 	mockConn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
-	sessStream := newSessionStream(mockStream, &SetupRequest{
-		Path:             "path",
-		ClientExtensions: NewExtension(),
-	})
+	sessStream := newSessionStream(mockStream)
 	sess := newSession(mockConn, sessStream, NewTrackMux(), nil)
 	c.addSession(sess)
 
