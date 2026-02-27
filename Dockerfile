@@ -45,10 +45,11 @@ RUN chown -R appuser:appuser /work
 RUN deno cache moq-web/cli/interop/main.ts
 
 # generate mkcert CA and server certs inside image so wrapper can find them
+# any failure producing certs should stop the build
 RUN mkcert -install && \
     mkdir -p /root/.local/share/mkcert && \
     cd /work/cmd/interop/server && \
-    mkcert -cert-file localhost.pem -key-file localhost-key-file localhost 127.0.0.1 ::1 || true && \
+    mkcert -cert-file localhost.pem -key-file localhost-key-file localhost 127.0.0.1 ::1 && \
     # ensure the generated certs and mkcert state are readable by the unprivileged user
     chown -R appuser:appuser /root/.local/share/mkcert /work/cmd/interop/server/*.pem
 
