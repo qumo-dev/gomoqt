@@ -18,8 +18,8 @@ Interop server and clients for testing MOQ Lite with WebTransport and QUIC.
 ```bash
 # Preferred: run the full interop test inside Docker (self‑contained image)
 # to exercise a particular client language:
-mage interop ts      # run TS client + server inside container
-mage interop go      # run Go client + server inside container
+mage interop:ts      # run TS client + server inside container
+mage interop:go      # run Go client + server inside container
 ```
 
 ### Using Go directly

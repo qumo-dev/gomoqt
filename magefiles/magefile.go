@@ -249,12 +249,6 @@ func (Interop) Go() error {
 		"go", "run", "./cmd/interop", "-lang", "go")
 }
 
-// Default now runs the TypeScript interop test inside Docker.
-func (i Interop) Default() error {
-	fmt.Println("Default interop target now uses Docker TS client; executing mage interop ts")
-	return i.Ts()
-}
-
 // ======================================
 // DEVELOPMENT UTILITIES
 // ======================================
@@ -323,8 +317,8 @@ func Help() {
 	fmt.Println("  mage test:coverage - Run tests with coverage")
 	fmt.Println("")
 	fmt.Println("Interop:")
-	fmt.Println("  mage interop ts                       - Dockerized interop using TypeScript client (preferred)")
-	fmt.Println("  mage interop go                       - Dockerized interop using Go client")
+	fmt.Println("  mage interop:ts                       - Dockerized interop using TypeScript client (preferred)")
+	fmt.Println("  mage interop:go                       - Dockerized interop using Go client")
 	fmt.Println("")
 	fmt.Println("Development:")
 	fmt.Println("  mage lint   - Run golangci-lint")
@@ -364,10 +358,10 @@ func regenerateCerts() error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		fmt.Printf("...failed\n  Error: %v\n", err)
+		fmt.Printf("failed\n  Error: %v\n", err)
 		return err
 	}
-	fmt.Println("...ok")
+	fmt.Println("ok")
 	return nil
 }
 

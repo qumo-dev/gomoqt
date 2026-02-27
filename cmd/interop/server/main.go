@@ -24,7 +24,7 @@ func main() {
 	flag.Parse()
 
 	if err := mkcert(); err != nil {
-		fmt.Fprintf(os.Stderr, "Setting up certificates...failed\n  Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Setting up certificatesfailed\n  Error: %v\n", err)
 		return
 	}
 
@@ -77,11 +77,11 @@ func main() {
 		// Accept the session with the custom mux
 		sess, err := moqt.Accept(w, r, mux)
 		if err != nil {
-			fmt.Printf("...failed\n  Error: %v\n", err)
+			fmt.Printf("failed\n  Error: %v\n", err)
 			w.Reject(moqt.ProtocolViolationErrorCode)
 			return
 		}
-		fmt.Println("...ok")
+		fmt.Println("ok")
 
 		go func() {
 			// Close the server when the session ends
@@ -144,19 +144,19 @@ func main() {
 		fmt.Print("Accepting client announcements...")
 		anns, err := sess.AcceptAnnounce("/")
 		if err != nil {
-			fmt.Printf("...failed\n  Error: %v\n", err)
+			fmt.Printf("failed\n  Error: %v\n", err)
 			return
 		}
 		defer anns.Close()
-		fmt.Println("...ok")
+		fmt.Println("ok")
 
 		fmt.Print("Receiving announcement...")
 		ann, err := anns.ReceiveAnnouncement(context.Background())
 		if err != nil {
-			fmt.Printf("...failed\n  Error: %v\n", err)
+			fmt.Printf("failed\n  Error: %v\n", err)
 			return
 		}
-		fmt.Println("...ok")
+		fmt.Println("ok")
 
 		fmt.Printf("Discovered broadcast: %s\n", string(ann.BroadcastPath()))
 
@@ -165,19 +165,19 @@ func main() {
 		// subscription is established or an error occurs. No artificial sleeps.
 		track, err := sess.Subscribe(ann.BroadcastPath(), "", nil)
 		if err != nil {
-			fmt.Printf("...failed\n  Error: %v\n", err)
+			fmt.Printf("failed\n  Error: %v\n", err)
 			return
 		}
 		defer track.Close()
-		fmt.Println("...ok")
+		fmt.Println("ok")
 
 		fmt.Print("Accepting group...")
 		group, err := track.AcceptGroup(context.Background())
 		if err != nil {
-			fmt.Printf("...failed\n  Error: %v\n", err)
+			fmt.Printf("failed\n  Error: %v\n", err)
 			return
 		}
-		fmt.Println("...ok")
+		fmt.Println("ok")
 
 		fmt.Print("Reading the first frame from client...")
 		frame := moqt.NewFrame(1024)
@@ -186,10 +186,10 @@ func main() {
 			if err == io.EOF {
 				return // Group closed by client
 			}
-			fmt.Printf("...failed\n  Error: %v\n", err)
+			fmt.Printf("failed\n  Error: %v\n", err)
 			return
 		}
-		fmt.Printf("...ok (payload: %s)\n", string(frame.Body()))
+		fmt.Printf("ok (payload: %s)\n", string(frame.Body()))
 
 		// Allow the session to finish cleanly by waiting for the session
 		// context to finish or by deferring session close; we avoid
@@ -197,7 +197,7 @@ func main() {
 
 		fmt.Print("Closing session...")
 		_ = sess.CloseWithError(moqt.NoError, "no error")
-		fmt.Println("...ok")
+		fmt.Println("ok")
 	})
 
 	fmt.Println("Listening...")
@@ -272,10 +272,10 @@ func mkcert() error {
 		cmd.Stderr = os.Stderr
 		err := cmd.Run()
 		if err != nil {
-			fmt.Printf("...failed\n  Error: %v\n", err)
+			fmt.Printf("failed\n  Error: %v\n", err)
 			return err
 		}
-		fmt.Println("...ok")
+		fmt.Println("ok")
 	}
 	return nil
 }

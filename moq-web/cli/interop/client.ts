@@ -1,45 +1,47 @@
 import { Client, Frame, TrackMux, TrackWriter } from "@okdaichi/moq";
 import { background } from "@okdaichi/golikejs/context";
-import { scope } from "@okdaichi/golikejs";
 
-scope(async (defer) => {
-	const client = new Client();
-	defer(() => {
-		client.close();
-	});
-
+// shared client logic exported as function
+export async function runClient(
+	addr: string,
+	transportOptions: WebTransportOptions,
+	debugEnabled: boolean,
+): Promise<void> {
+	const client = new Client({ transportOptions });
 	const mux = new TrackMux();
 
 	// basic prefixed log functions
 	function info(msg: string, ...args: any[]) {
-		console.log("[Client]", msg, ...args);
+		console.log(msg, ...args);
 	}
 	function debug(msg: string, ...args: any[]) {
-		console.debug("[Client]", msg, ...args);
+		console.debug(msg, ...args);
 	}
 
 	// helper to log a step and mark success/failure on one line
-	// write string to stdout without newline (Deno equivalent of process.stdout.write)
 	async function write(s: string) {
 		const encoder = new TextEncoder();
 		await Deno.stdout.write(encoder.encode(s));
 	}
 
 	async function step<T>(msg: string, fn: () => Promise<T>): Promise<T> {
-		await write(`[Client] ${msg}...`);
+		await write(`${msg}...`);
 		try {
 			const res = await fn();
 			console.log(" ok");
 			return res;
 		} catch (err: any) {
-			// include error message on same line so output stays aligned
 			console.log(" failed:", err instanceof Error ? err.message : err);
 			throw err;
 		}
 	}
 
+	if (!debugEnabled) {
+		console.debug = () => {};
+	}
+
 	// Channel to signal publish handler completion
-	const doneCh = new Array<() => void>();
+	const doneCh: Array<() => void> = [];
 	let done = false;
 
 	mux.publishFunc(
@@ -47,26 +49,19 @@ scope(async (defer) => {
 		"/interop/client",
 		async (track: TrackWriter) => {
 			try {
-				console.debug("[Client] Server subscribed, sending data...");
+				debug("Server subscribed, sending data...");
 
 				const group = await step("Opening group", async () => {
-					const [group, err] = await track.openGroup()
+					const [g, err] = await track.openGroup();
 					if (err) throw err;
-					return group;
+					return g;
 				});
-				defer(() => group.close());
-
-				const frame = new Frame(
-					new TextEncoder().encode("Hello from moq-ts client"),
-				);
-
+				const frame = new Frame(new TextEncoder().encode("Hello from moq-ts client"));
 				await step("Writing frame to server", () => group.writeFrame(frame));
-
-				console.info("[Client] [OK] Data sent to server");
+				await group.close();
 			} catch (e) {
-				console.error("[Client] Error in publish:", e);
+				console.error("Error in publish:", e);
 			} finally {
-				// Signal that handler has been invoked
 				done = true;
 				doneCh.forEach((resolve) => resolve());
 			}
@@ -75,7 +70,7 @@ scope(async (defer) => {
 
 	debug("Registering /interop/client handler");
 
-	const session = await step("Connecting to server", () => client.dial("http://127.0.0.1:9000/", mux));
+	const session = await step("Connecting to server", () => client.dial(addr, mux));
 
 	const announced = await step("Accepting server announcements", async () => {
 		const [a, err] = await session.acceptAnnounce("/");
@@ -116,7 +111,6 @@ scope(async (defer) => {
 
 	debug("Operations completed");
 
-	// Wait for the handler to complete (like Go's doneCh)
 	if (!done) {
 		await Promise.race([
 			new Promise<void>((resolve) => doneCh.push(resolve)),
@@ -124,12 +118,7 @@ scope(async (defer) => {
 		]);
 	}
 
-	// Wait for a longer time before closing to allow server to read the frame
 	await new Promise((resolve) => setTimeout(resolve, 2000));
 
 	await step("Closing session", () => session.closeWithError(0, "no error"));
-
-	defer(() => {
-		Deno.exit(0);
-	});
-});
+}
