@@ -224,9 +224,7 @@ func (s *Server) HandleWebTransport(w http.ResponseWriter, r *http.Request) erro
 
 	responseWriter := newResponseWriter(conn, rsp, s)
 
-	s.setupAndServe(responseWriter, req)
-
-	return nil
+	return s.setupAndServe(responseWriter, req)
 }
 
 func (s *Server) handleNativeQUIC(conn quic.Connection) error {
