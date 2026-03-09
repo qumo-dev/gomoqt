@@ -87,6 +87,7 @@ if err != nil {
 - Optional catalog fields use pointer types where the package needs to preserve the difference between “field omitted” and “field explicitly set to zero”.
 - Unknown JSON properties are preserved in `ExtraFields` so catalogs can be round-tripped without dropping extensions.
 - `Catalog` and `CatalogDelta` are intentionally separate types so independent snapshots and incremental updates cannot be confused accidentally.
+- `Broadcast` routes non-catalog tracks by `Track.Name`, so it rejects catalogs that reuse the same name in multiple namespaces.
 
 ## References
 

@@ -192,6 +192,12 @@ func TestParseCatalog_RejectsDeltaJSON(t *testing.T) {
 	assert.Contains(t, err.Error(), "delta catalog fields are not allowed")
 }
 
+func TestParseCatalog_RejectsTrailingJSON(t *testing.T) {
+	_, err := ParseCatalog([]byte(`{"version":1} {"extra":2}`))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "after top-level value")
+}
+
 func TestParseCatalogDelta_RoundTrip(t *testing.T) {
 	input := `{
 		"deltaUpdate": true,
@@ -213,6 +219,12 @@ func TestParseCatalogDelta_RejectsIndependentJSON(t *testing.T) {
 	_, err := ParseCatalogDelta([]byte(`{"version": 1, "tracks": [{"name": "video", "packaging": "loc", "isLive": true}]}`))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "independent catalog fields are not allowed")
+}
+
+func TestParseCatalogDelta_RejectsTrailingJSON(t *testing.T) {
+	_, err := ParseCatalogDelta([]byte(`{"deltaUpdate":true,"addTracks":[{"name":"video","packaging":"loc","isLive":true}]} {"extra":2}`))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "after top-level value")
 }
 
 func TestCatalogApplyDelta_PreservesDeclaredOperationOrder(t *testing.T) {
@@ -315,7 +327,7 @@ func TestCatalogApplyDelta_MergesMetadata(t *testing.T) {
 	base := Catalog{
 		Version:          1,
 		DefaultNamespace: "live/demo",
-		Tracks:           []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}},
+		Tracks:           []Track{{Namespace: "live/demo", Name: "video", Packaging: PackagingLOC, IsLive: new(true)}},
 		ExtraFields:      map[string]json.RawMessage{"base": json.RawMessage(`true`)},
 	}
 	delta := CatalogDelta{
@@ -336,6 +348,31 @@ func TestCatalogApplyDelta_MergesMetadata(t *testing.T) {
 	assert.Contains(t, updated.ExtraFields, "delta")
 	require.Len(t, updated.Tracks, 2)
 	assert.Equal(t, "audio", updated.Tracks[1].Name)
+}
+
+func TestCatalogApplyDelta_RejectsChangingDefaultNamespaceForInheritedTracks(t *testing.T) {
+	base := Catalog{
+		Version:          1,
+		DefaultNamespace: "live/demo",
+		Tracks: []Track{{
+			Name:      "video",
+			Packaging: PackagingLOC,
+			IsLive:    new(true),
+		}},
+	}
+	delta := CatalogDelta{
+		DefaultNamespace: "live/updated",
+		AddTracks: []Track{{
+			Namespace: "live/updated",
+			Name:      "audio",
+			Packaging: PackagingLOC,
+			IsLive:    new(false),
+		}},
+	}
+
+	_, err := base.ApplyDelta(delta)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot change default namespace")
 }
 
 func TestCatalogDeltaValidate_RemoveTracksRejectExtraFields(t *testing.T) {

@@ -17,6 +17,11 @@ const DefaultCatalogTrackName moqt.TrackName = "catalog"
 // can manage a broadcast through a single object. Track replacement and
 // removal close any active TrackWriter values for that track; handlers are
 // expected to return once their writer is closed.
+//
+// Because the underlying moqt routing key is a single TrackName, Broadcast
+// requires track names to be unique across namespaces within the current
+// catalog snapshot. Catalogs that contain the same track name in multiple
+// namespaces are rejected rather than being mapped to synthetic routing names.
 type Broadcast struct {
 	mu sync.RWMutex
 

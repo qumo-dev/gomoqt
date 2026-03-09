@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
 	"strings"
@@ -265,7 +266,10 @@ func (c Catalog) ApplyDelta(delta CatalogDelta) (Catalog, error) {
 	}
 
 	result := c.Clone()
-	if delta.DefaultNamespace != "" {
+	if delta.DefaultNamespace != "" && delta.DefaultNamespace != result.DefaultNamespace {
+		if result.hasInheritedNamespaceTracks() {
+			return Catalog{}, fmt.Errorf("msf: cannot change default namespace when catalog contains tracks that inherit it")
+		}
 		result.DefaultNamespace = delta.DefaultNamespace
 	}
 	if delta.GeneratedAt != nil {
@@ -305,6 +309,16 @@ func (c Catalog) ApplyDelta(delta CatalogDelta) (Catalog, error) {
 	}
 
 	return result, nil
+}
+
+// hasInheritedNamespaceTracks reports whether any track currently relies on DefaultNamespace.
+func (c Catalog) hasInheritedNamespaceTracks() bool {
+	for _, track := range c.Tracks {
+		if track.Namespace == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // ParseCatalog decodes an independent MSF catalog from JSON bytes. It rejects
@@ -988,6 +1002,12 @@ func decodeOrderedObject(data []byte) ([]orderedField, error) {
 		fields = append(fields, orderedField{Key: key, Value: cloneRawMessage(raw)})
 	}
 	if _, err := dec.Token(); err != nil {
+		return nil, err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("msf: unexpected trailing JSON data")
+		}
 		return nil, err
 	}
 	return fields, nil
