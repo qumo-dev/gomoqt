@@ -20,6 +20,22 @@ func TestLocationJSON(t *testing.T) {
 	assert.Equal(t, location, decoded)
 }
 
+func TestLocationJSON_InvalidEntryLength(t *testing.T) {
+	tests := []string{
+		`[1]`,
+		`[1,2,3]`,
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			var location Location
+			err := json.Unmarshal([]byte(input), &location)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "exactly 2 items")
+		})
+	}
+}
+
 func TestMediaTimelineEntryJSON(t *testing.T) {
 	entry := MediaTimelineEntry{
 		MediaTime: 2002,

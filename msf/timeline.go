@@ -25,12 +25,19 @@ func (l Location) MarshalJSON() ([]byte, error) {
 // method ensures that the compact array format in the MSF specification is
 // accepted when reading JSON.
 func (l *Location) UnmarshalJSON(data []byte) error {
-	var raw [2]uint64
+	var raw []json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	l.GroupID = raw[0]
-	l.ObjectID = raw[1]
+	if len(raw) != 2 {
+		return fmt.Errorf("msf: location must contain exactly 2 items")
+	}
+	if err := json.Unmarshal(raw[0], &l.GroupID); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[1], &l.ObjectID); err != nil {
+		return err
+	}
 	return nil
 }
 
