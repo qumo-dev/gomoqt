@@ -100,6 +100,7 @@ func ParseCatalogDeltaString(s string) (CatalogDelta, error) {
 	return ParseCatalogDelta([]byte(s))
 }
 
+// operationOrder returns the declared delta operation order, preserving JSON order when known.
 func (d CatalogDelta) operationOrder() []deltaOperationKind {
 	if len(d.deltaOpOrder) > 0 {
 		return slices.Clone(d.deltaOpOrder)
@@ -227,6 +228,7 @@ func (r TrackRef) ID(defaultNamespace string) TrackID {
 	}
 }
 
+// effectiveNamespace resolves Namespace against the delta or catalog default namespace.
 func (r TrackRef) effectiveNamespace(defaultNamespace string) string {
 	if r.Namespace != "" {
 		return r.Namespace
@@ -310,6 +312,7 @@ func (c TrackClone) Validate(path string) []string {
 	return problems
 }
 
+// effectiveNamespace resolves the clone entry namespace used for parent lookup.
 func (c TrackClone) effectiveNamespace(defaultNamespace string) string {
 	return c.Track.effectiveNamespace(defaultNamespace)
 }
@@ -344,6 +347,7 @@ func (c *TrackClone) UnmarshalJSON(data []byte) error {
 	return c.Track.unmarshalObject(trackRaw)
 }
 
+// cloneTrackRefs returns a deep copy of a TrackRef slice.
 func cloneTrackRefs(in []TrackRef) []TrackRef {
 	if in == nil {
 		return nil
@@ -355,6 +359,7 @@ func cloneTrackRefs(in []TrackRef) []TrackRef {
 	return out
 }
 
+// cloneTrackClones returns a deep copy of a TrackClone slice.
 func cloneTrackClones(in []TrackClone) []TrackClone {
 	if in == nil {
 		return nil
@@ -366,6 +371,7 @@ func cloneTrackClones(in []TrackClone) []TrackClone {
 	return out
 }
 
+// cloneDeltaExtraFields copies extension fields into dst for delta metadata merging.
 func cloneDeltaExtraFields(dst map[string]json.RawMessage, src map[string]json.RawMessage) {
 	maps.Copy(dst, cloneRawMessages(src))
 }

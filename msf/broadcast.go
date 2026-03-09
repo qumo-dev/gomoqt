@@ -25,6 +25,7 @@ type Broadcast struct {
 	tracks           moqt.Broadcast
 }
 
+// initLocked initializes lazily allocated broadcast defaults while b.mu is held.
 func (b *Broadcast) initLocked() {
 	if b.catalogTrackName == "" {
 		b.catalogTrackName = DefaultCatalogTrackName
@@ -198,6 +199,7 @@ func (b *Broadcast) ServeTrack(tw *moqt.TrackWriter) {
 	b.Handler(tw.TrackName).ServeTrack(tw)
 }
 
+// serveCatalogTrack serializes the current catalog snapshot onto the reserved catalog track.
 func (b *Broadcast) serveCatalogTrack(tw *moqt.TrackWriter) {
 	payload, err := b.CatalogBytes()
 	if err != nil {
@@ -238,6 +240,7 @@ func validateTrackHandler(handler moqt.TrackHandler) error {
 	return nil
 }
 
+// staleTrackNamesLocked reports track names present in the current catalog but absent from catalog.
 func (b *Broadcast) staleTrackNamesLocked(catalog Catalog) []moqt.TrackName {
 	if len(b.catalog.Tracks) == 0 {
 		return nil

@@ -89,6 +89,7 @@ func (r Role) IsKnown() bool {
 
 }
 
+// Error returns the aggregated validation problems as a single error string.
 func (e *ValidationError) Error() string {
 	if len(e.Problems) == 0 {
 		return "msf: validation failed"
@@ -97,6 +98,7 @@ func (e *ValidationError) Error() string {
 	return "msf: validation failed: " + strings.Join(e.Problems, "; ")
 }
 
+// newValidationError converts a non-empty problem list into a ValidationError.
 func newValidationError(problems []string) error {
 	if len(problems) == 0 {
 		return nil
@@ -323,6 +325,7 @@ func ParseCatalogString(s string) (Catalog, error) {
 	return ParseCatalog([]byte(s))
 }
 
+// addTrack appends a new track after checking that its resolved identity is unique.
 func (c *Catalog) addTrack(track Track) error {
 	id := track.ID(c.DefaultNamespace)
 	if _, idx, ok := c.findTrack(id); ok {
@@ -333,6 +336,7 @@ func (c *Catalog) addTrack(track Track) error {
 	return nil
 }
 
+// removeTrack removes the track identified by track from the catalog.
 func (c *Catalog) removeTrack(track TrackRef) error {
 	id := track.ID(c.DefaultNamespace)
 	_, idx, ok := c.findTrack(id)
@@ -344,6 +348,7 @@ func (c *Catalog) removeTrack(track TrackRef) error {
 	return nil
 }
 
+// cloneTrack creates a new track by cloning an existing parent and applying overrides.
 func (c *Catalog) cloneTrack(track TrackClone) error {
 	parentID := TrackID{Namespace: track.effectiveNamespace(c.DefaultNamespace), Name: track.ParentName}
 	parent, _, ok := c.findTrack(parentID)
@@ -367,6 +372,7 @@ func (c *Catalog) cloneTrack(track TrackClone) error {
 	return nil
 }
 
+// findTrack looks up a track by resolved identity and returns the track and its index.
 func (c Catalog) findTrack(id TrackID) (Track, int, bool) {
 	for i, track := range c.Tracks {
 		if track.ID(c.DefaultNamespace) == id {
@@ -381,6 +387,7 @@ var (
 	_ json.Unmarshaler = (*Catalog)(nil)
 )
 
+// MarshalJSON encodes the independent catalog in the draft-00 JSON shape.
 func (c Catalog) MarshalJSON() ([]byte, error) {
 	obj := make(map[string]any, len(c.ExtraFields)+2)
 	for key, raw := range c.ExtraFields {
@@ -401,6 +408,7 @@ func (c Catalog) MarshalJSON() ([]byte, error) {
 	return json.Marshal(obj)
 }
 
+// UnmarshalJSON decodes the independent catalog shape and rejects delta-only fields.
 func (c *Catalog) UnmarshalJSON(data []byte) error {
 	*c = Catalog{}
 	c.ExtraFields = make(map[string]json.RawMessage)
@@ -478,6 +486,7 @@ func (t Track) ID(defaultNamespace string) TrackID {
 	}
 }
 
+// effectiveNamespace resolves Namespace against the catalog default namespace.
 func (t Track) effectiveNamespace(defaultNamespace string) string {
 	if t.Namespace != "" {
 		return t.Namespace
@@ -495,6 +504,7 @@ const (
 	trackContextAdd     trackContext = "add"
 )
 
+// validate checks track-level constraints for either an independent catalog or addTracks entry.
 func (t Track) validate(ctx trackContext, path string) []string {
 	var problems []string
 	if t.Name == "" {
@@ -545,6 +555,7 @@ func (t Track) validate(ctx trackContext, path string) []string {
 	return problems
 }
 
+// applyOverrides copies explicitly declared fields from override onto the receiver.
 func (t *Track) applyOverrides(override Track) {
 	if override.hasField("namespace") {
 		t.Namespace = override.Namespace
@@ -646,6 +657,7 @@ var (
 	_ json.Unmarshaler = (*Track)(nil)
 )
 
+// marshalObject builds the JSON object form used by Track marshaling and clone entries.
 func (t Track) marshalObject() map[string]any {
 	obj := make(map[string]any, len(t.ExtraFields)+24)
 	for key, raw := range t.ExtraFields {
@@ -735,10 +747,12 @@ func (t Track) marshalObject() map[string]any {
 	return obj
 }
 
+// MarshalJSON encodes the track using the draft-00 object form.
 func (t Track) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t.marshalObject())
 }
 
+// unmarshalObject decodes a track from a raw JSON object map.
 func (t *Track) unmarshalObject(raw map[string]json.RawMessage) error {
 	*t = Track{}
 	t.ExtraFields = make(map[string]json.RawMessage)
@@ -865,6 +879,7 @@ func (t *Track) unmarshalObject(raw map[string]json.RawMessage) error {
 	return nil
 }
 
+// UnmarshalJSON decodes the track JSON object and preserves unknown fields.
 func (t *Track) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -873,6 +888,7 @@ func (t *Track) UnmarshalJSON(data []byte) error {
 	return t.unmarshalObject(raw)
 }
 
+// hasField reports whether field was explicitly present or is materially set on the track.
 func (t Track) hasField(field string) bool {
 	if _, ok := t.presentFields[field]; ok {
 		return true
@@ -942,6 +958,7 @@ type orderedField struct {
 	Value json.RawMessage
 }
 
+// decodeOrderedObject decodes a JSON object while preserving the original field order.
 func decodeOrderedObject(data []byte) ([]orderedField, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	tok, err := dec.Token()
@@ -975,6 +992,7 @@ func decodeOrderedObject(data []byte) ([]orderedField, error) {
 	return fields, nil
 }
 
+// cloneTracks returns a deep copy of a track slice.
 func cloneTracks(in []Track) []Track {
 	if in == nil {
 		return nil
@@ -986,6 +1004,7 @@ func cloneTracks(in []Track) []Track {
 	return out
 }
 
+// cloneRawMessages returns a deep copy of a raw-message map.
 func cloneRawMessages(in map[string]json.RawMessage) map[string]json.RawMessage {
 	if in == nil {
 		return make(map[string]json.RawMessage)
@@ -997,6 +1016,7 @@ func cloneRawMessages(in map[string]json.RawMessage) map[string]json.RawMessage 
 	return out
 }
 
+// cloneRawMessage returns a copied RawMessage buffer.
 func cloneRawMessage(in json.RawMessage) json.RawMessage {
 	if in == nil {
 		return nil
@@ -1004,6 +1024,7 @@ func cloneRawMessage(in json.RawMessage) json.RawMessage {
 	return append(json.RawMessage(nil), in...)
 }
 
+// cloneInt64Ptr returns a copied int64 pointer.
 func cloneInt64Ptr(in *int64) *int64 {
 	if in == nil {
 		return nil
@@ -1012,6 +1033,7 @@ func cloneInt64Ptr(in *int64) *int64 {
 	return &value
 }
 
+// cloneBoolPtr returns a copied bool pointer.
 func cloneBoolPtr(in *bool) *bool {
 	if in == nil {
 		return nil
