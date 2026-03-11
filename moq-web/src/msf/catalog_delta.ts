@@ -159,7 +159,12 @@ function applyTrackOverrides(base: Track, override: Track): Track {
 			continue;
 		}
 		if (value !== undefined) {
-			(next as Record<string, unknown>)[key] = value;
+			if (key === "depends" && Array.isArray(value)) {
+				// Clone array-typed depends so the override and resulting track do not share the same instance.
+				(next as Record<string, unknown>)[key] = [...value];
+			} else {
+				(next as Record<string, unknown>)[key] = value;
+			}
 		}
 	}
 	if (override.extraFields) {
