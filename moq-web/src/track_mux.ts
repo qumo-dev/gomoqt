@@ -1,10 +1,10 @@
 import type { AnnouncementWriter } from "./announce_stream.ts";
 import { Announcement } from "./announce_stream.ts";
 import type { BroadcastPath } from "./broadcast_path.ts";
+import { NotFoundTrackHandler } from "./broadcast.ts";
 
 import type { TrackWriter } from "./track_writer.ts";
 import type { TrackPrefix } from "./track_prefix.ts";
-import { SubscribeErrorCode } from "./error.ts";
 
 type AnnouncedTrackHandler = {
 	announcement: Announcement;
@@ -109,7 +109,7 @@ export class TrackMux {
 		const announced = this.#handlers.get(path);
 		if (!announced) {
 			console.warn(`[TrackMux] no handler for track for path: ${path}`);
-			await NotFoundHandler.serveTrack(track);
+			await NotFoundTrackHandler.serveTrack(track);
 			return;
 		}
 
@@ -175,9 +175,3 @@ export const DefaultTrackMux: TrackMux = new TrackMux();
 export interface TrackHandler {
 	serveTrack(trackWriter: TrackWriter): void | Promise<void>;
 }
-
-const NotFoundHandler: TrackHandler = {
-	async serveTrack(trackWriter: TrackWriter): Promise<void> {
-		await trackWriter.closeWithError(SubscribeErrorCode.TrackNotFound);
-	},
-};
