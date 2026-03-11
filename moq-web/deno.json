@@ -3,7 +3,8 @@
 	"name": "@okdaichi/moq",
 	"version": "0.10.5",
 	"exports": {
-		".": "./src/mod.ts"
+		".": "./src/mod.ts",
+		"./msf": "./src/msf/mod.ts"
 	},
 	"license": "MIT",
 	"unstable": ["net"],

@@ -13,5 +13,6 @@ export * from "./subscribe_stream.ts";
 export * from "./track_writer.ts";
 export * from "./track_reader.ts";
 export * from "./track_mux.ts";
+export * from "./broadcast.ts";
 export * from "./error.ts";
 export * from "./frame.ts";

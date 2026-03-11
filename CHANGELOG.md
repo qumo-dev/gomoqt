@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **moq-web:** reorganized MSF code into `src/msf/` directory, introduced generic `Broadcast` class with accompanying tests, and added MSF-aware broadcast implementation.
+- **moq-web:** exposed `NotFoundTrackHandler` and added `NotFound` helper for API parity with Go.
+- **moq-web:** cleaned up root-level MSF files and updated exports (`mod.ts`, `deno.json`).
+
+
 ## [v0.10.7] - 2026-02-27
 
 ### Added
