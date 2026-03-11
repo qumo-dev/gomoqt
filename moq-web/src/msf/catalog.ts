@@ -1,10 +1,12 @@
+type OpenString = string & Record<PropertyKey, never>;
+
 export type Packaging =
 	| "loc"
 	| "mediatimeline"
 	| "eventtimeline"
 	| "cmaf"
 	| "legacy"
-	| (string & {});
+	| OpenString;
 
 export type Role =
 	| "video"
@@ -13,7 +15,7 @@ export type Role =
 	| "caption"
 	| "subtitle"
 	| "signlanguage"
-	| (string & {});
+	| OpenString;
 
 export interface Track {
 	namespace?: string;

@@ -5,6 +5,27 @@ import { join } from "@std/path";
 // but usually calling "mkcert" directly works if it's in PATH.
 const cmd = Deno.build.os === "windows" ? "mkcert.exe" : "mkcert";
 
+function hasFlag(args: string[], name: string): boolean {
+	return args.includes(name);
+}
+
+async function computeHash(path: string): Promise<string> {
+	const pem = await Deno.readTextFile(path);
+	const m = pem.match(/-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----/s);
+	if (!m) {
+		throw new Error("no certificate block");
+	}
+	const certificateBody = m[1];
+	if (certificateBody === undefined) {
+		throw new Error("certificate body missing");
+	}
+	const b64 = certificateBody.replace(/\s+/g, "");
+	const der = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+	const hashBuf = await crypto.subtle.digest("SHA-256", der);
+	const hashBytes = new Uint8Array(hashBuf);
+	return btoa(String.fromCharCode(...hashBytes));
+}
+
 try {
 	const mkcert = new Deno.Command(cmd, {
 		args: ["-CAROOT"],
@@ -25,34 +46,13 @@ try {
 
 	console.log(`[Secure Wrapper] Using Root CA from: ${certPath}`);
 
-	let forwardedArgs = [...Deno.args];
-
-	// helper to check if a flag is already present
-	function hasFlag(name: string): boolean {
-		return forwardedArgs.includes(name);
-	}
+	const forwardedArgs = [...Deno.args];
 
 	// if no cert-hash was provided, try to compute it from the server's pem file
-	if (!hasFlag("--cert-hash")) {
+	if (!hasFlag(forwardedArgs, "--cert-hash")) {
 		try {
 			// path relative to moq-web directory where this wrapper runs
 			const certFile = join("..", "cmd", "interop", "server", "localhost.pem");
-			async function computeHash(path: string): Promise<string> {
-				const pem = await Deno.readTextFile(path);
-				const m = pem.match(/-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----/s);
-				if (!m) {
-					throw new Error("no certificate block");
-				}
-				const certificateBody = m[1];
-				if (certificateBody === undefined) {
-					throw new Error("certificate body missing");
-				}
-				const b64 = certificateBody.replace(/\s+/g, "");
-				const der = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-				const hashBuf = await crypto.subtle.digest("SHA-256", der);
-				const hashBytes = new Uint8Array(hashBuf);
-				return btoa(String.fromCharCode(...hashBytes));
-			}
 			const hash = await computeHash(certFile);
 			console.log(`[Secure Wrapper] computed cert hash: ${hash}`);
 			forwardedArgs.push("--insecure", "--cert-hash", hash);
