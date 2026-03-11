@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [v0.10.8] - 2026-03-12
+
 ### Changed
 
 - **moq-web:** reorganized MSF code into `src/msf/` directory, introduced generic `Broadcast` class with accompanying tests, and added MSF-aware broadcast implementation.
@@ -367,7 +369,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Comprehensive test coverage
 - MIT License
 
-[Unreleased]: https://github.com/okdaichi/gomoqt/compare/v0.10.5...HEAD
+[Unreleased]: https://github.com/okdaichi/gomoqt/compare/v0.10.8...HEAD
+[v0.10.8]: https://github.com/okdaichi/gomoqt/compare/v0.10.7...v0.10.8
+[v0.10.7]: https://github.com/okdaichi/gomoqt/compare/v0.10.6...v0.10.7
+[v0.10.6]: https://github.com/okdaichi/gomoqt/compare/v0.10.5...v0.10.6
 [v0.10.5]: https://github.com/okdaichi/gomoqt/compare/v0.10.4...v0.10.5
 [v0.10.4]: https://github.com/okdaichi/gomoqt/compare/v0.10.3...v0.10.4
 [v0.10.3]: https://github.com/okdaichi/gomoqt/compare/v0.10.2...v0.10.3
