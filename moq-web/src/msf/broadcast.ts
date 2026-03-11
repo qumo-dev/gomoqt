@@ -1,5 +1,5 @@
 import { Broadcast as TrackBroadcast } from "../broadcast.ts";
-import { SubscribeErrorCode } from "../error.ts";
+import { GroupErrorCode, SubscribeErrorCode } from "../error.ts";
 import type { TrackHandler } from "../track_mux.ts";
 import type { TrackWriter } from "../track_writer.ts";
 import {
@@ -126,7 +126,7 @@ export class Broadcast implements TrackHandler {
 
 		const writeErr = await group.writeFrame(payload);
 		if (writeErr) {
-			await group.cancel(0x00);
+			await group.cancel(GroupErrorCode.InternalError);
 			await trackWriter.closeWithError(SubscribeErrorCode.InternalError);
 			return;
 		}
