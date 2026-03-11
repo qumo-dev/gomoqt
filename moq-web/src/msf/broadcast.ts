@@ -16,14 +16,12 @@ export const DefaultCatalogTrackName = "catalog";
 
 export class Broadcast implements TrackHandler {
 	#catalogTrackName: string;
-	#catalog: Catalog = { version: 0, tracks: [] };
+	#catalog: Catalog;
 	#tracks = new TrackBroadcast();
 
-	constructor(catalog?: Catalog, catalogTrackName = DefaultCatalogTrackName) {
+	constructor(catalog: Catalog, catalogTrackName = DefaultCatalogTrackName) {
 		this.#catalogTrackName = catalogTrackName;
-		if (catalog) {
-			this.#catalog = prepareCatalog(catalog, this.#catalogTrackName);
-		}
+		this.#catalog = prepareCatalog(catalog, this.#catalogTrackName);
 	}
 
 	get catalogTrackName(): string {
