@@ -12,7 +12,7 @@ func main() {
     server := moqt.Server{
         Addr: "moqt.example.com:9000",
         TLSConfig: &tls.Config{
-            NextProtos:         []string{"h3", "moq-00"},
+            NextProtos:         []string{"h3", "moq-lite-03"},
             Certificates:       []tls.Certificate{loadCert()},
             InsecureSkipVerify: false,
         },

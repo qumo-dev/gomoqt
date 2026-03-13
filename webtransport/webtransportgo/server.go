@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"sync"
 
 	"github.com/okdaichi/gomoqt/quic"
 	"github.com/okdaichi/gomoqt/webtransport"
@@ -13,33 +14,33 @@ import (
 	quicgo_webtransportgo "github.com/quic-go/webtransport-go"
 )
 
-func NewServer(checkOrigin func(r *http.Request) bool) webtransport.Server {
-	wtserver := &quicgo_webtransportgo.Server{
-		H3:          &http3.Server{},
-		CheckOrigin: checkOrigin,
-	}
-	// Apply HTTP/3 settings required for WebTransport and install ConnContext
-	// so Upgrade() can access the underlying *quic.Conn.
-	quicgo_webtransportgo.ConfigureHTTP3Server(wtserver.H3)
+var _ webtransport.Server = (*Server)(nil)
 
-	return wrapServer(wtserver)
+// Server is a wrapper for (quic-go/webtransport-go).Server
+type Server struct {
+	CheckOrigin          func(r *http.Request) bool
+	ApplicationProtocols []string
+	internalServer       *quicgo_webtransportgo.Server
+	initOnce             sync.Once
 }
 
-func wrapServer(server *quicgo_webtransportgo.Server) webtransport.Server {
-	return &serverWrapper{
-		server: server,
-	}
+func (s *Server) init() {
+	s.initOnce.Do(func() {
+		if s.internalServer == nil {
+			s.internalServer = &quicgo_webtransportgo.Server{
+				H3:                   &http3.Server{},
+				CheckOrigin:          s.CheckOrigin,
+				ApplicationProtocols: s.ApplicationProtocols,
+			}
+		}
+
+		quicgo_webtransportgo.ConfigureHTTP3Server(s.internalServer.H3)
+	})
 }
 
-var _ webtransport.Server = (*serverWrapper)(nil)
-
-// serverWrapper is a wrapper for Server
-type serverWrapper struct {
-	server *quicgo_webtransportgo.Server
-}
-
-func (wrapper *serverWrapper) Upgrade(w http.ResponseWriter, r *http.Request) (quic.Connection, error) {
-	wtsess, err := wrapper.server.Upgrade(w, r)
+func (s *Server) Upgrade(w http.ResponseWriter, r *http.Request) (quic.Connection, error) {
+	s.init()
+	wtsess, err := s.internalServer.Upgrade(w, r)
 	if err != nil {
 		return nil, err
 	}
@@ -47,12 +48,13 @@ func (wrapper *serverWrapper) Upgrade(w http.ResponseWriter, r *http.Request) (q
 	return wrapSession(wtsess), nil
 }
 
-func (w *serverWrapper) ServeQUICConn(conn quic.Connection) error {
+func (s *Server) ServeQUICConn(conn quic.Connection) error {
+	s.init()
 	if conn == nil {
 		return nil
 	}
 	if wrapper, ok := conn.(quicgoUnwrapper); ok {
-		return w.server.ServeQUICConn(wrapper.Unwrap())
+		return s.internalServer.ServeQUICConn(wrapper.Unwrap())
 	}
 	return errors.New("invalid connection type: expected a wrapped quic-go connection with Unwrap() method")
 }
@@ -61,22 +63,28 @@ type quicgoUnwrapper interface {
 	Unwrap() *quicgo_quicgo.Conn
 }
 
-func (w *serverWrapper) Serve(conn net.PacketConn) error {
+func (s *Server) Serve(conn net.PacketConn) error {
+	s.init()
 
-	return w.server.Serve(conn)
+	return s.internalServer.Serve(conn)
 }
 
-func (w *serverWrapper) Close() error {
-	return w.server.Close()
+func (s *Server) Close() error {
+	if s.internalServer != nil {
+		return s.internalServer.Close()
+	}
+	return nil
 }
 
-func (w *serverWrapper) Shutdown(ctx context.Context) error {
+func (s *Server) Shutdown(ctx context.Context) error {
 	// Implement a proper shutdown logic that passes the context to the server
 	closeCh := make(chan struct{})
 
 	// Close the server in a separate goroutine
 	go func() {
-		_ = w.server.Close() // Ignore close error as server is shutting down
+		if s.internalServer != nil {
+			_ = s.internalServer.Close() // Ignore close error as server is shutting down
+		}
 		close(closeCh)
 	}()
 

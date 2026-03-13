@@ -170,7 +170,7 @@ func TestServer_ServeQUICListener(t *testing.T) {
 			mockConn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 			mockConn.On("LocalAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8081})
 			mockConn.On("ConnectionState").Return(quic.ConnectionState{
-				TLS: tls.ConnectionState{NegotiatedProtocol: "moq-00"},
+				TLS: tls.ConnectionState{NegotiatedProtocol: NextProtoMOQ},
 			})
 			// Context is used for accept timeout in handleNativeQUIC
 			mockConn.On("Context").Return(context.Background())
@@ -990,6 +990,7 @@ func TestServer_HandleWebTransport_WithNilLogger(t *testing.T) {
 	}
 
 	mockResponseWriter := &MockHTTPResponseWriter{}
+	mockResponseWriter.On("Header").Return(make(http.Header)).Maybe()
 	req := &http.Request{
 		URL: &url.URL{Path: "/test"},
 		TLS: &tls.ConnectionState{},
@@ -1003,6 +1004,35 @@ func TestServer_HandleWebTransport_WithNilLogger(t *testing.T) {
 	err := server.HandleWebTransport(mockResponseWriter, req)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to upgrade connection")
+}
+
+func TestServer_HandleWebTransport_InvalidWTProtocol(t *testing.T) {
+	wtServer := &MockWebTransportServer{}
+
+	server := &Server{
+		Addr: ":8080",
+		NewWebtransportServerFunc: func(checkOrigin func(*http.Request) bool) webtransport.Server {
+			return wtServer
+		},
+	}
+
+	mockResponseWriter := &MockHTTPResponseWriter{}
+	mockResponseWriter.On("Header").Return(make(http.Header)).Maybe()
+
+	req := &http.Request{
+		URL:    &url.URL{Path: "/test"},
+		TLS:    &tls.ConnectionState{},
+		Header: make(http.Header),
+	}
+
+	wtServer.On("Upgrade", mockResponseWriter, req).Return(nil, errors.New("upgrade failed"))
+
+	err := server.HandleWebTransport(mockResponseWriter, req)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to upgrade connection")
+
+	wtServer.AssertCalled(t, "Upgrade", mockResponseWriter, req)
+	mockResponseWriter.AssertExpectations(t)
 }
 
 // func TestServer_Accept_EdgeCases(t *testing.T) {

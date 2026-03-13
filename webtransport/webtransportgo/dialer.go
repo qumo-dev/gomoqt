@@ -6,15 +6,13 @@ import (
 	"net/http"
 
 	"github.com/okdaichi/gomoqt/quic"
-	"github.com/okdaichi/gomoqt/webtransport"
 	quicgo_webtransportgo "github.com/quic-go/webtransport-go"
 )
 
-var _ webtransport.DialAddrFunc = Dial
-
 func Dial(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config) (*http.Response, quic.Connection, error) {
 	d := quicgo_webtransportgo.Dialer{
-		TLSClientConfig: tlsConfig,
+		TLSClientConfig:      tlsConfig,
+		ApplicationProtocols: []string{"moq-lite-03"},
 	}
 	rsp, wtsess, err := d.Dial(ctx, addr, header)
 
