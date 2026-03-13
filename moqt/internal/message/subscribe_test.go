@@ -19,7 +19,6 @@ func TestSubscribeMessage_EncodeDecode(t *testing.T) {
 				SubscribeID:        1,
 				BroadcastPath:      "path/to/track",
 				SubscriberPriority: 5,
-				TrackPriority:      5,
 			},
 		},
 		"empty track path": {
@@ -27,7 +26,6 @@ func TestSubscribeMessage_EncodeDecode(t *testing.T) {
 				SubscribeID:        1,
 				BroadcastPath:      "",
 				SubscriberPriority: 5,
-				TrackPriority:      5,
 			},
 		},
 		"nil parameters": {
@@ -35,7 +33,6 @@ func TestSubscribeMessage_EncodeDecode(t *testing.T) {
 				SubscribeID:        1,
 				BroadcastPath:      "path",
 				SubscriberPriority: 1,
-				TrackPriority:      1,
 			},
 		},
 	}

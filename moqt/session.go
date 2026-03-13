@@ -409,7 +409,7 @@ func (sess *Session) processBiStream(stream quic.Stream) {
 
 		// Create a receiveSubscribeStream
 		config := &TrackConfig{
-			TrackPriority: TrackPriority(sm.TrackPriority),
+			TrackPriority: TrackPriority(sm.SubscriberPriority),
 		}
 
 		substr := newReceiveSubscribeStream(SubscribeID(sm.SubscribeID), stream, config)

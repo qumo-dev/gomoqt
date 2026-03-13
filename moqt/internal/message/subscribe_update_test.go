@@ -17,19 +17,16 @@ func TestSubscribeUpdateMessage_EncodeDecode(t *testing.T) {
 		"valid message": {
 			input: message.SubscribeUpdateMessage{
 				SubscriberPriority: 5,
-				TrackPriority:      5,
 			},
 		},
 		"zero priority": {
 			input: message.SubscribeUpdateMessage{
 				SubscriberPriority: 0,
-				TrackPriority:      0,
 			},
 		},
 		"max priority": {
 			input: message.SubscribeUpdateMessage{
 				SubscriberPriority: 255,
-				TrackPriority:      255,
 			},
 		},
 	}
