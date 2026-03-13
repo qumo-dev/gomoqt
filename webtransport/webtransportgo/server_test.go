@@ -12,75 +12,68 @@ import (
 // as defined in github.com/quic-go/webtransport-go/protocol.go.
 const settingsEnableWebtransport uint64 = 0x2b603742
 
-// Ensure ConfigureHTTP3Server was applied (ConnContext must be non-nil).
-func TestNewServer_ConnContextIsSet(t *testing.T) {
-	srv := NewServer(nil)
+// Ensure init() configures the internal server (ConnContext must be non-nil).
+func TestInit_ConnContextIsSet(t *testing.T) {
+	srv := &Server{}
+	srv.init()
 
-	wrapper, ok := srv.(*serverWrapper)
-	require.True(t, ok, "NewServer must return a *serverWrapper")
-
-	assert.NotNil(t, wrapper.server.H3.ConnContext,
+	assert.NotNil(t, srv.internalServer.H3.ConnContext,
 		"H3.ConnContext must be non-nil after ConfigureHTTP3Server; "+
 			"a nil ConnContext causes every Upgrade() call to fail with "+
 			"\"webtransport: missing QUIC connection\"")
 }
 
-// TestNewServer_EnableDatagramsIsSet verifies that H3.EnableDatagrams is true,
+// TestInit_EnableDatagramsIsSet verifies that H3.EnableDatagrams is true,
 // which is required for HTTP/3-level QUIC datagram support used by WebTransport.
-func TestNewServer_EnableDatagramsIsSet(t *testing.T) {
-	srv := NewServer(nil)
+func TestInit_EnableDatagramsIsSet(t *testing.T) {
+	srv := &Server{}
+	srv.init()
 
-	wrapper, ok := srv.(*serverWrapper)
-	require.True(t, ok)
-
-	assert.True(t, wrapper.server.H3.EnableDatagrams,
+	assert.True(t, srv.internalServer.H3.EnableDatagrams,
 		"H3.EnableDatagrams must be true for WebTransport")
 }
 
-// TestNewServer_WebTransportSettingAdvertised verifies that the HTTP/3 SETTINGS
+// TestInit_WebTransportSettingAdvertised verifies that the HTTP/3 SETTINGS
 // frame will advertise WebTransport support to clients.
-func TestNewServer_WebTransportSettingAdvertised(t *testing.T) {
-	srv := NewServer(nil)
+func TestInit_WebTransportSettingAdvertised(t *testing.T) {
+	srv := &Server{}
+	srv.init()
 
-	wrapper, ok := srv.(*serverWrapper)
-	require.True(t, ok)
-
-	require.NotNil(t, wrapper.server.H3.AdditionalSettings,
+	require.NotNil(t, srv.internalServer.H3.AdditionalSettings,
 		"H3.AdditionalSettings must not be nil")
 
-	val, exists := wrapper.server.H3.AdditionalSettings[settingsEnableWebtransport]
+	val, exists := srv.internalServer.H3.AdditionalSettings[settingsEnableWebtransport]
 	assert.True(t, exists,
 		"H3.AdditionalSettings must contain settingsEnableWebtransport (0x2b603742)")
 	assert.Equal(t, uint64(1), val,
 		"settingsEnableWebtransport must be set to 1")
 }
 
-// TestNewServer_CheckOriginPropagated verifies that the checkOrigin function
+// TestInit_CheckOriginPropagated verifies that the checkOrigin function
 // provided by the caller is forwarded to the underlying webtransport-go Server.
-func TestNewServer_CheckOriginPropagated(t *testing.T) {
+func TestInit_CheckOriginPropagated(t *testing.T) {
 	called := false
 	checkOrigin := func(r *http.Request) bool {
 		called = true
 		return true
 	}
 
-	srv := NewServer(checkOrigin)
+	srv := &Server{CheckOrigin: checkOrigin}
+	srv.init()
 
-	wrapper, ok := srv.(*serverWrapper)
-	require.True(t, ok)
-
-	require.NotNil(t, wrapper.server.CheckOrigin,
+	require.NotNil(t, srv.internalServer.CheckOrigin,
 		"CheckOrigin must be propagated to the underlying server")
 
 	// Invoke the stored function to confirm it's the one we passed in.
-	wrapper.server.CheckOrigin(&http.Request{})
+	srv.internalServer.CheckOrigin(&http.Request{})
 	assert.True(t, called, "stored CheckOrigin should be our function")
 }
 
-// TestNewServer_NilCheckOriginDoesNotPanic verifies that passing nil for
-// checkOrigin is safe (the underlying library substitutes its own default).
-func TestNewServer_NilCheckOriginDoesNotPanic(t *testing.T) {
+// TestInit_NilCheckOriginDoesNotPanic verifies that passing nil for
+// CheckOrigin is safe (the underlying library substitutes its own default).
+func TestInit_NilCheckOriginDoesNotPanic(t *testing.T) {
+	srv := &Server{}
 	assert.NotPanics(t, func() {
-		NewServer(nil)
+		srv.init()
 	})
 }

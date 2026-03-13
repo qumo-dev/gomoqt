@@ -1020,3 +1020,19 @@ func TestClient_ConfigurationInheritance(t *testing.T) {
 	timeout := c.Config.setupTimeout()
 	assert.Equal(t, 30*time.Second, timeout)
 }
+
+func TestClient_DialQUIC_DefaultsNativeALPNWhenUnset(t *testing.T) {
+	c := &Client{TLSConfig: &tls.Config{}}
+	var capturedProtos []string
+	wantErr := errors.New("stop after tls capture")
+
+	c.DialQUICFunc = func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (quic.Connection, error) {
+		capturedProtos = append([]string(nil), tlsConfig.NextProtos...)
+		return nil, wantErr
+	}
+
+	_, err := c.DialQUIC(context.Background(), "example.com:443", "/test", NewTrackMux())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, wantErr)
+	assert.Equal(t, []string{NextProtoMOQ}, capturedProtos)
+}

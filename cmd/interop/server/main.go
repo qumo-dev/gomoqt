@@ -34,7 +34,7 @@ func main() {
 	server := moqt.Server{
 		Addr: *addr,
 		TLSConfig: &tls.Config{
-			NextProtos:         []string{"h3", "moq-00"},
+			NextProtos:         []string{moqt.NextProtoH3, moqt.NextProtoMOQ},
 			Certificates:       []tls.Certificate{generateCert()},
 			InsecureSkipVerify: true, // TODO: Not recommended for production
 		},

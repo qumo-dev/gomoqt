@@ -110,7 +110,10 @@ func (s *Server) init() {
 		if s.NewWebtransportServerFunc != nil {
 			s.wtServer = s.NewWebtransportServerFunc(checkOrigin)
 		} else {
-			s.wtServer = webtransportgo.NewServer(checkOrigin)
+			s.wtServer = &webtransportgo.Server{
+				CheckOrigin:          checkOrigin,
+				ApplicationProtocols: []string{NextProtoMOQ},
+			}
 		}
 	})
 }
@@ -182,9 +185,10 @@ func (s *Server) ServeQUICConn(conn quic.Connection) error {
 	switch protocol := conn.ConnectionState().TLS.NegotiatedProtocol; protocol {
 	case NextProtoH3:
 		return s.wtServer.ServeQUICConn(conn)
-	case NextProtoMOQ:
-		return s.handleNativeQUIC(conn)
 	default:
+		if protocol == NextProtoMOQ {
+			return s.handleNativeQUIC(conn)
+		}
 		return fmt.Errorf("unsupported protocol: %s", protocol)
 	}
 }
@@ -334,7 +338,7 @@ func (s *Server) ListenAndServe() error {
 
 	// Make sure we have NextProtos set for ALPN negotiation
 	if len(tlsConfig.NextProtos) == 0 {
-		tlsConfig.NextProtos = []string{NextProtoMOQ}
+		tlsConfig.NextProtos = DefaultServerNextProtos
 	}
 
 	// Ensure WebTransport required QUIC flags are enabled.
@@ -381,7 +385,7 @@ func (s *Server) ListenAndServeTLS(certFile, keyFile string) error {
 	// Create TLS config with certificates
 	tlsConfig := &tls.Config{
 		Certificates: certs,
-		NextProtos:   []string{NextProtoMOQ, webtransport.NextProtoH3},
+		NextProtos:   DefaultServerNextProtos,
 	}
 
 	// Ensure WebTransport required QUIC flags are enabled.

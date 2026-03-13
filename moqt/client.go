@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"log/slog"
-	"net/http"
 	"net/url"
 	"sync"
 	"sync/atomic"
@@ -135,13 +134,11 @@ func (c *Client) DialWebTransport(ctx context.Context, host, path string, mux *T
 
 	var conn quic.Connection
 	var err error
-	var dialFunc webtransport.DialAddrFunc
 	if c.DialWebTransportFunc != nil {
-		dialFunc = c.DialWebTransportFunc
+		_, conn, err = c.DialWebTransportFunc(dialCtx, "https://"+host+path, nil, c.TLSConfig)
 	} else {
-		dialFunc = webtransportgo.Dial
+		_, conn, err = webtransportgo.Dial(dialCtx, "https://"+host+path, nil, c.TLSConfig)
 	}
-	_, conn, err = dialFunc(dialCtx, "https://"+host+path, http.Header{}, c.TLSConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -194,12 +191,23 @@ func (c *Client) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux)
 	} else {
 		dialFunc = quicgo.DialAddrEarly
 	}
+
+	tlsConfig := c.TLSConfig
+	if tlsConfig == nil {
+		tlsConfig = &tls.Config{}
+	} else {
+		tlsConfig = tlsConfig.Clone()
+	}
+	if len(tlsConfig.NextProtos) == 0 {
+		tlsConfig.NextProtos = SupportedNativeMOQALPNs
+	}
+
 	// if c.DialQUICFunc != nil {
 	// 	conn, err = c.DialQUICFunc(dialCtx, addr, c.TLSConfig, c.QUICConfig)
 	// } else {
 	// 	conn, err = quicgo.DialAddrEarly(dialCtx, addr, c.TLSConfig, c.QUICConfig)
 	// }
-	conn, err := dialFunc(dialCtx, addr, c.TLSConfig, c.QUICConfig)
+	conn, err := dialFunc(dialCtx, addr, tlsConfig, c.QUICConfig)
 	if err != nil {
 		return nil, err
 	}
