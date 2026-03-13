@@ -13,9 +13,17 @@ import (
 * }
  */
 type SubscribeMessage struct {
-	SubscribeID   uint64
-	BroadcastPath string
-	TrackName     string
+	SubscribeID          uint64
+	BroadcastPath        string
+	TrackName            string
+	SubscriberPriority   uint8
+	SubscriberOrdered    uint8
+	SubscriberMaxLatency uint64
+	StartGroup           uint64
+	EndGroup             uint64
+
+	// TrackPriority is kept as a compatibility alias for SubscriberPriority.
+	// If SubscriberPriority is zero, TrackPriority is encoded instead.
 	TrackPriority uint8
 }
 
@@ -25,7 +33,11 @@ func (s SubscribeMessage) Len() int {
 	l += VarintLen(uint64(s.SubscribeID))
 	l += StringLen(s.BroadcastPath)
 	l += StringLen(s.TrackName)
-	l += VarintLen(uint64(s.TrackPriority))
+	l += VarintLen(uint64(s.priority()))
+	l += VarintLen(uint64(s.SubscriberOrdered))
+	l += VarintLen(s.SubscriberMaxLatency)
+	l += VarintLen(s.StartGroup)
+	l += VarintLen(s.EndGroup)
 
 	return l
 }
@@ -40,7 +52,11 @@ func (s SubscribeMessage) Encode(w io.Writer) error {
 	b = append(b, s.BroadcastPath...)
 	b, _ = WriteVarint(b, uint64(len(s.TrackName)))
 	b = append(b, s.TrackName...)
-	b, _ = WriteVarint(b, uint64(s.TrackPriority))
+	b, _ = WriteVarint(b, uint64(s.priority()))
+	b, _ = WriteVarint(b, uint64(s.SubscriberOrdered))
+	b, _ = WriteVarint(b, s.SubscriberMaxLatency)
+	b, _ = WriteVarint(b, s.StartGroup)
+	b, _ = WriteVarint(b, s.EndGroup)
 
 	_, err := w.Write(b)
 	return err
@@ -84,7 +100,36 @@ func (s *SubscribeMessage) Decode(src io.Reader) error {
 	if err != nil {
 		return err
 	}
+	s.SubscriberPriority = uint8(num)
 	s.TrackPriority = uint8(num)
+	b = b[n:]
+
+	num, n, err = ReadVarint(b)
+	if err != nil {
+		return err
+	}
+	s.SubscriberOrdered = uint8(num)
+	b = b[n:]
+
+	num, n, err = ReadVarint(b)
+	if err != nil {
+		return err
+	}
+	s.SubscriberMaxLatency = num
+	b = b[n:]
+
+	num, n, err = ReadVarint(b)
+	if err != nil {
+		return err
+	}
+	s.StartGroup = num
+	b = b[n:]
+
+	num, n, err = ReadVarint(b)
+	if err != nil {
+		return err
+	}
+	s.EndGroup = num
 	b = b[n:]
 
 	if len(b) != 0 {
@@ -92,4 +137,11 @@ func (s *SubscribeMessage) Decode(src io.Reader) error {
 	}
 
 	return nil
+}
+
+func (s SubscribeMessage) priority() uint8 {
+	if s.SubscriberPriority != 0 {
+		return s.SubscriberPriority
+	}
+	return s.TrackPriority
 }

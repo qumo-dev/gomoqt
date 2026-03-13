@@ -42,8 +42,27 @@ func newReceiveSubscribeStream(id SubscribeID, stream quic.Stream, config *Track
 			}
 
 			rss.configMu.Lock()
+			ordered := false
+			if sum.SubscriberOrdered != 0 {
+				ordered = true
+			}
+
+			startGroup := GroupSequence(0)
+			if sum.StartGroup != 0 {
+				startGroup = GroupSequence(sum.StartGroup - 1)
+			}
+
+			endGroup := GroupSequence(0)
+			if sum.EndGroup != 0 {
+				endGroup = GroupSequence(sum.EndGroup - 1)
+			}
+
 			rss.config = &TrackConfig{
-				TrackPriority: TrackPriority(sum.TrackPriority),
+				TrackPriority: TrackPriority(sum.SubscriberPriority),
+				Ordered:       ordered,
+				MaxLatencyMs:  sum.SubscriberMaxLatency,
+				StartGroup:    startGroup,
+				EndGroup:      endGroup,
 			}
 
 			select {
@@ -102,7 +121,28 @@ func (rss *receiveSubscribeStream) WriteInfo(info Info) error {
 			err = Cause(rss.ctx)
 			return
 		}
-		sum := message.SubscribeOkMessage{}
+		ordered := uint8(0)
+		if rss.config.Ordered {
+			ordered = 1
+		}
+
+		startGroup := uint64(0)
+		if rss.config.StartGroup != 0 {
+			startGroup = uint64(rss.config.StartGroup) + 1
+		}
+
+		endGroup := uint64(0)
+		if rss.config.EndGroup != 0 {
+			endGroup = uint64(rss.config.EndGroup) + 1
+		}
+
+		sum := message.SubscribeOkMessage{
+			PublisherPriority:   uint8(rss.config.TrackPriority),
+			PublisherOrdered:    ordered,
+			PublisherMaxLatency: rss.config.MaxLatencyMs,
+			StartGroup:          startGroup,
+			EndGroup:            endGroup,
+		}
 		err = sum.Encode(rss.stream)
 		if err != nil {
 			_ = rss.closeWithError(InternalSubscribeErrorCode)

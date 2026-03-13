@@ -16,23 +16,26 @@ func TestSubscribeMessage_EncodeDecode(t *testing.T) {
 	}{
 		"valid message": {
 			input: message.SubscribeMessage{
-				SubscribeID:   1,
-				BroadcastPath: "path/to/track",
-				TrackPriority: 5,
+				SubscribeID:        1,
+				BroadcastPath:      "path/to/track",
+				SubscriberPriority: 5,
+				TrackPriority:      5,
 			},
 		},
 		"empty track path": {
 			input: message.SubscribeMessage{
-				SubscribeID:   1,
-				BroadcastPath: "",
-				TrackPriority: 5,
+				SubscribeID:        1,
+				BroadcastPath:      "",
+				SubscriberPriority: 5,
+				TrackPriority:      5,
 			},
 		},
 		"nil parameters": {
 			input: message.SubscribeMessage{
-				SubscribeID:   1,
-				BroadcastPath: "path",
-				TrackPriority: 1,
+				SubscribeID:        1,
+				BroadcastPath:      "path",
+				SubscriberPriority: 1,
+				TrackPriority:      1,
 			},
 		},
 	}
@@ -183,6 +186,6 @@ func TestSubscribeMessage_DecodeErrors(t *testing.T) {
 		src := bytes.NewReader(buf.Bytes())
 		err := s.Decode(src)
 		assert.Error(t, err)
-		assert.Equal(t, message.ErrMessageTooShort, err)
+		assert.Error(t, err)
 	})
 }

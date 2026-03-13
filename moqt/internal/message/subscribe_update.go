@@ -10,13 +10,24 @@ import (
  * }
  */
 type SubscribeUpdateMessage struct {
+	SubscriberPriority   uint8
+	SubscriberOrdered    uint8
+	SubscriberMaxLatency uint64
+	StartGroup           uint64
+	EndGroup             uint64
+
+	// TrackPriority is kept as a compatibility alias for SubscriberPriority.
 	TrackPriority uint8
 }
 
 func (su SubscribeUpdateMessage) Len() int {
 	var l int
 
-	l += VarintLen(uint64(su.TrackPriority))
+	l += VarintLen(uint64(su.priority()))
+	l += VarintLen(uint64(su.SubscriberOrdered))
+	l += VarintLen(su.SubscriberMaxLatency)
+	l += VarintLen(su.StartGroup)
+	l += VarintLen(su.EndGroup)
 
 	return l
 }
@@ -26,7 +37,11 @@ func (su SubscribeUpdateMessage) Encode(w io.Writer) error {
 	p := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
 
 	p, _ = WriteMessageLength(p, uint64(msgLen))
-	p, _ = WriteVarint(p, uint64(su.TrackPriority))
+	p, _ = WriteVarint(p, uint64(su.priority()))
+	p, _ = WriteVarint(p, uint64(su.SubscriberOrdered))
+	p, _ = WriteVarint(p, su.SubscriberMaxLatency)
+	p, _ = WriteVarint(p, su.StartGroup)
+	p, _ = WriteVarint(p, su.EndGroup)
 
 	_, err := w.Write(p)
 
@@ -50,7 +65,36 @@ func (sum *SubscribeUpdateMessage) Decode(src io.Reader) error {
 	if err != nil {
 		return err
 	}
+	sum.SubscriberPriority = uint8(num)
 	sum.TrackPriority = uint8(num)
+	b = b[n:]
+
+	num, n, err = ReadVarint(b)
+	if err != nil {
+		return err
+	}
+	sum.SubscriberOrdered = uint8(num)
+	b = b[n:]
+
+	num, n, err = ReadVarint(b)
+	if err != nil {
+		return err
+	}
+	sum.SubscriberMaxLatency = num
+	b = b[n:]
+
+	num, n, err = ReadVarint(b)
+	if err != nil {
+		return err
+	}
+	sum.StartGroup = num
+	b = b[n:]
+
+	num, n, err = ReadVarint(b)
+	if err != nil {
+		return err
+	}
+	sum.EndGroup = num
 	b = b[n:]
 
 	if len(b) != 0 {
@@ -58,4 +102,11 @@ func (sum *SubscribeUpdateMessage) Decode(src io.Reader) error {
 	}
 
 	return nil
+}
+
+func (su SubscribeUpdateMessage) priority() uint8 {
+	if su.SubscriberPriority != 0 {
+		return su.SubscriberPriority
+	}
+	return su.TrackPriority
 }

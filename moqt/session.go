@@ -192,11 +192,30 @@ func (s *Session) Subscribe(path BroadcastPath, name TrackName, config *TrackCon
 	}
 
 	// Send a SUBSCRIBE message
+	ordered := uint8(0)
+	if config.Ordered {
+		ordered = 1
+	}
+
+	startGroup := uint64(0)
+	if config.StartGroup != 0 {
+		startGroup = uint64(config.StartGroup) + 1
+	}
+
+	endGroup := uint64(0)
+	if config.EndGroup != 0 {
+		endGroup = uint64(config.EndGroup) + 1
+	}
+
 	sm := message.SubscribeMessage{
-		SubscribeID:   uint64(id),
-		BroadcastPath: string(path),
-		TrackName:     string(name),
-		TrackPriority: uint8(config.TrackPriority),
+		SubscribeID:          uint64(id),
+		BroadcastPath:        string(path),
+		TrackName:            string(name),
+		SubscriberPriority:   uint8(config.TrackPriority),
+		SubscriberOrdered:    ordered,
+		SubscriberMaxLatency: config.MaxLatencyMs,
+		StartGroup:           startGroup,
+		EndGroup:             endGroup,
 	}
 	err = sm.Encode(stream)
 	if err == nil {
@@ -325,24 +344,7 @@ func (sess *Session) AcceptAnnounce(prefix string) (*AnnouncementReader, error) 
 		return nil, fmt.Errorf("failed to send ANNOUNCE_PLEASE message: %w", err)
 	}
 
-	var aim message.AnnounceInitMessage
-	err = aim.Decode(stream)
-	if err != nil {
-		var strErr *quic.StreamError
-		if errors.As(err, &strErr) {
-			// Helpful debug logging for interop investigation: show exact stream error details
-			strErrCode := quic.StreamErrorCode(InternalAnnounceErrorCode)
-			stream.CancelRead(strErrCode)
-
-			return nil, &AnnounceError{
-				StreamError: strErr,
-			}
-		}
-
-		return nil, fmt.Errorf("failed to read ANNOUNCE_INIT message: %w", err)
-	}
-
-	return newAnnouncementReader(stream, prefix, aim.Suffixes), nil
+	return newAnnouncementReader(stream, prefix, nil), nil
 }
 
 // AcceptAnnounce requests announcements from the remote peer that match the
@@ -423,7 +425,7 @@ func (sess *Session) processBiStream(stream quic.Stream) {
 		// Ensure the track writer is closed when done
 		track.Close()
 	default:
-		_ = sess.CloseWithError(ProtocolViolationErrorCode, fmt.Sprintf("unknown bidirectional stream type: %v", streamType))
+		cancelStreamWithError(stream, quic.StreamErrorCode(InternalSessionErrorCode))
 		return
 	}
 }
@@ -471,8 +473,8 @@ func (sess *Session) processUniStream(stream quic.ReceiveStream) {
 		// Enqueue the receiver
 		track.enqueueGroup(GroupSequence(gm.GroupSequence), stream)
 	default:
-		// Terminate the session
-		_ = sess.CloseWithError(ProtocolViolationErrorCode, fmt.Sprintf("unknown unidirectional stream type: %v", streamType))
+		// Unknown stream types are stream-local and non-fatal for extension probing.
+		stream.CancelRead(quic.StreamErrorCode(InternalSessionErrorCode))
 		return
 	}
 }

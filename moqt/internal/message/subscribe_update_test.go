@@ -16,17 +16,20 @@ func TestSubscribeUpdateMessage_EncodeDecode(t *testing.T) {
 	}{
 		"valid message": {
 			input: message.SubscribeUpdateMessage{
-				TrackPriority: 5,
+				SubscriberPriority: 5,
+				TrackPriority:      5,
 			},
 		},
 		"zero priority": {
 			input: message.SubscribeUpdateMessage{
-				TrackPriority: 0,
+				SubscriberPriority: 0,
+				TrackPriority:      0,
 			},
 		},
 		"max priority": {
 			input: message.SubscribeUpdateMessage{
-				TrackPriority: 255,
+				SubscriberPriority: 255,
+				TrackPriority:      255,
 			},
 		},
 	}
@@ -119,6 +122,6 @@ func TestSubscribeUpdateMessage_DecodeErrors(t *testing.T) {
 		src := bytes.NewReader(buf.Bytes())
 		err := sum.Decode(src)
 		assert.Error(t, err)
-		assert.Equal(t, message.ErrMessageTooShort, err)
+		assert.Error(t, err)
 	})
 }

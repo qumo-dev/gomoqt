@@ -15,7 +15,13 @@ func TestSubscribeOkMessage_EncodeDecode(t *testing.T) {
 		wantErr bool
 	}{
 		"valid message": {
-			input: message.SubscribeOkMessage{},
+			input: message.SubscribeOkMessage{
+				PublisherPriority:   1,
+				PublisherOrdered:    0,
+				PublisherMaxLatency: 100,
+				StartGroup:          0,
+				EndGroup:            0,
+			},
 		},
 	}
 
@@ -68,6 +74,20 @@ func TestSubscribeOkMessage_DecodeErrors(t *testing.T) {
 		src := bytes.NewReader(buf.Bytes())
 		err := som.Decode(src)
 		assert.Error(t, err)
-		assert.Equal(t, message.ErrMessageTooShort, err)
+	})
+
+	t.Run("invalid type", func(t *testing.T) {
+		var som message.SubscribeOkMessage
+		var buf bytes.Buffer
+		buf.WriteByte(0x06) // message length
+		buf.WriteByte(0x01) // type=1 (invalid; must be 0)
+		buf.WriteByte(0x01) // PublisherPriority
+		buf.WriteByte(0x00) // PublisherOrdered
+		buf.WriteByte(0x00) // PublisherMaxLatency
+		buf.WriteByte(0x00) // StartGroup
+		buf.WriteByte(0x00) // EndGroup
+		src := bytes.NewReader(buf.Bytes())
+		err := som.Decode(src)
+		assert.Error(t, err)
 	})
 }

@@ -1261,6 +1261,8 @@ func TestSession_ProcessBiStream_InvalidStreamType(t *testing.T) {
 	// Create a mock stream with invalid stream type
 	mockStream := &MockQUICStream{}
 	mockStream.On("StreamID").Return(quic.StreamID(3))
+	mockStream.On("CancelRead", mock.Anything).Return().Maybe()
+	mockStream.On("CancelWrite", mock.Anything).Return().Maybe()
 
 	// Prepare invalid StreamType (255)
 	var buf bytes.Buffer
@@ -1284,12 +1286,12 @@ func TestSession_ProcessBiStream_InvalidStreamType(t *testing.T) {
 
 	select {
 	case <-done:
-		// Expected to return after terminating session
+		// Expected to return after resetting stream
 	case <-time.After(200 * time.Millisecond):
 		t.Error("processBiStream should complete after invalid stream type")
 	}
 
-	assert.True(t, session.terminating(), "Session should be terminating after invalid stream type")
+	assert.False(t, session.terminating(), "Session should remain active after invalid stream type")
 }
 
 func TestSession_ProcessBiStream_DecodeStreamTypeError(t *testing.T) {
@@ -1532,6 +1534,7 @@ func TestSession_ProcessUniStream_InvalidStreamType(t *testing.T) {
 	// Create a mock receive stream with invalid stream type
 	mockRecvStream := &MockQUICReceiveStream{}
 	mockRecvStream.On("StreamID").Return(quic.StreamID(6))
+	mockRecvStream.On("CancelRead", mock.Anything).Return().Maybe()
 
 	// Prepare invalid StreamType (254)
 	var buf bytes.Buffer
@@ -1555,12 +1558,12 @@ func TestSession_ProcessUniStream_InvalidStreamType(t *testing.T) {
 
 	select {
 	case <-done:
-		// Expected to return after terminating session
+		// Expected to return after resetting stream
 	case <-time.After(200 * time.Millisecond):
 		t.Error("processUniStream should complete after invalid stream type")
 	}
 
-	assert.True(t, session.terminating(), "Session should be terminating after invalid stream type")
+	assert.False(t, session.terminating(), "Session should remain active after invalid stream type")
 }
 
 func TestSession_ProcessUniStream_DecodeStreamTypeError(t *testing.T) {
@@ -1870,10 +1873,8 @@ func TestSession_AcceptAnnounce_DecodeInitMessageStreamError(t *testing.T) {
 
 	reader, err := session.AcceptAnnounce("/test/prefix/")
 
-	assert.Error(t, err)
-	assert.Nil(t, reader)
-	var annErr *AnnounceError
-	assert.ErrorAs(t, err, &annErr)
+	assert.NoError(t, err)
+	assert.NotNil(t, reader)
 
 	_ = session.CloseWithError(NoError, "")
 }
@@ -1905,8 +1906,8 @@ func TestSession_AcceptAnnounce_DecodeInitMessageError(t *testing.T) {
 
 	reader, err := session.AcceptAnnounce("/test/prefix/")
 
-	assert.Error(t, err)
-	assert.Nil(t, reader)
+	assert.NoError(t, err)
+	assert.NotNil(t, reader)
 
 	_ = session.CloseWithError(NoError, "")
 }
@@ -1964,8 +1965,3 @@ func TestSession_Terminate_WithApplicationError(t *testing.T) {
 	var sessErr *SessionError
 	assert.ErrorAs(t, err, &sessErr)
 }
-
-
-
-
-

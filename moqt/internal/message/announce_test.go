@@ -18,18 +18,21 @@ func TestAnnounceMessage_EncodeDecode(t *testing.T) {
 			input: message.AnnounceMessage{
 				AnnounceStatus: message.AnnounceStatus(1),
 				TrackSuffix:    "path/to/track",
+				Hops:           0,
 			},
 		},
 		"empty wildcard parameters": {
 			input: message.AnnounceMessage{
 				AnnounceStatus: message.AnnounceStatus(1),
 				TrackSuffix:    "",
+				Hops:           0,
 			},
 		},
 		"max values": {
 			input: message.AnnounceMessage{
 				AnnounceStatus: message.AnnounceStatus(^byte(0)),
 				TrackSuffix:    "very/long/path",
+				Hops:           1024,
 			},
 		},
 	}
@@ -103,11 +106,12 @@ func TestAnnounceMessage_DecodeErrors(t *testing.T) {
 		var am message.AnnounceMessage
 		// Manually construct data with extra bytes after valid data
 		var buf bytes.Buffer
-		buf.WriteByte(0x04) // length varint = 4
+		buf.WriteByte(0x05) // length varint = 5
 		buf.WriteByte(0x01) // status
 		buf.WriteByte(0x01) // string length 1
 		buf.WriteByte('a')  // string
-		buf.WriteByte(0x00) // extra byte (fills to 4 bytes)
+		buf.WriteByte(0x00) // hops
+		buf.WriteByte(0x00) // extra byte
 		src := bytes.NewReader(buf.Bytes())
 		err := am.Decode(src)
 		assert.Error(t, err)

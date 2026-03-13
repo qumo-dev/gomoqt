@@ -51,7 +51,6 @@ func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) err
 		}
 
 		actives := make(map[suffix]*activeAnnouncement)
-		suffixes := make([]suffix, 0, len(announcements))
 
 		for ann := range announcements {
 			if !ann.IsActive() {
@@ -61,23 +60,25 @@ func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) err
 			if !ok {
 				continue
 			}
-			// Always replace with the latest active announcement for the suffix
+			// Always replace with the latest active announcement for the suffix.
 			actives[sfx] = &activeAnnouncement{announcement: ann}
-			suffixes = append(suffixes, sfx)
-		}
-
-		err = message.AnnounceInitMessage{
-			Suffixes: suffixes,
-		}.Encode(aw.stream)
-		if err != nil {
-			var strErr *quic.StreamError
-			if errors.As(err, &strErr) {
-				err = &AnnounceError{StreamError: strErr}
-			}
-			return
 		}
 
 		aw.actives = actives
+
+		for sfx := range actives {
+			err = message.AnnounceMessage{
+				AnnounceStatus: message.ACTIVE,
+				TrackSuffix:    sfx,
+			}.Encode(aw.stream)
+			if err != nil {
+				var strErr *quic.StreamError
+				if errors.As(err, &strErr) {
+					err = &AnnounceError{StreamError: strErr}
+				}
+				return
+			}
+		}
 
 		// Register end functions for each active announcement
 		for sfx, active := range actives {

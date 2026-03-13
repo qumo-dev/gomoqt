@@ -8,9 +8,12 @@ const (
 	/*
 	 * Bidirectional Stream Type
 	 */
+	// StreamTypeSession is deprecated in moq-lite-03 and kept for transition.
 	StreamTypeSession   StreamType = 0x0
 	StreamTypeAnnounce  StreamType = 0x1
 	StreamTypeSubscribe StreamType = 0x2
+	StreamTypeFetch     StreamType = 0x3
+	StreamTypeProbe     StreamType = 0x4
 
 	/*
 	 * Unidirectional Stream Type

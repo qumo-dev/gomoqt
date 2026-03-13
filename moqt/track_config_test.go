@@ -41,19 +41,19 @@ func TestTrackConfig_String(t *testing.T) {
 			config: TrackConfig{
 				TrackPriority: TrackPriority(0),
 			},
-			expected: "{ track_priority: 0 }",
+			expected: "{ track_priority: 0, ordered: false, max_latency_ms: 0, start_group: 0, end_group: 0 }",
 		},
 		"specific values": {
 			config: TrackConfig{
 				TrackPriority: TrackPriority(128),
 			},
-			expected: "{ track_priority: 128 }",
+			expected: "{ track_priority: 128, ordered: false, max_latency_ms: 0, start_group: 0, end_group: 0 }",
 		},
 		"high values": {
 			config: TrackConfig{
 				TrackPriority: TrackPriority(255),
 			},
-			expected: "{ track_priority: 255 }",
+			expected: "{ track_priority: 255, ordered: false, max_latency_ms: 0, start_group: 0, end_group: 0 }",
 		},
 	}
 

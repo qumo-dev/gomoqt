@@ -15,6 +15,7 @@ type AnnounceStatus byte
 type AnnounceMessage struct {
 	AnnounceStatus AnnounceStatus
 	TrackSuffix    string
+	Hops           uint64
 }
 
 func (am AnnounceMessage) Len() int {
@@ -22,6 +23,7 @@ func (am AnnounceMessage) Len() int {
 
 	l += VarintLen(uint64(am.AnnounceStatus))
 	l += StringLen(am.TrackSuffix)
+	l += VarintLen(am.Hops)
 
 	return l
 }
@@ -34,6 +36,7 @@ func (am AnnounceMessage) Encode(w io.Writer) error {
 	b, _ = WriteMessageLength(b, uint64(msgLen))
 	b, _ = WriteVarint(b, uint64(am.AnnounceStatus))
 	b, _ = WriteString(b, am.TrackSuffix)
+	b, _ = WriteVarint(b, am.Hops)
 
 	_, err := w.Write(b)
 
@@ -65,6 +68,13 @@ func (am *AnnounceMessage) Decode(src io.Reader) error {
 		return err
 	}
 	am.TrackSuffix = str
+	b = b[n:]
+
+	num, n, err = ReadVarint(b)
+	if err != nil {
+		return err
+	}
+	am.Hops = num
 	b = b[n:]
 
 	if len(b) != 0 {
