@@ -16,11 +16,11 @@ func newAnnouncementWriter(stream quic.Stream, prefix prefix) *AnnouncementWrite
 	}
 
 	sas := &AnnouncementWriter{
-		prefix:  prefix,
-		stream:  stream,
-		ctx:     context.WithValue(stream.Context(), &biStreamTypeCtxKey, message.StreamTypeAnnounce),
-		actives: make(map[suffix]*activeAnnouncement),
-		initCh:  make(chan struct{}),
+		prefix:   prefix,
+		stream:   stream,
+		ctx:      context.WithValue(stream.Context(), &biStreamTypeCtxKey, message.StreamTypeAnnounce),
+		actives:  make(map[suffix]*activeAnnouncement),
+		initDone: make(chan struct{}),
 	}
 
 	return sas
@@ -36,17 +36,23 @@ type AnnouncementWriter struct {
 	mu      sync.RWMutex
 	actives map[suffix]*activeAnnouncement
 
-	initCh   chan struct{}
+	initDone chan struct{}
 	initOnce sync.Once
+	initErr  error
 }
 
 // init initializes the AnnouncementWriter with the given announcements.
-// It sends an AnnounceInitMessage and sets up end handlers for active announcements.
+// It sends ACTIVE AnnounceMessage entries for current actives and sets up end handlers.
 func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) error {
 	var err error
 	aw.initOnce.Do(func() {
+		defer close(aw.initDone)
+
 		if aw.ctx.Err() != nil {
 			err = Cause(aw.ctx)
+			aw.mu.Lock()
+			aw.initErr = err
+			aw.mu.Unlock()
 			return
 		}
 
@@ -64,8 +70,6 @@ func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) err
 			actives[sfx] = &activeAnnouncement{announcement: ann}
 		}
 
-		aw.actives = actives
-
 		for sfx := range actives {
 			err = message.AnnounceMessage{
 				AnnounceStatus: message.ACTIVE,
@@ -76,17 +80,28 @@ func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) err
 				if errors.As(err, &strErr) {
 					err = &AnnounceError{StreamError: strErr}
 				}
+				aw.mu.Lock()
+				aw.initErr = err
+				aw.mu.Unlock()
 				return
 			}
 		}
 
+		aw.mu.Lock()
+		aw.actives = actives
 		// Register end functions for each active announcement
 		for sfx, active := range actives {
 			aw.registerEndHandler(sfx, active.announcement)
 		}
-		close(aw.initCh)
+		aw.mu.Unlock()
 	})
-	return err
+
+	aw.mu.RLock()
+	defer aw.mu.RUnlock()
+	if err != nil {
+		return err
+	}
+	return aw.initErr
 }
 
 // registerEndHandler registers handlers for when the announcement ends.
@@ -129,10 +144,17 @@ func (aw *AnnouncementWriter) registerEndHandler(sfx suffix, ann *Announcement) 
 func (aw *AnnouncementWriter) SendAnnouncement(announcement *Announcement) error {
 	// Wait for initialization to complete
 	select {
-	case <-aw.initCh:
+	case <-aw.initDone:
 		// Initialization complete
 	case <-aw.ctx.Done():
 		return Cause(aw.ctx)
+	}
+
+	aw.mu.RLock()
+	initErr := aw.initErr
+	aw.mu.RUnlock()
+	if initErr != nil {
+		return initErr
 	}
 
 	if !announcement.IsActive() {

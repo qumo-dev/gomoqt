@@ -143,19 +143,50 @@ func TestAnnouncementWriter_Init(t *testing.T) {
 				for _, suffix := range tt.expectedSuffixes {
 					assert.Contains(t, sas.actives, suffix)
 				}
+			}
 
-				// Verify initCh is closed after successful initialization
-				select {
-				case <-sas.initCh:
-					// Channel is closed, this is expected
-				default:
-					t.Error("initCh should be closed")
-				}
+			// Verify initDone is closed after init completes (including error paths)
+			select {
+			case <-sas.initDone:
+				// Channel is closed, this is expected
+			default:
+				t.Error("initDone should be closed")
 			}
 
 			mockStream.AssertExpectations(t)
 		})
 	}
+}
+
+func TestAnnouncementWriter_SendAnnouncement_AfterInitError(t *testing.T) {
+	mockStream := &MockQUICStream{}
+	ctx := context.Background()
+
+	mockStream.On("Context").Return(ctx)
+	mockStream.On("Write", mock.Anything).Return(0, errors.New("write error")).Once()
+
+	sas := newAnnouncementWriter(mockStream, "/test/")
+	ann, _ := NewAnnouncement(ctx, BroadcastPath("/test/stream1"))
+
+	// Force init to fail
+	err := sas.init(map[*Announcement]struct{}{ann: {}})
+	require.Error(t, err)
+
+	// SendAnnouncement must return promptly with init error (must not block)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- sas.SendAnnouncement(ann)
+	}()
+
+	select {
+	case gotErr := <-errCh:
+		require.Error(t, gotErr)
+		assert.ErrorContains(t, gotErr, "write error")
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("SendAnnouncement blocked after init error")
+	}
+
+	mockStream.AssertExpectations(t)
 }
 
 func TestAnnouncementWriter_Init_OnlyOnce(t *testing.T) {
@@ -447,7 +478,7 @@ func TestAnnouncementWriter_Close(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.Nil(t, sas.actives)
-		assert.NotNil(t, sas.initCh)
+		assert.NotNil(t, sas.initDone)
 
 		mockStream.AssertExpectations(t)
 	})
@@ -500,7 +531,7 @@ func TestAnnouncementWriter_Close(t *testing.T) {
 		assert.Error(t, err)
 		assert.Equal(t, expectedErr, err)
 		assert.Nil(t, sas.actives)
-		assert.NotNil(t, sas.initCh)
+		assert.NotNil(t, sas.initDone)
 
 		mockStream.AssertExpectations(t)
 	})
@@ -534,7 +565,7 @@ func TestAnnouncementWriter_CloseWithError(t *testing.T) {
 
 				assert.NoError(t, err)
 				assert.Nil(t, sas.actives)
-				assert.NotNil(t, sas.initCh)
+				assert.NotNil(t, sas.initDone)
 
 				mockStream.AssertExpectations(t)
 			})
