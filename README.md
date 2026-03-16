@@ -139,5 +139,5 @@ This project is licensed under the MIT License; see [LICENSE](LICENSE) for detai
 
 ## Acknowledgments
 - [quic-go](https://github.com/quic-go/quic-go) — QUIC implementation in Go
-- [webtransport-go](https://github.com/quic-go/webtransport-go) — WebTransport implementation in Go
+- [webtransport-go](https://github.com/okdaichi/webtransport-go) — WebTransport implementation in Go
 - [MOQ Lite Specification](https://kixelated.github.io/moq-drafts/draft-lcurley-moq-transfork.html) — The specification this implementation follows

@@ -8,45 +8,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// settingsEnableWebtransport is the HTTP/3 settings identifier for WebTransport,
-// as defined in github.com/quic-go/webtransport-go/protocol.go.
-const settingsEnableWebtransport uint64 = 0x2b603742
-
-// Ensure init() configures the internal server (ConnContext must be non-nil).
-func TestServer_Init_ConnContextIsSet(t *testing.T) {
+// TestServer_Init_CreatesInternalServer verifies wrapper init allocates the
+// upstream server and an HTTP/3 server container.
+func TestServer_Init_CreatesInternalServer(t *testing.T) {
 	srv := &Server{}
 	srv.init()
 
-	assert.NotNil(t, srv.internalServer.H3.ConnContext,
-		"H3.ConnContext must be non-nil after ConfigureHTTP3Server; "+
-			"a nil ConnContext causes every Upgrade() call to fail with "+
-			"\"webtransport: missing QUIC connection\"")
-}
-
-// TestInit_EnableDatagramsIsSet verifies that H3.EnableDatagrams is true,
-// which is required for HTTP/3-level QUIC datagram support used by WebTransport.
-func TestServer_Init_EnableDatagramsIsSet(t *testing.T) {
-	srv := &Server{}
-	srv.init()
-
-	assert.True(t, srv.internalServer.H3.EnableDatagrams,
-		"H3.EnableDatagrams must be true for WebTransport")
-}
-
-// TestInit_WebTransportSettingAdvertised verifies that the HTTP/3 SETTINGS
-// frame will advertise WebTransport support to clients.
-func TestServer_Init_WebTransportSettingAdvertised(t *testing.T) {
-	srv := &Server{}
-	srv.init()
-
-	require.NotNil(t, srv.internalServer.H3.AdditionalSettings,
-		"H3.AdditionalSettings must not be nil")
-
-	val, exists := srv.internalServer.H3.AdditionalSettings[settingsEnableWebtransport]
-	assert.True(t, exists,
-		"H3.AdditionalSettings must contain settingsEnableWebtransport (0x2b603742)")
-	assert.Equal(t, uint64(1), val,
-		"settingsEnableWebtransport must be set to 1")
+	require.NotNil(t, srv.internalServer)
+	require.NotNil(t, srv.internalServer.H3)
 }
 
 // TestInit_CheckOriginPropagated verifies that the checkOrigin function

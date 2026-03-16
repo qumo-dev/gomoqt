@@ -137,5 +137,5 @@ mage help
 
 ## 감사의 글
 - [quic-go](https://github.com/quic-go/quic-go) — Go의 QUIC 구현
-- [webtransport-go](https://github.com/quic-go/webtransport-go) — Go의 WebTransport 구현
+- [webtransport-go](https://github.com/okdaichi/webtransport-go) — Go의 WebTransport 구현
 - [MOQ Lite 사양](https://kixelated.github.io/moq-drafts/draft-lcurley-moq-transfork.html) — 본 구현이 따르는 사양

@@ -11,7 +11,7 @@ import (
 	"github.com/okdaichi/gomoqt/webtransport"
 	quicgo_quicgo "github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
-	quicgo_webtransportgo "github.com/quic-go/webtransport-go"
+	quicgo_webtransportgo "github.com/okdaichi/webtransport-go"
 )
 
 var _ webtransport.Server = (*Server)(nil)
@@ -33,8 +33,6 @@ func (s *Server) init() {
 				ApplicationProtocols: s.ApplicationProtocols,
 			}
 		}
-
-		quicgo_webtransportgo.ConfigureHTTP3Server(s.internalServer.H3)
 	})
 }
 

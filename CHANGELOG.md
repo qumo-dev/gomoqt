@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Dependencies:** switched WebTransport dependency from `github.com/quic-go/webtransport-go` to `github.com/okdaichi/webtransport-go v0.10.1-okdaichi.1`.
+- **webtransport/webtransportgo:** updated wrapper imports to use the forked WebTransport module path.
+- **webtransport/webtransportgo:** adapted server wrapper initialization for fork API differences (removed dependency on `ConfigureHTTP3Server`).
+- **Documentation:** updated README files (all supported languages) and MoQT docs links to reference `github.com/okdaichi/webtransport-go`.
+
+### Tests
+
+- **webtransport/webtransportgo:** updated server init tests to validate stable wrapper initialization behavior across the forked implementation.
+
 ## [v0.11.0] - 2026-03-12
 
 ### Added

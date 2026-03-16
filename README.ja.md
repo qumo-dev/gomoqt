@@ -137,5 +137,5 @@ mage help
 
 ## 謝辞
 - [quic-go](https://github.com/quic-go/quic-go) — Go による QUIC 実装
-- [webtransport-go](https://github.com/quic-go/webtransport-go) — Go による WebTransport 実装
+- [webtransport-go](https://github.com/okdaichi/webtransport-go) — Go による WebTransport 実装
 - [MOQ Lite 仕様](https://kixelated.github.io/moq-drafts/draft-lcurley-moq-transfork.html) — 本実装が準拠する仕様
