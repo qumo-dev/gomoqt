@@ -14,7 +14,6 @@ import (
 
 func newSession(
 	conn quic.Connection,
-	sessStream *sessionStream,
 	mux *TrackMux,
 	onClose func(),
 ) *Session {
@@ -22,20 +21,19 @@ func newSession(
 		mux = DefaultMux
 	}
 
+	connCtx := conn.Context()
 	sess := &Session{
-		sessionStream: sessStream,
-		ctx:           conn.Context(),
-		conn:          conn,
-		mux:           mux,
-		trackReaders:  make(map[SubscribeID]*TrackReader),
-		trackWriters:  make(map[SubscribeID]*TrackWriter),
-		onClose:       onClose,
+		ctx:          connCtx,
+		conn:         conn,
+		mux:          mux,
+		trackReaders: make(map[SubscribeID]*TrackReader),
+		trackWriters: make(map[SubscribeID]*TrackWriter),
+		onClose:      onClose,
 	}
 
 	// Supervise the session stream closure
-	sessStreamCtx := sessStream.Context()
-	context.AfterFunc(sessStreamCtx, func() {
-		reason := sessStreamCtx.Err()
+	context.AfterFunc(connCtx, func() {
+		reason := connCtx.Err()
 		var appErr *quic.ApplicationError
 		if errors.As(reason, &appErr) {
 			return // Normal closure
@@ -60,8 +58,6 @@ func newSession(
 // Session represents an active MOQ session over a QUIC connection.
 // It manages bidirectional and unidirectional streams, subscriptions, and announcements for a single peer connection.
 type Session struct {
-	*sessionStream
-
 	ctx context.Context // Context for the session
 
 	wg sync.WaitGroup // WaitGroup for session cleanup

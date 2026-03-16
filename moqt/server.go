@@ -11,20 +11,17 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/okdaichi/gomoqt/moqt/internal/message"
 	"github.com/okdaichi/gomoqt/quic"
 	"github.com/okdaichi/gomoqt/quic/quicgo"
 	"github.com/okdaichi/gomoqt/webtransport"
-	"github.com/okdaichi/gomoqt/webtransport/webtransportgo"
 )
 
 // ListenAndServe starts a new Server bound to the specified address and TLS configuration and runs it until an error occurs.
 // This is a convenience helper that constructs a Server with the default setup handler and calls its ListenAndServe method.
 func ListenAndServe(addr string, tlsConfig *tls.Config) error {
 	server := &Server{
-		Addr:         addr,
-		TLSConfig:    tlsConfig,
-		SetupHandler: DefaultRouter,
+		Addr:      addr,
+		TLSConfig: tlsConfig,
 	}
 	return server.ListenAndServe()
 }
@@ -56,11 +53,6 @@ type Server struct {
 	Config *Config
 
 	/*
-	 * Set-up Request SetupHandler
-	 */
-	SetupHandler SetupHandler
-
-	/*
 	 * Listen QUIC function
 	 */
 	ListenFunc quic.ListenAddrFunc
@@ -70,12 +62,7 @@ type Server struct {
 	 * If the server is configured with a WebTransport server, it is used to handle WebTransport sessions.
 	 * If not, a default server is used.
 	 */
-	NewWebtransportServerFunc func(checkOrigin func(*http.Request) bool) webtransport.Server
-	wtServer                  webtransport.Server
-
-	// CheckHTTPOrigin validates the HTTP Origin header for WebTransport connections.
-	// If nil, all origins are accepted.
-	CheckHTTPOrigin func(*http.Request) bool
+	WebTransportServer webtransport.Server
 
 	/*
 	 * Logger
@@ -103,18 +90,6 @@ func (s *Server) init() {
 		s.listeners = make(map[quic.Listener]struct{})
 		s.doneChan = make(chan struct{})
 		s.activeSess = make(map[*Session]struct{})
-		// Initialize WebtransportServer
-		// Use Server-level CheckHTTPOrigin. Config no longer holds origin checks.
-		checkOrigin := s.CheckHTTPOrigin
-
-		if s.NewWebtransportServerFunc != nil {
-			s.wtServer = s.NewWebtransportServerFunc(checkOrigin)
-		} else {
-			s.wtServer = &webtransportgo.Server{
-				CheckOrigin:          checkOrigin,
-				ApplicationProtocols: []string{NextProtoMOQ},
-			}
-		}
 	})
 }
 
@@ -175,7 +150,7 @@ func (s *Server) ServeQUICListener(ln quic.Listener) error {
 
 // ServeQUICConn serves a single QUIC connection.
 // It detects whether the connection uses WebTransport or the native MOQ ALPN and dispatches to the appropriate handling logic for the session.
-func (s *Server) ServeQUICConn(conn quic.Connection) error {
+func (s *Server) ServeQUICConn(conn quic.Connection) (*Session, error) {
 	if s.shuttingDown() {
 		return ErrServerClosed
 	}
@@ -184,7 +159,7 @@ func (s *Server) ServeQUICConn(conn quic.Connection) error {
 
 	switch protocol := conn.ConnectionState().TLS.NegotiatedProtocol; protocol {
 	case NextProtoH3:
-		return s.wtServer.ServeQUICConn(conn)
+		return s.WebTransportServer.ServeQUICConn(conn)
 	default:
 		if protocol == NextProtoMOQ {
 			return s.handleNativeQUIC(conn)
@@ -193,12 +168,12 @@ func (s *Server) ServeQUICConn(conn quic.Connection) error {
 	}
 }
 
-// HandleWebTransport upgrades an incoming HTTP request to a WebTransport
+// Upgrade upgrades an incoming HTTP request to a WebTransport
 // connection and handles session handshake and setup using the Server's
 // SetupHandler.
-func (s *Server) HandleWebTransport(w http.ResponseWriter, r *http.Request) error {
+func (s *Server) Upgrade(w http.ResponseWriter, r *http.Request) (*Session, error) {
 	if s.shuttingDown() {
-		return fmt.Errorf("server is shutting down")
+		return nil, fmt.Errorf("server is shutting down")
 	}
 
 	s.init()
@@ -208,25 +183,13 @@ func (s *Server) HandleWebTransport(w http.ResponseWriter, r *http.Request) erro
 			"remote_address", r.RemoteAddr,
 		)
 		http.Error(w, "plain HTTP is not supported; use HTTPS", http.StatusUpgradeRequired)
-		return fmt.Errorf("plain HTTP connection from %s", r.RemoteAddr)
+		return nil, fmt.Errorf("plain HTTP connection from %s", r.RemoteAddr)
 	}
 
-	conn, err := s.wtServer.Upgrade(w, r)
+	conn, err := s.WebTransportServer.Upgrade(w, r)
 	if err != nil {
-		return fmt.Errorf("failed to upgrade connection: %w", err)
+		return nil, fmt.Errorf("failed to upgrade connection: %w", err)
 	}
-
-	acceptCtx, cancelAccept := context.WithTimeout(r.Context(), s.Config.setupTimeout())
-	defer cancelAccept()
-	req, rsp, err := acceptSessionStream(acceptCtx, conn)
-	if err != nil {
-		return fmt.Errorf("failed to accept session stream: %w", err)
-	}
-
-	// Use the path in the HTTP request as the MoQ setup request
-	req.Path = r.URL.Path
-
-	responseWriter := newResponseWriter(conn, rsp, s, req.Versions)
 
 	return s.setupAndServe(responseWriter, req)
 }
@@ -238,89 +201,7 @@ func (s *Server) handleNativeQUIC(conn quic.Connection) error {
 
 	s.init()
 
-	acceptCtx, cancelAccept := context.WithTimeout(conn.Context(), s.Config.setupTimeout())
-	defer cancelAccept()
-	req, rsp, err := acceptSessionStream(acceptCtx, conn)
-	if err != nil {
-		return fmt.Errorf("moq: failed to accept session stream: %w", err)
-	}
-
-	w := newResponseWriter(conn, rsp, s, req.Versions)
-
 	return s.setupAndServe(w, req)
-}
-
-// setupAndServe dispatches the setup request to the configured handler, recovering
-// from any panic the handler may raise and logging it as a server-level error.
-func (s *Server) setupAndServe(w SetupResponseWriter, req *SetupRequest) error {
-	var err error
-	defer func() {
-		if rec := recover(); rec != nil {
-			err = fmt.Errorf("panic in setup handler: %v", rec)
-			s.log().Error("panic in setup handler", "panic", rec)
-			w.Reject(SetupFailedErrorCode)
-		}
-	}()
-
-	if s.SetupHandler != nil {
-		s.SetupHandler.ServeMOQ(w, req)
-	} else {
-		DefaultRouter.ServeMOQ(w, req)
-	}
-
-	return err
-}
-
-func acceptSessionStream(acceptCtx context.Context, conn quic.Connection) (*SetupRequest, *response, error) {
-	stream, err := conn.AcceptStream(acceptCtx)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to accept a session stream: %w", err)
-	}
-
-	var streamType message.StreamType
-	err = streamType.Decode(stream)
-	if err != nil {
-		var appErr *quic.ApplicationError
-		if errors.As(err, &appErr) {
-			return nil, nil, &SessionError{ApplicationError: appErr}
-		} else {
-			return nil, nil, fmt.Errorf("moq: failed to receive STREAM_TYPE message: %w", err)
-		}
-	}
-
-	var scm message.SessionClientMessage
-	err = scm.Decode(stream)
-	if err != nil {
-		var appErr *quic.ApplicationError
-		if errors.As(err, &appErr) {
-			return nil, nil, &SessionError{ApplicationError: appErr}
-		}
-
-		return nil, nil, err
-	}
-
-	// Get the client parameters
-	clientParams := &Extension{scm.Parameters}
-
-	// Get the path parameter
-	path, _ := clientParams.GetString(param_type_path)
-
-	versions := make([]Version, len(scm.SupportedVersions))
-	for i, v := range scm.SupportedVersions {
-		versions[i] = Version(v)
-	}
-
-	r := &SetupRequest{
-		reqCtx:           stream.Context(),
-		Path:             path,
-		Versions:         versions,
-		ClientExtensions: clientParams,
-		RemoteAddr:       conn.RemoteAddr().String(),
-	}
-
-	rsp := newResponse(newSessionStream(stream), DefaultServerVersion, NewExtension())
-
-	return r, rsp, nil
 }
 
 // ListenAndServe starts the server by listening on the server's Address and serving QUIC connections.
@@ -458,11 +339,11 @@ func (s *Server) Close() error {
 	<-s.doneChan
 
 	// Close WebTransport server (guard against panics from underlying implementations)
-	if s.wtServer != nil {
+	if s.WebTransportServer != nil {
 		done := make(chan struct{})
 		go func() {
 			defer func() { recover() }()
-			_ = s.wtServer.Close()
+			_ = s.WebTransportServer.Close()
 			close(done)
 		}()
 		select {
@@ -535,11 +416,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 
 	// Close WebTransport server (guard against panics from underlying implementations)
-	if s.wtServer != nil {
+	if s.WebTransportServer != nil {
 		done := make(chan struct{})
 		go func() {
 			defer func() { recover() }()
-			_ = s.wtServer.Close()
+			_ = s.WebTransportServer.Close()
 			close(done)
 		}()
 		select {
