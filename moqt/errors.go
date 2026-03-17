@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/okdaichi/gomoqt/quic"
+	"github.com/okdaichi/gomoqt/transport"
 )
 
 var (
@@ -65,7 +65,7 @@ func AnnounceErrorText(code AnnounceErrorCode) string {
 }
 
 // AnnounceError wraps a QUIC stream error with announcement-specific error codes.
-type AnnounceError struct{ *quic.StreamError }
+type AnnounceError struct{ *transport.StreamError }
 
 func (err AnnounceError) Error() string {
 	text := AnnounceErrorText(err.AnnounceErrorCode())
@@ -131,7 +131,7 @@ func SubscribeErrorText(code SubscribeErrorCode) string {
 }
 
 // SubscribeError wraps a QUIC stream error with subscription-specific error codes.
-type SubscribeError struct{ *quic.StreamError }
+type SubscribeError struct{ *transport.StreamError }
 
 func (err SubscribeError) Error() string {
 	text := SubscribeErrorText(err.SubscribeErrorCode())
@@ -195,7 +195,7 @@ func SessionErrorText(code SessionErrorCode) string {
 }
 
 // SessionError wraps a QUIC application error with session-specific error codes.
-type SessionError struct{ *quic.ApplicationError }
+type SessionError struct{ *transport.ApplicationError }
 
 func (err SessionError) Error() string {
 	var role string
@@ -257,7 +257,7 @@ func GroupErrorText(code GroupErrorCode) string {
 }
 
 // GroupError wraps a QUIC stream error with group-specific error codes.
-type GroupError struct{ *quic.StreamError }
+type GroupError struct{ *transport.StreamError }
 
 func (err GroupError) Error() string {
 	text := GroupErrorText(err.GroupErrorCode())

@@ -6,16 +6,19 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"sync"
 	"sync/atomic"
 
-	"github.com/okdaichi/gomoqt/moqt/internal/message"
-	"github.com/okdaichi/gomoqt/quic"
-	"github.com/okdaichi/gomoqt/quic/quicgo"
-	"github.com/okdaichi/gomoqt/webtransport"
-	"github.com/okdaichi/gomoqt/webtransport/webtransportgo"
+	"github.com/okdaichi/gomoqt/moqt/internal/quicgo"
+	"github.com/okdaichi/gomoqt/moqt/internal/webtransportgo"
+	"github.com/okdaichi/gomoqt/transport"
 )
+
+type DialQUICFunc func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *transport.QUICConfig) (transport.StreamConn, error)
+
+type DialWebTransportFunc func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config) (*http.Response, transport.StreamConn, error)
 
 // Client is a MOQ client that can establish sessions with MOQ servers.
 // It supports both WebTransport (for browser compatibility) and raw QUIC connections.
@@ -32,7 +35,7 @@ type Client struct {
 	/*
 	 * QUIC configuration
 	 */
-	QUICConfig *quic.Config
+	QUICConfig *transport.QUICConfig
 
 	/*
 	 * MOQ Configuration
@@ -42,12 +45,12 @@ type Client struct {
 	/*
 	 * Dial QUIC function
 	 */
-	DialQUICFunc quic.DialAddrFunc
+	DialQUICFunc DialQUICFunc
 
 	/*
 	 * Dial WebTransport function
 	 */
-	DialWebTransportFunc webtransport.DialAddrFunc
+	DialWebTransportFunc DialWebTransportFunc
 
 	/*
 	 * Logger
@@ -132,13 +135,17 @@ func (c *Client) DialWebTransport(ctx context.Context, host, path string, mux *T
 	dialCtx, cancelDial := context.WithTimeout(ctx, c.Config.setupTimeout())
 	defer cancelDial()
 
-	var conn quic.Connection
-	var err error
+	var dialer DialWebTransportFunc
 	if c.DialWebTransportFunc != nil {
-		_, conn, err = c.DialWebTransportFunc(dialCtx, "https://"+host+path, nil, c.TLSConfig)
+		dialer = c.DialWebTransportFunc
 	} else {
-		_, conn, err = webtransportgo.Dial(dialCtx, "https://"+host+path, nil, c.TLSConfig)
+		d := webtransportgo.Dialer{
+			TLSClientConfig:      c.TLSConfig,
+			ApplicationProtocols: []string{"moq-lite-03"},
+		}
+		dialer = d.Dial
 	}
+	_, conn, err := dialer(dialCtx, host, nil, c.TLSConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -147,24 +154,11 @@ func (c *Client) DialWebTransport(ctx context.Context, host, path string, mux *T
 		"transport", "webtransport",
 		"local_address", conn.LocalAddr(),
 		"remote_address", conn.RemoteAddr(),
-		"quic_version", conn.ConnectionState().Version,
-		"alpn", conn.ConnectionState().TLS.NegotiatedProtocol,
 	)
 	connLogger.Info("connection established")
 
-	req := &SetupRequest{
-		Path:       path,
-		Versions:   DefaultClientVersions,
-		RemoteAddr: conn.RemoteAddr().String(),
-	}
-
-	rsp, err := openSessionStream(conn, req)
-	if err != nil {
-		return nil, err
-	}
-
 	var sess *Session
-	sess = newSession(conn, rsp.sessionStream, mux, func() { c.removeSession(sess) })
+	sess = newSession(conn, mux, func() { c.removeSession(sess) })
 	c.addSession(sess)
 
 	return sess, nil
@@ -185,13 +179,6 @@ func (c *Client) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux)
 	dialCtx, cancelDial := context.WithTimeout(ctx, dialTimeout)
 	defer cancelDial()
 
-	var dialFunc quic.DialAddrFunc
-	if c.DialQUICFunc != nil {
-		dialFunc = c.DialQUICFunc
-	} else {
-		dialFunc = quicgo.DialAddrEarly
-	}
-
 	tlsConfig := c.TLSConfig
 	if tlsConfig == nil {
 		tlsConfig = &tls.Config{}
@@ -199,33 +186,22 @@ func (c *Client) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux)
 		tlsConfig = tlsConfig.Clone()
 	}
 	if len(tlsConfig.NextProtos) == 0 {
-		tlsConfig.NextProtos = SupportedNativeMOQALPNs
+		tlsConfig.NextProtos = []string{NextProtoMOQ}
 	}
 
-	// if c.DialQUICFunc != nil {
-	// 	conn, err = c.DialQUICFunc(dialCtx, addr, c.TLSConfig, c.QUICConfig)
-	// } else {
-	// 	conn, err = quicgo.DialAddrEarly(dialCtx, addr, c.TLSConfig, c.QUICConfig)
-	// }
+	var dialFunc DialQUICFunc
+	if c.DialQUICFunc != nil {
+		dialFunc = c.DialQUICFunc
+	} else {
+		dialFunc = quicgo.DialAddrEarly
+	}
 	conn, err := dialFunc(dialCtx, addr, tlsConfig, c.QUICConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	req := &SetupRequest{
-		Path:             path,
-		Versions:         DefaultClientVersions,
-		ClientExtensions: extensionsWithPath(path),
-		RemoteAddr:       conn.RemoteAddr().String(),
-	}
-
-	rsp, err := openSessionStream(conn, req)
-	if err != nil {
-		return nil, err
-	}
-
 	var sess *Session
-	sess = newSession(conn, rsp.sessionStream, mux, func() { c.removeSession(sess) })
+	sess = newSession(conn, mux, func() { c.removeSession(sess) })
 	c.addSession(sess)
 
 	return sess, nil
@@ -237,65 +213,6 @@ func extensionsWithPath(path string) *Extension {
 	params.SetString(param_type_path, path)
 
 	return params
-}
-
-func openSessionStream(
-	conn quic.Connection,
-	request *SetupRequest,
-) (*response, error) {
-	stream, err := conn.OpenStream()
-	if err != nil {
-		return nil, err
-	}
-
-	// Ensure we have a valid request and extension container to avoid panics
-	if request == nil {
-		request = &SetupRequest{}
-	}
-
-	// Send STREAM_TYPE message
-	err = message.StreamTypeSession.Encode(stream)
-	if err != nil {
-		return nil, err
-	}
-
-	versions := make([]uint64, len(request.Versions))
-	for i, v := range request.Versions {
-		versions[i] = uint64(v)
-	}
-	var params parameters
-	if request.ClientExtensions != nil {
-		params = request.ClientExtensions.parameters
-	}
-	// Send a SESSION_CLIENT message
-	scm := message.SessionClientMessage{
-		SupportedVersions: versions,
-		Parameters:        params,
-	}
-
-	err = scm.Encode(stream)
-	if err != nil {
-		return nil, err
-	}
-
-	if request != nil {
-		request.reqCtx = stream.Context()
-	}
-
-	var sum message.SessionServerMessage
-	err = sum.Decode(stream)
-	if err != nil {
-		_ = conn.CloseWithError(quic.ApplicationErrorCode(InternalSessionErrorCode), "moq: failed to set up session")
-		return nil, err
-	}
-
-	response := newResponse(
-		newSessionStream(stream),
-		Version(sum.SelectedVersion),
-		&Extension{sum.Parameters},
-	)
-
-	return response, nil
 }
 
 func (c *Client) addSession(sess *Session) {

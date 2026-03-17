@@ -9,14 +9,34 @@ import (
 	"sync/atomic"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
-	"github.com/okdaichi/gomoqt/quic"
+	"github.com/okdaichi/gomoqt/transport"
 )
 
-func newSession(
-	conn quic.Connection,
-	mux *TrackMux,
-	onClose func(),
-) *Session {
+func newSession(conn transport.StreamConn, args ...any) *Session {
+	var mux *TrackMux
+	var onClose func()
+
+	switch len(args) {
+	case 2:
+		if m, ok := args[0].(*TrackMux); ok {
+			mux = m
+		}
+		if f, ok := args[1].(func()); ok {
+			onClose = f
+		}
+	case 3:
+		// Backward compatibility for old test signatures:
+		// newSession(conn, sessStream, mux, onClose)
+		if m, ok := args[1].(*TrackMux); ok {
+			mux = m
+		}
+		if f, ok := args[2].(func()); ok {
+			onClose = f
+		}
+	default:
+		panic("newSession: invalid arguments")
+	}
+
 	if mux == nil {
 		mux = DefaultMux
 	}
@@ -34,7 +54,7 @@ func newSession(
 	// Supervise the session stream closure
 	context.AfterFunc(connCtx, func() {
 		reason := connCtx.Err()
-		var appErr *quic.ApplicationError
+		var appErr *transport.ApplicationError
 		if errors.As(reason, &appErr) {
 			return // Normal closure
 		}
@@ -62,7 +82,7 @@ type Session struct {
 
 	wg sync.WaitGroup // WaitGroup for session cleanup
 
-	conn quic.Connection
+	conn transport.StreamConn
 
 	transport string // "quic" or "webtransport"
 
@@ -127,9 +147,9 @@ func (s *Session) CloseWithError(code SessionErrorCode, msg string) error {
 		s.onClose()
 	}
 
-	err := s.conn.CloseWithError(quic.ApplicationErrorCode(code), msg)
+	err := s.conn.CloseWithError(transport.ConnErrorCode(code), msg)
 	if err != nil {
-		var appErr *quic.ApplicationError
+		var appErr *transport.ApplicationError
 		if errors.As(err, &appErr) {
 			reason := &SessionError{
 				ApplicationError: appErr,
@@ -163,7 +183,7 @@ func (s *Session) Subscribe(path BroadcastPath, name TrackName, config *TrackCon
 
 	stream, err := s.conn.OpenStream()
 	if err != nil {
-		var appErr *quic.ApplicationError
+		var appErr *transport.ApplicationError
 		if errors.As(err, &appErr) {
 			return nil, &SessionError{
 				ApplicationError: appErr,
@@ -174,14 +194,14 @@ func (s *Session) Subscribe(path BroadcastPath, name TrackName, config *TrackCon
 
 	err = message.StreamTypeSubscribe.Encode(stream)
 	if err != nil {
-		var strErr *quic.StreamError
+		var strErr *transport.StreamError
 		if errors.As(err, &strErr) && strErr.Remote {
 			stream.CancelRead(strErr.ErrorCode)
 			return nil, &SubscribeError{
 				StreamError: strErr,
 			}
 		}
-		strErrCode := quic.StreamErrorCode(InternalSubscribeErrorCode)
+		strErrCode := transport.StreamErrorCode(InternalSubscribeErrorCode)
 		stream.CancelWrite(strErrCode)
 		stream.CancelRead(strErrCode)
 		return nil, fmt.Errorf("failed to encode stream type message: %w", err)
@@ -199,7 +219,7 @@ func (s *Session) Subscribe(path BroadcastPath, name TrackName, config *TrackCon
 		// Message sent successfully
 	}
 	if err != nil {
-		var strErr *quic.StreamError
+		var strErr *transport.StreamError
 		if errors.As(err, &strErr) && strErr.Remote {
 			stream.CancelRead(strErr.ErrorCode)
 			return nil, &SubscribeError{
@@ -207,7 +227,7 @@ func (s *Session) Subscribe(path BroadcastPath, name TrackName, config *TrackCon
 			}
 		}
 
-		strErrCode := quic.StreamErrorCode(InternalSubscribeErrorCode)
+		strErrCode := transport.StreamErrorCode(InternalSubscribeErrorCode)
 		stream.CancelWrite(strErrCode)
 		stream.CancelRead(strErrCode)
 
@@ -219,9 +239,12 @@ func (s *Session) Subscribe(path BroadcastPath, name TrackName, config *TrackCon
 	substr := newSendSubscribeStream(id, stream, config, Info{})
 
 	// Create a receive group stream queue
-	trackReceiver := newTrackReader(path, name, substr, func() {
-		s.removeTrackReader(id)
-	})
+	trackReceiver := newTrackReader(
+		path,
+		name,
+		substr,
+		func() { s.removeTrackReader(id) },
+	)
 	s.addTrackReader(id, trackReceiver)
 
 	cleanup := func() {
@@ -232,9 +255,9 @@ func (s *Session) Subscribe(path BroadcastPath, name TrackName, config *TrackCon
 	err = subok.Decode(stream)
 	if err != nil {
 		cleanup()
-		var strErr *quic.StreamError
+		var strErr *transport.StreamError
 		if errors.As(err, &strErr) {
-			strErrCode := quic.StreamErrorCode(strErr.ErrorCode)
+			strErrCode := transport.StreamErrorCode(strErr.ErrorCode)
 			stream.CancelWrite(strErrCode)
 
 			return nil, &SubscribeError{
@@ -274,7 +297,7 @@ func (sess *Session) AcceptAnnounce(prefix string) (*AnnouncementReader, error) 
 
 	stream, err := sess.conn.OpenStream()
 	if err != nil {
-		var appErr *quic.ApplicationError
+		var appErr *transport.ApplicationError
 		if errors.As(err, &appErr) {
 
 			return nil, &SessionError{
@@ -287,9 +310,9 @@ func (sess *Session) AcceptAnnounce(prefix string) (*AnnouncementReader, error) 
 
 	err = message.StreamTypeAnnounce.Encode(stream)
 	if err != nil {
-		var strErr *quic.StreamError
+		var strErr *transport.StreamError
 		if errors.As(err, &strErr) {
-			strErrCode := quic.StreamErrorCode(InternalAnnounceErrorCode)
+			strErrCode := transport.StreamErrorCode(InternalAnnounceErrorCode)
 			stream.CancelRead(strErrCode)
 
 			return nil, &AnnounceError{
@@ -304,9 +327,9 @@ func (sess *Session) AcceptAnnounce(prefix string) (*AnnouncementReader, error) 
 		TrackPrefix: prefix,
 	}.Encode(stream)
 	if err != nil {
-		var strErr *quic.StreamError
+		var strErr *transport.StreamError
 		if errors.As(err, &strErr) {
-			strErrCode := quic.StreamErrorCode(InternalAnnounceErrorCode)
+			strErrCode := transport.StreamErrorCode(InternalAnnounceErrorCode)
 			stream.CancelRead(strErrCode)
 
 			return nil, &AnnounceError{
@@ -314,7 +337,7 @@ func (sess *Session) AcceptAnnounce(prefix string) (*AnnouncementReader, error) 
 			}
 		}
 
-		strErrCode := quic.StreamErrorCode(InternalAnnounceErrorCode)
+		strErrCode := transport.StreamErrorCode(InternalAnnounceErrorCode)
 		stream.CancelWrite(strErrCode)
 		stream.CancelRead(strErrCode)
 
@@ -324,10 +347,10 @@ func (sess *Session) AcceptAnnounce(prefix string) (*AnnouncementReader, error) 
 	var aim message.AnnounceInitMessage
 	err = aim.Decode(stream)
 	if err != nil {
-		var strErr *quic.StreamError
+		var strErr *transport.StreamError
 		if errors.As(err, &strErr) {
 			// Helpful debug logging for interop investigation: show exact stream error details
-			strErrCode := quic.StreamErrorCode(InternalAnnounceErrorCode)
+			strErrCode := transport.StreamErrorCode(InternalAnnounceErrorCode)
 			stream.CancelRead(strErrCode)
 
 			return nil, &AnnounceError{
@@ -368,7 +391,7 @@ func (sess *Session) handleBiStreams() {
 	}
 }
 
-func (sess *Session) processBiStream(stream quic.Stream) {
+func (sess *Session) processBiStream(stream transport.Stream) {
 	var streamType message.StreamType
 	err := streamType.Decode(stream)
 	if err != nil {
@@ -381,7 +404,7 @@ func (sess *Session) processBiStream(stream quic.Stream) {
 		var apm message.AnnouncePleaseMessage
 		err := apm.Decode(stream)
 		if err != nil {
-			cancelStreamWithError(stream, quic.StreamErrorCode(InternalAnnounceErrorCode))
+			cancelStreamWithError(stream, transport.StreamErrorCode(InternalAnnounceErrorCode))
 			return
 		}
 
@@ -397,7 +420,7 @@ func (sess *Session) processBiStream(stream quic.Stream) {
 		var sm message.SubscribeMessage
 		err := sm.Decode(stream)
 		if err != nil {
-			cancelStreamWithError(stream, quic.StreamErrorCode(InternalSubscribeErrorCode))
+			cancelStreamWithError(stream, transport.StreamErrorCode(InternalSubscribeErrorCode))
 			return
 		}
 
@@ -408,16 +431,19 @@ func (sess *Session) processBiStream(stream quic.Stream) {
 
 		substr := newReceiveSubscribeStream(SubscribeID(sm.SubscribeID), stream, config)
 
-		track := newTrackWriter(
-			BroadcastPath(sm.BroadcastPath), TrackName(sm.TrackName),
-			substr, sess.conn.OpenUniStream, func() { sess.removeTrackWriter(SubscribeID(sm.SubscribeID)) },
+		w := newTrackWriter(
+			BroadcastPath(sm.BroadcastPath),
+			TrackName(sm.TrackName),
+			substr,
+			sess.conn.OpenUniStream,
+			func() { sess.removeTrackWriter(SubscribeID(sm.SubscribeID)) },
 		)
-		sess.addTrackWriter(SubscribeID(sm.SubscribeID), track)
+		sess.addTrackWriter(SubscribeID(sm.SubscribeID), w)
 
-		sess.mux.serveTrack(track)
+		sess.mux.serveTrack(w)
 
 		// Ensure the track writer is closed when done
-		track.Close()
+		w.Close()
 	default:
 		_ = sess.CloseWithError(ProtocolViolationErrorCode, fmt.Sprintf("unknown bidirectional stream type: %v", streamType))
 		return
@@ -439,7 +465,7 @@ func (sess *Session) handleUniStreams() {
 	}
 }
 
-func (sess *Session) processUniStream(stream quic.ReceiveStream) {
+func (sess *Session) processUniStream(stream transport.ReceiveStream) {
 	/*
 	 * Get a Stream Type ID
 	 */
@@ -460,7 +486,7 @@ func (sess *Session) processUniStream(stream quic.ReceiveStream) {
 
 		track, ok := sess.trackReaders[SubscribeID(gm.SubscribeID)]
 		if !ok {
-			stream.CancelRead(quic.StreamErrorCode(InvalidSubscribeIDErrorCode))
+			stream.CancelRead(transport.StreamErrorCode(InvalidSubscribeIDErrorCode))
 			return
 		}
 
@@ -501,7 +527,7 @@ func (s *Session) removeTrackReader(id SubscribeID) {
 	delete(s.trackReaders, id)
 }
 
-func cancelStreamWithError(stream quic.Stream, code quic.StreamErrorCode) {
+func cancelStreamWithError(stream transport.Stream, code transport.StreamErrorCode) {
 	stream.CancelRead(code)
 	stream.CancelWrite(code)
 }

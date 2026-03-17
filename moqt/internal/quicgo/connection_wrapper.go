@@ -2,13 +2,14 @@ package quicgo
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 
-	"github.com/okdaichi/gomoqt/quic"
+	"github.com/okdaichi/gomoqt/transport"
 	quicgo_quicgo "github.com/quic-go/quic-go"
 )
 
-func wrapConnection(conn *quicgo_quicgo.Conn) quic.Connection {
+func wrapConnection(conn *quicgo_quicgo.Conn) transport.StreamConn {
 	if conn == nil {
 		return nil
 	}
@@ -17,35 +18,29 @@ func wrapConnection(conn *quicgo_quicgo.Conn) quic.Connection {
 	}
 }
 
-var _ quic.Connection = (*connWrapper)(nil)
+var _ transport.StreamConn = (*connWrapper)(nil)
 
 type connWrapper struct {
 	conn *quicgo_quicgo.Conn
 }
 
-func (wrapper *connWrapper) AcceptStream(ctx context.Context) (quic.Stream, error) {
+func (wrapper *connWrapper) AcceptStream(ctx context.Context) (transport.Stream, error) {
 	stream, err := wrapper.conn.AcceptStream(ctx)
 	return &rawQuicStream{stream: stream}, err
 }
 
-func (wrapper *connWrapper) AcceptUniStream(ctx context.Context) (quic.ReceiveStream, error) {
+func (wrapper *connWrapper) AcceptUniStream(ctx context.Context) (transport.ReceiveStream, error) {
 	stream, err := wrapper.conn.AcceptUniStream(ctx)
 	return &rawQuicReceiveStream{stream: stream}, err
 }
 
-func (wrapper *connWrapper) CloseWithError(code quic.ApplicationErrorCode, msg string) error {
+func (wrapper *connWrapper) CloseWithError(code transport.ConnErrorCode, msg string) error {
 	return wrapper.conn.CloseWithError(code, msg)
 }
 
-func (wrapper *connWrapper) ConnectionState() quic.ConnectionState {
+func (wrapper *connWrapper) TLS() *tls.ConnectionState {
 	state := wrapper.conn.ConnectionState()
-	return quic.ConnectionState{
-		TLS:               state.TLS,
-		SupportsDatagrams: state.SupportsDatagrams,
-		Used0RTT:          state.Used0RTT,
-		Version:           quic.Version(state.Version),
-		GSO:               state.GSO,
-	}
+	return &state.TLS
 }
 
 func (wrapper *connWrapper) Context() context.Context {
@@ -56,22 +51,22 @@ func (wrapper *connWrapper) LocalAddr() net.Addr {
 	return wrapper.conn.LocalAddr()
 }
 
-func (wrapper *connWrapper) OpenStream() (quic.Stream, error) {
+func (wrapper *connWrapper) OpenStream() (transport.Stream, error) {
 	stream, err := wrapper.conn.OpenStream()
 	return &rawQuicStream{stream: stream}, err
 }
 
-func (wrapper *connWrapper) OpenStreamSync(ctx context.Context) (quic.Stream, error) {
+func (wrapper *connWrapper) OpenStreamSync(ctx context.Context) (transport.Stream, error) {
 	stream, err := wrapper.conn.OpenStreamSync(ctx)
 	return &rawQuicStream{stream: stream}, err
 }
 
-func (wrapper *connWrapper) OpenUniStream() (quic.SendStream, error) {
+func (wrapper *connWrapper) OpenUniStream() (transport.SendStream, error) {
 	stream, err := wrapper.conn.OpenUniStream()
 	return &rawQuicSendStream{stream: stream}, err
 }
 
-func (wrapper *connWrapper) OpenUniStreamSync(ctx context.Context) (quic.SendStream, error) {
+func (wrapper *connWrapper) OpenUniStreamSync(ctx context.Context) (transport.SendStream, error) {
 	stream, err := wrapper.conn.OpenUniStreamSync(ctx)
 	return &rawQuicSendStream{stream: stream}, err
 }

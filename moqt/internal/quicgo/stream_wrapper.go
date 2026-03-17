@@ -4,11 +4,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/okdaichi/gomoqt/quic"
+	"github.com/okdaichi/gomoqt/transport"
 	quicgo_quicgo "github.com/quic-go/quic-go"
 )
 
-var _ quic.Stream = (*rawQuicStream)(nil)
+var _ transport.Stream = (*rawQuicStream)(nil)
 
 type rawQuicStream struct {
 	stream *quicgo_quicgo.Stream
@@ -22,11 +22,11 @@ func (wrapper rawQuicStream) Write(b []byte) (int, error) {
 	return wrapper.stream.Write(b)
 }
 
-func (wrapper rawQuicStream) CancelRead(code quic.StreamErrorCode) {
+func (wrapper rawQuicStream) CancelRead(code transport.StreamErrorCode) {
 	wrapper.stream.CancelRead(quicgo_quicgo.StreamErrorCode(code))
 }
 
-func (wrapper rawQuicStream) CancelWrite(code quic.StreamErrorCode) {
+func (wrapper rawQuicStream) CancelWrite(code transport.StreamErrorCode) {
 	wrapper.stream.CancelWrite(quicgo_quicgo.StreamErrorCode(code))
 }
 
@@ -53,7 +53,7 @@ func (wrapper rawQuicStream) Context() context.Context {
 /*
  *
  */
-var _ quic.ReceiveStream = (*rawQuicReceiveStream)(nil)
+var _ transport.ReceiveStream = (*rawQuicReceiveStream)(nil)
 
 type rawQuicReceiveStream struct {
 	stream *quicgo_quicgo.ReceiveStream
@@ -63,7 +63,7 @@ func (wrapper rawQuicReceiveStream) Read(b []byte) (int, error) {
 	return wrapper.stream.Read(b)
 }
 
-func (wrapper rawQuicReceiveStream) CancelRead(code quic.StreamErrorCode) {
+func (wrapper rawQuicReceiveStream) CancelRead(code transport.StreamErrorCode) {
 	wrapper.stream.CancelRead(quicgo_quicgo.StreamErrorCode(code))
 }
 
@@ -75,7 +75,7 @@ func (wrapper rawQuicReceiveStream) SetReadDeadline(time time.Time) error {
  *
  */
 
-var _ quic.SendStream = (*rawQuicSendStream)(nil)
+var _ transport.SendStream = (*rawQuicSendStream)(nil)
 
 type rawQuicSendStream struct {
 	stream *quicgo_quicgo.SendStream
@@ -85,7 +85,7 @@ func (wrapper rawQuicSendStream) Write(b []byte) (int, error) {
 	return wrapper.stream.Write(b)
 }
 
-func (wrapper rawQuicSendStream) CancelWrite(code quic.StreamErrorCode) {
+func (wrapper rawQuicSendStream) CancelWrite(code transport.StreamErrorCode) {
 	wrapper.stream.CancelWrite(quicgo_quicgo.StreamErrorCode(code))
 }
 

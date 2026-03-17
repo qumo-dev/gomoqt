@@ -7,9 +7,9 @@ package quicgo
 
 // 	switch e := err.(type) {
 // 	case *quicgo_quicgo.StreamError:
-// 		return &quic.StreamError{
-// 			StreamID:  quic.StreamID(e.StreamID),
-// 			ErrorCode: quic.StreamErrorCode(e.ErrorCode),
+// 		return &transport.StreamError{
+// 			StreamID:  transport.StreamID(e.StreamID),
+// 			ErrorCode: transport.StreamErrorCode(e.ErrorCode),
 // 			Remote:    e.Remote,
 // 			Err:       e,
 // 		}

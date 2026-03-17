@@ -4,49 +4,33 @@ import (
 	"context"
 	"errors"
 	"net"
-	"net/http"
 	"sync"
 
-	"github.com/okdaichi/gomoqt/quic"
-	"github.com/okdaichi/gomoqt/webtransport"
+	"github.com/okdaichi/gomoqt/transport"
+	quicgo_webtransportgo "github.com/okdaichi/webtransport-go"
 	quicgo_quicgo "github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
-	quicgo_webtransportgo "github.com/okdaichi/webtransport-go"
 )
 
-var _ webtransport.Server = (*Server)(nil)
+// var _ webtransport.Server = (*Server)(nil)
 
 // Server is a wrapper for (quic-go/webtransport-go).Server
 type Server struct {
-	CheckOrigin          func(r *http.Request) bool
-	ApplicationProtocols []string
-	internalServer       *quicgo_webtransportgo.Server
-	initOnce             sync.Once
+	internalServer *quicgo_webtransportgo.Server
+	initOnce       sync.Once
 }
 
 func (s *Server) init() {
 	s.initOnce.Do(func() {
 		if s.internalServer == nil {
 			s.internalServer = &quicgo_webtransportgo.Server{
-				H3:                   &http3.Server{},
-				CheckOrigin:          s.CheckOrigin,
-				ApplicationProtocols: s.ApplicationProtocols,
+				H3: &http3.Server{},
 			}
 		}
 	})
 }
 
-func (s *Server) Upgrade(w http.ResponseWriter, r *http.Request) (quic.Connection, error) {
-	s.init()
-	wtsess, err := s.internalServer.Upgrade(w, r)
-	if err != nil {
-		return nil, err
-	}
-
-	return wrapSession(wtsess), nil
-}
-
-func (s *Server) ServeQUICConn(conn quic.Connection) error {
+func (s *Server) ServeQUICConn(conn transport.StreamConn) error {
 	s.init()
 	if conn == nil {
 		return nil

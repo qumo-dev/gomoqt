@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/okdaichi/gomoqt/moqt"
-	"github.com/okdaichi/gomoqt/quic"
+	"github.com/okdaichi/gomoqt/transport"
 )
 
 const CatalogTrackName = "catalog.json"
@@ -22,13 +22,9 @@ func main() {
 			Certificates:       []tls.Certificate{generateCert()},
 			InsecureSkipVerify: true, // TODO: Not recommended for production
 		},
-		QUICConfig: &quic.Config{
+		QUICConfig: &transport.QUICConfig{
 			Allow0RTT:       true,
 			EnableDatagrams: true,
-		},
-		CheckHTTPOrigin: func(r *http.Request) bool {
-			slog.Info("HTTP Origin", "origin", r.Header.Get("Origin"))
-			return true // TODO: Implement proper origin check
 		},
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelDebug,

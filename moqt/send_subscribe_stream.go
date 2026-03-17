@@ -6,10 +6,10 @@ import (
 	"sync"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
-	"github.com/okdaichi/gomoqt/quic"
+	"github.com/okdaichi/gomoqt/transport"
 )
 
-func newSendSubscribeStream(id SubscribeID, stream quic.Stream, initConfig *TrackConfig, info Info) *sendSubscribeStream {
+func newSendSubscribeStream(id SubscribeID, stream transport.Stream, initConfig *TrackConfig, info Info) *sendSubscribeStream {
 	substr := &sendSubscribeStream{
 		ctx:    context.WithValue(stream.Context(), &biStreamTypeCtxKey, message.StreamTypeSubscribe),
 		id:     id,
@@ -26,7 +26,7 @@ type sendSubscribeStream struct {
 
 	config *TrackConfig
 
-	stream quic.Stream
+	stream transport.Stream
 
 	mu sync.Mutex
 
@@ -105,7 +105,7 @@ func (sss *sendSubscribeStream) closeWithError(code SubscribeErrorCode) error {
 	sss.mu.Lock()
 	defer sss.mu.Unlock()
 
-	strErrCode := quic.StreamErrorCode(code)
+	strErrCode := transport.StreamErrorCode(code)
 	// Cancel the write side of the stream
 	sss.stream.CancelWrite(strErrCode)
 	// Cancel the read side of the stream

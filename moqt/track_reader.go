@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/okdaichi/gomoqt/quic"
+	"github.com/okdaichi/gomoqt/transport"
 )
 
 func newTrackReader(broadcastPath BroadcastPath, trackName TrackName, subscribeStream *sendSubscribeStream, onCloseTrackFunc func()) *TrackReader {
@@ -16,7 +16,7 @@ func newTrackReader(broadcastPath BroadcastPath, trackName TrackName, subscribeS
 		queuedCh:            make(chan struct{}, 1),
 		queueing: make([]struct {
 			sequence GroupSequence
-			stream   quic.ReceiveStream
+			stream   transport.ReceiveStream
 		}, 0, 1<<3),
 		dequeued:         make(map[*GroupReader]struct{}),
 		onCloseTrackFunc: onCloseTrackFunc,
@@ -32,11 +32,11 @@ type TrackReader struct {
 	BroadcastPath BroadcastPath
 	TrackName     TrackName
 
-	*sendSubscribeStream
+	sendSubscribeStream *sendSubscribeStream
 
 	queueing []struct {
 		sequence GroupSequence
-		stream   quic.ReceiveStream
+		stream   transport.ReceiveStream
 	}
 	queuedCh chan struct{}
 	trackMu  sync.Mutex
@@ -44,6 +44,14 @@ type TrackReader struct {
 	dequeued map[*GroupReader]struct{}
 
 	onCloseTrackFunc func()
+}
+
+func (r *TrackReader) SubscribeID() SubscribeID {
+	return r.sendSubscribeStream.SubscribeID()
+}
+
+func (r *TrackReader) TrackConfig() *TrackConfig {
+	return r.sendSubscribeStream.TrackConfig()
 }
 
 // AcceptGroup blocks until the next group is available or context is
@@ -73,6 +81,10 @@ func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 	}
 }
 
+func (r *TrackReader) Context() context.Context {
+	return r.sendSubscribeStream.Context()
+}
+
 func (r *TrackReader) dequeueGroup() *GroupReader {
 	r.trackMu.Lock()
 	defer r.trackMu.Unlock()
@@ -99,7 +111,7 @@ func (r *TrackReader) Close() error {
 	defer r.trackMu.Unlock()
 
 	// Cancel all pending groups first
-	errCode := quic.StreamErrorCode(SubscribeCanceledErrorCode)
+	errCode := transport.StreamErrorCode(SubscribeCanceledErrorCode)
 	for _, entry := range r.queueing {
 		entry.stream.CancelRead(errCode)
 	}
@@ -127,7 +139,7 @@ func (r *TrackReader) CloseWithError(code SubscribeErrorCode) error {
 	defer r.trackMu.Unlock()
 
 	// Cancel all pending groups first
-	errCode := quic.StreamErrorCode(code)
+	errCode := transport.StreamErrorCode(code)
 	for _, entry := range r.queueing {
 		entry.stream.CancelRead(errCode)
 	}
@@ -158,12 +170,7 @@ func (r *TrackReader) Update(config *TrackConfig) error {
 	return r.sendSubscribeStream.updateSubscribe(config)
 }
 
-// TrackConfig returns the currently active subscription configuration.
-func (r *TrackReader) TrackConfig() *TrackConfig {
-	return r.sendSubscribeStream.TrackConfig()
-}
-
-func (r *TrackReader) enqueueGroup(sequence GroupSequence, stream quic.ReceiveStream) {
+func (r *TrackReader) enqueueGroup(sequence GroupSequence, stream transport.ReceiveStream) {
 	if stream == nil {
 		return
 	}
@@ -172,13 +179,13 @@ func (r *TrackReader) enqueueGroup(sequence GroupSequence, stream quic.ReceiveSt
 	defer r.trackMu.Unlock()
 
 	if r.Context().Err() != nil || r.queueing == nil {
-		stream.CancelRead(quic.StreamErrorCode(SubscribeCanceledErrorCode))
+		stream.CancelRead(transport.StreamErrorCode(SubscribeCanceledErrorCode))
 		return
 	}
 
 	entry := struct {
 		sequence GroupSequence
-		stream   quic.ReceiveStream
+		stream   transport.ReceiveStream
 	}{
 		sequence: sequence,
 		stream:   stream,

@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
-	"github.com/okdaichi/gomoqt/quic"
+	"github.com/okdaichi/gomoqt/transport"
 )
 
 // Cause translates a Go context cancellation reason into a package-specific error type.
@@ -16,7 +16,7 @@ import (
 func Cause(ctx context.Context) error {
 	reason := context.Cause(ctx)
 
-	var strErr *quic.StreamError
+	var strErr *transport.StreamError
 	if errors.As(reason, &strErr) {
 		st, ok := ctx.Value(&biStreamTypeCtxKey).(message.StreamType)
 		if ok {
@@ -32,9 +32,9 @@ func Cause(ctx context.Context) error {
 				// a generic session-level application error instead of
 				// reusing the stream's numeric value.
 				return &SessionError{
-					ApplicationError: &quic.ApplicationError{
+					ApplicationError: &transport.ApplicationError{
 						Remote:       strErr.Remote,
-						ErrorCode:    quic.ApplicationErrorCode(ProtocolViolationErrorCode),
+						ErrorCode:    transport.ApplicationErrorCode(ProtocolViolationErrorCode),
 						ErrorMessage: "moqt: closed session stream",
 					},
 				}
@@ -64,7 +64,7 @@ func Cause(ctx context.Context) error {
 		return reason
 	}
 
-	var appErr *quic.ApplicationError
+	var appErr *transport.ApplicationError
 	if errors.As(reason, &appErr) {
 		return &SessionError{
 			ApplicationError: appErr,

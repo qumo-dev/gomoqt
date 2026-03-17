@@ -16,7 +16,7 @@ import (
 	// "sync" is not used directly here; it may be needed in future changes
 
 	"github.com/okdaichi/gomoqt/moqt"
-	"github.com/okdaichi/gomoqt/quic"
+	"github.com/okdaichi/gomoqt/transport"
 )
 
 func main() {
@@ -38,7 +38,7 @@ func main() {
 			Certificates:       []tls.Certificate{generateCert()},
 			InsecureSkipVerify: true, // TODO: Not recommended for production
 		},
-		QUICConfig: &quic.Config{
+		QUICConfig: &transport.QUICConfig{
 			Allow0RTT:       true,
 			EnableDatagrams: true,
 		},

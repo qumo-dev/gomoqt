@@ -5,20 +5,20 @@ import (
 	"crypto/tls"
 	"net"
 
-	"github.com/okdaichi/gomoqt/quic"
+	"github.com/okdaichi/gomoqt/transport"
 	quicgo_quicgo "github.com/quic-go/quic-go"
 )
 
-var _ quic.ListenAddrFunc = ListenAddrEarly
+// var _ quic.ListenAddrFunc = ListenAddrEarly
 
-func ListenAddrEarly(addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (quic.Listener, error) {
+func ListenAddrEarly(addr string, tlsConfig *tls.Config, quicConfig *transport.QUICConfig) (transport.QUICListener, error) {
 	ln, err := quicgo_quicgo.ListenAddrEarly(addr, tlsConfig, quicConfig)
 	return wrapListener(ln), err
 }
 
-var _ quic.Listener = (*listenerWrapper)(nil)
+// var _ quic.Listener = (*listenerWrapper)(nil)
 
-func wrapListener(quicListener *quicgo_quicgo.EarlyListener) quic.Listener {
+func wrapListener(quicListener *quicgo_quicgo.EarlyListener) transport.QUICListener {
 	return &listenerWrapper{
 		listener: quicListener,
 	}
@@ -28,7 +28,7 @@ type listenerWrapper struct {
 	listener *quicgo_quicgo.EarlyListener
 }
 
-func (wrapper *listenerWrapper) Accept(ctx context.Context) (quic.Connection, error) {
+func (wrapper *listenerWrapper) Accept(ctx context.Context) (transport.StreamConn, error) {
 	conn, err := wrapper.listener.Accept(ctx)
 	return wrapConnection(conn), err
 }

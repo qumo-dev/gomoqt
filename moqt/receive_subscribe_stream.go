@@ -5,10 +5,10 @@ import (
 	"sync"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
-	"github.com/okdaichi/gomoqt/quic"
+	"github.com/okdaichi/gomoqt/transport"
 )
 
-func newReceiveSubscribeStream(id SubscribeID, stream quic.Stream, config *TrackConfig) *receiveSubscribeStream {
+func newReceiveSubscribeStream(id SubscribeID, stream transport.Stream, config *TrackConfig) *receiveSubscribeStream {
 	// Ensure config is not nil
 	if config == nil {
 		config = &TrackConfig{}
@@ -72,7 +72,7 @@ func newReceiveSubscribeStream(id SubscribeID, stream quic.Stream, config *Track
 type receiveSubscribeStream struct {
 	subscribeID SubscribeID
 
-	stream quic.Stream
+	stream transport.Stream
 
 	acceptOnce sync.Once
 	// writeInfoWG tracks active WriteInfo calls so close waits for them.
@@ -91,7 +91,7 @@ func (rss *receiveSubscribeStream) SubscribeID() SubscribeID {
 	return rss.subscribeID
 }
 
-func (rss *receiveSubscribeStream) WriteInfo(info Info) error {
+func (rss *receiveSubscribeStream) writeInfo(info Info) error {
 	var err error
 	rss.acceptOnce.Do(func() {
 		rss.writeInfoWG.Add(1)
@@ -181,7 +181,7 @@ func (rss *receiveSubscribeStream) closeWithError(code SubscribeErrorCode) error
 	// stream afterwards to enforce the error unconditionally.
 	rss.writeInfoWG.Wait()
 
-	strErrCode := quic.StreamErrorCode(code)
+	strErrCode := transport.StreamErrorCode(code)
 	// Cancel the write-side stream
 	rss.stream.CancelWrite(strErrCode)
 	// Cancel the read-side stream
