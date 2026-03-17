@@ -6,16 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **transport:** introduced a shared transport abstraction package (`transport/*`) and migrated core connection/listener/config/error interfaces into it.
+
 ### Changed
 
+- **moqt core:** migrated client/session/server and internal QUIC/WebTransport wrappers to the shared `transport` package APIs.
+- **moqt/upgrader:** added support for customizable WebTransport application protocols via `Upgrader.ApplicationProtocols`.
+- **interop:** updated Dockerized interop flow and Go interop client/server URL handling for more robust address/scheme behavior.
+- **interop/Dockerfile:** aligned containerized interop environment with updated Go toolchain/runtime settings.
+- **examples:** updated broadcast and echo server examples to the current `Upgrader` API.
 - **Dependencies:** switched WebTransport dependency from `github.com/quic-go/webtransport-go` to `github.com/okdaichi/webtransport-go v0.10.1-okdaichi.1`.
 - **webtransport/webtransportgo:** updated wrapper imports to use the forked WebTransport module path.
 - **webtransport/webtransportgo:** adapted server wrapper initialization for fork API differences (removed dependency on `ConfigureHTTP3Server`).
 - **Documentation:** updated README files (all supported languages) and MoQT docs links to reference `github.com/okdaichi/webtransport-go`.
 
+### Fixed
+
+- **moqt/server:** wire server `connContext` into the default internal WebTransport server (`http3.Server.ConnContext`) so request contexts include MOQ server metadata during WebTransport upgrades.
+- **moqt/server:** fix `connContext` variable shadowing so custom `Server.ConnContext` return values are correctly propagated.
+
+### Removed
+
+- **moqt:** removed unused router/session-stream related code paths as part of the transport-layer refactor.
+- **moq-web:** removed `SessionStream` and related legacy session-stream wiring to simplify session management.
+- **examples:** cleaned up outdated relay/native_quic example code paths.
+
 ### Tests
 
+- **moqt:** migrated test suite to the new session/server transport APIs after transport-layer refactor.
 - **webtransport/webtransportgo:** updated server init tests to validate stable wrapper initialization behavior across the forked implementation.
+- **moqt/server:** added regression tests to verify default WebTransport `ConnContext` wiring and `connContext` behavior (custom context propagation and nil-context panic guard).
 
 ## [v0.11.0] - 2026-03-12
 
