@@ -18,6 +18,11 @@ func wrapConnection(conn *quicgo_quicgo.Conn) transport.StreamConn {
 	}
 }
 
+// WrapConnection converts a quic-go connection to the transport.StreamConn abstraction.
+func WrapConnection(conn *quicgo_quicgo.Conn) transport.StreamConn {
+	return wrapConnection(conn)
+}
+
 var _ transport.StreamConn = (*connWrapper)(nil)
 
 type connWrapper struct {

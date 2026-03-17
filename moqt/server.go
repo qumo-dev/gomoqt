@@ -101,22 +101,29 @@ func (s *Server) init() {
 		s.listeners = make(map[transport.QUICListener]struct{})
 		s.doneChan = make(chan struct{})
 		s.activeSess = make(map[*Session]struct{})
+		if s.WebTransportServer == nil {
+			s.WebTransportServer = &webtransportgo.Server{ConnContext: s.connContext}
+			return
+		}
+		if wtServer, ok := s.WebTransportServer.(*webtransportgo.Server); ok && wtServer.ConnContext == nil {
+			wtServer.ConnContext = s.connContext
+		}
 	})
 }
 
 type serverContextKeyType struct{}
 
-var serverContextKey = serverContextKeyType{}
+var moqServerContextKey = serverContextKeyType{}
 
 func (s *Server) connContext(ctx context.Context, conn transport.StreamConn) context.Context {
 	if s.ConnContext != nil {
-		ctx := s.ConnContext(ctx, conn)
+		ctx = s.ConnContext(ctx, conn)
 		if ctx == nil {
 			panic("nil context returned by ConnContext")
 		}
 	}
 
-	ctx = context.WithValue(ctx, serverContextKey, s)
+	ctx = context.WithValue(ctx, moqServerContextKey, s)
 
 	return ctx
 }
@@ -227,15 +234,14 @@ func (u *Upgrader) upgradeWebTransport(w http.ResponseWriter, r *http.Request) (
 // connection and handles session handshake and setup using the Server's
 // SetupHandler.
 func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Session, error) {
-	s, ok := r.Context().Value(serverContextKey).(*Server)
-	if !ok {
-		return nil, fmt.Errorf("failed to retrieve server from request context")
-	}
+	s, _ := r.Context().Value(moqServerContextKey).(*Server)
 
 	if r.TLS == nil {
-		s.log().Warn("connection rejected: plain HTTP is not supported; use HTTPS",
-			"remote_address", r.RemoteAddr,
-		)
+		if s != nil {
+			s.log().Warn("connection rejected: plain HTTP is not supported; use HTTPS",
+				"remote_address", r.RemoteAddr,
+			)
+		}
 		http.Error(w, "plain HTTP is not supported; use HTTPS", http.StatusUpgradeRequired)
 		return nil, fmt.Errorf("plain HTTP connection from %s", r.RemoteAddr)
 	}
@@ -243,6 +249,9 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Session, er
 	conn, err := u.upgradeWebTransport(w, r)
 	if err != nil {
 		return nil, fmt.Errorf("failed to upgrade connection: %w", err)
+	}
+	if s == nil {
+		return newSession(conn, u.TrackMux, func() {}), nil
 	}
 
 	var sess *Session

@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync"
 
+	"github.com/okdaichi/gomoqt/moqt/internal/quicgo"
 	"github.com/okdaichi/gomoqt/transport"
 	quicgo_webtransportgo "github.com/okdaichi/webtransport-go"
 	quicgo_quicgo "github.com/quic-go/quic-go"
@@ -18,13 +19,25 @@ import (
 type Server struct {
 	internalServer *quicgo_webtransportgo.Server
 	initOnce       sync.Once
+
+	ConnContext func(ctx context.Context, conn transport.StreamConn) context.Context
 }
 
 func (s *Server) init() {
 	s.initOnce.Do(func() {
 		if s.internalServer == nil {
+			h3 := &http3.Server{}
+			if s.ConnContext != nil {
+				h3.ConnContext = func(ctx context.Context, conn *quicgo_quicgo.Conn) context.Context {
+					ctx = s.ConnContext(ctx, quicgo.WrapConnection(conn))
+					if ctx == nil {
+						panic("nil context returned by ConnContext")
+					}
+					return ctx
+				}
+			}
 			s.internalServer = &quicgo_webtransportgo.Server{
-				H3: &http3.Server{},
+				H3: h3,
 			}
 		}
 	})

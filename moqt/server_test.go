@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	internalwt "github.com/okdaichi/gomoqt/moqt/internal/webtransportgo"
 	"github.com/okdaichi/gomoqt/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -32,6 +33,44 @@ func TestServer_Init(t *testing.T) {
 	assert.NotNil(t, s.listeners)
 	assert.NotNil(t, s.activeSess)
 	assert.NotNil(t, s.doneChan)
+}
+
+func TestServer_Init_ConfiguresDefaultWebTransportConnContext(t *testing.T) {
+	s := &Server{}
+	s.init()
+
+	wt, ok := s.WebTransportServer.(*internalwt.Server)
+	assert.True(t, ok)
+	assert.NotNil(t, wt.ConnContext)
+}
+
+func TestServer_connContext_AppliesCustomAndInjectsServer(t *testing.T) {
+	type customKey struct{}
+
+	s := &Server{
+		ConnContext: func(ctx context.Context, conn transport.StreamConn) context.Context {
+			return context.WithValue(ctx, customKey{}, "ok")
+		},
+	}
+
+	ctx := s.connContext(context.Background(), &MockStreamConn{})
+
+	assert.Equal(t, "ok", ctx.Value(customKey{}))
+	ctxServer, ok := ctx.Value(moqServerContextKey).(*Server)
+	assert.True(t, ok)
+	assert.Equal(t, s, ctxServer)
+}
+
+func TestServer_connContext_PanicsOnNilCustomContext(t *testing.T) {
+	s := &Server{
+		ConnContext: func(ctx context.Context, conn transport.StreamConn) context.Context {
+			return nil
+		},
+	}
+
+	assert.Panics(t, func() {
+		_ = s.connContext(context.Background(), &MockStreamConn{})
+	})
 }
 
 func TestServer_ServeQUICListener_ShuttingDown(t *testing.T) {
@@ -136,12 +175,22 @@ func TestServer_addRemoveSession_ShutdownCompletes(t *testing.T) {
 	}
 }
 
-func TestUpgrader_Upgrade_RequiresServerInContext(t *testing.T) {
-	u := &Upgrader{}
+func TestUpgrader_Upgrade_WithoutServerContext(t *testing.T) {
+	u := &Upgrader{
+		UpgradeFunc: func(w http.ResponseWriter, r *http.Request) (transport.StreamConn, error) {
+			conn := &MockStreamConn{}
+			conn.On("Context").Return(context.Background())
+			conn.On("AcceptStream", mock.Anything).Return(nil, context.Canceled)
+			conn.On("AcceptUniStream", mock.Anything).Return(nil, context.Canceled)
+			conn.On("CloseWithError", mock.Anything, mock.Anything).Return(nil)
+			return conn, nil
+		},
+	}
 	r := &http.Request{TLS: &tls.ConnectionState{}}
-	_, err := u.Upgrade(&MockHTTPResponseWriter{}, r)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to retrieve server")
+	sess, err := u.Upgrade(&MockHTTPResponseWriter{}, r)
+	assert.NoError(t, err)
+	assert.NotNil(t, sess)
+	_ = sess.CloseWithError(NoError, "")
 }
 
 func TestUpgrader_Upgrade_PlainHTTPRejected(t *testing.T) {
@@ -149,7 +198,7 @@ func TestUpgrader_Upgrade_PlainHTTPRejected(t *testing.T) {
 	u := &Upgrader{}
 
 	r, _ := http.NewRequest(http.MethodGet, "https://example.com/moq", nil)
-	r = r.WithContext(context.WithValue(context.Background(), serverContextKey, s))
+	r = r.WithContext(context.WithValue(context.Background(), moqServerContextKey, s))
 	r.TLS = nil
 	r.RemoteAddr = "127.0.0.1:443"
 
@@ -182,7 +231,7 @@ func TestUpgrader_Upgrade_Success(t *testing.T) {
 	}
 
 	r, _ := http.NewRequest(http.MethodGet, "https://example.com/moq", nil)
-	r = r.WithContext(context.WithValue(context.Background(), serverContextKey, s))
+	r = r.WithContext(context.WithValue(context.Background(), moqServerContextKey, s))
 	r.TLS = &tls.ConnectionState{}
 
 	w := &MockHTTPResponseWriter{}
