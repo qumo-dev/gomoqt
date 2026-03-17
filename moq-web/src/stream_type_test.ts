@@ -20,10 +20,6 @@ Deno.test("Stream", async (t) => {
 	// Test BiStreamTypes constant values
 	await t.step("BiStreamTypes - Constant Values", async (t) => {
 		const cases = {
-			"SessionStreamType should be 0x00": {
-				actual: BiStreamTypes.SessionStreamType,
-				expected: 0x00,
-			},
 			"AnnounceStreamType should be 0x01": {
 				actual: BiStreamTypes.AnnounceStreamType,
 				expected: 0x01,
@@ -49,7 +45,6 @@ Deno.test("Stream", async (t) => {
 
 		await t.step("should have all required properties", () => {
 			const properties = [
-				"SessionStreamType",
 				"AnnounceStreamType",
 				"SubscribeStreamType",
 			];
@@ -59,7 +54,6 @@ Deno.test("Stream", async (t) => {
 		});
 
 		await t.step("all values should be numbers", () => {
-			assertEquals(typeof BiStreamTypes.SessionStreamType, "number");
 			assertEquals(typeof BiStreamTypes.AnnounceStreamType, "number");
 			assertEquals(typeof BiStreamTypes.SubscribeStreamType, "number");
 		});
@@ -91,14 +85,13 @@ Deno.test("Stream", async (t) => {
 		});
 	});
 
-	// Test Stream Type Integration
-	await t.step("Stream Type Integration - Namespace Overlap", () => {
-		// BiStreamTypes and UniStreamTypes can have overlapping values
-		// since they represent different categories of streams
-		assertEquals(BiStreamTypes.SessionStreamType, 0x00);
-		assertEquals(UniStreamTypes.GroupStreamType, 0x00);
-		// This is expected and correct - they are in different namespaces
-	});
+	// // Test Stream Type Integration
+	// await t.step("Stream Type Integration - Namespace Overlap", () => {
+	// 	// BiStreamTypes and UniStreamTypes can have overlapping values
+	// 	// since they represent different categories of streams
+	// 	assertEquals(UniStreamTypes.GroupStreamType, 0x00);
+	// 	// This is expected and correct - they are in different namespaces
+	// });
 
 	// Test switch statement compatibility
 	await t.step(
@@ -106,8 +99,6 @@ Deno.test("Stream", async (t) => {
 		async (t) => {
 			const testBiStreamType = (type: number): string => {
 				switch (type) {
-					case BiStreamTypes.SessionStreamType:
-						return "session";
 					case BiStreamTypes.AnnounceStreamType:
 						return "announce";
 					case BiStreamTypes.SubscribeStreamType:
@@ -128,10 +119,6 @@ Deno.test("Stream", async (t) => {
 
 			await t.step("BiStreamTypes - switch statement cases", async (t) => {
 				const biCases = {
-					"SessionStreamType returns 'session'": {
-						input: BiStreamTypes.SessionStreamType,
-						expected: "session",
-					},
 					"AnnounceStreamType returns 'announce'": {
 						input: BiStreamTypes.AnnounceStreamType,
 						expected: "announce",
