@@ -41,8 +41,7 @@ class MockWebTransport {
 		});
 		const readable = new ReadableStream({
 			start(controller) {
-				// Enqueue mock SessionServerMessage data
-				// Format: versions count (varint) + extensions count (varint)
+				// Enqueue minimal mock setup payload
 				controller.enqueue(new Uint8Array([0x00, 0x00]));
 				controller.close();
 			},
@@ -103,8 +102,7 @@ Deno.test("Client - Constructor with Custom Options", () => {
 	assertEquals(client.options.transportOptions?.requireUnreliable, false);
 });
 
-// Note: dial() tests are skipped because proper mocking of SessionServerMessage
-// would require complex varint encoding. These tests verify Client logic only.
+// Note: dial() tests focus on Client behavior and keep transport payload mocking minimal.
 
 Deno.test("Client - dial() attempts to create session", async () => {
 	const client = new Client();

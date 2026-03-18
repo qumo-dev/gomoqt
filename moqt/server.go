@@ -194,7 +194,11 @@ func (s *Server) ServeQUICConn(conn transport.StreamConn) error {
 
 	s.init()
 
-	switch protocol := conn.TLS().NegotiatedProtocol; protocol {
+	tlsInfo := conn.TLS()
+	if tlsInfo == nil {
+		return fmt.Errorf("connection does not have TLS information; cannot determine protocol")
+	}
+	switch protocol := tlsInfo.NegotiatedProtocol; protocol {
 	case NextProtoH3:
 		return s.WebTransportServer.ServeQUICConn(conn)
 	case NextProtoMOQ:
@@ -232,9 +236,8 @@ func (u *Upgrader) upgradeWebTransport(w http.ResponseWriter, r *http.Request) (
 	return defaultUpgrader.Upgrade(w, r)
 }
 
-// Upgrade upgrades an incoming HTTP request to a WebTransport
-// connection and handles session handshake and setup using the Server's
-// SetupHandler.
+// Upgrade upgrades an incoming HTTP request to a WebTransport session and registers it with the server's session management.
+// It returns the established session or an error if the upgrade fails.
 func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Session, error) {
 	s, _ := r.Context().Value(moqServerContextKey).(*Server)
 
@@ -304,9 +307,7 @@ func (s *Server) ListenAndServe() error {
 	quicConf.EnableStreamResetPartialDelivery = true
 
 	var listenFunc QUICListenFunc
-	if s.ListenFunc != nil {
-		listenFunc = s.ListenFunc
-	} else {
+	if s.ListenFunc == nil {
 		listenFunc = quicgo.ListenAddrEarly
 	}
 	ln, err := listenFunc(s.Addr, tlsConfig, quicConf)
@@ -341,22 +342,20 @@ func (s *Server) ListenAndServeTLS(certFile, keyFile string) error {
 	}
 
 	// Ensure WebTransport required QUIC flags are enabled.
-	quicConf := s.QUICConfig
-	if quicConf == nil {
+	var quicConf *quic.Config
+	if s.QUICConfig == nil {
 		quicConf = &quic.Config{}
 	} else {
-		clone := *quicConf
-		quicConf = &clone
+		quicConf = s.QUICConfig.Clone()
 	}
 	quicConf.EnableDatagrams = true
 	quicConf.EnableStreamResetPartialDelivery = true
 
 	var listenFunc QUICListenFunc
-	if s.ListenFunc != nil {
-		listenFunc = s.ListenFunc
-	} else {
+	if s.ListenFunc == nil {
 		listenFunc = quicgo.ListenAddrEarly
 	}
+
 	ln, err := listenFunc(s.Addr, tlsConfig.Clone(), quicConf)
 	if err != nil {
 		return err
