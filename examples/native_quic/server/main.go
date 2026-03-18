@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/okdaichi/gomoqt/moqt"
-	"github.com/okdaichi/gomoqt/transport"
+	"github.com/quic-go/quic-go"
 )
 
 func main() {
@@ -18,7 +18,7 @@ func main() {
 			Certificates:       []tls.Certificate{generateCert()},
 			InsecureSkipVerify: true, // TODO: Not recommended for production
 		},
-		QUICConfig: &transport.QUICConfig{
+		QUICConfig: &quic.Config{
 			Allow0RTT:       true,
 			EnableDatagrams: true,
 		},

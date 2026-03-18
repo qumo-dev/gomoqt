@@ -14,6 +14,7 @@ import (
 	"github.com/okdaichi/gomoqt/moqt/internal/quicgo"
 	"github.com/okdaichi/gomoqt/moqt/internal/webtransportgo"
 	"github.com/okdaichi/gomoqt/transport"
+	"github.com/quic-go/quic-go"
 )
 
 // ListenAndServe starts a new Server bound to the specified address and TLS configuration and runs it until an error occurs.
@@ -26,7 +27,8 @@ func ListenAndServe(addr string, tlsConfig *tls.Config) error {
 	return server.ListenAndServe()
 }
 
-type QUICListenFunc func(addr string, tlsConfig *tls.Config, quicConfig *transport.QUICConfig) (transport.QUICListener, error)
+type QUICListenFunc func(addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (transport.QUICListener, error)
+
 type WebTransportServer interface {
 	ServeQUICConn(conn transport.StreamConn) error
 	Close() error
@@ -51,7 +53,7 @@ type Server struct {
 	/*
 	 * QUIC configuration
 	 */
-	QUICConfig *transport.QUICConfig
+	QUICConfig *quic.Config
 
 	/*
 	 * MOQ Configuration
@@ -292,9 +294,9 @@ func (s *Server) ListenAndServe() error {
 	}
 
 	// Ensure WebTransport required QUIC flags are enabled.
-	var quicConf *transport.QUICConfig
+	var quicConf *quic.Config
 	if s.QUICConfig == nil {
-		quicConf = &transport.QUICConfig{}
+		quicConf = &quic.Config{}
 	} else {
 		quicConf = s.QUICConfig.Clone()
 	}
@@ -341,7 +343,7 @@ func (s *Server) ListenAndServeTLS(certFile, keyFile string) error {
 	// Ensure WebTransport required QUIC flags are enabled.
 	quicConf := s.QUICConfig
 	if quicConf == nil {
-		quicConf = &transport.QUICConfig{}
+		quicConf = &quic.Config{}
 	} else {
 		clone := *quicConf
 		quicConf = &clone

@@ -6,12 +6,13 @@ import (
 	"net"
 
 	"github.com/okdaichi/gomoqt/transport"
+	"github.com/quic-go/quic-go"
 	quicgo_quicgo "github.com/quic-go/quic-go"
 )
 
 // var _ quic.ListenAddrFunc = ListenAddrEarly
 
-func ListenAddrEarly(addr string, tlsConfig *tls.Config, quicConfig *transport.QUICConfig) (transport.QUICListener, error) {
+func ListenAddrEarly(addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (transport.QUICListener, error) {
 	ln, err := quicgo_quicgo.ListenAddrEarly(addr, tlsConfig, quicConfig)
 	return wrapListener(ln), err
 }

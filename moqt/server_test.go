@@ -11,6 +11,7 @@ import (
 
 	internalwt "github.com/okdaichi/gomoqt/moqt/internal/webtransportgo"
 	"github.com/okdaichi/gomoqt/transport"
+	"github.com/quic-go/quic-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -143,12 +144,12 @@ func TestServer_ListenAndServe_RequiresTLSConfig(t *testing.T) {
 func TestServer_ListenAndServe_ConfiguresDefaultsBeforeListen(t *testing.T) {
 	called := false
 	var gotTLS *tls.Config
-	var gotQUIC *transport.QUICConfig
+	var gotQUIC *quic.Config
 
 	s := &Server{
 		Addr:      "localhost:0",
 		TLSConfig: &tls.Config{},
-		ListenFunc: func(addr string, tlsConfig *tls.Config, quicConfig *transport.QUICConfig) (transport.QUICListener, error) {
+		ListenFunc: func(addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (transport.QUICListener, error) {
 			called = true
 			gotTLS = tlsConfig
 			gotQUIC = quicConfig

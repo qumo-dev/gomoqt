@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/okdaichi/gomoqt/transport"
+	"github.com/quic-go/quic-go"
 )
 
 // BenchmarkBroadcastServer_HighLoad benchmarks a realistic broadcast scenario
@@ -189,7 +189,7 @@ func setupBroadcastServerWithFrameSize(b *testing.B, ctx context.Context, frameS
 			Certificates:       []tls.Certificate{generateTestCert(b)},
 			InsecureSkipVerify: true,
 		},
-		QUICConfig: &transport.QUICConfig{
+		QUICConfig: &quic.Config{
 			Allow0RTT:       true,
 			EnableDatagrams: true,
 		},
