@@ -4,15 +4,8 @@ import (
 	"io"
 )
 
-/*
- * SUBSCRIBE_UPDATE Message {
- *   Subscriber Priority (varint),
- *   Subscriber Ordered (varint),
- *   Subscriber Max Latency (varint),
- *   Start Group (varint),
- *   End Group (varint),
- * }
- */
+// SubscribeUpdateMessage updates the subscriber-side delivery preferences and
+// group range for an existing SUBSCRIBE.
 type SubscribeUpdateMessage struct {
 	SubscriberPriority   uint8
 	SubscriberOrdered    uint8

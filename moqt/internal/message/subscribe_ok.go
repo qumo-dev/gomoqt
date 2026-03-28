@@ -7,16 +7,8 @@ import (
 
 var ErrInvalidSubscribeOkMessageType = errors.New("invalid message type for SubscribeOkMessage")
 
-/*
- * SUBSCRIBE_OK Message {
- *   Type (varint),
- *   Publisher Priority (varint),
- *   Publisher Ordered (varint),
- *   Publisher Max Latency (varint),
- *   Start Group (varint),
- *   End Group (varint),
- * }
- */
+// SubscribeOkMessage is the publisher response to SUBSCRIBE.
+// The first encoded field is a type tag, fixed to 0x0 for SUBSCRIBE_OK.
 type SubscribeOkMessage struct {
 	PublisherPriority   uint8
 	PublisherOrdered    uint8

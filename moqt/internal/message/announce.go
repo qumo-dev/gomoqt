@@ -12,6 +12,9 @@ const (
 
 type AnnounceStatus byte
 
+// AnnounceMessage is sent on an ANNOUNCE stream.
+// Only the broadcast path suffix is carried on the wire; the receiver
+// reconstructs the full broadcast path by prepending the requested prefix.
 type AnnounceMessage struct {
 	AnnounceStatus      AnnounceStatus
 	BroadcastPathSuffix string

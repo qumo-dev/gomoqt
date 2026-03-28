@@ -11,8 +11,9 @@ import (
 func TestSubscribeDropMessage_EncodeDecode(t *testing.T) {
 	t.Run("valid_message", func(t *testing.T) {
 		original := SubscribeDropMessage{
-			SubscribeID: 42,
-			ReasonCode:  3,
+			StartGroup: 42,
+			EndGroup:   43,
+			ErrorCode:  3,
 		}
 
 		var buf bytes.Buffer
@@ -23,14 +24,16 @@ func TestSubscribeDropMessage_EncodeDecode(t *testing.T) {
 		err = decoded.Decode(&buf)
 		require.NoError(t, err)
 
-		assert.Equal(t, original.SubscribeID, decoded.SubscribeID)
-		assert.Equal(t, original.ReasonCode, decoded.ReasonCode)
+		assert.Equal(t, original.StartGroup, decoded.StartGroup)
+		assert.Equal(t, original.EndGroup, decoded.EndGroup)
+		assert.Equal(t, original.ErrorCode, decoded.ErrorCode)
 	})
 
-	t.Run("zero_subscribe_id", func(t *testing.T) {
+	t.Run("zero_values", func(t *testing.T) {
 		original := SubscribeDropMessage{
-			SubscribeID: 0,
-			ReasonCode:  1,
+			StartGroup: 0,
+			EndGroup:   0,
+			ErrorCode:  1,
 		}
 
 		var buf bytes.Buffer
@@ -41,16 +44,18 @@ func TestSubscribeDropMessage_EncodeDecode(t *testing.T) {
 		err = decoded.Decode(&buf)
 		require.NoError(t, err)
 
-		assert.Equal(t, uint64(0), decoded.SubscribeID)
-		assert.Equal(t, uint64(1), decoded.ReasonCode)
+		assert.Equal(t, uint64(0), decoded.StartGroup)
+		assert.Equal(t, uint64(0), decoded.EndGroup)
+		assert.Equal(t, uint64(1), decoded.ErrorCode)
 	})
 
 	t.Run("max_values", func(t *testing.T) {
 		// Max varint value in MOQ (62-bit limit)
 		maxVal := uint64(1<<62) - 1
 		original := SubscribeDropMessage{
-			SubscribeID: maxVal,
-			ReasonCode:  maxVal,
+			StartGroup: maxVal,
+			EndGroup:   maxVal,
+			ErrorCode:  maxVal,
 		}
 
 		var buf bytes.Buffer
@@ -61,8 +66,9 @@ func TestSubscribeDropMessage_EncodeDecode(t *testing.T) {
 		err = decoded.Decode(&buf)
 		require.NoError(t, err)
 
-		assert.Equal(t, maxVal, decoded.SubscribeID)
-		assert.Equal(t, maxVal, decoded.ReasonCode)
+		assert.Equal(t, maxVal, decoded.StartGroup)
+		assert.Equal(t, maxVal, decoded.EndGroup)
+		assert.Equal(t, maxVal, decoded.ErrorCode)
 	})
 }
 
@@ -84,7 +90,7 @@ func TestSubscribeDropMessage_DecodeErrors(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("read_varint_error_for_subscribe_id", func(t *testing.T) {
+	t.Run("read_varint_error_for_type", func(t *testing.T) {
 		var sdm SubscribeDropMessage
 		var buf bytes.Buffer
 		buf.WriteByte(0x01) // length varint = 1
@@ -94,11 +100,11 @@ func TestSubscribeDropMessage_DecodeErrors(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("read_varint_error_for_reason_code", func(t *testing.T) {
+	t.Run("invalid_type", func(t *testing.T) {
 		var sdm SubscribeDropMessage
 		var buf bytes.Buffer
 		buf.WriteByte(0x02) // length varint = 2
-		buf.WriteByte(0x00) // SubscribeID = 0
+		buf.WriteByte(0x00) // invalid type
 		buf.WriteByte(0x80) // invalid varint (incomplete)
 		src := bytes.NewReader(buf.Bytes())
 		err := sdm.Decode(src)
@@ -108,10 +114,12 @@ func TestSubscribeDropMessage_DecodeErrors(t *testing.T) {
 	t.Run("extra_data", func(t *testing.T) {
 		var sdm SubscribeDropMessage
 		var buf bytes.Buffer
-		buf.WriteByte(0x03) // length varint = 3
-		buf.WriteByte(0x01) // SubscribeID = 1
-		buf.WriteByte(0x02) // ReasonCode = 2
-		buf.WriteByte(0xFF) // extra trailing byte
+		buf.WriteByte(0x05) // length varint = 5
+		buf.WriteByte(0x01) // type = 1
+		buf.WriteByte(0x00) // StartGroup = 0
+		buf.WriteByte(0x01) // EndGroup = 1
+		buf.WriteByte(0x02) // ErrorCode = 2
+		buf.WriteByte(0xFF) // extra byte inside the message body
 		src := bytes.NewReader(buf.Bytes())
 		err := sdm.Decode(src)
 		assert.Equal(t, ErrMessageTooShort, err)

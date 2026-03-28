@@ -6,11 +6,19 @@ import (
 
 /*
 * SUBSCRIBE Message {
-*   Subscribe ID (varint),
-*   Broadcast Path (string),
-*   Track Name (string),
-*   Track Priority (varint),
+*   Message Length (varint)
+*   Subscribe ID (varint)
+*   Broadcast Path (string)
+*   Track Name (string)
+*   Subscriber Priority (varint)
+*   Subscriber Ordered (varint)
+*   Subscriber Max Latency (varint)
+*   Start Group (varint)
+*   End Group (varint)
 * }
+*
+* Broadcast Path and Track Name are length-prefixed UTF-8 strings.
+* Start Group and End Group use 0 for the default/latest and unbounded values.
  */
 type SubscribeMessage struct {
 	SubscribeID          uint64

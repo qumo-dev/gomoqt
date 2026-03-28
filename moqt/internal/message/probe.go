@@ -4,10 +4,11 @@ import (
 	"io"
 )
 
-// ProbeMessage is sent on the Probe stream (0x4) to negotiate session parameters
-// including bitrate and other capabilities.
+// ProbeMessage is sent on the Probe stream (0x4).
+// The subscriber sends a target bitrate; the publisher replies with the
+// measured bitrate.
 type ProbeMessage struct {
-	// Bitrate is the current bitrate in bits per second that the sender can support
+	// Bitrate is the target or measured bitrate in bits per second.
 	Bitrate uint64
 }
 
