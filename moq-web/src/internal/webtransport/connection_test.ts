@@ -1,5 +1,5 @@
 import { assertEquals, assertInstanceOf } from "@std/assert";
-import { StreamConn } from "./connection.ts";
+import { WebTransportSession } from "./connection.ts";
 import { StreamConnError } from "./error.ts";
 
 class FailingMockWebTransport {
@@ -13,8 +13,8 @@ class FailingMockWebTransport {
 	}
 }
 
-Deno.test("SessionImpl.openStream maps WebTransportError session source to SessionError", async () => {
-	const session = new StreamConn(
+Deno.test("WebTransportSession.openStream maps session-sourced WebTransportError to StreamConnError", async () => {
+	const session = new WebTransportSession(
 		(new FailingMockWebTransport()) as any,
 	);
 	const [stream, err] = await session.openStream();
@@ -22,7 +22,7 @@ Deno.test("SessionImpl.openStream maps WebTransportError session source to Sessi
 	assertInstanceOf(err, StreamConnError);
 });
 
-Deno.test("SessionImpl.acceptStream returns error when incoming reader yields done", async () => {
+Deno.test("WebTransportSession.acceptStream/acceptUniStream return error when incoming readers are done", async () => {
 	const mock = {
 		incomingBidirectionalStreams: new ReadableStream({
 			start(controller) {
@@ -38,7 +38,7 @@ Deno.test("SessionImpl.acceptStream returns error when incoming reader yields do
 		closed: Promise.resolve({ closeCode: undefined, reason: undefined }),
 	} as any;
 
-	const session = new StreamConn(mock);
+	const session = new WebTransportSession(mock);
 
 	const [s1, e1] = await session.acceptStream();
 	assertEquals(s1, undefined);
@@ -49,7 +49,7 @@ Deno.test("SessionImpl.acceptStream returns error when incoming reader yields do
 	assertInstanceOf(e2, Error);
 });
 
-Deno.test("SessionImpl.openStream returns error when createBidirectionalStream throws Error", async () => {
+Deno.test("WebTransportSession.openStream returns thrown Error from createBidirectionalStream", async () => {
 	const mock = {
 		incomingBidirectionalStreams: new ReadableStream({ start(_c) {} }),
 		incomingUnidirectionalStreams: new ReadableStream({ start(_c) {} }),
@@ -60,14 +60,14 @@ Deno.test("SessionImpl.openStream returns error when createBidirectionalStream t
 		},
 	} as any;
 
-	const session = new StreamConn(mock);
+	const session = new WebTransportSession(mock);
 	const [stream, err] = await session.openStream();
 	assertEquals(stream, undefined);
 	assertInstanceOf(err, Error);
 	assertEquals(err?.message, "connection failed");
 });
 
-Deno.test("SessionImpl.openStream handles non-session WebTransportError", async () => {
+Deno.test("WebTransportSession.openStream preserves non-session WebTransportError", async () => {
 	const mock = {
 		incomingBidirectionalStreams: new ReadableStream({ start(_c) {} }),
 		incomingUnidirectionalStreams: new ReadableStream({ start(_c) {} }),
@@ -79,13 +79,13 @@ Deno.test("SessionImpl.openStream handles non-session WebTransportError", async 
 		},
 	} as any;
 
-	const session = new StreamConn(mock);
+	const session = new WebTransportSession(mock);
 	const [stream, err] = await session.openStream();
 	assertEquals(stream, undefined);
 	assertEquals((err as any).source, "stream");
 });
 
-Deno.test("SessionImpl.openUniStream returns error when createUnidirectionalStream throws", async () => {
+Deno.test("WebTransportSession.openUniStream returns thrown error from createUnidirectionalStream", async () => {
 	const mock = {
 		incomingBidirectionalStreams: new ReadableStream({ start(_c) {} }),
 		incomingUnidirectionalStreams: new ReadableStream({ start(_c) {} }),
@@ -96,14 +96,14 @@ Deno.test("SessionImpl.openUniStream returns error when createUnidirectionalStre
 		},
 	} as any;
 
-	const session = new StreamConn(mock);
+	const session = new WebTransportSession(mock);
 	const [stream, err] = await session.openUniStream();
 	assertEquals(stream, undefined);
 	assertInstanceOf(err, Error);
 	assertEquals(err?.message, "uni stream failed");
 });
 
-Deno.test("SessionImpl.openStream succeeds with valid bidirectional stream", async () => {
+Deno.test("WebTransportSession.openStream returns Stream with readable/writable wrappers", async () => {
 	const mockWritableStream = {
 		getWriter() {
 			return {
@@ -139,13 +139,16 @@ Deno.test("SessionImpl.openStream succeeds with valid bidirectional stream", asy
 		},
 	} as any;
 
-	const session = new StreamConn(mock);
+	const session = new WebTransportSession(mock);
 	const [stream, err] = await session.openStream();
 	assertEquals(err, undefined);
-	assertEquals(typeof stream?.id, "bigint");
+	assertEquals(typeof stream?.readable, "object");
+	assertEquals(typeof stream?.writable, "object");
+	assertEquals(typeof stream?.readable?.cancel, "function");
+	assertEquals(typeof stream?.writable?.close, "function");
 });
 
-Deno.test("SessionImpl.openUniStream succeeds with valid unidirectional stream", async () => {
+Deno.test("WebTransportSession.openUniStream returns SendStream wrapper", async () => {
 	const mockWritableStream = {
 		getWriter() {
 			return {
@@ -169,13 +172,15 @@ Deno.test("SessionImpl.openUniStream succeeds with valid unidirectional stream",
 		},
 	} as any;
 
-	const session = new StreamConn(mock);
+	const session = new WebTransportSession(mock);
 	const [stream, err] = await session.openUniStream();
 	assertEquals(err, undefined);
-	assertEquals(typeof stream?.id, "bigint");
+	assertEquals(typeof stream?.close, "function");
+	assertEquals(typeof stream?.cancel, "function");
+	assertEquals(typeof stream?.closed, "function");
 });
 
-Deno.test("SessionImpl.close cancels readers", async () => {
+Deno.test("WebTransportSession.close closes transport", async () => {
 	let closeCalled = false;
 	const mock = {
 		incomingBidirectionalStreams: new ReadableStream({ start(_c) {} }),
@@ -187,12 +192,12 @@ Deno.test("SessionImpl.close cancels readers", async () => {
 		},
 	} as any;
 
-	const session = new StreamConn(mock);
+	const session = new WebTransportSession(mock);
 	session.close({ closeCode: 0, reason: "test" });
 	assertEquals(closeCalled, true);
 });
 
-Deno.test("SessionImpl.ready and closed return promises from underlying transport", async () => {
+Deno.test("WebTransportSession.ready and closed proxy underlying transport promises", async () => {
 	const mock = {
 		incomingBidirectionalStreams: new ReadableStream({ start(_c) {} }),
 		incomingUnidirectionalStreams: new ReadableStream({ start(_c) {} }),
@@ -200,7 +205,7 @@ Deno.test("SessionImpl.ready and closed return promises from underlying transpor
 		closed: Promise.resolve({ closeCode: 0, reason: "closed" }),
 	} as any;
 
-	const session = new StreamConn(mock);
+	const session = new WebTransportSession(mock);
 	await session.ready;
 	const closeInfo = await session.closed;
 	assertEquals(closeInfo.closeCode, 0);

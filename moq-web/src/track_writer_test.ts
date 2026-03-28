@@ -12,7 +12,7 @@ Deno.test("TrackWriter", async (t) => {
 		"TrackWriter.openGroup succeeds and writes group stream type and msg",
 		async () => {
 			const [ctx] = withCancelCause(background());
-			const stream = new MockStream({ id: 1n });
+			const stream = new MockStream({});
 			const subscribe = new SubscribeMessage({
 				subscribeId: 99,
 				broadcastPath: "/test",
@@ -22,7 +22,6 @@ Deno.test("TrackWriter", async (t) => {
 			const rss = new ReceiveSubscribeStream(ctx, stream, subscribe);
 			const writtenData: Uint8Array[] = [];
 			const mockWritable = new MockSendStream({
-				id: 77n,
 				write: spy(async (p: Uint8Array) => {
 					writtenData.push(new Uint8Array(p));
 					return [p.length, undefined] as [number, Error | undefined];
@@ -39,7 +38,7 @@ Deno.test("TrackWriter", async (t) => {
 		"TrackWriter.openGroup handles failing openUniStream",
 		async () => {
 			const [ctx] = withCancelCause(background());
-			const stream = new MockStream({ id: 2n });
+			const stream = new MockStream({});
 			const subscribe = new SubscribeMessage({
 				subscribeId: 99,
 				broadcastPath: "/test",
@@ -59,7 +58,7 @@ Deno.test("TrackWriter", async (t) => {
 		"TrackWriter.closeWithError cancels all groups and closes subscribe stream with error",
 		async () => {
 			const [ctx] = withCancelCause(background());
-			const stream = new MockStream({ id: 3n });
+			const stream = new MockStream({});
 			const subscribe = new SubscribeMessage({
 				subscribeId: 21,
 				broadcastPath: "/t",
@@ -69,7 +68,6 @@ Deno.test("TrackWriter", async (t) => {
 			const rss = new ReceiveSubscribeStream(ctx, stream, subscribe);
 			const cancelCalls: number[] = [];
 			const mockWritable = new MockSendStream({
-				id: 200n,
 				cancel: spy(async (code: number) => {
 					cancelCalls.push(code);
 				}),
@@ -93,7 +91,6 @@ Deno.test("TrackWriter", async (t) => {
 		async () => {
 			const [ctx] = withCancelCause(background());
 			const mockWritable = new MockSendStream({
-				id: 1n,
 				write: spy(async (_p: Uint8Array) => {
 					return [0, new Error("writeInfo failed")] as [
 						number,
@@ -101,7 +98,7 @@ Deno.test("TrackWriter", async (t) => {
 					];
 				}),
 			});
-			const stream = new MockStream({ id: 1n, writable: mockWritable });
+			const stream = new MockStream({ writable: mockWritable });
 			const subscribe = new SubscribeMessage({
 				subscribeId: 0,
 				broadcastPath: "/test/",
@@ -118,7 +115,6 @@ Deno.test("TrackWriter", async (t) => {
 					return [
 						new SendStream({
 							stream: new WritableStream({ write(_c) {} }),
-							streamId: 1n,
 						}),
 						undefined,
 					];
@@ -135,7 +131,7 @@ Deno.test("TrackWriter", async (t) => {
 		"TrackWriter.openGroup returns error when writeVarint fails",
 		async () => {
 			const [ctx] = withCancelCause(background());
-			const stream = new MockStream({ id: 2n });
+			const stream = new MockStream({});
 			const subscribe = new SubscribeMessage({
 				subscribeId: 0,
 				broadcastPath: "/test/",
@@ -156,7 +152,7 @@ Deno.test("TrackWriter", async (t) => {
 			});
 
 			const openUni = async () =>
-				[new SendStream({ stream: writable, streamId: 1n }), undefined] as [
+				[new SendStream({ stream: writable }), undefined] as [
 					SendStream,
 					undefined,
 				];

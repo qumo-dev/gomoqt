@@ -29,8 +29,8 @@ import { BiStreamTypes, UniStreamTypes } from "./stream_type.ts";
 import { Queue } from "./internal/queue.ts";
 import type { SubscribeID, TrackName } from "./alias.ts";
 
-export interface SessionOptions {
-	webtransport: StreamConn;
+export interface SessionInit {
+	transport: StreamConn;
 
 	mux?: TrackMux;
 }
@@ -52,8 +52,8 @@ export class Session {
 		Queue<[ReceiveStream, GroupMessage]>
 	> = new Map();
 
-	constructor(options: SessionOptions) {
-		this.#webtransport = options.webtransport;
+	constructor(options: SessionInit) {
+		this.#webtransport = options.transport;
 		this.mux = options.mux ?? DefaultTrackMux;
 		const [ctx, cancel] = withCancelCause(background());
 		this.#webtransport.closed.then((info) => {

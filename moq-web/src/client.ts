@@ -50,7 +50,7 @@ export class Client {
 				this.options.transportOptions,
 			);
 			const session = new Session({
-				webtransport: webtransport,
+				transport: webtransport,
 				mux,
 			});
 			await session.ready;

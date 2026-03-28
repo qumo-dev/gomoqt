@@ -13,7 +13,7 @@ function setupWriter() {
 			state.streamClosed = true;
 		},
 	});
-	const writer = new SendStream({ stream: writableStream, streamId: 1n });
+	const writer = new SendStream({ stream: writableStream });
 	return { writer, writtenData, state };
 }
 
@@ -93,7 +93,7 @@ Deno.test("SendStream", async (t) => {
 				abortReason = reason;
 			},
 		});
-		const writer = new SendStream({ stream: writableStream, streamId: 1n });
+		const writer = new SendStream({ stream: writableStream });
 
 		const error = new WebTransportStreamError({
 			source: "stream",
@@ -112,18 +112,13 @@ Deno.test("SendStream", async (t) => {
 		}
 	});
 
-	await t.step("id - should return stream id", () => {
-		const { writer } = setupWriter();
-		assertEquals(writer.id, 1n);
-	});
-
 	await t.step("write - should return error on stream failure", async () => {
 		const writableStream = new WritableStream<Uint8Array>({
 			write(_chunk) {
 				throw new Error("Write failed");
 			},
 		});
-		const writer = new SendStream({ stream: writableStream, streamId: 1n });
+		const writer = new SendStream({ stream: writableStream });
 
 		const data = new Uint8Array([1, 2, 3]);
 		const [n, err] = await writer.write(data);
@@ -142,7 +137,7 @@ Deno.test("SendStream", async (t) => {
 					return Promise.reject({ source: "stream", streamErrorCode: null });
 				},
 			});
-			const s = new SendStream({ stream: writable, streamId: 1n });
+			const s = new SendStream({ stream: writable });
 
 			const [n, err] = await s.write(new Uint8Array([1, 2, 3]));
 			assertEquals(n, 0);
@@ -165,7 +160,7 @@ Deno.test("SendStream", async (t) => {
 					return Promise.reject({ source: "stream", streamErrorCode: 123 });
 				},
 			});
-			const s = new SendStream({ stream: writable, streamId: 2n });
+			const s = new SendStream({ stream: writable });
 
 			const [n, err] = await s.write(new Uint8Array([1, 2, 3]));
 			assertEquals(n, 0);
@@ -187,7 +182,7 @@ Deno.test("SendStream", async (t) => {
 				return Promise.resolve();
 			},
 		});
-		const s = new SendStream({ stream: writable, streamId: 3n });
+		const s = new SendStream({ stream: writable });
 		await s.cancel(1);
 		const [n, err] = await s.write(new Uint8Array([1]));
 		assertEquals(n, 0);

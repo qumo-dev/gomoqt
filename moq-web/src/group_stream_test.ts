@@ -18,7 +18,6 @@ Deno.test("GroupWriter", async (t) => {
 			const buf = new Buffer(new ArrayBuffer(0));
 			const writeSpy = spy(buf.write.bind(buf));
 			const writer: SendStream = {
-				id: 1n,
 				write: writeSpy,
 				close: async () => {},
 				cancel: async (_code: number) => {},
@@ -46,7 +45,6 @@ Deno.test("GroupWriter", async (t) => {
 		const [ctx] = withCancelCause(background());
 		// failure writer that always returns an error
 		const writer: SendStream = {
-			id: 1n,
 			write: spy(async (_p: Uint8Array) => [0, new Error("fail")]),
 			close: async () => {},
 			cancel: async (_code: number) => {},
@@ -67,7 +65,6 @@ Deno.test("GroupWriter", async (t) => {
 			const [ctx] = withCancelCause(background());
 			let closeCalls = 0;
 			const writer: SendStream = {
-				id: 2n,
 				write: async (p: Uint8Array) => [p.length, undefined],
 				close: spy(async () => {
 					closeCalls++;
@@ -93,7 +90,6 @@ Deno.test("GroupWriter", async (t) => {
 					return Promise.resolve();
 				},
 			}),
-			streamId: 1n,
 		});
 		const groupMsg = new GroupMessage({ sequence: 1 });
 		const gw = new GroupWriter(background(), writer, groupMsg);
@@ -110,7 +106,6 @@ Deno.test("GroupWriter", async (t) => {
 			await new Promise((r) => setTimeout(r, 0));
 			let closeCalls = 0;
 			const writer: SendStream = {
-				id: 5n,
 				write: async (p: Uint8Array) => [p.length, undefined],
 				close: spy(async () => {
 					closeCalls++;
@@ -133,7 +128,6 @@ Deno.test("GroupWriter", async (t) => {
 			await new Promise((r) => setTimeout(r, 0));
 			const cancelCalls: number[] = [];
 			const writer: SendStream = {
-				id: 6n,
 				write: async (p: Uint8Array) => [p.length, undefined],
 				close: async () => {},
 				cancel: spy(async (code: number) => {
@@ -164,7 +158,6 @@ Deno.test("GroupReader", async (t) => {
 			const bufSrc = new Buffer(new ArrayBuffer(0));
 			bufSrc.write(data);
 			const rs: ReceiveStream = {
-				id: 8n,
 				read: spy(bufSrc.read.bind(bufSrc)),
 				cancel: async (_code: number) => {},
 				closed: () => new Promise<void>(() => {}),
@@ -186,7 +179,6 @@ Deno.test("GroupReader", async (t) => {
 		const [ctx] = withCancelCause(background());
 		const cancelCalls: number[] = [];
 		const rs: ReceiveStream = {
-			id: 4n,
 			read: async () => [0, new EOFError()],
 			cancel: spy(async (code: number) => {
 				cancelCalls.push(code);
@@ -206,7 +198,6 @@ Deno.test("GroupReader", async (t) => {
 			cancelFunc(new Error("already canceled"));
 			const cancelCalls: number[] = [];
 			const rs: ReceiveStream = {
-				id: 7n,
 				read: async () => [0, new EOFError()],
 				cancel: spy(async (code: number) => {
 					cancelCalls.push(code);
@@ -239,7 +230,7 @@ Deno.test("GroupReader", async (t) => {
 			},
 		});
 
-		const reader = new ReceiveStream({ stream: readable, streamId: 1n });
+		const reader = new ReceiveStream({ stream: readable });
 		const gr = new GroupReader(
 			background(),
 			reader,
@@ -264,7 +255,7 @@ Deno.test("GroupReader", async (t) => {
 				},
 			});
 
-			const reader = new ReceiveStream({ stream: readable, streamId: 1n });
+			const reader = new ReceiveStream({ stream: readable });
 			const gr = new GroupReader(
 				background(),
 				reader,
@@ -302,7 +293,6 @@ Deno.test("GroupReader", async (t) => {
 			const bufSrc = new Buffer(new ArrayBuffer(0));
 			bufSrc.write(data);
 			const rs: ReceiveStream = {
-				id: 9n,
 				read: spy(bufSrc.read.bind(bufSrc)),
 				cancel: async (_code: number) => {},
 				closed: () => new Promise<void>(() => {}),
@@ -334,7 +324,6 @@ Deno.test("GroupReader", async (t) => {
 
 	await t.step("readFrame returns EOFError when stream closes immediately", async () => {
 		const rs: ReceiveStream = {
-			id: 42n,
 			read: spy(async () => [0, new EOFError()]),
 			cancel: async (_code: number) => {},
 			closed: () => new Promise<void>(() => {}),
@@ -361,7 +350,6 @@ Deno.test("GroupReader", async (t) => {
 		const bufSrc = new Buffer(new ArrayBuffer(0));
 		bufSrc.write(data);
 		const rs: ReceiveStream = {
-			id: 99n,
 			read: spy(bufSrc.read.bind(bufSrc)),
 			cancel: async (_code: number) => {},
 			closed: () => new Promise<void>(() => {}),

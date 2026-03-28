@@ -15,7 +15,7 @@ function setupReader(data: Uint8Array[]) {
 			}
 		},
 	});
-	const reader = new ReceiveStream({ stream: readableStream, streamId: 1n });
+	const reader = new ReceiveStream({ stream: readableStream });
 	return { reader };
 }
 
@@ -102,11 +102,6 @@ Deno.test("ReceiveStream", async (t) => {
 		assertEquals(buf2, new Uint8Array([3, 4, 5]));
 	});
 
-	await t.step("id - should return stream id", () => {
-		const { reader } = setupReader([]);
-		assertEquals(reader.id, 1n);
-	});
-
 	await t.step("cancel - should cancel the stream", async () => {
 		let cancelReason: unknown = undefined;
 		const readableStream = new ReadableStream<Uint8Array>({
@@ -114,7 +109,7 @@ Deno.test("ReceiveStream", async (t) => {
 				cancelReason = reason;
 			},
 		});
-		const reader = new ReceiveStream({ stream: readableStream, streamId: 1n });
+		const reader = new ReceiveStream({ stream: readableStream });
 
 		const code = 1;
 
@@ -155,7 +150,7 @@ Deno.test("ReceiveStream", async (t) => {
 					return Promise.reject({ source: "stream", streamErrorCode: null });
 				},
 			});
-			const r = new ReceiveStream({ stream: readable, streamId: 1n });
+			const r = new ReceiveStream({ stream: readable });
 
 			const p = new Uint8Array(4);
 			const [n, err] = await r.read(p);
@@ -175,7 +170,7 @@ Deno.test("ReceiveStream", async (t) => {
 					return Promise.resolve();
 				},
 			});
-			const r = new ReceiveStream({ stream: readable, streamId: 2n });
+			const r = new ReceiveStream({ stream: readable });
 			await r.cancel(1);
 
 			const p = new Uint8Array(4);
