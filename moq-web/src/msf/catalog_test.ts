@@ -1,11 +1,16 @@
 import {
 	applyCatalogDelta,
 	decodeLocation,
+	effectiveNamespace,
+	parseTrack,
 	parseCatalog,
 	parseCatalogDelta,
+	stringifyCatalog,
 	validateCatalog,
+	validateTrack,
 	validateEventTimelineRecord,
 	ValidationError,
+	trackId,
 } from "./mod.ts";
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 
@@ -103,6 +108,79 @@ Deno.test("decodeLocation requires exactly two numeric fields", () => {
 	assertThrows(() => decodeLocation([1]), Error, "exactly 2 items");
 	assertThrows(() => decodeLocation([1, "x"]), Error, "must be numbers");
 	assertEquals(decodeLocation([5, 9]), { groupId: 5, objectId: 9 });
+});
+
+Deno.test("catalog helpers cover namespace and serialization branches", () => {
+	assertEquals(effectiveNamespace({ namespace: "ns" }, "fallback"), "ns");
+	assertEquals(effectiveNamespace({}, "fallback"), "fallback");
+	assertEquals(effectiveNamespace({}, undefined), "\u0000catalog");
+	assertEquals(trackId({ name: "v" }, "fallback"), "fallback|v");
+
+	const parsedTrack = parseTrack(
+		{
+			name: "clip",
+			packaging: "cmaf",
+			extra: 1,
+		},
+	);
+	assertEquals(parsedTrack.extraFields, { extra: 1 });
+
+	assertEquals(
+		stringifyCatalog({
+			version: 2,
+			generatedAt: 10,
+			isComplete: true,
+			tracks: [parsedTrack],
+			extraFields: { hello: "world" },
+		}),
+		JSON.stringify({
+			hello: "world",
+			version: 2,
+			generatedAt: 10,
+			isComplete: true,
+			tracks: [{ extra: 1, name: "clip", packaging: "cmaf", extraFields: { extra: 1 } }],
+		}),
+	);
+});
+
+Deno.test("validateTrack covers packaging-specific validation branches", () => {
+	assertEquals(
+		validateTrack({ name: "t", packaging: "loc", isLive: true, trackDuration: 1 }, "t"),
+		["t: trackDuration must not be present when isLive is true"],
+	);
+	assertEquals(
+		validateTrack(
+			{
+				name: "e",
+				packaging: "eventtimeline",
+				mimeType: "application/json",
+				depends: ["base"],
+			},
+			"tracks[0]",
+		),
+		[
+			"tracks[0]: eventType is required for eventtimeline tracks",
+		],
+	);
+	assertEquals(
+		validateTrack(
+			{ name: "m", packaging: "mediatimeline", eventType: "x", mimeType: "text/plain" },
+			"tracks[0]",
+		),
+		[
+			"tracks[0]: eventType must not be set for mediatimeline tracks",
+			"tracks[0]: mediatimeline tracks must use mimeType application/json",
+			"tracks[0]: mediatimeline tracks must declare depends",
+		],
+	);
+	assertEquals(
+		validateTrack({ name: "l", packaging: "loc", isLive: false }, "tracks[0]"),
+		[],
+	);
+	assertEquals(
+		validateTrack({ name: "d", packaging: "cmaf", eventType: "x" }, "tracks[0]"),
+		["tracks[0]: eventType must only be set for eventtimeline tracks"],
+	);
 });
 
 Deno.test("validateEventTimelineRecord enforces selector and payload", async () => {
