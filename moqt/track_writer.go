@@ -1,22 +1,24 @@
 package moqt
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"sync/atomic"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
-	"github.com/okdaichi/gomoqt/quic"
 )
 
-func newTrackWriter(path BroadcastPath, name TrackName,
+func newTrackWriter(
+	broadcastPath BroadcastPath,
+	trackName TrackName,
 	subscribeStream *receiveSubscribeStream,
-	openUniStreamFunc func() (quic.SendStream, error),
+	openUniStreamFunc func() (SendStream, error),
 	onCloseTrackFunc func(),
 ) *TrackWriter {
 	track := &TrackWriter{
-		BroadcastPath:          path,
-		TrackName:              name,
+		BroadcastPath:          broadcastPath,
+		TrackName:              trackName,
 		receiveSubscribeStream: subscribeStream,
 		activeGroups:           make(map[*GroupWriter]struct{}),
 		openUniStreamFunc:      openUniStreamFunc,
@@ -28,12 +30,12 @@ func newTrackWriter(path BroadcastPath, name TrackName,
 
 // TrackWriter writes groups for a published track.
 // It manages the lifecycle of active groups for that track.
-// The TrackWriter provides methods to open group writers and to inspect the track configuration.
+// The TrackWriter provides output-side methods to send track data.
 type TrackWriter struct {
 	BroadcastPath BroadcastPath
 	TrackName     TrackName
 
-	*receiveSubscribeStream
+	receiveSubscribeStream *receiveSubscribeStream
 
 	groupMapMu   sync.Mutex
 	activeGroups map[*GroupWriter]struct{}
@@ -48,7 +50,7 @@ type TrackWriter struct {
 	// groupSequence is atomically incremented for each OpenGroup call
 	groupSequence atomic.Uint64
 
-	openUniStreamFunc func() (quic.SendStream, error)
+	openUniStreamFunc func() (SendStream, error)
 
 	onCloseTrackFunc func()
 }
@@ -158,6 +160,30 @@ func (s *TrackWriter) SkipGroups(n uint64) {
 	s.groupSequence.Add(n)
 }
 
+func (s *TrackWriter) Context() context.Context {
+	return s.receiveSubscribeStream.Context()
+}
+
+func (s *TrackWriter) WriteInfo(info Info) error {
+	return s.receiveSubscribeStream.writeInfo(info)
+}
+
+func (s *TrackWriter) TrackConfig() *TrackConfig {
+	if s.receiveSubscribeStream == nil {
+		return &TrackConfig{}
+	}
+	return s.receiveSubscribeStream.TrackConfig()
+}
+
+func (s *TrackWriter) Updated() <-chan struct{} {
+	if s.receiveSubscribeStream == nil {
+		ch := make(chan struct{})
+		close(ch)
+		return ch
+	}
+	return s.receiveSubscribeStream.Updated()
+}
+
 // openGroupWithSequence is the internal implementation for opening a group with a specific sequence.
 func (s *TrackWriter) openGroupWithSequence(seq GroupSequence) (*GroupWriter, error) {
 	// Avoid accessing s.ctx directly; it can be nil if the receiveSubscribeStream
@@ -185,7 +211,7 @@ func (s *TrackWriter) openGroupWithSequence(seq GroupSequence) (*GroupWriter, er
 
 	stream, err := s.openUniStreamFunc()
 	if err != nil {
-		var appErr *quic.ApplicationError
+		var appErr *ApplicationError
 		if errors.As(err, &appErr) {
 			sessErr := &SessionError{
 				ApplicationError: appErr,
@@ -197,28 +223,28 @@ func (s *TrackWriter) openGroupWithSequence(seq GroupSequence) (*GroupWriter, er
 
 	err = message.StreamTypeGroup.Encode(stream)
 	if err != nil {
-		var strErr *quic.StreamError
+		var strErr *StreamError
 		if errors.As(err, &strErr) {
 			return nil, &GroupError{StreamError: strErr}
 		}
 
-		strErrCode := quic.StreamErrorCode(InternalGroupErrorCode)
+		strErrCode := StreamErrorCode(InternalGroupErrorCode)
 		stream.CancelWrite(strErrCode)
 
 		return nil, err
 	}
 
 	err = message.GroupMessage{
-		SubscribeID:   uint64(s.subscribeID),
+		SubscribeID:   uint64(s.receiveSubscribeStream.subscribeID),
 		GroupSequence: uint64(seq),
 	}.Encode(stream)
 	if err != nil {
-		var strErr *quic.StreamError
+		var strErr *StreamError
 		if errors.As(err, &strErr) {
 			return nil, &GroupError{StreamError: strErr}
 		}
 
-		strErrCode := quic.StreamErrorCode(InternalGroupErrorCode)
+		strErrCode := StreamErrorCode(InternalGroupErrorCode)
 		stream.CancelWrite(strErrCode)
 
 		return nil, err

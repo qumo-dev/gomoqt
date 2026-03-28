@@ -11,7 +11,7 @@ Deno.test("TrackReader", async (t) => {
 		"TrackReader.acceptGroup returns a group or error on empty dequeue",
 		async () => {
 			const [ctx] = withCancelCause(background());
-			const stream = new MockStream({ id: 1n });
+			const stream = new MockStream({});
 			const subscribe = new SubscribeMessage({
 				subscribeId: 33,
 				broadcastPath: "/test",
@@ -34,7 +34,7 @@ Deno.test("TrackReader", async (t) => {
 		"TrackReader.update proxies to subscribeStream update and readInfo returns info",
 		async () => {
 			const [ctx] = withCancelCause(background());
-			const stream = new MockStream({ id: 2n });
+			const stream = new MockStream({});
 			const subscribe = new SubscribeMessage({
 				subscribeId: 21,
 				broadcastPath: "/test",
@@ -58,7 +58,7 @@ Deno.test("TrackReader", async (t) => {
 		"TrackReader.acceptGroup returns error when context is cancelled",
 		async () => {
 			const [ctx, cancel] = withCancelCause(background());
-			const stream = new MockStream({ id: 3n });
+			const stream = new MockStream({});
 			const subscribe = new SubscribeMessage({
 				subscribeId: 44,
 				broadcastPath: "/test",
@@ -85,7 +85,7 @@ Deno.test("TrackReader", async (t) => {
 		"TrackReader.acceptGroup returns GroupReader when group is available",
 		async () => {
 			const [ctx] = withCancelCause(background());
-			const stream = new MockStream({ id: 4n });
+			const stream = new MockStream({});
 			const subscribe = new SubscribeMessage({
 				subscribeId: 55,
 				broadcastPath: "/test",
@@ -99,7 +99,7 @@ Deno.test("TrackReader", async (t) => {
 			const tr = new TrackReader("/test", "name", sss, queue, onClose);
 
 			// Add a group to the queue
-			const mockReceiveStream = new MockReceiveStream({ id: 100n });
+			const mockReceiveStream = new MockReceiveStream({});
 			const groupMsg = new GroupMessage({
 				subscribeId: 55,
 				sequence: 1,
@@ -114,7 +114,7 @@ Deno.test("TrackReader", async (t) => {
 
 	await t.step("TrackReader.closeWithError calls onCloseFunc", async () => {
 		const [ctx] = withCancelCause(background());
-		const stream = new MockStream({ id: 5n });
+		const stream = new MockStream({});
 		const subscribe = new SubscribeMessage({
 			subscribeId: 66,
 			broadcastPath: "/test",
@@ -136,7 +136,7 @@ Deno.test("TrackReader", async (t) => {
 
 	await t.step("TrackReader.trackConfig returns correct config", () => {
 		const [ctx] = withCancelCause(background());
-		const stream = new MockStream({ id: 6n });
+		const stream = new MockStream({});
 		const subscribe = new SubscribeMessage({
 			subscribeId: 77,
 			broadcastPath: "/test",
@@ -154,7 +154,7 @@ Deno.test("TrackReader", async (t) => {
 
 	await t.step("TrackReader.context returns subscribe stream context", () => {
 		const [ctx] = withCancelCause(background());
-		const stream = new MockStream({ id: 7n });
+		const stream = new MockStream({});
 		const subscribe = new SubscribeMessage({
 			subscribeId: 88,
 			broadcastPath: "/test",

@@ -1,103 +1,91 @@
-# internal Package
+# `moqt/internal`
 
 ## Overview
 
-The `internal` package provides the core implementation details for the MOQT
-(Media Over QUIC Transfork) protocol. It contains the low-level components that
-power the public API exposed through the parent `moqt` package. Following Go's
-convention, this package is only accessible to its parent package and sibling
-packages, ensuring implementation details remain hidden from external consumers.
+This directory contains **internal implementation details** used by the public
+`moqt` package. It is intentionally split into subpackages, not a single
+top-level `internal` Go package.
 
-## Responsibilities
+Current layout:
 
-- Implementing the low-level protocol interactions defined in the MOQT
-  specification
-- Managing session establishment and maintenance
-- Handling message encoding and decoding for all MOQT message types
-- Providing transport abstractions for QUIC connections
-- Implementing error handling and propagation
-- Supporting version negotiation and protocol compatibility
+- `message`: binary message/stream-type codecs used by MOQT control/data paths
+- `quicgo`: adapter layer from `quic-go` types to `transport` interfaces
+- `webtransportgo`: adapter layer from `okdaichi/webtransport-go` types to
+  `transport` interfaces
 
-## Key Interfaces and Components
+Because this code is under Go's `internal` directory, it is available only to
+code within the module tree and is not part of the external API contract.
 
-### Session
+## Subpackages
 
-The `Session` struct represents an established MOQT session and manages the
-underlying connection, streams, and state. It handles the sending and receiving
-of various MOQT messages and provides methods for track subscription,
-announcements, and data transmission.
+### `message`
 
-### message package
+Implements low-level wire helpers and message types used by the higher-level
+`moqt` package.
 
-The `message` subpackage implements all the message types defined in the MOQT
-specification, including:
+- Varint/length-prefixed helpers (`Read*`, `Write*`, `*Len`)
+- Stream type codec (`StreamTypeSession`, `StreamTypeAnnounce`,
+  `StreamTypeSubscribe`, `StreamTypeGroup`)
+- Message structs and encode/decode logic, including:
+  - `AnnounceMessage`
+  - `AnnounceInitMessage`
+  - `AnnouncePleaseMessage`
+  - `SubscribeMessage`
+  - `SubscribeOkMessage`
+  - `SubscribeUpdateMessage`
+  - `SessionUpdateMessage`
+  - `GroupMessage`
 
-- `SessionClientMessage`/`SessionServerMessage` - For session establishment
-- `AnnounceMessage`/`AnnouncePleaseMessage` - For track announcements
-- `FrameMessage` - For media data transmission
-- `GroupMessage` - For grouping frames
-- `InfoMessage`/`InfoRequestMessage` - For track information
+### `quicgo`
 
-### protocol package
+Wraps `github.com/quic-go/quic-go` connections/streams/listeners behind the
+project's `transport` interfaces.
 
-The `protocol` package defines protocol constants, including version identifiers
-like `Draft01`, `Draft02`, `Draft03`, and `Develop`.
+Main responsibilities:
 
-### transport package
+- Dial/listen helpers (`DialAddrEarly`, `ListenAddrEarly`)
+- Connection wrapper (`WrapConnection`) for `transport.StreamConn`
+- Stream wrappers for `transport.Stream`, `transport.SendStream`, and
+  `transport.ReceiveStream`
 
-The `transport` package provides abstractions for the underlying QUIC transport,
-including connection management and stream handling.
+### `webtransportgo`
 
-## Interaction with Other Packages
+Wraps `github.com/okdaichi/webtransport-go` sessions/streams so the rest of the
+code can keep using `transport` interfaces regardless of backend transport.
 
-### Dependencies (packages this package depends on)
+Main responsibilities:
 
-- `github.com/quic-go/quic-go`: Used for the underlying QUIC implementation
-- `github.com/quic-go/quic-go/quicvarint`: Used for variable-length integer
-  encoding/decoding
-- `golang.org/x/exp/slog`: Used for structured logging
-- Standard Go packages: `context`, `sync`, `errors`, `bytes`, etc.
+- Client dialer wrapper (`Dialer.Dial`)
+- Server/upgrader wrappers (`Server`, `Upgrader`)
+- Session/stream wrappers to `transport.StreamConn` and related stream
+  interfaces
+- Optional `ConnContext` bridge in `Server` for wiring connection context from
+  HTTP/3+QUIC into higher layers
 
-### Dependents (packages that depend on this package)
+## Relationship to `moqt`
 
-- `moqt` (parent package): Uses the internal implementation to provide the
-  public API
-- Sibling packages: May access internal functionality as needed
+The public API and session behavior live in `moqt/*.go`. Those files import
+`moqt/internal/...` to:
 
-## Implementation Notes
+- encode/decode MOQT messages,
+- abstract over QUIC vs WebTransport connection backends,
+- keep backend-specific dependencies out of the public API surface.
 
-- The package follows a layered architecture:
-  - Transport layer (connection, streams)
-  - Protocol layer (message encoding/decoding)
-  - Session layer (state management, track handling)
-- Error handling follows Go conventions with custom error types for specific
-  protocol errors
-- Message encoding/decoding is done carefully with attention to binary format
-  specifications
-- Concurrent operations are protected by appropriate synchronization primitives
-  (mutexes, etc.)
+## Testing
 
-## Testing Strategy
+Each subpackage is tested with unit tests in place:
 
-Testing the internal package involves:
+- `moqt/internal/message/*_test.go`
+- `moqt/internal/quicgo/*_test.go`
+- `moqt/internal/webtransportgo/*_test.go`
 
-1. Unit tests for individual components, particularly message encoding/decoding
-2. Mock-based tests using the transport mocks (see `mock_connection.go`,
-   `mock_stream.go`)
-3. Integration tests that verify the correct protocol flows
-4. Ensuring thread-safety through concurrent testing scenarios
+Project-wide tests are run from repository root (already covered by CI/local
+`go test ./...`).
 
-## Future Extensibility
+## Notes for maintainers
 
-The package is designed to be extensible in several ways:
-
-- Support for new protocol versions via the version negotiation mechanism
-- Addition of new message types as the protocol evolves
-- Enhancement of error handling and recovery strategies
-- Performance optimizations (e.g., using `sync.Pool` for message buffers)
-
-## References
-
-- [MOQ Transfork Specification](https://kixelated.github.io/moq-drafts/draft-lcurley-moq-transfork.html)
-- [quic-go library](https://github.com/quic-go/quic-go)
-- [Go Style Guide for gomoqt](../../.github/prompts/style.prompt.md)
+- Treat these packages as implementation details; avoid exposing their types in
+  exported public APIs.
+- Keep wrapper behavior aligned with `transport` interface contracts.
+- When adding wire-level messages, update both encode/decode paths and tests in
+  `message`.

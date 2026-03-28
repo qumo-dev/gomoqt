@@ -4,11 +4,10 @@ import (
 	"context"
 	"net"
 
-	"github.com/okdaichi/gomoqt/quic"
 	"github.com/stretchr/testify/mock"
 )
 
-var _ quic.Listener = (*MockEarlyListener)(nil)
+var _ QUICListener = (*MockEarlyListener)(nil)
 
 // MockEarlyListener implements a mock for quic.EarlyListener using mock.Mock
 type MockEarlyListener struct {
@@ -16,10 +15,10 @@ type MockEarlyListener struct {
 }
 
 // Accept mocks the Accept method of EarlyListener
-func (m *MockEarlyListener) Accept(ctx context.Context) (quic.Connection, error) {
+func (m *MockEarlyListener) Accept(ctx context.Context) (StreamConn, error) {
 	// New mock implementation
 	args := m.Called(ctx)
-	conn, _ := args.Get(0).(quic.Connection)
+	conn, _ := args.Get(0).(StreamConn)
 	return conn, args.Error(1)
 }
 

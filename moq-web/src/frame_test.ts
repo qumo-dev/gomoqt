@@ -35,6 +35,26 @@ Deno.test("frame - BytesFrame basic operations", async (t) => {
 		assertThrows(() => f.copyTo(123), Error);
 	});
 
+	await t.step("bytes returns a view of the written data", () => {
+		const data = new Uint8Array([4, 5, 6]);
+		const f = new Frame(data.buffer);
+		f.write(data);
+
+		assertEquals(f.bytes, data);
+	});
+
+	await t.step("copyTo throws when destination is too small", () => {
+		const data = new Uint8Array([1, 2, 3, 4]);
+		const f = new Frame(data.buffer);
+		f.write(data);
+
+		assertThrows(
+			() => f.copyTo(new Uint8Array(2)),
+			Error,
+			"Destination buffer too small",
+		);
+	});
+
 	// await t.step("clone with provided buffer", () => {
 	// 	const data = new Uint8Array([1, 2, 3]);
 	// 	const f = new BytesFrame(data);

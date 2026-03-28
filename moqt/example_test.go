@@ -21,13 +21,6 @@ func Example() {
 	server := &moqt.Server{
 		Addr:      ":4433",
 		TLSConfig: tlsConfig,
-		SetupHandler: moqt.SetupHandlerFunc(func(w moqt.SetupResponseWriter, r *moqt.SetupRequest) {
-			// Select a supported version from the client's request
-			if err := w.SelectVersion(moqt.DefaultServerVersion); err != nil {
-				w.Reject(moqt.UnsupportedVersionErrorCode)
-				return
-			}
-		}),
 	}
 
 	// Start serving (this blocks, so typically run in a goroutine)
@@ -60,34 +53,6 @@ func ExampleClient() {
 	defer func() { _ = session.CloseWithError(moqt.NoError, "done") }()
 
 	fmt.Println("Connected to MOQ server")
-}
-
-// ExampleExtension demonstrates how to work with MOQ protocol parameters.
-func ExampleExtension() {
-	// Create new parameters
-	params := moqt.NewExtension()
-
-	// Set various parameter types
-	params.SetUint(1, 42)
-	params.SetString(2, "example")
-	params.SetBool(3, true)
-
-	// Retrieve parameters
-	if value, err := params.GetUint(1); err == nil {
-		fmt.Printf("Parameter 1: %d\n", value)
-	}
-
-	if value, err := params.GetString(2); err == nil {
-		fmt.Printf("Parameter 2: %s\n", value)
-	}
-
-	if value, err := params.GetBool(3); err == nil {
-		fmt.Printf("Parameter 3: %t\n", value)
-	}
-
-	// Clone parameters
-	clonedParams := params.Clone()
-	fmt.Printf("Cloned parameters: %s\n", clonedParams.String())
 }
 
 // ExampleTrackMux demonstrates how to use the track multiplexer for publishing tracks.

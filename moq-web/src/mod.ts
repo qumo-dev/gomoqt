@@ -7,7 +7,6 @@ export * from "./info.ts";
 export * from "./client.ts";
 export * from "./announce_stream.ts";
 export * from "./group_stream.ts";
-export * from "./session_stream.ts";
 export * from "./stream_type.ts";
 export * from "./subscribe_stream.ts";
 export * from "./track_writer.ts";

@@ -41,8 +41,7 @@ class MockWebTransport {
 		});
 		const readable = new ReadableStream({
 			start(controller) {
-				// Enqueue mock SessionServerMessage data
-				// Format: versions count (varint) + extensions count (varint)
+				// Enqueue minimal mock setup payload
 				controller.enqueue(new Uint8Array([0x00, 0x00]));
 				controller.close();
 			},
@@ -72,8 +71,6 @@ Deno.test("Client - Constructor with Default Options", () => {
 	const client = new Client();
 
 	assertExists(client.options);
-	assertExists(client.options.versions);
-	assertEquals(client.options.versions instanceof Set, true);
 	assertEquals(client.options.transportOptions?.allowPooling, false);
 	assertEquals(
 		client.options.transportOptions?.congestionControl,
@@ -84,7 +81,6 @@ Deno.test("Client - Constructor with Default Options", () => {
 
 Deno.test("Client - Constructor with Custom Options", () => {
 	const customOptions: MOQOptions = {
-		versions: new Set([1]) as any, // Using number since Version type is number
 		transportOptions: {
 			allowPooling: true,
 			congestionControl: "throughput",
@@ -94,7 +90,6 @@ Deno.test("Client - Constructor with Custom Options", () => {
 
 	const client = new Client(customOptions);
 
-	assertEquals(client.options.versions, new Set([1]));
 	assertEquals(client.options.transportOptions?.allowPooling, true);
 	assertEquals(
 		client.options.transportOptions?.congestionControl,
@@ -103,8 +98,7 @@ Deno.test("Client - Constructor with Custom Options", () => {
 	assertEquals(client.options.transportOptions?.requireUnreliable, false);
 });
 
-// Note: dial() tests are skipped because proper mocking of SessionServerMessage
-// would require complex varint encoding. These tests verify Client logic only.
+// Note: dial() tests focus on Client behavior and keep transport payload mocking minimal.
 
 Deno.test("Client - dial() attempts to create session", async () => {
 	const client = new Client();
@@ -262,7 +256,6 @@ Deno.test("Client - MOQ alias instantiation", () => {
 	// Should be instance of Client
 	assertEquals(moqClient instanceof Client, true);
 	assertExists(moqClient.options);
-	assertExists(moqClient.options.versions);
 });
 
 // Restore original WebTransport after all tests

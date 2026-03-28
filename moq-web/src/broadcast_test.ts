@@ -66,6 +66,17 @@ Deno.test("Broadcast register and serveTrack routes to registered handler", asyn
 	assertEquals(handler.calls[0], mock.trackWriter);
 });
 
+Deno.test("Broadcast handler returns NotFoundTrackHandler for empty name", () => {
+	const broadcast = new Broadcast();
+	assertEquals(broadcast.handler(""), NotFoundTrackHandler);
+});
+
+Deno.test("Broadcast remove returns false when track is missing", async () => {
+	const broadcast = new Broadcast();
+	assertEquals(await broadcast.remove("missing"), false);
+	assertEquals(await broadcast.remove(""), false);
+});
+
 Deno.test("Broadcast register rejects invalid input", async () => {
 	const broadcast = new Broadcast();
 	await assertRejects(
@@ -117,6 +128,26 @@ Deno.test("Broadcast replacement closes previous active tracks", async () => {
 	assertEquals(oldTrack.closeCalls, 1);
 	assertEquals(second.calls.length, 1);
 	assertEquals(second.calls[0], newTrack.trackWriter);
+});
+
+Deno.test("Broadcast close closes all active tracks", async () => {
+	const broadcast = new Broadcast();
+	const handler = new MockTrackHandler();
+	handler.waitForClose = true;
+	await broadcast.register("video", handler);
+	await broadcast.register("audio", handler);
+
+	const first = newMockTrackWriter("video");
+	const second = newMockTrackWriter("audio");
+	const serve1 = broadcast.serveTrack(first.trackWriter);
+	const serve2 = broadcast.serveTrack(second.trackWriter);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	await broadcast.close();
+	await Promise.all([serve1, serve2]);
+
+	assertEquals(first.closeCalls, 1);
+	assertEquals(second.closeCalls, 1);
 });
 
 Deno.test("NotFound and NotFoundTrackHandler close with track-not-found", async () => {

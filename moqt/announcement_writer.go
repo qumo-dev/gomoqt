@@ -6,11 +6,10 @@ import (
 	"sync"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
-	"github.com/okdaichi/gomoqt/quic"
 )
 
 // newAnnouncementWriter creates a new AnnouncementWriter for the given stream and prefix.
-func newAnnouncementWriter(stream quic.Stream, prefix prefix) *AnnouncementWriter {
+func newAnnouncementWriter(stream Stream, prefix prefix) *AnnouncementWriter {
 	if !isValidPrefix(prefix) {
 		panic("invalid prefix for AnnouncementWriter")
 	}
@@ -18,7 +17,7 @@ func newAnnouncementWriter(stream quic.Stream, prefix prefix) *AnnouncementWrite
 	sas := &AnnouncementWriter{
 		prefix:  prefix,
 		stream:  stream,
-		ctx:     context.WithValue(stream.Context(), &biStreamTypeCtxKey, message.StreamTypeAnnounce),
+		ctx:     context.WithValue(stream.Context(), biStreamTypeCtxKey, message.StreamTypeAnnounce),
 		actives: make(map[suffix]*activeAnnouncement),
 		initCh:  make(chan struct{}),
 	}
@@ -30,7 +29,7 @@ func newAnnouncementWriter(stream quic.Stream, prefix prefix) *AnnouncementWrite
 // It handles initialization, sending active announcements, and cleanup.
 type AnnouncementWriter struct {
 	prefix prefix
-	stream quic.Stream
+	stream Stream
 	ctx    context.Context
 
 	mu      sync.RWMutex
@@ -70,7 +69,7 @@ func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) err
 			Suffixes: suffixes,
 		}.Encode(aw.stream)
 		if err != nil {
-			var strErr *quic.StreamError
+			var strErr *StreamError
 			if errors.As(err, &strErr) {
 				err = &AnnounceError{StreamError: strErr}
 			}
@@ -173,7 +172,7 @@ func (aw *AnnouncementWriter) SendAnnouncement(announcement *Announcement) error
 		TrackSuffix:    suffix,
 	}.Encode(aw.stream)
 	if err != nil {
-		var strErr *quic.StreamError
+		var strErr *StreamError
 		if errors.As(err, &strErr) {
 			return &AnnounceError{
 				StreamError: strErr,
@@ -228,7 +227,7 @@ func (aw *AnnouncementWriter) CloseWithError(code AnnounceErrorCode) error {
 		endFunc()
 	}
 
-	strErrCode := quic.StreamErrorCode(code)
+	strErrCode := StreamErrorCode(code)
 	aw.stream.CancelWrite(strErrCode)
 	aw.stream.CancelRead(strErrCode)
 

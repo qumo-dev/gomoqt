@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,7 +54,26 @@ func main() {
 
 	// Start server in background (run server package under cmd/interop)
 	// Server binds to :port (all interfaces), not hostname:port
-	_, port, _ := strings.Cut(*addr, ":")
+	clientURL := *addr
+	if !strings.Contains(clientURL, "://") {
+		if *lang == "go" {
+			clientURL = "moqt://" + clientURL
+		} else {
+			clientURL = "https://" + clientURL
+		}
+	}
+
+	parsedAddr, err := url.Parse(clientURL)
+	if err != nil {
+		slog.Error("invalid interop addr", "addr", *addr, "error", err)
+		return
+	}
+
+	port := parsedAddr.Port()
+	if port == "" {
+		slog.Error("interop addr must include explicit port", "addr", *addr)
+		return
+	}
 	// determine project root so we can run the server package regardless of cwd
 	root, err := findRootDir()
 	if err != nil {
@@ -129,7 +149,8 @@ func main() {
 		}
 	} else {
 		// Go client
-		clientCmd = exec.CommandContext(ctx, "go", "run", "./client", "-addr", "https://"+*addr)
+		clientPath := filepath.Join(root, "cmd", "interop", "client")
+		clientCmd = exec.CommandContext(ctx, "go", "run", clientPath, "-addr", clientURL)
 	}
 
 	clientStdout, err := clientCmd.StdoutPipe()

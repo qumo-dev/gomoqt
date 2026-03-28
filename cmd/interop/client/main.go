@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"time"
@@ -10,9 +11,10 @@ import (
 )
 
 func main() {
-	addr := flag.String("addr", "https://moqt.example.com:9000", "server URL for MOQ (https://host:port)")
+	addr := flag.String("addr", "moqt://localhost:9000", "server URL for MOQ (moqt://host:port or https://host:port)")
 	flag.Parse()
 	client := &moqt.Client{
+		TLSConfig: &tls.Config{InsecureSkipVerify: true}, // interop uses local self-signed certs
 		Config: &moqt.Config{
 			SetupTimeout: 10 * time.Second,
 		},

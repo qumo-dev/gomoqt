@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/okdaichi/gomoqt/moqt"
-	"github.com/okdaichi/gomoqt/quic"
+	"github.com/quic-go/quic-go"
 )
 
 func main() {
@@ -28,13 +28,16 @@ func main() {
 		Logger: slog.Default(),
 	}
 
-	moqt.HandleFunc("/echo", func(w moqt.SetupResponseWriter, r *moqt.SetupRequest) {
-		mux := moqt.NewTrackMux()
-		sess, err := moqt.Accept(w, r, mux)
+	// Serve moq over webtransport
+	upgrader := moqt.Upgrader{}
+	http.HandleFunc("/echo", func(w http.ResponseWriter, r *http.Request) {
+		sess, err := upgrader.Upgrade(w, r)
 		if err != nil {
-			slog.Error("failed to accept session", "error", err)
+			slog.Error("failed to upgrade to WebTransport session", "error", err)
 			return
 		}
+
+		mux := moqt.NewTrackMux()
 
 		anns, err := sess.AcceptAnnounce("/")
 		if err != nil {
@@ -103,15 +106,6 @@ func main() {
 					}
 				}))
 			}(ann)
-		}
-
-	})
-
-	// Serve moq over webtransport
-	http.HandleFunc("/echo", func(w http.ResponseWriter, r *http.Request) {
-		err := server.HandleWebTransport(w, r)
-		if err != nil {
-			slog.Error("failed to serve moq over webtransport", "error", err)
 		}
 	})
 

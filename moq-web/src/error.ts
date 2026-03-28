@@ -2,10 +2,7 @@
 // Session Error Codes
 // =============================================================================
 
-import {
-	WebTransportSessionError,
-	WebTransportStreamError,
-} from "./internal/webtransport/error.ts";
+import { StreamConnError, WebTransportStreamError } from "./internal/webtransport/error.ts";
 
 export const SessionErrorCode = {
 	/** No error occurred */
@@ -28,7 +25,7 @@ export const SessionErrorCode = {
 
 export type SessionErrorCode = number;
 
-export class SessionError extends WebTransportSessionError {
+export class SessionError extends StreamConnError {
 	override get code(): SessionErrorCode {
 		return super.code as SessionErrorCode;
 	}

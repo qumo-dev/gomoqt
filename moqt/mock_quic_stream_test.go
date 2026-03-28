@@ -5,13 +5,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/okdaichi/gomoqt/quic"
 	"github.com/stretchr/testify/mock"
 )
 
-var _ quic.Stream = (*MockQUICStream)(nil)
+var _ Stream = (*MockQUICStream)(nil)
 
-// MockQUICStream is a mock implementation of quic.Stream using testify/mock
+// MockQUICStream is a mock implementation of Stream using testify/mock
 type MockQUICStream struct {
 	mock.Mock
 	ReadFunc  func(p []byte) (n int, err error)
@@ -22,20 +21,20 @@ type MockQUICStream struct {
 	mu     sync.Mutex
 }
 
-func (m *MockQUICStream) StreamID() (id quic.StreamID) {
+func (m *MockQUICStream) StreamID() (id StreamID) {
 	// Recover from testify/mock panic when method is called without an expectation.
 	// This makes tests more resilient to logging calls that reference StreamID().
 	defer func() {
 		if r := recover(); r != nil {
-			id = quic.StreamID(0)
+			id = StreamID(0)
 		}
 	}()
 
 	args := m.Called()
 	if len(args) == 0 || args.Get(0) == nil {
-		return quic.StreamID(0)
+		return StreamID(0)
 	}
-	return args.Get(0).(quic.StreamID)
+	return args.Get(0).(StreamID)
 }
 
 func (m *MockQUICStream) Read(p []byte) (n int, err error) {
@@ -54,7 +53,7 @@ func (m *MockQUICStream) Write(p []byte) (n int, err error) {
 	return args.Int(0), args.Error(1)
 }
 
-func (m *MockQUICStream) CancelRead(code quic.StreamErrorCode) {
+func (m *MockQUICStream) CancelRead(code StreamErrorCode) {
 	m.Called(code)
 	// Cancel the context to simulate stream cancellation
 	m.mu.Lock()
@@ -65,7 +64,7 @@ func (m *MockQUICStream) CancelRead(code quic.StreamErrorCode) {
 	m.mu.Unlock()
 }
 
-func (m *MockQUICStream) CancelWrite(code quic.StreamErrorCode) {
+func (m *MockQUICStream) CancelWrite(code StreamErrorCode) {
 	m.Called(code)
 	// Cancel the context to simulate stream cancellation
 	m.mu.Lock()

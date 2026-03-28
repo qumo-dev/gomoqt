@@ -41,8 +41,7 @@ Deno.test("AnnouncementWriter", async (t) => {
 		const [ctx] = withCancelCause(background());
 		const writeBuf = Buffer.make(256);
 		const mockStream = new MockStream({
-			id: 1n,
-			writable: new MockSendStream({ id: 1n, write: (p) => writeBuf.write(p) }),
+			writable: new MockSendStream({ write: (p) => writeBuf.write(p) }),
 		});
 		const req = new AnnouncePleaseMessage({ prefix: "/test/" });
 		const writer = new AnnouncementWriter(ctx, mockStream, req);
@@ -54,7 +53,7 @@ Deno.test("AnnouncementWriter", async (t) => {
 
 	await t.step("init returns error when prefix mismatched", async () => {
 		const [ctx] = withCancelCause(background());
-		const mockStream = new MockStream({ id: 2n });
+		const mockStream = new MockStream({});
 		const req = new AnnouncePleaseMessage({ prefix: "/test/" });
 		const writer = new AnnouncementWriter(ctx, mockStream, req);
 		const annWrong = new Announcement("/wrong/abc", ctx.done());
@@ -66,8 +65,7 @@ Deno.test("AnnouncementWriter", async (t) => {
 		const [ctx] = withCancelCause(background());
 		const writeBuf = Buffer.make(256);
 		const mockStream = new MockStream({
-			id: 3n,
-			writable: new MockSendStream({ id: 3n, write: (p) => writeBuf.write(p) }),
+			writable: new MockSendStream({ write: (p) => writeBuf.write(p) }),
 		});
 		const req = new AnnouncePleaseMessage({ prefix: "/p/" });
 		const writer = new AnnouncementWriter(ctx, mockStream, req);
@@ -86,10 +84,8 @@ Deno.test("AnnouncementWriter", async (t) => {
 		const writableCancel = spy(async (_code: number) => {});
 		const readableCancel = spy(async (_code: number) => {});
 		const mockStream = new MockStream({
-			id: 4n,
-			writable: new MockSendStream({ id: 4n, cancel: writableCancel }),
+			writable: new MockSendStream({ cancel: writableCancel }),
 			readable: new MockReceiveStream({
-				id: 4n,
 				cancel: readableCancel,
 			}),
 		});
@@ -106,7 +102,7 @@ Deno.test("AnnouncementWriter", async (t) => {
 
 	await t.step("init returns error on duplicate suffix in input", async () => {
 		const [ctx] = withCancelCause(background());
-		const mockStream = new MockStream({ id: 6n });
+		const mockStream = new MockStream({});
 		const req = new AnnouncePleaseMessage({ prefix: "/dup/" });
 		const writer = new AnnouncementWriter(ctx, mockStream, req);
 		const ann1 = new Announcement("/dup/path", ctx.done());
@@ -121,7 +117,7 @@ Deno.test("AnnouncementWriter", async (t) => {
 		"init replaces inactive announcements with active ones",
 		async () => {
 			const [ctx] = withCancelCause(background());
-			const mockStream = new MockStream({ id: 7n });
+			const mockStream = new MockStream({});
 			const req = new AnnouncePleaseMessage({ prefix: "/rep/" });
 			const writer = new AnnouncementWriter(ctx, mockStream, req);
 			const old = new Announcement("/rep/aaa", ctx.done());
@@ -136,7 +132,7 @@ Deno.test("AnnouncementWriter", async (t) => {
 	await t.step(
 		"init returns error when trying to end non-active announcement",
 		async () => {
-			const mockStream = new MockStream({ id: 1n });
+			const mockStream = new MockStream({});
 
 			const aw = new AnnouncementWriter(
 				background(),
@@ -155,7 +151,7 @@ Deno.test("AnnouncementWriter", async (t) => {
 	await t.step(
 		"send returns error when trying to end non-active announcement",
 		async () => {
-			const mockStream = new MockStream({ id: 2n });
+			const mockStream = new MockStream({});
 
 			const aw = new AnnouncementWriter(
 				background(),
@@ -180,8 +176,7 @@ Deno.test("AnnouncementWriter", async (t) => {
 			await new Promise((r) => setTimeout(r, 0));
 			const closeSpy = spy(async () => {});
 			const mockStream = new MockStream({
-				id: 9n,
-				writable: new MockSendStream({ id: 9n, close: closeSpy }),
+				writable: new MockSendStream({ close: closeSpy }),
 			});
 			const req = new AnnouncePleaseMessage({ prefix: "/test/" });
 			const writer = new AnnouncementWriter(ctx, mockStream, req);
@@ -199,10 +194,8 @@ Deno.test("AnnouncementWriter", async (t) => {
 			const writableCancel = spy(async (_code: number) => {});
 			const readableCancel = spy(async (_code: number) => {});
 			const mockStream = new MockStream({
-				id: 10n,
-				writable: new MockSendStream({ id: 10n, cancel: writableCancel }),
+				writable: new MockSendStream({ cancel: writableCancel }),
 				readable: new MockReceiveStream({
-					id: 10n,
 					cancel: readableCancel,
 				}),
 			});
@@ -218,7 +211,7 @@ Deno.test("AnnouncementWriter", async (t) => {
 Deno.test("AnnouncementReader", async (t) => {
 	await t.step("initial announcements enqueued", async () => {
 		const [ctx, cancel] = withCancelCause(background());
-		const mockStream = new MockStream({ id: 5n });
+		const mockStream = new MockStream({});
 		const req = new AnnouncePleaseMessage({ prefix: "/x/" });
 		const aim = new AnnounceInitMessage({ suffixes: ["a", "b"] });
 		const reader = new AnnouncementReader(ctx, mockStream, req, aim);
@@ -243,9 +236,8 @@ Deno.test("AnnouncementReader", async (t) => {
 			// Create mock stream with the data
 			const writableCancel = spy(async (_code: number) => {});
 			const mockStream = new MockStream({
-				id: 8n,
-				writable: new MockSendStream({ id: 8n, cancel: writableCancel }),
-				readable: new MockReceiveStream({ id: 8n, read: (p) => buf.read(p) }),
+				writable: new MockSendStream({ cancel: writableCancel }),
+				readable: new MockReceiveStream({ read: (p) => buf.read(p) }),
 			});
 			const req = new AnnouncePleaseMessage({ prefix: "/" });
 			new AnnouncementReader(ctx, mockStream, req, aim);
@@ -266,13 +258,10 @@ Deno.test("AnnouncementReader", async (t) => {
 			const readableCancel = spy(async (_code: number) => {});
 
 			const mockStream = new MockStream({
-				id: 1n,
 				writable: new MockSendStream({
-					id: 1n,
 					cancel: writableCancel,
 				}),
 				readable: new MockReceiveStream({
-					id: 1n,
 					read: (p) => buf.read(p),
 					cancel: readableCancel,
 				}),
@@ -292,7 +281,7 @@ Deno.test("AnnouncementReader", async (t) => {
 
 	await t.step("receive returns error when queue closed", async () => {
 		const [ctx, cancel] = withCancelCause(background());
-		const mockStream = new MockStream({ id: 2n });
+		const mockStream = new MockStream({});
 
 		const apm = new AnnouncePleaseMessage({ prefix: "/test/" });
 		const aim = new AnnounceInitMessage({ suffixes: [] });
@@ -312,8 +301,7 @@ Deno.test("AnnouncementReader", async (t) => {
 			cancelFunc(new Error("already canceled"));
 			const closeSpy = spy(async () => {});
 			const mockStream = new MockStream({
-				id: 11n,
-				writable: new MockSendStream({ id: 11n, close: closeSpy }),
+				writable: new MockSendStream({ close: closeSpy }),
 			});
 			const req = new AnnouncePleaseMessage({ prefix: "/x/" });
 			const aim = new AnnounceInitMessage({ suffixes: [] });
@@ -331,10 +319,8 @@ Deno.test("AnnouncementReader", async (t) => {
 			const writableCancel = spy(async (_code: number) => {});
 			const readableCancel = spy(async (_code: number) => {});
 			const mockStream = new MockStream({
-				id: 12n,
-				writable: new MockSendStream({ id: 12n, cancel: writableCancel }),
+				writable: new MockSendStream({ cancel: writableCancel }),
 				readable: new MockReceiveStream({
-					id: 12n,
 					cancel: readableCancel,
 				}),
 			});
@@ -358,8 +344,7 @@ Deno.test("AnnouncementReader", async (t) => {
 			await activeTrueMsg.encode(buf);
 
 			const mockStream = new MockStream({
-				id: 20n,
-				readable: new MockReceiveStream({ id: 20n, read: (p) => buf.read(p) }),
+				readable: new MockReceiveStream({ read: (p) => buf.read(p) }),
 			});
 
 			const apm = new AnnouncePleaseMessage({ prefix: "/" });
@@ -389,8 +374,7 @@ Deno.test("AnnouncementReader", async (t) => {
 			await activeFalseMsg.encode(buf);
 
 			const mockStream = new MockStream({
-				id: 21n,
-				readable: new MockReceiveStream({ id: 21n, read: (p) => buf.read(p) }),
+				readable: new MockReceiveStream({ read: (p) => buf.read(p) }),
 			});
 
 			const apm = new AnnouncePleaseMessage({ prefix: "/" });
@@ -419,7 +403,7 @@ Deno.test("AnnouncementReader", async (t) => {
 		"AnnouncementWriter send returns error when path does not match prefix",
 		async () => {
 			const [ctx] = withCancelCause(background());
-			const mockStream = new MockStream({ id: 30n });
+			const mockStream = new MockStream({});
 			const req = new AnnouncePleaseMessage({ prefix: "/test/" });
 			const aw = new AnnouncementWriter(ctx, mockStream, req);
 
@@ -437,14 +421,12 @@ Deno.test("AnnouncementReader", async (t) => {
 		async () => {
 			const writtenData: Uint8Array[] = [];
 			const mockWritable = new MockSendStream({
-				id: 31n,
 				write: spy(async (p: Uint8Array) => {
 					writtenData.push(new Uint8Array(p));
 					return [p.length, undefined] as [number, Error | undefined];
 				}),
 			});
 			const mockStream = new MockStream({
-				id: 31n,
 				writable: mockWritable,
 			});
 			const [ctx] = withCancelCause(background());
@@ -467,14 +449,12 @@ Deno.test("AnnouncementReader", async (t) => {
 		async () => {
 			const writtenData: Uint8Array[] = [];
 			const mockWritable = new MockSendStream({
-				id: 32n,
 				write: spy(async (p: Uint8Array) => {
 					writtenData.push(new Uint8Array(p));
 					return [p.length, undefined] as [number, Error | undefined];
 				}),
 			});
 			const mockStream = new MockStream({
-				id: 32n,
 				writable: mockWritable,
 			});
 			const [ctx, cancel] = withCancelCause(background());
@@ -508,14 +488,12 @@ Deno.test("AnnouncementReader", async (t) => {
 		async () => {
 			const writtenData: Uint8Array[] = [];
 			const mockWritable = new MockSendStream({
-				id: 33n,
 				write: spy(async (p: Uint8Array) => {
 					writtenData.push(new Uint8Array(p));
 					return [p.length, undefined] as [number, Error | undefined];
 				}),
 			});
 			const mockStream = new MockStream({
-				id: 33n,
 				writable: mockWritable,
 			});
 			const [ctx] = withCancelCause(background());
@@ -542,7 +520,7 @@ Deno.test("AnnouncementReader", async (t) => {
 		"AnnouncementWriter init returns error when path does not start with prefix",
 		async () => {
 			const [ctx] = withCancelCause(background());
-			const mockStream = new MockStream({ id: 34n });
+			const mockStream = new MockStream({});
 			const req = new AnnouncePleaseMessage({ prefix: "/test/" });
 			const aw = new AnnouncementWriter(ctx, mockStream, req);
 
@@ -558,14 +536,12 @@ Deno.test("AnnouncementReader", async (t) => {
 		async () => {
 			const writtenData: Uint8Array[] = [];
 			const mockWritable = new MockSendStream({
-				id: 35n,
 				write: spy(async (p: Uint8Array) => {
 					writtenData.push(new Uint8Array(p));
 					return [p.length, undefined] as [number, Error | undefined];
 				}),
 			});
 			const mockStream = new MockStream({
-				id: 35n,
 				writable: mockWritable,
 			});
 			const [ctx] = withCancelCause(background());
@@ -585,14 +561,12 @@ Deno.test("AnnouncementReader", async (t) => {
 		async () => {
 			const writtenData: Uint8Array[] = [];
 			const mockWritable = new MockSendStream({
-				id: 36n,
 				write: spy(async (p: Uint8Array) => {
 					writtenData.push(new Uint8Array(p));
 					return [p.length, undefined] as [number, Error | undefined];
 				}),
 			});
 			const mockStream = new MockStream({
-				id: 36n,
 				writable: mockWritable,
 			});
 			const [ctx] = withCancelCause(background());

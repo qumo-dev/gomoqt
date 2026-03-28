@@ -1,22 +1,22 @@
-export type WebTransportSessionErrorCode = number;
+export type StreamConnErrorCode = number;
 
-export interface WebTransportSessionErrorInfo {
+export interface StreamConnErrorInfo {
 	closeCode: number;
 	reason: string;
 }
 
-export class WebTransportSessionError extends Error {
-	readonly _code: WebTransportSessionErrorCode;
+export class StreamConnError extends Error {
+	readonly _code: StreamConnErrorCode;
 
 	readonly remote: boolean;
 
 	readonly reason: string;
 
-	get code(): WebTransportSessionErrorCode {
+	get code(): StreamConnErrorCode {
 		return this._code;
 	}
 
-	constructor(info: WebTransportSessionErrorInfo, remote: boolean = false) {
+	constructor(info: StreamConnErrorInfo, remote: boolean = false) {
 		super(
 			`session was closed for reason "${info.reason}" with code ${info.closeCode} by ${
 				remote ? "remote" : "local"
@@ -25,7 +25,7 @@ export class WebTransportSessionError extends Error {
 		this._code = info.closeCode;
 		this.remote = remote;
 		this.reason = info.reason;
-		Object.setPrototypeOf(this, WebTransportSessionError.prototype);
+		Object.setPrototypeOf(this, StreamConnError.prototype);
 	}
 }
 

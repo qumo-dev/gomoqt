@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
-	"github.com/okdaichi/gomoqt/quic"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -178,10 +177,10 @@ func TestGroupWriter_CloseWithStreamError(t *testing.T) {
 		mockStream := &MockQUICSendStream{}
 		mockStream.On("Context").Return(context.Background())
 
-		streamID := quic.StreamID(123)
-		streamErr := &quic.StreamError{
+		streamID := StreamID(123)
+		streamErr := &StreamError{
 			StreamID:  streamID,
-			ErrorCode: quic.StreamErrorCode(42),
+			ErrorCode: StreamErrorCode(42),
 		}
 
 		mockStream.On("Close").Return(streamErr)
@@ -236,7 +235,7 @@ func TestGroupWriter_Context(t *testing.T) {
 
 	ctx := sgs.Context()
 	assert.NotNil(t, ctx)
-	assert.Equal(t, message.StreamTypeGroup, ctx.Value(&uniStreamTypeCtxKey))
+	assert.Equal(t, message.StreamTypeGroup, ctx.Value(uniStreamTypeCtxKey))
 	mockStream.AssertExpectations(t)
 }
 
@@ -244,7 +243,7 @@ func TestGroupWriter_CancelWrite(t *testing.T) {
 	called := false
 	mockStream := &MockQUICSendStream{}
 	mockStream.On("Context").Return(context.Background())
-	mockStream.On("CancelWrite", quic.StreamErrorCode(1)).Return()
+	mockStream.On("CancelWrite", StreamErrorCode(1)).Return()
 
 	sgs := newGroupWriter(mockStream, GroupSequence(1), func() { called = true })
 
