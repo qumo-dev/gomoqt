@@ -49,6 +49,7 @@ func newSession(conn StreamConn, mux *TrackMux, onClose func()) *Session {
 
 	return sess
 }
+
 // Session represents an active MOQ session over a QUIC connection.
 // It manages bidirectional and unidirectional streams, subscriptions, and announcements for a single peer connection.
 type Session struct {
