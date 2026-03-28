@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/okdaichi/gomoqt/quic"
-	"github.com/okdaichi/gomoqt/quic/quicgo"
-	"github.com/okdaichi/gomoqt/webtransport"
+	"github.com/okdaichi/gomoqt/moqt/internal/quicgo"
+	"github.com/okdaichi/gomoqt/moqt/internal/webtransportgo"
+	"github.com/quic-go/quic-go"
 )
 
 // ListenAndServe starts a new Server bound to the specified address and TLS configuration and runs it until an error occurs.
@@ -24,6 +24,13 @@ func ListenAndServe(addr string, tlsConfig *tls.Config) error {
 		TLSConfig: tlsConfig,
 	}
 	return server.ListenAndServe()
+}
+
+type QUICListenFunc func(addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (QUICListener, error)
+
+type WebTransportServer interface {
+	ServeQUICConn(conn StreamConn) error
+	Close() error
 }
 
 // Server is a MOQ server that accepts both WebTransport and raw QUIC connections.
@@ -52,29 +59,30 @@ type Server struct {
 	 */
 	Config *Config
 
-	// /*
-	//  * Handler invoked when a new session is established.
-	//  */
-	// SessionHandler func(req *SessionRequest)
-
 	/*
 	 * Listen QUIC function
 	 */
-	ListenFunc quic.ListenAddrFunc
+	ListenFunc QUICListenFunc
 
-	WebTransportServer webtransport.Server
+	/*
+	 * WebTransport Server
+	 * If the server is configured with a WebTransport server, it is used to handle WebTransport sessions.
+	 * If not, a default server is used.
+	 */
+	WebTransportServer WebTransportServer
 
-	// CheckHTTPOrigin validates the HTTP Origin header for WebTransport connections.
-	// If nil, all origins are accepted.
-	CheckHTTPOrigin func(*http.Request) bool
+	//
+	NativeQUICHandler *NativeQUICHandler
 
 	/*
 	 * Logger
 	 */
 	Logger *slog.Logger
 
+	ConnContext func(ctx context.Context, conn StreamConn) context.Context
+
 	listenerMu    sync.RWMutex
-	listeners     map[quic.Listener]struct{}
+	listeners     map[QUICListener]struct{}
 	listenerGroup sync.WaitGroup
 
 	sessMu     sync.RWMutex
@@ -91,10 +99,34 @@ type Server struct {
 
 func (s *Server) init() {
 	s.initOnce.Do(func() {
-		s.listeners = make(map[quic.Listener]struct{})
+		s.listeners = make(map[QUICListener]struct{})
 		s.doneChan = make(chan struct{})
 		s.activeSess = make(map[*Session]struct{})
+		if s.WebTransportServer == nil {
+			s.WebTransportServer = &webtransportgo.Server{ConnContext: s.connContext}
+			return
+		}
+		if wtServer, ok := s.WebTransportServer.(*webtransportgo.Server); ok && wtServer.ConnContext == nil {
+			wtServer.ConnContext = s.connContext
+		}
 	})
+}
+
+type serverContextKeyType struct{}
+
+var moqServerContextKey = serverContextKeyType{}
+
+func (s *Server) connContext(ctx context.Context, conn StreamConn) context.Context {
+	if s.ConnContext != nil {
+		ctx = s.ConnContext(ctx, conn)
+		if ctx == nil {
+			panic("nil context returned by ConnContext")
+		}
+	}
+
+	ctx = context.WithValue(ctx, moqServerContextKey, s)
+
+	return ctx
 }
 
 // log returns Server.Logger if set, otherwise a discard logger.
@@ -107,7 +139,7 @@ func (s *Server) log() *slog.Logger {
 
 // ServeQUICListener accepts connections on the provided QUIC listener and handles them using the Server's configuration.
 // This runs until the listener is closed or the server shuts down.
-func (s *Server) ServeQUICListener(ln quic.Listener) error {
+func (s *Server) ServeQUICListener(ln QUICListener) error {
 	if s.shuttingDown() {
 		return ErrServerClosed
 	}
@@ -146,7 +178,7 @@ func (s *Server) ServeQUICListener(ln quic.Listener) error {
 		}
 
 		// Handle connection in a goroutine
-		go func(conn quic.Connection) {
+		go func(conn StreamConn) {
 			_ = s.ServeQUICConn(conn)
 		}(conn)
 	}
@@ -154,78 +186,95 @@ func (s *Server) ServeQUICListener(ln quic.Listener) error {
 
 // ServeQUICConn serves a single QUIC connection.
 // It detects whether the connection uses WebTransport or the native MOQ ALPN and dispatches to the appropriate handling logic for the session.
-func (s *Server) ServeQUICConn(conn quic.Connection) error {
+func (s *Server) ServeQUICConn(conn StreamConn) error {
 	if s.shuttingDown() {
 		return ErrServerClosed
 	}
 
 	s.init()
 
-	switch protocol := conn.ConnectionState().TLS.NegotiatedProtocol; protocol {
+	tlsInfo := conn.TLS()
+	if tlsInfo == nil {
+		return fmt.Errorf("connection does not have TLS information; cannot determine protocol")
+	}
+	switch protocol := tlsInfo.NegotiatedProtocol; protocol {
 	case NextProtoH3:
 		return s.WebTransportServer.ServeQUICConn(conn)
 	case NextProtoMOQ:
-		return s.handleNativeQUIC(conn)
+		if s.NativeQUICHandler != nil {
+			return s.NativeQUICHandler.handleNativeQUIC(conn)
+		}
+		return fmt.Errorf("native QUIC is not supported for protocol: %s", protocol)
 	default:
 		return fmt.Errorf("unsupported protocol: %s", protocol)
 	}
 }
 
-// HandleWebTransport upgrades an incoming HTTP request to a WebTransport
-// connection and handles the session using the Server's SessionHandler.
-func (s *Server) HandleWebTransport(w http.ResponseWriter, r *http.Request) error {
-	if s.shuttingDown() {
-		return fmt.Errorf("server is shutting down")
-	}
+type Upgrader struct {
+	CheckOrigin          func(r *http.Request) bool
+	ApplicationProtocols []string
+	ReorderingTimeout    time.Duration
+	TrackMux             *TrackMux
+	UpgradeFunc          func(w http.ResponseWriter, r *http.Request) (StreamConn, error)
+}
 
-	s.init()
+func (u *Upgrader) upgradeWebTransport(w http.ResponseWriter, r *http.Request) (StreamConn, error) {
+	if u.UpgradeFunc != nil {
+		return u.UpgradeFunc(w, r)
+	}
+	protocols := u.ApplicationProtocols
+	if len(protocols) == 0 {
+		protocols = []string{NextProtoMOQ}
+	}
+	// Fallback to default upgrader if custom upgrader is not set
+	defaultUpgrader := webtransportgo.Upgrader{
+		CheckOrigin:          u.CheckOrigin,
+		ApplicationProtocols: protocols,
+		ReorderingTimeout:    u.ReorderingTimeout,
+	}
+	return defaultUpgrader.Upgrade(w, r)
+}
+
+// Upgrade upgrades an incoming HTTP request to a WebTransport session and registers it with the server's session management.
+// It returns the established session or an error if the upgrade fails.
+func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Session, error) {
+	s, _ := r.Context().Value(moqServerContextKey).(*Server)
 
 	if r.TLS == nil {
-		s.log().Warn("connection rejected: plain HTTP is not supported; use HTTPS",
-			"remote_address", r.RemoteAddr,
-		)
-		http.Error(w, "plain HTTP is not supported; use HTTPS", http.StatusUpgradeRequired)
-		return fmt.Errorf("plain HTTP connection from %s", r.RemoteAddr)
-	}
-
-	conn, err := s.WebTransportServer.Upgrade(w, r)
-	if err != nil {
-		return fmt.Errorf("failed to upgrade connection: %w", err)
-	}
-
-	return s.serveSession(conn)
-}
-
-func (s *Server) handleNativeQUIC(conn quic.Connection) (*Session, error) {
-	if s.shuttingDown() {
-		return nil, ErrServerClosed
-	}
-
-	s.init()
-
-	return s.serveSession(conn)
-}
-
-// serveSession creates a Session from the connection and calls the SessionHandler.
-func (s *Server) serveSession(conn quic.Connection) (*Session, error) {
-	var err error
-	defer func() {
-		if rec := recover(); rec != nil {
-			err = fmt.Errorf("panic in session handler: %v", rec)
-			s.log().Error("panic in session handler", "panic", rec)
-			_ = conn.CloseWithError(quic.ApplicationErrorCode(SetupFailedErrorCode), "internal server error")
+		if s != nil {
+			s.log().Warn("connection rejected: plain HTTP is not supported; use HTTPS",
+				"remote_address", r.RemoteAddr,
+			)
 		}
-	}()
+		http.Error(w, "plain HTTP is not supported; use HTTPS", http.StatusUpgradeRequired)
+		return nil, fmt.Errorf("plain HTTP connection from %s", r.RemoteAddr)
+	}
+
+	conn, err := u.upgradeWebTransport(w, r)
+	if err != nil {
+		return nil, fmt.Errorf("failed to upgrade connection: %w", err)
+	}
+	if s == nil {
+		return newSession(conn, u.TrackMux, func() {}), nil
+	}
 
 	var sess *Session
-	sess = newSession(
-		conn,
-		DefaultMux, // We can pass DefaultMux or let user update it
-		func() { s.removeSession(sess) },
-	)
+	sess = newSession(conn, u.TrackMux, func() { s.removeSession(sess) })
 	s.addSession(sess)
 
-	return sess, err
+	return sess, nil
+}
+
+type NativeQUICHandler struct {
+	TrackMux       *TrackMux
+	SessionHandler func(sess *Session) error
+}
+
+func (h *NativeQUICHandler) handleNativeQUIC(conn StreamConn) error {
+	if h.SessionHandler != nil {
+		return h.SessionHandler(newSession(conn, h.TrackMux, func() {})) // TODO: implement proper session cleanup callback
+	}
+	return fmt.Errorf("no session handler configured for native QUIC handler")
 }
 
 // ListenAndServe starts the server by listening on the server's Address and serving QUIC connections.
@@ -243,7 +292,7 @@ func (s *Server) ListenAndServe() error {
 
 	// Make sure we have NextProtos set for ALPN negotiation
 	if len(tlsConfig.NextProtos) == 0 {
-		tlsConfig.NextProtos = DefaultServerNextProtos
+		tlsConfig.NextProtos = []string{NextProtoH3, NextProtoMOQ}
 	}
 
 	// Ensure WebTransport required QUIC flags are enabled.
@@ -256,13 +305,11 @@ func (s *Server) ListenAndServe() error {
 	quicConf.EnableDatagrams = true
 	quicConf.EnableStreamResetPartialDelivery = true
 
-	var ln quic.Listener
-	var err error
-	if s.ListenFunc != nil {
-		ln, err = s.ListenFunc(s.Addr, tlsConfig, quicConf)
-	} else {
-		ln, err = quicgo.ListenAddrEarly(s.Addr, tlsConfig, quicConf)
+	listenFunc := s.ListenFunc
+	if listenFunc == nil {
+		listenFunc = quicgo.ListenAddrEarly
 	}
+	ln, err := listenFunc(s.Addr, tlsConfig, quicConf)
 	if err != nil {
 		return fmt.Errorf("failed to start QUIC listener at %s: %w", s.Addr, err)
 	}
@@ -290,26 +337,25 @@ func (s *Server) ListenAndServeTLS(certFile, keyFile string) error {
 	// Create TLS config with certificates
 	tlsConfig := &tls.Config{
 		Certificates: certs,
-		NextProtos:   DefaultServerNextProtos,
+		NextProtos:   []string{NextProtoH3, NextProtoMOQ},
 	}
 
 	// Ensure WebTransport required QUIC flags are enabled.
-	quicConf := s.QUICConfig
-	if quicConf == nil {
+	var quicConf *quic.Config
+	if s.QUICConfig == nil {
 		quicConf = &quic.Config{}
 	} else {
-		clone := *quicConf
-		quicConf = &clone
+		quicConf = s.QUICConfig.Clone()
 	}
 	quicConf.EnableDatagrams = true
 	quicConf.EnableStreamResetPartialDelivery = true
 
-	var ln quic.Listener
-	if s.ListenFunc != nil {
-		ln, err = s.ListenFunc(s.Addr, tlsConfig.Clone(), quicConf)
-	} else {
-		ln, err = quicgo.ListenAddrEarly(s.Addr, tlsConfig.Clone(), quicConf)
+	listenFunc := s.ListenFunc
+	if listenFunc == nil {
+		listenFunc = quicgo.ListenAddrEarly
 	}
+
+	ln, err := listenFunc(s.Addr, tlsConfig.Clone(), quicConf)
 	if err != nil {
 		return err
 	}
@@ -465,18 +511,18 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (s *Server) addListener(ln quic.Listener) {
+func (s *Server) addListener(ln QUICListener) {
 	s.listenerMu.Lock()
 	defer s.listenerMu.Unlock()
 
 	if s.listeners == nil {
-		s.listeners = make(map[quic.Listener]struct{})
+		s.listeners = make(map[QUICListener]struct{})
 	}
 	s.listeners[ln] = struct{}{}
 	s.listenerGroup.Add(1)
 }
 
-func (s *Server) removeListener(ln quic.Listener) {
+func (s *Server) removeListener(ln QUICListener) {
 	s.listenerMu.Lock()
 
 	_, ok := s.listeners[ln]

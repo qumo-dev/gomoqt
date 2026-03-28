@@ -137,5 +137,5 @@ mage help
 
 ## 致谢
 - [quic-go](https://github.com/quic-go/quic-go) — Go 的 QUIC 实现
-- [webtransport-go](https://github.com/quic-go/webtransport-go) — Go 的 WebTransport 实现
+- [webtransport-go](https://github.com/okdaichi/webtransport-go) — Go 的 WebTransport 实现
 - [MOQ Lite 规范](https://kixelated.github.io/moq-drafts/draft-lcurley-moq-transfork.html) — 本实现遵循的规范

@@ -3,8 +3,6 @@ import { WebTransportStreamError, WebTransportStreamErrorInfo } from "./error.ts
 import { WebTransportStreamErrorCode } from "./mod.ts";
 
 export interface SendStream extends Writer {
-	readonly id: bigint;
-
 	close(): Promise<void>;
 	cancel(code: WebTransportStreamErrorCode): Promise<void>;
 
@@ -13,7 +11,6 @@ export interface SendStream extends Writer {
 
 export interface SendStreamInit {
 	stream: WritableStream<Uint8Array>;
-	streamId: bigint;
 }
 
 /**
@@ -22,13 +19,11 @@ export interface SendStreamInit {
  */
 class SendStreamClass implements SendStream {
 	#writer: WritableStreamDefaultWriter<Uint8Array>;
-	readonly id: bigint;
 
 	#err?: Error;
 
 	constructor(init: SendStreamInit) {
 		this.#writer = init.stream.getWriter();
-		this.id = init.streamId;
 	}
 
 	/**

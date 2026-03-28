@@ -3,13 +3,11 @@ package moqt
 import (
 	"bytes"
 	"errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"io"
 	"testing"
 	"time"
-
-	"github.com/okdaichi/gomoqt/quic"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
 
 func TestNewReceiveGroupStream(t *testing.T) {
@@ -109,7 +107,7 @@ func TestReceiveGroupStream_CancelRead(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			mockStream := &MockQUICReceiveStream{}
-			mockStream.On("CancelRead", quic.StreamErrorCode(tt.errorCode)).Return()
+			mockStream.On("CancelRead", StreamErrorCode(tt.errorCode)).Return()
 
 			rgs := newGroupReader(GroupSequence(123), mockStream, func() {})
 
@@ -122,7 +120,7 @@ func TestReceiveGroupStream_CancelRead(t *testing.T) {
 
 func TestReceiveGroupStream_CancelRead_MultipleCalls(t *testing.T) {
 	mockStream := &MockQUICReceiveStream{}
-	mockStream.On("CancelRead", quic.StreamErrorCode(InternalGroupErrorCode)).Return()
+	mockStream.On("CancelRead", StreamErrorCode(InternalGroupErrorCode)).Return()
 
 	rgs := newGroupReader(GroupSequence(123), mockStream, func() {})
 
@@ -131,7 +129,7 @@ func TestReceiveGroupStream_CancelRead_MultipleCalls(t *testing.T) {
 	rgs.CancelRead(InternalGroupErrorCode)
 
 	// Should be called for each CancelRead invocation
-	mockStream.AssertCalled(t, "CancelRead", quic.StreamErrorCode(InternalGroupErrorCode))
+	mockStream.AssertCalled(t, "CancelRead", StreamErrorCode(InternalGroupErrorCode))
 	mockStream.AssertExpectations(t)
 }
 
@@ -200,13 +198,13 @@ func TestReceiveGroupStream_SetReadDeadline(t *testing.T) {
 func TestReceiveGroupStream_ReadFrame_StreamError(t *testing.T) {
 	mockStream := &MockQUICReceiveStream{
 		ReadFunc: func(p []byte) (int, error) {
-			return 0, &quic.StreamError{
-				StreamID:  quic.StreamID(123),
-				ErrorCode: quic.StreamErrorCode(1),
+			return 0, &StreamError{
+				StreamID:  StreamID(123),
+				ErrorCode: StreamErrorCode(1),
 			}
 		},
 	}
-	mockStream.On("StreamID").Return(quic.StreamID(123))
+	mockStream.On("StreamID").Return(StreamID(123))
 
 	rgs := newGroupReader(123, mockStream, func() {})
 	frame := NewFrame(0)

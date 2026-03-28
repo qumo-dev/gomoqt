@@ -14,15 +14,13 @@ Deno.test("SendSubscribeStream.update writes update to writable", async () => {
 	const [ctx] = withCancelCause(background());
 	const writtenData: Uint8Array[] = [];
 	const mockWritable = new MockSendStream({
-		id: 1n,
 		write: spy(async (p: Uint8Array) => {
 			writtenData.push(new Uint8Array(p));
 			return [p.length, undefined] as [number, Error | undefined];
 		}),
 	});
-	const mockReadable = new MockReceiveStream({ id: 1n });
+	const mockReadable = new MockReceiveStream({});
 	const s = new MockStream({
-		id: 1n,
 		writable: mockWritable,
 		readable: mockReadable,
 	});
@@ -45,14 +43,12 @@ Deno.test("SendSubscribeStream closeWithError cancels stream", async () => {
 	const [ctx] = withCancelCause(background());
 	const cancelCalls: number[] = [];
 	const mockWritable = new MockSendStream({
-		id: 1n,
 		cancel: spy(async (code: number) => {
 			cancelCalls.push(code);
 		}),
 	});
-	const mockReadable = new MockReceiveStream({ id: 1n });
+	const mockReadable = new MockReceiveStream({});
 	const s = new MockStream({
-		id: 1n,
 		writable: mockWritable,
 		readable: mockReadable,
 	});
@@ -72,15 +68,13 @@ Deno.test("ReceiveSubscribeStream writeInfo sends SUBSCRIBE_OK and prevents doub
 	const [ctx] = withCancelCause(background());
 	const writtenData: Uint8Array[] = [];
 	const mockWritable = new MockSendStream({
-		id: 2n,
 		write: spy(async (p: Uint8Array) => {
 			writtenData.push(new Uint8Array(p));
 			return [p.length, undefined] as [number, Error | undefined];
 		}),
 	});
-	const mockReadable = new MockReceiveStream({ id: 2n });
+	const mockReadable = new MockReceiveStream({});
 	const s = new MockStream({
-		id: 2n,
 		writable: mockWritable,
 		readable: mockReadable,
 	});
@@ -99,10 +93,9 @@ Deno.test("ReceiveSubscribeStream writeInfo sends SUBSCRIBE_OK and prevents doub
 
 Deno.test("ReceiveSubscribeStream writeInfo returns error when context canceled", async () => {
 	const [ctx, cancel] = withCancelCause(background());
-	const mockWritable = new MockSendStream({ id: 2n });
-	const mockReadable = new MockReceiveStream({ id: 2n });
+	const mockWritable = new MockSendStream({});
+	const mockReadable = new MockReceiveStream({});
 	const s = new MockStream({
-		id: 2n,
 		writable: mockWritable,
 		readable: mockReadable,
 	});
@@ -121,10 +114,9 @@ Deno.test("ReceiveSubscribeStream writeInfo returns error when context canceled"
 
 Deno.test("ReceiveSubscribeStream close closes stream", async () => {
 	const [ctx] = withCancelCause(background());
-	const mockWritable = new MockSendStream({ id: 2n });
-	const mockReadable = new MockReceiveStream({ id: 2n });
+	const mockWritable = new MockSendStream({});
+	const mockReadable = new MockReceiveStream({});
 	const s = new MockStream({
-		id: 2n,
 		writable: mockWritable,
 		readable: mockReadable,
 	});
@@ -140,10 +132,9 @@ Deno.test("ReceiveSubscribeStream close closes stream", async () => {
 
 Deno.test("ReceiveSubscribeStream close does nothing if context canceled", async () => {
 	const [ctx, cancel] = withCancelCause(background());
-	const mockWritable = new MockSendStream({ id: 2n });
-	const mockReadable = new MockReceiveStream({ id: 2n });
+	const mockWritable = new MockSendStream({});
+	const mockReadable = new MockReceiveStream({});
 	const s = new MockStream({
-		id: 2n,
 		writable: mockWritable,
 		readable: mockReadable,
 	});
@@ -161,10 +152,9 @@ Deno.test("ReceiveSubscribeStream close does nothing if context canceled", async
 
 Deno.test("ReceiveSubscribeStream closeWithError does nothing if context canceled", async () => {
 	const [ctx, cancel] = withCancelCause(background());
-	const mockWritable = new MockSendStream({ id: 2n });
-	const mockReadable = new MockReceiveStream({ id: 2n });
+	const mockWritable = new MockSendStream({});
+	const mockReadable = new MockReceiveStream({});
 	const s = new MockStream({
-		id: 2n,
 		writable: mockWritable,
 		readable: mockReadable,
 	});
@@ -208,10 +198,9 @@ Deno.test("ReceiveSubscribeStream updated waiters are notified upon update", asy
 		offset += arr.length;
 	}
 	// Create mock stream with the encoded data
-	const mockWritable = new MockSendStream({ id: 3n });
+	const mockWritable = new MockSendStream({});
 	let readOffset = 0;
 	const mockReadable = new MockReceiveStream({
-		id: 3n,
 		read: spy(async (p: Uint8Array) => {
 			if (readOffset >= data.length) {
 				return [0, new EOFError()] as [number, Error | undefined];
@@ -223,7 +212,6 @@ Deno.test("ReceiveSubscribeStream updated waiters are notified upon update", asy
 		}),
 	});
 	const s2 = new MockStream({
-		id: 3n,
 		writable: mockWritable,
 		readable: mockReadable,
 	});
@@ -236,20 +224,17 @@ Deno.test("ReceiveSubscribeStream closeWithError cancels streams and broadcasts 
 	const [ctx] = withCancelCause(background());
 	const writableCancelCalls: number[] = [];
 	const mockWritable = new MockSendStream({
-		id: 4n,
 		cancel: spy(async (code: number) => {
 			writableCancelCalls.push(code);
 		}),
 	});
 	const readableCancelCalls: number[] = [];
 	const mockReadable = new MockReceiveStream({
-		id: 4n,
 		cancel: spy(async (code: number) => {
 			readableCancelCalls.push(code);
 		}),
 	});
 	const s = new MockStream({
-		id: 4n,
 		writable: mockWritable,
 		readable: mockReadable,
 	});
@@ -269,7 +254,6 @@ Deno.test("ReceiveSubscribeStream writeInfo is only executed once even with conc
 	const [ctx] = withCancelCause(background());
 	const writtenData: Uint8Array[] = [];
 	const mockWritable = new MockSendStream({
-		id: 5n,
 		write: spy(async (p: Uint8Array) => {
 			// artificial delay to simulate race
 			await new Promise((r) => setTimeout(r, 10));
@@ -277,9 +261,8 @@ Deno.test("ReceiveSubscribeStream writeInfo is only executed once even with conc
 			return [p.length, undefined] as [number, Error | undefined];
 		}),
 	});
-	const mockReadable = new MockReceiveStream({ id: 5n });
+	const mockReadable = new MockReceiveStream({});
 	const s = new MockStream({
-		id: 5n,
 		writable: mockWritable,
 		readable: mockReadable,
 	});

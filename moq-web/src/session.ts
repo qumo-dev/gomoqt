@@ -1,12 +1,8 @@
-import { DEFAULT_CLIENT_VERSIONS } from "./version.ts";
-import type { Version } from "./version.ts";
 import {
 	AnnounceInitMessage,
 	AnnouncePleaseMessage,
 	GroupMessage,
 	readVarint,
-	SessionClientMessage,
-	SessionServerMessage,
 	SubscribeMessage,
 	SubscribeOkMessage,
 	writeVarint,
@@ -14,12 +10,10 @@ import {
 import {
 	ReceiveStream,
 	Stream,
-	WebTransportSession,
-	WebTransportSessionError,
-	WebTransportSessionErrorInfo,
+	StreamConn,
+	StreamConnError,
+	StreamConnErrorInfo,
 } from "./internal/webtransport/mod.ts";
-import { Extensions } from "./extensions.ts";
-import { SessionStream } from "./session_stream.ts";
 import { background, withCancelCause } from "@okdaichi/golikejs/context";
 import type { CancelCauseFunc, Context } from "@okdaichi/golikejs/context";
 import { AnnouncementReader, AnnouncementWriter } from "./announce_stream.ts";
@@ -35,32 +29,21 @@ import { BiStreamTypes, UniStreamTypes } from "./stream_type.ts";
 import { Queue } from "./internal/queue.ts";
 import type { SubscribeID, TrackName } from "./alias.ts";
 
-export interface SessionOptions {
-	webtransport: WebTransportSession;
+export interface SessionInit {
+	transport: StreamConn;
 
-	versions?: Set<Version>;
-	extensions?: Extensions;
 	mux?: TrackMux;
 }
 
 export class Session {
 	readonly ready: Promise<void>;
-	#webtransport: WebTransportSession;
-	#sessionStream!: SessionStream;
+	#webtransport: StreamConn;
 	#ctx: Context;
 	#cancelFunc: CancelCauseFunc;
 
 	#wg: Promise<void>[] = [];
 
 	#subscribeIDCounter: number = 0;
-
-	// #biStreamCounter: number = 0; // client bidirectional stream counter
-
-	// #serverBiStreamCounter: number = 1;
-
-	// #uniStreamCounter: number = 2;
-
-	// #serverUniStreamCounter: number = 3;
 
 	readonly mux: TrackMux;
 
@@ -69,8 +52,8 @@ export class Session {
 		Queue<[ReceiveStream, GroupMessage]>
 	> = new Map();
 
-	constructor(options: SessionOptions) {
-		this.#webtransport = options.webtransport;
+	constructor(options: SessionInit) {
+		this.#webtransport = options.transport;
 		this.mux = options.mux ?? DefaultTrackMux;
 		const [ctx, cancel] = withCancelCause(background());
 		this.#webtransport.closed.then((info) => {
@@ -85,8 +68,8 @@ export class Session {
 			}
 
 			cancel(
-				new WebTransportSessionError(
-					info as WebTransportSessionErrorInfo,
+				new StreamConnError(
+					info as StreamConnErrorInfo,
 					true,
 				),
 			);
@@ -102,74 +85,11 @@ export class Session {
 		});
 		this.#ctx = ctx;
 		this.#cancelFunc = cancel;
-		this.ready = this.#setup(
-			options.versions ?? DEFAULT_CLIENT_VERSIONS,
-			options.extensions ?? new Extensions(),
-		);
+		this.ready = this.#setup();
 	}
 
-	async #setup(versions: Set<Version>, extensions: Extensions): Promise<void> {
+	async #setup(): Promise<void> {
 		await this.#webtransport.ready;
-
-		const [stream, openErr] = await this.#webtransport.openStream();
-		if (openErr) {
-			console.error("moq: failed to open session stream:", openErr);
-			throw openErr;
-		}
-		// Send STREAM_TYPE
-		let [, err] = await writeVarint(
-			stream.writable,
-			BiStreamTypes.SessionStreamType,
-		);
-		if (err) {
-			console.error("moq: failed to open session stream:", err);
-			throw err;
-		}
-
-		// Send the session client message
-		const req = new SessionClientMessage({
-			versions,
-			extensions: extensions.entries,
-		});
-		err = await req.encode(stream.writable);
-		if (err) {
-			console.error("moq: failed to send SESSION_CLIENT message:", err);
-			throw err;
-		}
-
-		// debug log removed
-
-		// Receive the session server message
-		const rsp = new SessionServerMessage({});
-		err = await rsp.decode(stream.readable);
-		if (err) {
-			console.error("moq: failed to receive SESSION_SERVER message:", err);
-			throw err;
-		}
-
-		// debug log removed
-
-		// TODO: Check the version compatibility
-		if (!versions.has(rsp.version)) {
-			throw new Error(`Incompatible session version: ${rsp.version}`);
-		}
-
-		this.#sessionStream = new SessionStream({
-			context: this.#ctx,
-			stream: stream,
-			client: req,
-			server: rsp,
-			detectFunc: async () => {
-				// Block until the connection is closed
-				// TODO: Implement actual bitrate detection logic
-				await this.#ctx.done();
-				return 0; // Placeholder for bitrate detection logic
-			},
-		});
-
-		this.#sessionStream.context.done().then(() => {
-			this.#cancelFunc(new Error("moq: session stream closed"));
-		}).catch(() => {});
 
 		// Start listening for incoming streams
 		this.#wg.push(this.#listenBiStreams());
@@ -406,6 +326,7 @@ export class Session {
 			}
 		}
 	}
+
 	async #listenUniStreams(): Promise<void> {
 		const pendingHandles: Promise<void>[] = [];
 		try {
@@ -478,14 +399,8 @@ export class Session {
 			// ignore
 		}
 		this.#wg = [];
-
-		// Also wait for SessionStream background tasks
-		try {
-			await this.#sessionStream.waitForBackgroundTasks();
-		} catch (_e) {
-			// ignore
-		}
 	}
+
 	async closeWithError(code: number, message: string): Promise<void> {
 		if (this.#ctx.err()) {
 			return;
@@ -509,12 +424,5 @@ export class Session {
 			// ignore
 		}
 		this.#wg = [];
-
-		// Also wait for SessionStream background tasks
-		try {
-			await this.#sessionStream.waitForBackgroundTasks();
-		} catch (_e) {
-			// ignore
-		}
 	}
 }

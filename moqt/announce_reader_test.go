@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
-	"github.com/okdaichi/gomoqt/quic"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -237,16 +236,16 @@ func TestAnnouncementReader_Close(t *testing.T) {
 func TestAnnouncementReader_CloseWithError(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	// Add the stream type to the context like newAnnouncementReader does
-	ctx = context.WithValue(ctx, &biStreamTypeCtxKey, message.StreamTypeAnnounce)
+	ctx = context.WithValue(ctx, biStreamTypeCtxKey, message.StreamTypeAnnounce)
 	mockStream := &MockQUICStream{}
-	mockStream.On("StreamID").Return(quic.StreamID(123))
+	mockStream.On("StreamID").Return(StreamID(123))
 	mockStream.On("Context").Return(ctx)
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 	mockStream.On("CancelRead", mock.Anything).Return()
 	mockStream.On("CancelWrite", mock.Anything).Run(func(args mock.Arguments) {
-		cancel(&quic.StreamError{
+		cancel(&StreamError{
 			StreamID:  mockStream.StreamID(),
-			ErrorCode: args[0].(quic.StreamErrorCode),
+			ErrorCode: args[0].(StreamErrorCode),
 		})
 	}).Return()
 
@@ -269,13 +268,13 @@ func TestAnnouncementReader_CloseWithError(t *testing.T) {
 func TestAnnouncementReader_CloseWithError_MultipleClose(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	mockStream := &MockQUICStream{}
-	mockStream.On("StreamID").Return(quic.StreamID(123))
+	mockStream.On("StreamID").Return(StreamID(123))
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 	mockStream.On("CancelRead", mock.Anything).Return()
 	mockStream.On("CancelWrite", mock.Anything).Run(func(args mock.Arguments) {
-		cancel(&quic.StreamError{
+		cancel(&StreamError{
 			StreamID:  mockStream.StreamID(),
-			ErrorCode: args[0].(quic.StreamErrorCode),
+			ErrorCode: args[0].(StreamErrorCode),
 		})
 	}).Return()
 	mockStream.On("Context").Return(ctx)
@@ -667,7 +666,7 @@ func TestAnnouncementReader_DuplicateActiveError(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	// Expect CloseWithError calls for duplicate announcement error
 	mockStream.On("CancelRead", mock.Anything).Return()
-	mockStream.On("CancelWrite", mock.Anything).Return()
+	mockStream.On("CancelWrite", mock.Anything).Return().Maybe()
 
 	ras := newAnnouncementReader(mockStream, "/test/", []string{})
 
@@ -718,7 +717,7 @@ func TestAnnouncementReader_EndNonExistentStreamError(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	// Expect CloseWithError calls for ending non-existent stream error
 	mockStream.On("CancelRead", mock.Anything).Return()
-	mockStream.On("CancelWrite", mock.Anything).Return()
+	mockStream.On("CancelWrite", mock.Anything).Return().Maybe()
 
 	ras := newAnnouncementReader(mockStream, "/test/", []string{})
 
@@ -921,9 +920,9 @@ func TestAnnouncementReader_StreamErrors(t *testing.T) {
 	}{
 		"quic_stream_error": {
 			setupError: func() error {
-				return &quic.StreamError{
-					StreamID:  quic.StreamID(123),
-					ErrorCode: quic.StreamErrorCode(42),
+				return &StreamError{
+					StreamID:  StreamID(123),
+					ErrorCode: StreamErrorCode(42),
 				}
 			},
 			expectedType: &AnnounceError{},

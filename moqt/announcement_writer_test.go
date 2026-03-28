@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/okdaichi/gomoqt/quic"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -216,9 +215,9 @@ func TestAnnouncementWriter_Init_StreamError(t *testing.T) {
 	mockStream := &MockQUICStream{}
 	ctx := context.Background()
 
-	streamError := &quic.StreamError{
-		StreamID:  quic.StreamID(123),
-		ErrorCode: quic.StreamErrorCode(42),
+	streamError := &StreamError{
+		StreamID:  StreamID(123),
+		ErrorCode: StreamErrorCode(42),
 	}
 
 	mockStream.On("Context").Return(ctx)
@@ -424,9 +423,9 @@ func TestAnnouncementWriter_SendAnnouncement_WriteError(t *testing.T) {
 		expectAnnErr bool
 	}{
 		"stream error": {
-			writeError: &quic.StreamError{
-				StreamID:  quic.StreamID(123),
-				ErrorCode: quic.StreamErrorCode(42),
+			writeError: &StreamError{
+				StreamID:  StreamID(123),
+				ErrorCode: StreamErrorCode(42),
 			},
 			expectAnnErr: true,
 		},
@@ -556,8 +555,8 @@ func TestAnnouncementWriter_CloseWithError(t *testing.T) {
 				ctx := context.Background()
 
 				mockStream.On("Context").Return(ctx)
-				mockStream.On("CancelWrite", quic.StreamErrorCode(tt.errorCode)).Return()
-				mockStream.On("CancelRead", quic.StreamErrorCode(tt.errorCode)).Return()
+				mockStream.On("CancelWrite", StreamErrorCode(tt.errorCode)).Return()
+				mockStream.On("CancelRead", StreamErrorCode(tt.errorCode)).Return()
 
 				sas := newAnnouncementWriter(mockStream, "/test/")
 
@@ -578,8 +577,8 @@ func TestAnnouncementWriter_CloseWithError(t *testing.T) {
 
 		mockStream.On("Context").Return(ctx)
 		mockStream.On("Write", mock.Anything).Return(0, nil) // For init and SendAnnouncement
-		mockStream.On("CancelWrite", quic.StreamErrorCode(InternalAnnounceErrorCode)).Return()
-		mockStream.On("CancelRead", quic.StreamErrorCode(InternalAnnounceErrorCode)).Return()
+		mockStream.On("CancelWrite", StreamErrorCode(InternalAnnounceErrorCode)).Return()
+		mockStream.On("CancelRead", StreamErrorCode(InternalAnnounceErrorCode)).Return()
 
 		sas := newAnnouncementWriter(mockStream, "/test/")
 

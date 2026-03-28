@@ -4,12 +4,10 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/okdaichi/gomoqt/quic"
-	"github.com/okdaichi/gomoqt/webtransport"
 	"github.com/stretchr/testify/mock"
 )
 
-var _ webtransport.Server = (*MockWebTransportServer)(nil)
+var _ WebTransportServer = (*MockWebTransportServer)(nil)
 
 // MockWebTransportServer is a mock implementation of the webtransport.Server interface
 type MockWebTransportServer struct {
@@ -17,16 +15,16 @@ type MockWebTransportServer struct {
 }
 
 // Upgrade mocks the Upgrade method
-func (m *MockWebTransportServer) Upgrade(w http.ResponseWriter, r *http.Request) (quic.Connection, error) {
+func (m *MockWebTransportServer) Upgrade(w http.ResponseWriter, r *http.Request) (StreamConn, error) {
 	args := m.Called(w, r)
-	if conn, ok := args.Get(0).(quic.Connection); ok {
+	if conn, ok := args.Get(0).(StreamConn); ok {
 		return conn, args.Error(1)
 	}
 	return nil, args.Error(1)
 }
 
 // ServeQUICConn mocks the ServeQUICConn method
-func (m *MockWebTransportServer) ServeQUICConn(conn quic.Connection) error {
+func (m *MockWebTransportServer) ServeQUICConn(conn StreamConn) error {
 	args := m.Called(conn)
 	return args.Error(0)
 }

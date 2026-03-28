@@ -5,11 +5,9 @@ import (
 	"io"
 	"iter"
 	"time"
-
-	"github.com/okdaichi/gomoqt/quic"
 )
 
-func newGroupReader(sequence GroupSequence, stream quic.ReceiveStream,
+func newGroupReader(sequence GroupSequence, stream ReceiveStream,
 	onClose func()) *GroupReader {
 	return &GroupReader{
 		sequence: sequence,
@@ -24,7 +22,7 @@ func newGroupReader(sequence GroupSequence, stream quic.ReceiveStream,
 type GroupReader struct {
 	sequence GroupSequence
 
-	stream     quic.ReceiveStream
+	stream     ReceiveStream
 	frameCount int64
 
 	onClose func()
@@ -47,7 +45,7 @@ func (s *GroupReader) ReadFrame(frame *Frame) error {
 			return err
 		}
 
-		var strErr *quic.StreamError
+		var strErr *StreamError
 		if errors.As(err, &strErr) {
 			grpErr := &GroupError{
 				StreamError: strErr,
@@ -66,7 +64,7 @@ func (s *GroupReader) ReadFrame(frame *Frame) error {
 
 // CancelRead cancels the group using the provided GroupErrorCode.
 func (s *GroupReader) CancelRead(code GroupErrorCode) {
-	strErrCode := quic.StreamErrorCode(code)
+	strErrCode := StreamErrorCode(code)
 	s.stream.CancelRead(strErrCode)
 }
 

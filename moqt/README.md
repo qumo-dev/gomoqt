@@ -37,7 +37,7 @@ the MOQ Lite specification sections:
 | 2.1.1. WebTransport                        | :white_check_mark: | :white_check_mark: |
 | 2.1.2. QUIC                                | :white_check_mark: | :white_check_mark: |
 | 2.1.3. Connection URL                      | :white_check_mark: | :white_check_mark: |
-| 2.2. Extension Negotiation                 | :white_check_mark: | :white_check_mark: |
+| 2.2. Extension Negotiation                 | :x:                | :x:                |
 | 2.3. Bitrate Monitoring                    |                    |                    |
 | 2.3.1. Bitrate Change Detection            | :white_check_mark: | :white_check_mark: |
 | 2.3.2. Bitrate Update Reception            | :white_check_mark: | :white_check_mark: |

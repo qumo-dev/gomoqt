@@ -1,10 +1,8 @@
 package moqt
 
 import (
-	"testing"
-
-	"github.com/okdaichi/gomoqt/quic"
 	"github.com/stretchr/testify/assert"
+	"testing"
 )
 
 // Test for standard errors
@@ -254,8 +252,8 @@ func TestGroupErrorText(t *testing.T) {
 func TestAnnounceError_UnknownCodeFallback(t *testing.T) {
 	unknownCode := AnnounceErrorCode(0x99)
 	err := AnnounceError{
-		&quic.StreamError{
-			ErrorCode: quic.StreamErrorCode(unknownCode),
+		&StreamError{
+			ErrorCode: StreamErrorCode(unknownCode),
 		},
 	}
 
@@ -270,8 +268,8 @@ func TestAnnounceError_UnknownCodeFallback(t *testing.T) {
 func TestSubscribeError_UnknownCodeFallback(t *testing.T) {
 	unknownCode := SubscribeErrorCode(0x99)
 	err := SubscribeError{
-		&quic.StreamError{
-			ErrorCode: quic.StreamErrorCode(unknownCode),
+		&StreamError{
+			ErrorCode: StreamErrorCode(unknownCode),
 		},
 	}
 
@@ -299,8 +297,8 @@ func TestSessionError_UnknownCodeFallback(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			unknownCode := SessionErrorCode(0x99)
 			err := SessionError{
-				&quic.ApplicationError{
-					ErrorCode: quic.ApplicationErrorCode(unknownCode),
+				&ApplicationError{
+					ErrorCode: ApplicationErrorCode(unknownCode),
 					Remote:    tt.remote,
 				},
 			}
@@ -318,8 +316,8 @@ func TestSessionError_UnknownCodeFallback(t *testing.T) {
 func TestGroupError_UnknownCodeFallback(t *testing.T) {
 	unknownCode := GroupErrorCode(0x99)
 	err := GroupError{
-		&quic.StreamError{
-			ErrorCode: quic.StreamErrorCode(unknownCode),
+		&StreamError{
+			ErrorCode: StreamErrorCode(unknownCode),
 		},
 	}
 
@@ -339,8 +337,8 @@ func TestAnnounceError(t *testing.T) {
 	}{
 		"internal error": {
 			err: AnnounceError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(InternalAnnounceErrorCode),
+				&StreamError{
+					ErrorCode: StreamErrorCode(InternalAnnounceErrorCode),
 				},
 			},
 			expectedString: "moqt: internal error",
@@ -348,8 +346,8 @@ func TestAnnounceError(t *testing.T) {
 		},
 		"duplicated broadcast path": {
 			err: AnnounceError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(DuplicatedAnnounceErrorCode),
+				&StreamError{
+					ErrorCode: StreamErrorCode(DuplicatedAnnounceErrorCode),
 				},
 			},
 			expectedString: "moqt: duplicated broadcast path",
@@ -357,8 +355,8 @@ func TestAnnounceError(t *testing.T) {
 		},
 		"invalid announce status": {
 			err: AnnounceError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(InvalidAnnounceStatusErrorCode),
+				&StreamError{
+					ErrorCode: StreamErrorCode(InvalidAnnounceStatusErrorCode),
 				},
 			},
 			expectedString: "moqt: invalid announce status",
@@ -366,8 +364,8 @@ func TestAnnounceError(t *testing.T) {
 		},
 		"uninterested": {
 			err: AnnounceError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(UninterestedErrorCode),
+				&StreamError{
+					ErrorCode: StreamErrorCode(UninterestedErrorCode),
 				},
 			},
 			expectedString: "moqt: uninterested",
@@ -375,8 +373,8 @@ func TestAnnounceError(t *testing.T) {
 		},
 		"banned prefix": {
 			err: AnnounceError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(BannedPrefixErrorCode),
+				&StreamError{
+					ErrorCode: StreamErrorCode(BannedPrefixErrorCode),
 				},
 			},
 			expectedString: "moqt: banned prefix",
@@ -384,8 +382,8 @@ func TestAnnounceError(t *testing.T) {
 		},
 		"invalid prefix": {
 			err: AnnounceError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(InvalidPrefixErrorCode),
+				&StreamError{
+					ErrorCode: StreamErrorCode(InvalidPrefixErrorCode),
 				},
 			},
 			expectedString: "moqt: invalid prefix",
@@ -410,8 +408,8 @@ func TestSubscribeError(t *testing.T) {
 	}{
 		"internal error": {
 			err: SubscribeError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(InternalSubscribeErrorCode),
+				&StreamError{
+					ErrorCode: StreamErrorCode(InternalSubscribeErrorCode),
 				},
 			},
 			expectedString: "moqt: internal error",
@@ -419,8 +417,8 @@ func TestSubscribeError(t *testing.T) {
 		},
 		"invalid range": {
 			err: SubscribeError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(InvalidRangeErrorCode),
+				&StreamError{
+					ErrorCode: StreamErrorCode(InvalidRangeErrorCode),
 				},
 			},
 			expectedString: "moqt: invalid range",
@@ -428,8 +426,8 @@ func TestSubscribeError(t *testing.T) {
 		},
 		"duplicate subscribe ID": {
 			err: SubscribeError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(DuplicateSubscribeIDErrorCode),
+				&StreamError{
+					ErrorCode: StreamErrorCode(DuplicateSubscribeIDErrorCode),
 				},
 			},
 			expectedString: "moqt: duplicated id",
@@ -437,8 +435,8 @@ func TestSubscribeError(t *testing.T) {
 		},
 		"track not found": {
 			err: SubscribeError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(TrackNotFoundErrorCode),
+				&StreamError{
+					ErrorCode: StreamErrorCode(TrackNotFoundErrorCode),
 				},
 			},
 			expectedString: "moqt: track does not exist",
@@ -446,8 +444,8 @@ func TestSubscribeError(t *testing.T) {
 		},
 		"unauthorized": {
 			err: SubscribeError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(UnauthorizedSubscribeErrorCode),
+				&StreamError{
+					ErrorCode: StreamErrorCode(UnauthorizedSubscribeErrorCode),
 				},
 			},
 			expectedString: "moqt: unauthorized",
@@ -455,8 +453,8 @@ func TestSubscribeError(t *testing.T) {
 		},
 		"timeout": {
 			err: SubscribeError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(SubscribeTimeoutErrorCode),
+				&StreamError{
+					ErrorCode: StreamErrorCode(SubscribeTimeoutErrorCode),
 				},
 			},
 			expectedString: "moqt: timeout",
@@ -481,8 +479,8 @@ func TestSessionError(t *testing.T) {
 	}{
 		"local internal error": {
 			err: SessionError{
-				&quic.ApplicationError{
-					ErrorCode: quic.ApplicationErrorCode(InternalSessionErrorCode),
+				&ApplicationError{
+					ErrorCode: ApplicationErrorCode(InternalSessionErrorCode),
 					Remote:    false,
 				},
 			},
@@ -491,8 +489,8 @@ func TestSessionError(t *testing.T) {
 		},
 		"remote unauthorized": {
 			err: SessionError{
-				&quic.ApplicationError{
-					ErrorCode: quic.ApplicationErrorCode(UnauthorizedSessionErrorCode),
+				&ApplicationError{
+					ErrorCode: ApplicationErrorCode(UnauthorizedSessionErrorCode),
 					Remote:    true,
 				},
 			},
@@ -501,8 +499,8 @@ func TestSessionError(t *testing.T) {
 		},
 		"local protocol violation": {
 			err: SessionError{
-				&quic.ApplicationError{
-					ErrorCode: quic.ApplicationErrorCode(ProtocolViolationErrorCode),
+				&ApplicationError{
+					ErrorCode: ApplicationErrorCode(ProtocolViolationErrorCode),
 					Remote:    false,
 				},
 			},
@@ -511,8 +509,8 @@ func TestSessionError(t *testing.T) {
 		},
 		"remote parameter length mismatch": {
 			err: SessionError{
-				&quic.ApplicationError{
-					ErrorCode: quic.ApplicationErrorCode(ParameterLengthMismatchErrorCode),
+				&ApplicationError{
+					ErrorCode: ApplicationErrorCode(ParameterLengthMismatchErrorCode),
 					Remote:    true,
 				},
 			},
@@ -521,8 +519,8 @@ func TestSessionError(t *testing.T) {
 		},
 		"local too many subscribes": {
 			err: SessionError{
-				&quic.ApplicationError{
-					ErrorCode: quic.ApplicationErrorCode(TooManySubscribeErrorCode),
+				&ApplicationError{
+					ErrorCode: ApplicationErrorCode(TooManySubscribeErrorCode),
 					Remote:    false,
 				},
 			},
@@ -531,8 +529,8 @@ func TestSessionError(t *testing.T) {
 		},
 		"local goaway timeout": {
 			err: SessionError{
-				&quic.ApplicationError{
-					ErrorCode: quic.ApplicationErrorCode(GoAwayTimeoutErrorCode),
+				&ApplicationError{
+					ErrorCode: ApplicationErrorCode(GoAwayTimeoutErrorCode),
 					Remote:    false,
 				},
 			},
@@ -541,8 +539,8 @@ func TestSessionError(t *testing.T) {
 		},
 		"remote unsupported version": {
 			err: SessionError{
-				&quic.ApplicationError{
-					ErrorCode: quic.ApplicationErrorCode(UnsupportedVersionErrorCode),
+				&ApplicationError{
+					ErrorCode: ApplicationErrorCode(UnsupportedVersionErrorCode),
 					Remote:    true,
 				},
 			},
@@ -551,8 +549,8 @@ func TestSessionError(t *testing.T) {
 		},
 		"local setup failed": {
 			err: SessionError{
-				&quic.ApplicationError{
-					ErrorCode: quic.ApplicationErrorCode(SetupFailedErrorCode),
+				&ApplicationError{
+					ErrorCode: ApplicationErrorCode(SetupFailedErrorCode),
 					Remote:    false,
 				},
 			},
@@ -561,8 +559,8 @@ func TestSessionError(t *testing.T) {
 		},
 		"local no error": {
 			err: SessionError{
-				&quic.ApplicationError{
-					ErrorCode: quic.ApplicationErrorCode(NoError),
+				&ApplicationError{
+					ErrorCode: ApplicationErrorCode(NoError),
 					Remote:    false,
 				},
 			},
@@ -588,8 +586,8 @@ func TestGroupError(t *testing.T) {
 	}{
 		"internal error": {
 			err: GroupError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(InternalGroupErrorCode),
+				&StreamError{
+					ErrorCode: StreamErrorCode(InternalGroupErrorCode),
 				},
 			},
 			expectedString: "moqt: internal error",
@@ -597,8 +595,8 @@ func TestGroupError(t *testing.T) {
 		},
 		"out of range": {
 			err: GroupError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(OutOfRangeErrorCode),
+				&StreamError{
+					ErrorCode: StreamErrorCode(OutOfRangeErrorCode),
 				},
 			},
 			expectedString: "moqt: out of range",
@@ -606,8 +604,8 @@ func TestGroupError(t *testing.T) {
 		},
 		"expired group": {
 			err: GroupError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(ExpiredGroupErrorCode),
+				&StreamError{
+					ErrorCode: StreamErrorCode(ExpiredGroupErrorCode),
 				},
 			},
 			expectedString: "moqt: group expires",
@@ -615,8 +613,8 @@ func TestGroupError(t *testing.T) {
 		},
 		"subscribe canceled": {
 			err: GroupError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(SubscribeCanceledErrorCode),
+				&StreamError{
+					ErrorCode: StreamErrorCode(SubscribeCanceledErrorCode),
 				},
 			},
 			expectedString: "moqt: subscribe canceled",
@@ -624,8 +622,8 @@ func TestGroupError(t *testing.T) {
 		},
 		"publish aborted": {
 			err: GroupError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(PublishAbortedErrorCode),
+				&StreamError{
+					ErrorCode: StreamErrorCode(PublishAbortedErrorCode),
 				},
 			},
 			expectedString: "moqt: publish aborted",
@@ -633,8 +631,8 @@ func TestGroupError(t *testing.T) {
 		},
 		"session closed": {
 			err: GroupError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(ClosedSessionGroupErrorCode),
+				&StreamError{
+					ErrorCode: StreamErrorCode(ClosedSessionGroupErrorCode),
 				},
 			},
 			expectedString: "moqt: session closed",
@@ -642,8 +640,8 @@ func TestGroupError(t *testing.T) {
 		},
 		"invalid subscribe ID": {
 			err: GroupError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(InvalidSubscribeIDErrorCode),
+				&StreamError{
+					ErrorCode: StreamErrorCode(InvalidSubscribeIDErrorCode),
 				},
 			},
 			expectedString: "moqt: invalid subscribe id",
@@ -782,8 +780,8 @@ func TestErrorTextConsistency(t *testing.T) {
 		for _, code := range codes {
 			text := AnnounceErrorText(code)
 			err := AnnounceError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(code),
+				&StreamError{
+					ErrorCode: StreamErrorCode(code),
 				},
 			}
 			assert.Equal(t, text, err.Error(), "AnnounceErrorText and AnnounceError.Error() should return the same text for code %v", code)
@@ -804,8 +802,8 @@ func TestErrorTextConsistency(t *testing.T) {
 		for _, code := range codes {
 			text := SubscribeErrorText(code)
 			err := SubscribeError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(code),
+				&StreamError{
+					ErrorCode: StreamErrorCode(code),
 				},
 			}
 			assert.Equal(t, text, err.Error(), "SubscribeErrorText and SubscribeError.Error() should return the same text for code %v", code)
@@ -832,8 +830,8 @@ func TestErrorTextConsistency(t *testing.T) {
 			// Test both local and remote
 			for _, remote := range []bool{false, true} {
 				err := SessionError{
-					&quic.ApplicationError{
-						ErrorCode: quic.ApplicationErrorCode(code),
+					&ApplicationError{
+						ErrorCode: ApplicationErrorCode(code),
 						Remote:    remote,
 					},
 				}
@@ -864,8 +862,8 @@ func TestErrorTextConsistency(t *testing.T) {
 		for _, code := range codes {
 			text := GroupErrorText(code)
 			err := GroupError{
-				&quic.StreamError{
-					ErrorCode: quic.StreamErrorCode(code),
+				&StreamError{
+					ErrorCode: StreamErrorCode(code),
 				},
 			}
 			assert.Equal(t, text, err.Error(), "GroupErrorText and GroupError.Error() should return the same text for code %v", code)

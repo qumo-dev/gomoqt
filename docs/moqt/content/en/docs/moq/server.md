@@ -114,7 +114,7 @@ type Server struct {
 {{< tabs items="Using Default WebTransport, Using Custom WebTransport" >}}
 {{< tab >}}
 
-[`quic-go/webtransport-go`](https://github.com/quic-go/webtransport-go) is used internally as the default WebTransport implementation when relevant fields which is set for customization are not set or `nil`.
+[`quic-go/webtransport-go`](https://github.com/okdaichi/webtransport-go) is used internally as the default WebTransport implementation when relevant fields which is set for customization are not set or `nil`.
 
 {{<github-readme-stats user="quic-go" repo="webtransport-go" >}}
 

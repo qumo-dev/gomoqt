@@ -14,14 +14,12 @@ import { EOFError } from "@okdaichi/golikejs/io";
  * Accepts Partial<SendStream> to override default implementations.
  */
 export class MockSendStream implements SendStream {
-	readonly id: bigint;
 	readonly write: (p: Uint8Array) => Promise<[number, Error | undefined]>;
 	readonly close: () => Promise<void>;
 	readonly cancel: (code: number) => Promise<void>;
 	readonly closed: () => Promise<void>;
 
 	constructor(partial: Partial<SendStream> = {}) {
-		this.id = partial.id ?? 0n;
 		const writeFunc = partial.write ??
 			(async (p: Uint8Array) => [p.length, undefined] as [number, Error | undefined]);
 		this.write = spy(async (p: Uint8Array) => await writeFunc(p));
@@ -38,13 +36,11 @@ export class MockSendStream implements SendStream {
  * Accepts Partial<ReceiveStream> to override default implementations.
  */
 export class MockReceiveStream implements ReceiveStream {
-	readonly id: bigint;
 	readonly read: (p: Uint8Array) => Promise<[number, Error | undefined]>;
 	readonly cancel: (code: number) => Promise<void>;
 	readonly closed: () => Promise<void>;
 
 	constructor(partial: Partial<ReceiveStream> = {}) {
-		this.id = partial.id ?? 0n;
 		const readFunc = partial.read ??
 			(async () => [0, new EOFError()] as [number, Error | undefined]);
 		this.read = spy(async (p: Uint8Array) => await readFunc(p));
@@ -59,14 +55,12 @@ export class MockReceiveStream implements ReceiveStream {
  * Accepts Partial<Stream> to override default implementations.
  */
 export class MockStream implements Stream {
-	readonly id: bigint;
 	readonly writable: SendStream;
 	readonly readable: ReceiveStream;
 
 	constructor(partial: Partial<Stream> = {}) {
-		this.id = partial.id ?? 0n;
-		this.writable = partial.writable ?? new MockSendStream({ id: partial.id });
+		this.writable = partial.writable ?? new MockSendStream({});
 		this.readable = partial.readable ??
-			new MockReceiveStream({ id: partial.id });
+			new MockReceiveStream({});
 	}
 }

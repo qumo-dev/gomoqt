@@ -16,7 +16,7 @@ import (
 	// "sync" is not used directly here; it may be needed in future changes
 
 	"github.com/okdaichi/gomoqt/moqt"
-	"github.com/okdaichi/gomoqt/quic"
+	"github.com/quic-go/quic-go"
 )
 
 func main() {
@@ -42,12 +42,19 @@ func main() {
 			Allow0RTT:       true,
 			EnableDatagrams: true,
 		},
-		CheckHTTPOrigin: func(r *http.Request) bool {
-			return true // TODO: Implement proper origin check
-		},
 	}
 
 	serverDone := make(chan struct{}, 1)
+
+	nativeMux := moqt.NewTrackMux()
+	server.NativeQUICHandler = &moqt.NativeQUICHandler{
+		TrackMux: nativeMux,
+		SessionHandler: func(sess *moqt.Session) error {
+			runInteropSession(sess, nativeMux, serverDone)
+			return nil
+		},
+	}
+
 	go func() {
 		<-serverDone
 		_ = server.Close()
@@ -61,143 +68,18 @@ func main() {
 
 	// Serve MOQ over WebTransport
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		err := server.HandleWebTransport(w, r)
+		upgrader := moqt.Upgrader{
+			CheckOrigin: func(r *http.Request) bool { return true },
+			TrackMux:    moqt.NewTrackMux(),
+		}
+
+		sess, err := upgrader.Upgrade(w, r)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to serve moq over webtransport: %v\n", err)
+			fmt.Fprintf(os.Stderr, "failed to upgrade to moq session: %v\n", err)
 			return
 		}
-	})
 
-	moqt.HandleFunc("/", func(w moqt.SetupResponseWriter, r *moqt.SetupRequest) {
-		fmt.Print("Setting up session")
-
-		// Create a custom mux for this session
-		mux := moqt.NewTrackMux()
-
-		// Accept the session with the custom mux
-		sess, err := moqt.Accept(w, r, mux)
-		if err != nil {
-			fmt.Printf("failed\n  Error: %v\n", err)
-			w.Reject(moqt.ProtocolViolationErrorCode)
-			return
-		}
-		fmt.Println("ok")
-
-		go func() {
-			// Close the server when the session ends
-			<-sess.Context().Done()
-
-			select {
-			case serverDone <- struct{}{}:
-			default:
-			}
-		}()
-
-		path := moqt.BroadcastPath("/interop/server")
-
-		// Wait for publish handler to finish. Use a buffered channel to support
-		// non-blocking notification so multiple handler invocations won't cause
-		// panics on close.
-		doneCh := make(chan struct{}, 1)
-		mux.PublishFunc(context.Background(), path, func(tw *moqt.TrackWriter) {
-			fmt.Printf("Serving a track: %s,%s\n", string(path), string(tw.TrackName))
-
-			group, err := tw.OpenGroup()
-			if err != nil {
-				fmt.Printf("Opening group... failed\n  Error: %v\n", err)
-				return
-			}
-			fmt.Println("Opening group... ok")
-
-			defer group.Close()
-
-			frame := moqt.NewFrame(1024)
-			_, _ = frame.Write([]byte("HELLO"))
-
-			err = group.WriteFrame(frame)
-			if err != nil {
-				fmt.Printf("Writing frame to client... failed\n  Error: %v\n", err)
-				return
-			}
-
-			fmt.Println("Writing frame to client... ok")
-
-			// Close the group to send FIN.
-			group.Close()
-
-			// Signal that handler has been invoked (non-blocking)
-			select {
-			case doneCh <- struct{}{}:
-			default:
-			}
-		})
-
-		// Wait for the broadcast to be published or timeout.
-		select {
-		case <-doneCh:
-			// Published normally
-		case <-time.After(5 * time.Second):
-			fmt.Println("publish handler did not complete in time; continuing")
-		}
-
-		// Discover broadcasts from client
-		fmt.Print("Accepting client announcements...")
-		anns, err := sess.AcceptAnnounce("/")
-		if err != nil {
-			fmt.Printf("failed\n  Error: %v\n", err)
-			return
-		}
-		defer anns.Close()
-		fmt.Println("ok")
-
-		fmt.Print("Receiving announcement...")
-		ann, err := anns.ReceiveAnnouncement(context.Background())
-		if err != nil {
-			fmt.Printf("failed\n  Error: %v\n", err)
-			return
-		}
-		fmt.Println("ok")
-
-		fmt.Printf("Discovered broadcast: %s\n", string(ann.BroadcastPath()))
-
-		fmt.Print("Subscribing to broadcast...")
-		// Subscribe to the announced broadcast. Subscribe blocks until the
-		// subscription is established or an error occurs. No artificial sleeps.
-		track, err := sess.Subscribe(ann.BroadcastPath(), "", nil)
-		if err != nil {
-			fmt.Printf("failed\n  Error: %v\n", err)
-			return
-		}
-		defer track.Close()
-		fmt.Println("ok")
-
-		fmt.Print("Accepting group...")
-		group, err := track.AcceptGroup(context.Background())
-		if err != nil {
-			fmt.Printf("failed\n  Error: %v\n", err)
-			return
-		}
-		fmt.Println("ok")
-
-		fmt.Print("Reading the first frame from client...")
-		frame := moqt.NewFrame(1024)
-		err = group.ReadFrame(frame)
-		if err != nil {
-			if err == io.EOF {
-				return // Group closed by client
-			}
-			fmt.Printf("failed\n  Error: %v\n", err)
-			return
-		}
-		fmt.Printf("ok (payload: %s)\n", string(frame.Body()))
-
-		// Allow the session to finish cleanly by waiting for the session
-		// context to finish or by deferring session close; we avoid
-		// arbitrary sleeps.
-
-		fmt.Print("Closing session...")
-		_ = sess.CloseWithError(moqt.NoError, "no error")
-		fmt.Println("ok")
+		go runInteropSession(sess, upgrader.TrackMux, serverDone)
 	})
 
 	fmt.Println("Listening...")
@@ -207,6 +89,98 @@ func main() {
 		fmt.Fprintf(os.Stderr, "failed to listen and serve: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func runInteropSession(sess *moqt.Session, mux *moqt.TrackMux, serverDone chan struct{}) {
+	defer func() {
+		_ = sess.CloseWithError(moqt.NoError, "no error")
+		select {
+		case serverDone <- struct{}{}:
+		default:
+		}
+	}()
+
+	path := moqt.BroadcastPath("/interop/server")
+	doneCh := make(chan struct{}, 1)
+
+	mux.PublishFunc(context.Background(), path, func(tw *moqt.TrackWriter) {
+		fmt.Printf("Serving a track: %s,%s\n", string(path), string(tw.TrackName))
+
+		group, err := tw.OpenGroup()
+		if err != nil {
+			fmt.Printf("Opening group... failed\n  Error: %v\n", err)
+			return
+		}
+		defer group.Close()
+		fmt.Println("Opening group... ok")
+
+		frame := moqt.NewFrame(1024)
+		_, _ = frame.Write([]byte("HELLO"))
+
+		if err = group.WriteFrame(frame); err != nil {
+			fmt.Printf("Writing frame to client... failed\n  Error: %v\n", err)
+			return
+		}
+		fmt.Println("Writing frame to client... ok")
+
+		select {
+		case doneCh <- struct{}{}:
+		default:
+		}
+	})
+
+	select {
+	case <-doneCh:
+	case <-time.After(5 * time.Second):
+		fmt.Println("publish handler did not complete in time; continuing")
+	}
+
+	fmt.Print("Accepting client announcements...")
+	anns, err := sess.AcceptAnnounce("/")
+	if err != nil {
+		fmt.Printf("failed\n  Error: %v\n", err)
+		return
+	}
+	defer anns.Close()
+	fmt.Println("ok")
+
+	fmt.Print("Receiving announcement...")
+	ann, err := anns.ReceiveAnnouncement(context.Background())
+	if err != nil {
+		fmt.Printf("failed\n  Error: %v\n", err)
+		return
+	}
+	fmt.Println("ok")
+
+	fmt.Printf("Discovered broadcast: %s\n", string(ann.BroadcastPath()))
+
+	fmt.Print("Subscribing to broadcast...")
+	track, err := sess.Subscribe(ann.BroadcastPath(), "", nil)
+	if err != nil {
+		fmt.Printf("failed\n  Error: %v\n", err)
+		return
+	}
+	defer track.Close()
+	fmt.Println("ok")
+
+	fmt.Print("Accepting group...")
+	group, err := track.AcceptGroup(context.Background())
+	if err != nil {
+		fmt.Printf("failed\n  Error: %v\n", err)
+		return
+	}
+	fmt.Println("ok")
+
+	fmt.Print("Reading the first frame from client...")
+	frame := moqt.NewFrame(1024)
+	if err = group.ReadFrame(frame); err != nil {
+		if err == io.EOF {
+			return
+		}
+		fmt.Printf("failed\n  Error: %v\n", err)
+		return
+	}
+	fmt.Printf("ok (payload: %s)\n", string(frame.Body()))
 }
 
 func generateCert() tls.Certificate {

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/okdaichi/gomoqt/moqt"
-	"github.com/okdaichi/gomoqt/quic"
+	"github.com/quic-go/quic-go"
 )
 
 func main() {
@@ -23,10 +23,6 @@ func main() {
 			EnableDatagrams: true,
 		},
 		Logger: slog.Default(),
-	}
-
-	server.SessionHandler = func(sess *moqt.Session) {
-		// Accept session
 	}
 
 	server.ListenAndServe()

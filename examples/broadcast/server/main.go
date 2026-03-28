@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/okdaichi/gomoqt/moqt"
-	"github.com/okdaichi/gomoqt/quic"
+	"github.com/quic-go/quic-go"
 )
 
 func main() {
@@ -28,15 +28,12 @@ func main() {
 		Logger: slog.Default(),
 	}
 
-	server.SessionHandler = func(sess *moqt.Session) {
-		// Just accept the session
-	}
-
 	// Serve moq over webtransport
+	upgrader := moqt.Upgrader{}
 	http.HandleFunc("/broadcast", func(w http.ResponseWriter, r *http.Request) {
-		err := server.HandleWebTransport(w, r)
+		_, err := upgrader.Upgrade(w, r)
 		if err != nil {
-			slog.Error("failed to serve web transport", "error", err)
+			slog.Error("failed to upgrade to WebTransport session", "error", err)
 			return
 		}
 	})

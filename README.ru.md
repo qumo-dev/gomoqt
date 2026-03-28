@@ -139,5 +139,5 @@ mage help
 
 ## Благодарности
 - [quic-go](https://github.com/quic-go/quic-go) — реализация QUIC на Go
-- [webtransport-go](https://github.com/quic-go/webtransport-go) — реализация WebTransport на Go
+- [webtransport-go](https://github.com/okdaichi/webtransport-go) — реализация WebTransport на Go
 - [Спецификация MOQ Lite](https://kixelated.github.io/moq-drafts/draft-lcurley-moq-transfork.html) — спецификация, которой следует данная реализация

@@ -6,16 +6,15 @@ import (
 	"sync"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
-	"github.com/okdaichi/gomoqt/quic"
 )
 
-func newAnnouncementReader(stream quic.Stream, prefix prefix, initSuffixes []suffix) *AnnouncementReader {
+func newAnnouncementReader(stream Stream, prefix prefix, initSuffixes []suffix) *AnnouncementReader {
 	if !isValidPrefix(prefix) {
 		panic("invalid prefix for AnnouncementReader")
 	}
 
 	ar := &AnnouncementReader{
-		ctx:         context.WithValue(stream.Context(), &biStreamTypeCtxKey, message.StreamTypeAnnounce),
+		ctx:         context.WithValue(stream.Context(), biStreamTypeCtxKey, message.StreamTypeAnnounce),
 		stream:      stream,
 		prefix:      prefix,
 		actives:     make(map[suffix]*Announcement),
@@ -107,7 +106,7 @@ func newAnnouncementReader(stream quic.Stream, prefix prefix, initSuffixes []suf
 // It maintains a list of active announcements and notifies when new announcements
 // are received or existing ones are canceled.
 type AnnouncementReader struct {
-	stream quic.Stream
+	stream Stream
 	prefix prefix
 
 	ctx context.Context
@@ -203,7 +202,7 @@ func (ras *AnnouncementReader) CloseWithError(code AnnounceErrorCode) error {
 		ras.announcedCh = nil
 	}
 
-	strErrCode := quic.StreamErrorCode(code)
+	strErrCode := StreamErrorCode(code)
 	ras.stream.CancelRead(strErrCode)
 	ras.stream.CancelWrite(strErrCode)
 

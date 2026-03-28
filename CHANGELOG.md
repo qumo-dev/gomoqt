@@ -6,13 +6,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **transport:** introduced a shared transport abstraction package (`transport/*`) and migrated core connection/listener/config/error interfaces into it.
+- **moqt:** added `alpn.go` with protocol constants (`NextProtoMOQ`, `NextProtoH3`) for ALPN-based negotiation.
+- **moqt API:** added top-level transport type aliases (e.g. `moqt.StreamConn`, `moqt.QUICListener`) to reduce `transport.` prefix leakage while keeping the dedicated transport abstraction package.
+- **moqt/server:** introduced `NativeQUICHandler` to encapsulate native MOQ-over-QUIC session handling.
+
 ### Changed
 
-- **moqt:** aligned SUBSCRIBE/SUBSCRIBE_OK/SUBSCRIBE_UPDATE message schemas with MoQ draft3, introducing explicit subscriber-side (SubscriberPriority, SubscriberOrdered, SubscriberMaxLatency, StartGroup, EndGroup) and publisher-side fields with proper field encoding/decoding.
-- **moqt:** updated session stream handling to treat unknown bidirectional and unidirectional stream types as stream-local errors (reset/cancel) rather than session-terminating violations, enabling safer extension probing.
-- **moqt:** refactored AnnouncementWriter initialization to emit individual per-suffix ACTIVE AnnounceMessage frames instead of ANNOUNCE_INIT, and simplified synchronization logic by removing unnecessary atomic flags and helper functions.
-- **moqt/internal/message:** added draft3 stream type constants (FETCH, PROBE) and deprecated legacy OBJECT/OBJECT_STREAM types.
-- **moqt/internal/message:** extended ANNOUNCE message encoding to include Hops field for draft3 alignment.
+- **moqt core:** migrated client/session/server and internal QUIC/WebTransport wrappers to the shared `transport` package APIs.
+- **moqt/server:** added ALPN-based protocol dispatching in `ServeQUICConn()` to route connections to WebTransport or native QUIC handlers based on negotiated protocol.
+- **moqt/upgrader:** added support for customizable WebTransport application protocols via `Upgrader.ApplicationProtocols`.
+- **moqt/client:** when dialing native QUIC, now defaults `TLSConfig.NextProtos` to `moq-lite-03` if unset.
+- **interop:** updated Dockerized interop flow and Go interop client/server URL handling for more robust address/scheme behavior.
+- **interop/Dockerfile:** aligned containerized interop environment with updated Go toolchain/runtime settings.
+- **examples:** updated broadcast and echo server examples to the current `Upgrader` API.
+- **Dependencies:** switched WebTransport dependency from `github.com/quic-go/webtransport-go` to `github.com/okdaichi/webtransport-go v0.10.1-okdaichi.1`.
+- **webtransport/webtransportgo:** updated wrapper imports and server wrapper initialization for the forked WebTransport module path (including removing dependency on `ConfigureHTTP3Server`).
+- **Documentation:** updated README files (all supported languages) and MoQT docs links to reference `github.com/okdaichi/webtransport-go`.
+- **moq-web:** aligned internal WebTransport connection abstractions and naming with the Go transport-layer model.
+
+### Fixed
+
+- **moqt/server:** wired server `connContext` into the default internal WebTransport server (`http3.Server.ConnContext`) and fixed `connContext` variable shadowing so custom `Server.ConnContext` return values propagate correctly during WebTransport upgrades.
+- **moqt/server:** fixed `Server.ListenAndServe()` and `Server.ListenAndServeTLS()` to correctly use custom `Server.ListenFunc` when provided (prevents nil function call panic in tests/custom listeners).
+
+### Removed
+
+- **moqt:** removed unused router/session-stream related code paths as part of the transport-layer refactor.
+- **moq-web:** removed `SessionStream` and related legacy session-stream wiring to simplify session management.
+- **moqt:** removed legacy `Version` API (`Version` type, draft constants, and default client/server version variables) in favor of ALPN/subprotocol-based negotiation.
+- **moqt:** removed obsolete `Extension` API (`parameters.go`, `NewExtension`, `ExtensionKey`, and related helpers/tests/examples) that was no longer used by current session setup.
+- **moq-web:** removed obsolete version negotiation surface (`src/version.ts`, `MOQOptions.versions`, `SessionOptions.versions`) and aligned API report artifacts.
+- **moq-web:** removed obsolete `Extensions` negotiation surface (`src/extensions.ts`, `MOQOptions.extensions`, `SessionOptions.extensions`) and aligned API report artifacts.
+- **examples:** cleaned up outdated relay/native_quic example code paths.
+
+### Tests
+
+- **moqt:** migrated test suite to the new session/server transport APIs after transport-layer refactor.
+- **webtransport/webtransportgo:** updated server init tests to validate stable wrapper initialization behavior across the forked implementation.
+- **moqt/server:** added regression tests to verify default WebTransport `ConnContext` wiring and `connContext` behavior (custom context propagation and nil-context panic guard).
+- **moqt/client:** added tests verifying default ALPN behavior for native QUIC dialing when `TLSConfig.NextProtos` is unset.
 
 ## [v0.11.0] - 2026-03-12
 

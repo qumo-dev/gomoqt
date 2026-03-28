@@ -1,6 +1,5 @@
 import { Session } from "./session.ts";
 import type { MOQOptions } from "./options.ts";
-import { DEFAULT_CLIENT_VERSIONS } from "./version.ts";
 import { DefaultTrackMux, TrackMux } from "./track_mux.ts";
 import { WebTransportSession } from "./internal/webtransport/mod.ts";
 
@@ -11,10 +10,7 @@ const DefaultWebTransportOptions: WebTransportOptions = {
 };
 
 const DefaultMOQOptions: MOQOptions = {
-	versions: DEFAULT_CLIENT_VERSIONS,
-	extensions: undefined,
 	reconnect: false, // TODO: Implement reconnect logic
-	// migrate: (url: URL) => false,
 	transportOptions: DefaultWebTransportOptions,
 };
 
@@ -29,8 +25,6 @@ export class Client {
 	 */
 	constructor(options?: MOQOptions) {
 		this.options = {
-			versions: options?.versions ?? DefaultMOQOptions.versions,
-			extensions: options?.extensions ?? DefaultMOQOptions.extensions,
 			reconnect: options?.reconnect ?? DefaultMOQOptions.reconnect,
 			transportOptions: {
 				...DefaultWebTransportOptions,
@@ -56,8 +50,7 @@ export class Client {
 				this.options.transportOptions,
 			);
 			const session = new Session({
-				webtransport: webtransport,
-				extensions: this.options.extensions,
+				transport: webtransport,
 				mux,
 			});
 			await session.ready;

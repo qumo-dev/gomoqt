@@ -5,18 +5,14 @@ import {
 	WebTransportStreamErrorCode,
 	WebTransportStreamErrorInfo,
 } from "./error.ts";
-import { StreamID } from "./alias.ts";
 
 export interface ReceiveStream extends Reader {
-	readonly id: StreamID;
-
 	cancel(code: WebTransportStreamErrorCode): Promise<void>;
 
 	closed(): Promise<void>;
 }
 export interface ReceiveStreamInit {
 	stream: ReadableStream<Uint8Array>;
-	streamId: bigint;
 }
 
 /**
@@ -27,7 +23,6 @@ class ReceiveStreamClass implements ReceiveStream {
 	#pull: ReadableStreamDefaultReader<Uint8Array>;
 	#buf: Uint8Array = new Uint8Array(0);
 	#closed: Promise<void>;
-	readonly id: bigint;
 	#err?: Error;
 
 	constructor(init: ReceiveStreamInit) {
@@ -46,7 +41,6 @@ class ReceiveStreamClass implements ReceiveStream {
 		} catch (_e) {
 			// ignore if not present
 		}
-		this.id = init.streamId;
 	}
 
 	/**

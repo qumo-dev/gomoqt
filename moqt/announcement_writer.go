@@ -6,11 +6,10 @@ import (
 	"sync"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
-	"github.com/okdaichi/gomoqt/quic"
 )
 
 // newAnnouncementWriter creates a new AnnouncementWriter for the given stream and prefix.
-func newAnnouncementWriter(stream quic.Stream, prefix prefix) *AnnouncementWriter {
+func newAnnouncementWriter(stream Stream, prefix prefix) *AnnouncementWriter {
 	if !isValidPrefix(prefix) {
 		panic("invalid prefix for AnnouncementWriter")
 	}
@@ -18,7 +17,7 @@ func newAnnouncementWriter(stream quic.Stream, prefix prefix) *AnnouncementWrite
 	sas := &AnnouncementWriter{
 		prefix:   prefix,
 		stream:   stream,
-		ctx:      context.WithValue(stream.Context(), &biStreamTypeCtxKey, message.StreamTypeAnnounce),
+		ctx:      context.WithValue(stream.Context(), biStreamTypeCtxKey, message.StreamTypeAnnounce),
 		actives:  make(map[suffix]*activeAnnouncement),
 		initDone: make(chan struct{}),
 	}
@@ -30,7 +29,7 @@ func newAnnouncementWriter(stream quic.Stream, prefix prefix) *AnnouncementWrite
 // It handles initialization, sending active announcements, and cleanup.
 type AnnouncementWriter struct {
 	prefix prefix
-	stream quic.Stream
+	stream Stream
 	ctx    context.Context
 
 	mu      sync.RWMutex
@@ -57,6 +56,7 @@ func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) err
 		}
 
 		actives := make(map[suffix]*activeAnnouncement)
+		suffixes := make([]string, 0, len(announcements))
 
 		for ann := range announcements {
 			if !ann.IsActive() {
@@ -68,23 +68,21 @@ func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) err
 			}
 			// Always replace with the latest active announcement for the suffix.
 			actives[sfx] = &activeAnnouncement{announcement: ann}
+			suffixes = append(suffixes, sfx)
 		}
 
-		for sfx := range actives {
-			err = message.AnnounceMessage{
-				AnnounceStatus: message.ACTIVE,
-				TrackSuffix:    sfx,
-			}.Encode(aw.stream)
-			if err != nil {
-				var strErr *quic.StreamError
-				if errors.As(err, &strErr) {
-					err = &AnnounceError{StreamError: strErr}
-				}
-				aw.mu.Lock()
-				aw.initErr = err
-				aw.mu.Unlock()
-				return
+		err = message.AnnounceInitMessage{
+			Suffixes: suffixes,
+		}.Encode(aw.stream)
+		if err != nil {
+			var strErr *StreamError
+			if errors.As(err, &strErr) {
+				err = &AnnounceError{StreamError: strErr}
 			}
+			aw.mu.Lock()
+			aw.initErr = err
+			aw.mu.Unlock()
+			return
 		}
 
 		aw.mu.Lock()
@@ -196,7 +194,7 @@ func (aw *AnnouncementWriter) SendAnnouncement(announcement *Announcement) error
 		TrackSuffix:    suffix,
 	}.Encode(aw.stream)
 	if err != nil {
-		var strErr *quic.StreamError
+		var strErr *StreamError
 		if errors.As(err, &strErr) {
 			return &AnnounceError{
 				StreamError: strErr,
@@ -251,7 +249,7 @@ func (aw *AnnouncementWriter) CloseWithError(code AnnounceErrorCode) error {
 		endFunc()
 	}
 
-	strErrCode := quic.StreamErrorCode(code)
+	strErrCode := StreamErrorCode(code)
 	aw.stream.CancelWrite(strErrCode)
 	aw.stream.CancelRead(strErrCode)
 

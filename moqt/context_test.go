@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
-	"github.com/okdaichi/gomoqt/quic"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -32,24 +31,24 @@ func TestCause(t *testing.T) {
 		"with stream error": {
 			setupCtx: func() context.Context {
 				ctx, cancel := context.WithCancelCause(context.Background())
-				streamErr := &quic.StreamError{StreamID: 1, ErrorCode: 1, Remote: true}
+				streamErr := &StreamError{StreamID: 1, ErrorCode: 1, Remote: true}
 				cancel(streamErr)
 				return ctx
 			},
-			expected: &quic.StreamError{StreamID: 1, ErrorCode: 1, Remote: true},
+			expected: &StreamError{StreamID: 1, ErrorCode: 1, Remote: true},
 		},
-		"with stream error and session stream type": {
+		"with stream error and session type": {
 			setupCtx: func() context.Context {
 				ctx, cancel := context.WithCancelCause(context.Background())
-				streamErr := &quic.StreamError{StreamID: 1, ErrorCode: 1, Remote: true}
-				ctx = context.WithValue(ctx, &biStreamTypeCtxKey, message.StreamTypeSession)
+				streamErr := &StreamError{StreamID: 1, ErrorCode: 1, Remote: true}
+				ctx = context.WithValue(ctx, biStreamTypeCtxKey, message.StreamTypeSession)
 				cancel(streamErr)
 				return ctx
 			},
 			expected: &SessionError{
-				ApplicationError: &quic.ApplicationError{
+				ApplicationError: &ApplicationError{
 					Remote:       true,
-					ErrorCode:    quic.ApplicationErrorCode(ProtocolViolationErrorCode),
+					ErrorCode:    ApplicationErrorCode(ProtocolViolationErrorCode),
 					ErrorMessage: "moqt: closed session stream",
 				},
 			},
@@ -57,48 +56,48 @@ func TestCause(t *testing.T) {
 		"with stream error and announce stream type": {
 			setupCtx: func() context.Context {
 				ctx, cancel := context.WithCancelCause(context.Background())
-				streamErr := &quic.StreamError{StreamID: 1, ErrorCode: 2, Remote: true}
-				ctx = context.WithValue(ctx, &biStreamTypeCtxKey, message.StreamTypeAnnounce)
+				streamErr := &StreamError{StreamID: 1, ErrorCode: 2, Remote: true}
+				ctx = context.WithValue(ctx, biStreamTypeCtxKey, message.StreamTypeAnnounce)
 				cancel(streamErr)
 				return ctx
 			},
 			expected: &AnnounceError{
-				StreamError: &quic.StreamError{StreamID: 1, ErrorCode: 2, Remote: true},
+				StreamError: &StreamError{StreamID: 1, ErrorCode: 2, Remote: true},
 			},
 		},
 		"with stream error and subscribe stream type": {
 			setupCtx: func() context.Context {
 				ctx, cancel := context.WithCancelCause(context.Background())
-				streamErr := &quic.StreamError{StreamID: 1, ErrorCode: 3, Remote: true}
-				ctx = context.WithValue(ctx, &biStreamTypeCtxKey, message.StreamTypeSubscribe)
+				streamErr := &StreamError{StreamID: 1, ErrorCode: 3, Remote: true}
+				ctx = context.WithValue(ctx, biStreamTypeCtxKey, message.StreamTypeSubscribe)
 				cancel(streamErr)
 				return ctx
 			},
 			expected: &SubscribeError{
-				StreamError: &quic.StreamError{StreamID: 1, ErrorCode: 3, Remote: true},
+				StreamError: &StreamError{StreamID: 1, ErrorCode: 3, Remote: true},
 			},
 		},
 		"with stream error and group stream type": {
 			setupCtx: func() context.Context {
 				ctx, cancel := context.WithCancelCause(context.Background())
-				streamErr := &quic.StreamError{StreamID: 1, ErrorCode: 4, Remote: true}
-				ctx = context.WithValue(ctx, &uniStreamTypeCtxKey, message.StreamTypeGroup)
+				streamErr := &StreamError{StreamID: 1, ErrorCode: 4, Remote: true}
+				ctx = context.WithValue(ctx, uniStreamTypeCtxKey, message.StreamTypeGroup)
 				cancel(streamErr)
 				return ctx
 			},
 			expected: &GroupError{
-				StreamError: &quic.StreamError{StreamID: 1, ErrorCode: 4, Remote: true},
+				StreamError: &StreamError{StreamID: 1, ErrorCode: 4, Remote: true},
 			},
 		},
 		"with application error": {
 			setupCtx: func() context.Context {
 				ctx, cancel := context.WithCancelCause(context.Background())
-				appErr := &quic.ApplicationError{Remote: false, ErrorCode: 5, ErrorMessage: "app error"}
+				appErr := &ApplicationError{Remote: false, ErrorCode: 5, ErrorMessage: "app error"}
 				cancel(appErr)
 				return ctx
 			},
 			expected: &SessionError{
-				ApplicationError: &quic.ApplicationError{Remote: false, ErrorCode: 5, ErrorMessage: "app error"},
+				ApplicationError: &ApplicationError{Remote: false, ErrorCode: 5, ErrorMessage: "app error"},
 			},
 		},
 	}

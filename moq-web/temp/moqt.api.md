@@ -65,7 +65,6 @@ export type BiStreamType = typeof BiStreamTypes[keyof typeof BiStreamTypes];
 
 // @public (undocumented)
 export const BiStreamTypes: {
-    readonly SessionStreamType: 0;
     readonly AnnounceStreamType: 1;
     readonly SubscribeStreamType: 2;
 };
@@ -192,16 +191,10 @@ export const MOQ: typeof Client;
 
 // @public (undocumented)
 export interface MOQOptions {
-    // Warning: (ae-forgotten-export) The symbol "Extensions" needs to be exported by the entry point index.d.ts
-    //
-    // (undocumented)
-    extensions?: Extensions;
     // (undocumented)
     reconnect?: boolean;
     // (undocumented)
     transportOptions?: WebTransportOptions;
-    // (undocumented)
-    versions?: Set<bigint>;
 }
 
 // @public (undocumented)
@@ -250,7 +243,7 @@ export class SendSubscribeStream {
 
 // @public (undocumented)
 export class Session {
-    constructor(init: SessionInit);
+    constructor(options: SessionOptions);
     // (undocumented)
     acceptAnnounce(prefix: TrackPrefix): Promise<[AnnouncementReader, undefined] | [undefined, Error]>;
     // (undocumented)
@@ -263,50 +256,17 @@ export class Session {
     readonly ready: Promise<void>;
     // (undocumented)
     subscribe(path: BroadcastPath, name: TrackName, config?: TrackConfig): Promise<[TrackReader, undefined] | [undefined, Error]>;
-    // (undocumented)
-    update(bitrate: bigint): void;
 }
 
 // @public (undocumented)
 export type SessionErrorCode = number;
 
 // @public (undocumented)
-export interface SessionInit {
+export interface SessionOptions {
     // (undocumented)
-    conn: WebTransport;
-    // (undocumented)
-    extensions?: Extensions;
+    webtransport: WebTransportSession;
     // (undocumented)
     mux?: TrackMux;
-    // Warning: (ae-forgotten-export) The symbol "Version" needs to be exported by the entry point index.d.ts
-    //
-    // (undocumented)
-    versions?: Set<Version>;
-}
-
-// @public (undocumented)
-export class SessionStream {
-    constructor(connCtx: Context, writer: Writer, reader: Reader, client: SessionClientMessage, server: SessionServerMessage);
-    // Warning: (ae-forgotten-export) The symbol "SessionClientMessage" needs to be exported by the entry point index.d.ts
-    //
-    // (undocumented)
-    readonly client: SessionClientMessage;
-    // Warning: (ae-forgotten-export) The symbol "SessionUpdateMessage" needs to be exported by the entry point index.d.ts
-    //
-    // (undocumented)
-    get clientInfo(): SessionUpdateMessage;
-    // (undocumented)
-    get context(): Context;
-    // Warning: (ae-forgotten-export) The symbol "SessionServerMessage" needs to be exported by the entry point index.d.ts
-    //
-    // (undocumented)
-    readonly server: SessionServerMessage;
-    // (undocumented)
-    get serverInfo(): SessionUpdateMessage;
-    // (undocumented)
-    update(bitrate: bigint): Promise<void>;
-    // (undocumented)
-    updated(): Promise<void>;
 }
 
 // @public (undocumented)

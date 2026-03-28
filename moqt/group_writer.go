@@ -5,17 +5,16 @@ import (
 	"time"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
-	"github.com/okdaichi/gomoqt/quic"
 )
 
-func newGroupWriter(stream quic.SendStream, sequence GroupSequence,
+func newGroupWriter(stream SendStream, sequence GroupSequence,
 	onClose func()) *GroupWriter {
 
 	return &GroupWriter{
 		sequence: sequence,
 		onClose:  onClose,
 		stream:   stream,
-		ctx:      context.WithValue(stream.Context(), &uniStreamTypeCtxKey, message.StreamTypeGroup),
+		ctx:      context.WithValue(stream.Context(), uniStreamTypeCtxKey, message.StreamTypeGroup),
 	}
 }
 
@@ -25,7 +24,7 @@ type GroupWriter struct {
 	sequence GroupSequence
 
 	ctx    context.Context
-	stream quic.SendStream
+	stream SendStream
 
 	frameCount uint64 // Number of frames sent on this stream
 
@@ -60,7 +59,7 @@ func (sgs *GroupWriter) SetWriteDeadline(t time.Time) error {
 
 // CancelWrite cancels the group with the specified GroupErrorCode and triggers callbacks.
 func (sgs *GroupWriter) CancelWrite(code GroupErrorCode) {
-	sgs.stream.CancelWrite(quic.StreamErrorCode(code))
+	sgs.stream.CancelWrite(StreamErrorCode(code))
 
 	sgs.onClose()
 }

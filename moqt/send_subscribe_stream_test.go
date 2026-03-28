@@ -7,7 +7,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/okdaichi/gomoqt/quic"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -186,13 +185,13 @@ func TestSendSubscribeStream_CloseWithError(t *testing.T) {
 		},
 	}
 
-	mockStream.On("StreamID").Return(quic.StreamID(1))
+	mockStream.On("StreamID").Return(StreamID(1))
 	ctx, cancel := context.WithCancelCause(context.Background())
 	mockStream.On("Context").Return(ctx)
 	mockStream.On("CancelWrite", mock.Anything).Run(func(args mock.Arguments) {
-		cancel(&quic.StreamError{
-			StreamID:  quic.StreamID(1),
-			ErrorCode: quic.StreamErrorCode(args[0].(quic.StreamErrorCode)),
+		cancel(&StreamError{
+			StreamID:  StreamID(1),
+			ErrorCode: StreamErrorCode(args[0].(StreamErrorCode)),
 		})
 	}).Return()
 	mockStream.On("CancelRead", mock.Anything).Return()
@@ -209,8 +208,8 @@ func TestSendSubscribeStream_CloseWithError(t *testing.T) {
 	assert.ErrorAs(t, Cause(sss.ctx), &subscribeErr, "closeErr should be a SubscribeError")
 
 	// Verify CancelWrite and CancelRead were called on the underlying stream
-	mockStream.AssertCalled(t, "CancelWrite", quic.StreamErrorCode(testErrCode))
-	mockStream.AssertCalled(t, "CancelRead", quic.StreamErrorCode(testErrCode))
+	mockStream.AssertCalled(t, "CancelWrite", StreamErrorCode(testErrCode))
+	mockStream.AssertCalled(t, "CancelRead", StreamErrorCode(testErrCode))
 }
 
 func TestSendSubscribeStream_CloseWithError_NilError(t *testing.T) {
@@ -222,13 +221,13 @@ func TestSendSubscribeStream_CloseWithError_NilError(t *testing.T) {
 		},
 	}
 
-	mockStream.On("StreamID").Return(quic.StreamID(1))
+	mockStream.On("StreamID").Return(StreamID(1))
 	ctx, cancel := context.WithCancelCause(context.Background())
 	mockStream.On("Context").Return(ctx)
 	mockStream.On("CancelWrite", mock.Anything).Run(func(args mock.Arguments) {
-		cancel(&quic.StreamError{
-			StreamID:  quic.StreamID(1),
-			ErrorCode: quic.StreamErrorCode(args[0].(quic.StreamErrorCode)), // 型はStreamErrorCodeで渡される
+		cancel(&StreamError{
+			StreamID:  StreamID(1),
+			ErrorCode: StreamErrorCode(args[0].(StreamErrorCode)), // 型はStreamErrorCodeで渡される
 		})
 	}).Return()
 	mockStream.On("CancelRead", mock.Anything).Return()
@@ -241,8 +240,8 @@ func TestSendSubscribeStream_CloseWithError_NilError(t *testing.T) {
 	assert.True(t, sss.ctx.Err() != nil, "stream should be marked as closed")
 
 	// Should still cancel the stream operations
-	mockStream.AssertCalled(t, "CancelWrite", quic.StreamErrorCode(testErrCode))
-	mockStream.AssertCalled(t, "CancelRead", quic.StreamErrorCode(testErrCode))
+	mockStream.AssertCalled(t, "CancelWrite", StreamErrorCode(testErrCode))
+	mockStream.AssertCalled(t, "CancelRead", StreamErrorCode(testErrCode))
 }
 
 func TestSendSubscribeStream_ConcurrentUpdate(t *testing.T) {
@@ -334,9 +333,9 @@ func TestSendSubscribeStream_UpdateSubscribeWriteError(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	mockStream.On("Context").Return(ctx)
 	mockStream.On("CancelWrite", mock.Anything).Run(func(args mock.Arguments) {
-		cancel(&quic.StreamError{
-			StreamID:  quic.StreamID(1),
-			ErrorCode: quic.StreamErrorCode(args[0].(quic.StreamErrorCode)),
+		cancel(&StreamError{
+			StreamID:  StreamID(1),
+			ErrorCode: StreamErrorCode(args[0].(StreamErrorCode)),
 		})
 	}).Return()
 	mockStream.On("CancelRead", mock.Anything).Return()
@@ -430,9 +429,9 @@ func TestSendSubscribeStream_CloseWithError_MultipleClose(t *testing.T) {
 	mockStream.On("CancelWrite", mock.Anything).Run(func(args mock.Arguments) {
 		callCount++
 		if callCount == 1 {
-			cancel(&quic.StreamError{
-				StreamID:  quic.StreamID(1),
-				ErrorCode: quic.StreamErrorCode(args[0].(quic.StreamErrorCode)),
+			cancel(&StreamError{
+				StreamID:  StreamID(1),
+				ErrorCode: StreamErrorCode(args[0].(StreamErrorCode)),
 			})
 		}
 	}).Return().Twice() // Called twice
