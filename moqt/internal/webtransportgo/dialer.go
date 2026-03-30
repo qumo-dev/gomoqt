@@ -9,12 +9,7 @@ import (
 	quicgo_webtransportgo "github.com/okdaichi/webtransport-go"
 )
 
-type Dialer struct {
-	TLSClientConfig      *tls.Config
-	ApplicationProtocols []string
-}
-
-func (d *Dialer) Dial(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config) (*http.Response, transport.StreamConn, error) {
+func Dial(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config) (*http.Response, transport.StreamConn, error) {
 	dialer := quicgo_webtransportgo.Dialer{
 		TLSClientConfig:      tlsConfig,
 		ApplicationProtocols: []string{"moq-lite-03"},

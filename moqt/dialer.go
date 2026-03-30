@@ -101,11 +101,7 @@ func (c *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *T
 	if c.DialWebTransportFunc != nil {
 		dialer = c.DialWebTransportFunc
 	} else {
-		d := webtransportgo.Dialer{
-			TLSClientConfig:      c.TLSConfig,
-			ApplicationProtocols: []string{"moq-lite-03"},
-		}
-		dialer = d.Dial
+		dialer = webtransportgo.Dial
 	}
 	target := host
 	if !strings.Contains(target, "://") {
@@ -115,7 +111,7 @@ func (c *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *T
 		target = "https://" + host + path
 	}
 
-	_, conn, err := dialer(dialCtx, target, nil, c.TLSConfig)
+	_, conn, err := dialer(dialCtx, target, http.Header{}, c.TLSConfig)
 	if err != nil {
 		return nil, err
 	}

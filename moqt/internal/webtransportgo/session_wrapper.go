@@ -14,6 +14,9 @@ type sessionWrapper struct {
 }
 
 func wrapSession(wtsess *quicgo_webtransportgo.Session) transport.StreamConn {
+	if wtsess == nil {
+		return nil
+	}
 	return &sessionWrapper{
 		sess: wtsess,
 	}

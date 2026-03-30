@@ -6,7 +6,6 @@ import (
 	"net"
 	"sync"
 
-	"github.com/okdaichi/gomoqt/moqt/internal/quicgo"
 	"github.com/okdaichi/gomoqt/transport"
 	quicgo_webtransportgo "github.com/okdaichi/webtransport-go"
 	quicgo_quicgo "github.com/quic-go/quic-go"
@@ -19,8 +18,6 @@ import (
 type Server struct {
 	internalServer *quicgo_webtransportgo.Server
 	initOnce       sync.Once
-
-	ConnContext func(ctx context.Context, conn transport.StreamConn) context.Context
 }
 
 func (s *Server) init() {
@@ -33,15 +30,6 @@ func (s *Server) init() {
 		if s.internalServer.H3 == nil {
 			s.internalServer.H3 = &http3.Server{}
 		}
-		if s.ConnContext != nil {
-			s.internalServer.H3.ConnContext = func(ctx context.Context, conn *quicgo_quicgo.Conn) context.Context {
-				ctx = s.ConnContext(ctx, quicgo.WrapConnection(conn))
-				if ctx == nil {
-					panic("nil context returned by ConnContext")
-				}
-				return ctx
-			}
-		}
 	})
 }
 
@@ -51,13 +39,13 @@ func (s *Server) ServeQUICConn(conn transport.StreamConn) error {
 		return nil
 	}
 	if wrapper, ok := conn.(quicgoUnwrapper); ok {
-		return s.internalServer.ServeQUICConn(wrapper.Unwrap())
+		return s.internalServer.ServeQUICConn(wrapper.unwrap())
 	}
 	return errors.New("invalid connection type: expected a wrapped quic-go connection with Unwrap() method")
 }
 
 type quicgoUnwrapper interface {
-	Unwrap() *quicgo_quicgo.Conn
+	unwrap() *quicgo_quicgo.Conn
 }
 
 func (s *Server) Serve(conn net.PacketConn) error {
