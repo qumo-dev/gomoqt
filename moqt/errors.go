@@ -15,9 +15,6 @@ var (
 
 	// ErrServerClosed is returned when the server has been closed.
 	ErrServerClosed = errors.New("moqt: server closed")
-
-	// ErrClientClosed is returned when the client has been closed.
-	ErrClientClosed = errors.New("moqt: client closed")
 )
 
 /*

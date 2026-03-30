@@ -2,15 +2,11 @@ package moqt
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/tls"
-	"encoding/hex"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
-	"sync/atomic"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/quicgo"
 	"github.com/okdaichi/gomoqt/moqt/internal/webtransportgo"
@@ -21,13 +17,13 @@ type DialQUICFunc func(ctx context.Context, addr string, tlsConfig *tls.Config, 
 
 type DialWebTransportFunc func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config) (*http.Response, StreamConn, error)
 
-// Client is a MOQ client that can establish sessions with MOQ servers.
+// Dialer is a MOQ client that can establish sessions with MOQ servers.
 // It supports both WebTransport (for browser compatibility) and raw QUIC connections.
 //
-// A Client can dial multiple servers and maintain multiple active sessions.
+// A Dialer can dial multiple servers and maintain multiple active sessions.
 // Sessions are tracked and managed automatically. When the client shuts down,
 // all active sessions are terminated gracefully.
-type Client struct {
+type Dialer struct {
 	/*
 	 * TLS configuration
 	 */
@@ -57,27 +53,10 @@ type Client struct {
 	 * Logger
 	 */
 	Logger *slog.Logger
-
-	//
-	initOnce sync.Once
-
-	sessMu     sync.RWMutex
-	activeSess map[*Session]struct{}
-
-	// mu         sync.Mutex
-	inShutdown atomic.Bool
-	doneChan   chan struct{}
-}
-
-func (c *Client) init() {
-	c.initOnce.Do(func() {
-		c.activeSess = make(map[*Session]struct{})
-		c.doneChan = make(chan struct{}, 1)
-	})
 }
 
 // log returns Client.Logger if set, otherwise a discard logger.
-func (c *Client) log() *slog.Logger {
+func (c *Dialer) log() *slog.Logger {
 	if c.Logger != nil {
 		return c.Logger
 	}
@@ -87,12 +66,7 @@ func (c *Client) log() *slog.Logger {
 // Dial establishes a new session to the specified URL using either WebTransport (https scheme) or QUIC (moqt scheme).
 // The provided TrackMux is used to route incoming service tracks if non-nil.
 // Dial returns the newly created Session or an error.
-func (c *Client) Dial(ctx context.Context, urlStr string, mux *TrackMux) (*Session, error) {
-	if c.shuttingDown() {
-		return nil, ErrClientClosed
-	}
-	c.init()
-
+func (c *Dialer) Dial(ctx context.Context, urlStr string, mux *TrackMux) (*Session, error) {
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
 		return nil, err
@@ -109,23 +83,10 @@ func (c *Client) Dial(ctx context.Context, urlStr string, mux *TrackMux) (*Sessi
 	}
 }
 
-// generateSessionID creates a unique session identifier for logging
-func generateSessionID() string {
-	bytes := make([]byte, 4)
-	_, _ = rand.Read(bytes)
-	return hex.EncodeToString(bytes)
-}
-
 // DialWebTransport establishes a new session over WebTransport (HTTP/3).
 // It performs the WebTransport handshake and initializes a MOQ session.
 // `host` should be host:port and `path` is the path used for session setup.
-func (c *Client) DialWebTransport(ctx context.Context, host, path string, mux *TrackMux) (*Session, error) {
-	if c.shuttingDown() {
-		return nil, ErrClientClosed
-	}
-
-	c.init()
-
+func (c *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *TrackMux) (*Session, error) {
 	var baseLogger *slog.Logger
 	if c.Logger != nil {
 		baseLogger = c.Logger
@@ -166,25 +127,14 @@ func (c *Client) DialWebTransport(ctx context.Context, host, path string, mux *T
 	)
 	connLogger.Info("connection established")
 
-	var sess *Session
-	sess = newSession(conn, mux, nil)
-	c.addSession(sess)
-	context.AfterFunc(sess.Context(), func() { c.removeSession(sess) })
-
-	return sess, nil
+	return newSession(conn, mux, nil), nil
 }
 
 // TODO: Expose this method if QUIC is supported
 // DialQUIC establishes a new session over native QUIC by dialing the provided
 // address and negotiating the transport protocol. This uses the QUIC dial
 // function configured on the Client (DialQUICFunc) if present.
-func (c *Client) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux) (*Session, error) {
-	if c.shuttingDown() {
-		return nil, ErrClientClosed
-	}
-
-	c.init()
-
+func (c *Dialer) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux) (*Session, error) {
 	dialTimeout := c.Config.setupTimeout()
 	dialCtx, cancelDial := context.WithTimeout(ctx, dialTimeout)
 	defer cancelDial()
@@ -210,75 +160,5 @@ func (c *Client) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux)
 		return nil, err
 	}
 
-	var sess *Session
-	sess = newSession(conn, mux, nil)
-	c.addSession(sess)
-	context.AfterFunc(sess.Context(), func() { c.removeSession(sess) })
-
-	return sess, nil
-}
-
-func (c *Client) shuttingDown() bool {
-	return c.inShutdown.Load()
-}
-
-// Close starts shutting down the client. It stops accepting new dials and
-// begins closing all active sessions, returning only after all sessions
-// are terminated.
-func (c *Client) Close() error {
-	c.inShutdown.Store(true)
-
-	c.sessMu.Lock()
-	for sess := range c.activeSess {
-		go func(sess *Session) {
-			_ = sess.CloseWithError(NoError, SessionErrorText(NoError))
-		}(sess)
-	}
-	c.sessMu.Unlock()
-
-	// Wait for active connections to complete if any
-	if len(c.activeSess) > 0 {
-		<-c.doneChan
-	}
-
-	return nil
-}
-
-// Shutdown gracefully shuts down the client, waiting for active sessions to
-// complete within the given context. If the context expires, remaining
-// sessions are terminated forcefully.
-func (c *Client) Shutdown(ctx context.Context) error {
-	if c.shuttingDown() {
-		return nil
-	}
-
-	c.inShutdown.Store(true)
-
-	c.goAway()
-	// For active connections, wait for completion or context cancellation
-	if len(c.activeSess) > 0 {
-		select {
-		case <-c.doneChan:
-		case <-ctx.Done():
-			if len(c.activeSess) > 0 {
-				for sess := range c.activeSess {
-					go func(sess *Session) {
-						_ = sess.CloseWithError(GoAwayTimeoutErrorCode, SessionErrorText(GoAwayTimeoutErrorCode))
-					}(sess)
-				}
-			}
-			return ctx.Err()
-		}
-	}
-
-	return nil
-}
-
-func (c *Client) goAway() {
-	for sess := range c.activeSess {
-		if sess == nil {
-			continue
-		}
-		_ = sess.goAway("")
-	}
+	return newSession(conn, mux, nil), nil
 }

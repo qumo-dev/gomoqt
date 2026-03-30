@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	client := moqt.Client{
+	client := moqt.Dialer{
 		Logger: slog.Default(),
 	}
 

@@ -13,7 +13,7 @@ import (
 func main() {
 	addr := flag.String("addr", "https://localhost:9000", "server URL for MOQ (https://host:port for WebTransport, moqt://host:port for native QUIC)")
 	flag.Parse()
-	client := &moqt.Client{
+	client := &moqt.Dialer{
 		TLSConfig: &tls.Config{InsecureSkipVerify: true}, // interop uses local self-signed certs
 		Config: &moqt.Config{
 			SetupTimeout: 10 * time.Second,

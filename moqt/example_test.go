@@ -38,7 +38,7 @@ func ExampleClient() {
 	}
 
 	// Create the client
-	client := &moqt.Client{
+	client := &moqt.Dialer{
 		TLSConfig: tlsConfig,
 	}
 

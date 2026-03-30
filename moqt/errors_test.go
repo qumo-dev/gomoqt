@@ -1,8 +1,9 @@
 package moqt
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // Test for standard errors
@@ -22,10 +23,6 @@ func TestStandardErrors(t *testing.T) {
 		"server closed": {
 			err:    ErrServerClosed,
 			expect: "moqt: server closed",
-		},
-		"client closed": {
-			err:    ErrClientClosed,
-			expect: "moqt: client closed",
 		},
 	}
 

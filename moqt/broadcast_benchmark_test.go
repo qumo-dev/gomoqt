@@ -257,7 +257,7 @@ func setupBroadcastServerWithFrameSize(b *testing.B, ctx context.Context, frameS
 }
 
 func runBroadcastClient(ctx context.Context, serverAddr string, framesReceived, bytesReceived *atomic.Int64) error {
-	client := Client{
+	client := Dialer{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		TLSConfig: &tls.Config{
 			InsecureSkipVerify: true,
