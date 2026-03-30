@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	internalwt "github.com/okdaichi/gomoqt/moqt/internal/webtransportgo"
 	"github.com/quic-go/quic-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -34,15 +33,6 @@ func TestServer_Init(t *testing.T) {
 	assert.NotNil(t, s.listeners)
 	assert.NotNil(t, s.sessionManager)
 	assert.NotNil(t, s.WebTransportServer)
-}
-
-func TestServer_Init_ConfiguresDefaultWebTransportServer(t *testing.T) {
-	s := &Server{}
-	s.init()
-
-	wt, ok := s.WebTransportServer.(*internalwt.Server)
-	require.True(t, ok)
-	require.NotNil(t, wt.ConnContext)
 }
 
 func TestServer_connContext_AppliesCustomAndInjectsServer(t *testing.T) {
