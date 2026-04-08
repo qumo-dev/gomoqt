@@ -8,7 +8,7 @@ import (
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
 )
 
-func newSendSubscribeStream(id SubscribeID, stream Stream, initConfig *TrackConfig, info Info) *sendSubscribeStream {
+func newSendSubscribeStream(id SubscribeID, stream Stream, initConfig *SubscribeConfig, info PublishInfo) *sendSubscribeStream {
 	substr := &sendSubscribeStream{
 		ctx:    context.WithValue(stream.Context(), biStreamTypeCtxKey, message.StreamTypeSubscribe),
 		id:     id,
@@ -23,38 +23,38 @@ func newSendSubscribeStream(id SubscribeID, stream Stream, initConfig *TrackConf
 type sendSubscribeStream struct {
 	ctx context.Context
 
-	config *TrackConfig
+	config *SubscribeConfig
 
 	stream Stream
 
 	mu sync.Mutex
 
-	info Info
+	info PublishInfo
 
 	id SubscribeID
 }
 
-func (sss *sendSubscribeStream) SubscribeID() SubscribeID {
-	return sss.id
+func (substr *sendSubscribeStream) SubscribeID() SubscribeID {
+	return substr.id
 }
 
-func (sss *sendSubscribeStream) TrackConfig() *TrackConfig {
-	sss.mu.Lock()
-	defer sss.mu.Unlock()
+func (substr *sendSubscribeStream) TrackConfig() *SubscribeConfig {
+	substr.mu.Lock()
+	defer substr.mu.Unlock()
 
-	return sss.config
+	return substr.config
 }
 
-func (sss *sendSubscribeStream) updateSubscribe(newConfig *TrackConfig) error {
+func (substr *sendSubscribeStream) updateSubscribe(newConfig *SubscribeConfig) error {
 	if newConfig == nil {
 		return errors.New("new track config cannot be nil")
 	}
 
-	sss.mu.Lock()
-	defer sss.mu.Unlock()
+	substr.mu.Lock()
+	defer substr.mu.Unlock()
 
-	if sss.ctx.Err() != nil {
-		return Cause(sss.ctx)
+	if substr.ctx.Err() != nil {
+		return Cause(substr.ctx)
 	}
 
 	// Send the message first before updating config
@@ -74,59 +74,59 @@ func (sss *sendSubscribeStream) updateSubscribe(newConfig *TrackConfig) error {
 	}
 
 	sum := message.SubscribeUpdateMessage{
-		SubscriberPriority:   uint8(newConfig.SubscriberPriority),
+		SubscriberPriority:   uint8(newConfig.Priority),
 		SubscriberOrdered:    ordered,
 		SubscriberMaxLatency: newConfig.MaxLatency,
 		StartGroup:           startGroup,
 		EndGroup:             endGroup,
 	}
-	err := sum.Encode(sss.stream)
+	err := sum.Encode(substr.stream)
 	if err != nil {
 		// Close the stream with error on write failure
-		sss.mu.Unlock() // Unlock before calling closeWithError to avoid deadlock
-		_ = sss.closeWithError(InternalSubscribeErrorCode)
-		sss.mu.Lock() // Re-lock for defer
+		substr.mu.Unlock() // Unlock before calling closeWithError to avoid deadlock
+		_ = substr.closeWithError(SubscribeErrorCodeInternal)
+		substr.mu.Lock() // Re-lock for defer
 		return err
 	}
 
-	sss.config = newConfig
+	substr.config = newConfig
 
 	return nil
 }
 
-func (sss *sendSubscribeStream) ReadInfo() Info {
-	return sss.info
+func (substr *sendSubscribeStream) ReadInfo() PublishInfo {
+	return substr.info
 }
 
-func (sss *sendSubscribeStream) Context() context.Context {
-	if sss == nil || sss.ctx == nil {
+func (substr *sendSubscribeStream) Context() context.Context {
+	if substr == nil || substr.ctx == nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		return ctx
 	}
-	return sss.ctx
+	return substr.ctx
 }
 
-func (sss *sendSubscribeStream) close() error {
-	sss.mu.Lock()
-	defer sss.mu.Unlock()
+func (substr *sendSubscribeStream) close() error {
+	substr.mu.Lock()
+	defer substr.mu.Unlock()
 
 	// Close the write side of the stream
-	err := sss.stream.Close()
+	err := substr.stream.Close()
 	// Do not cancel the read side on a graceful close: allow peer to finish sending
 
 	return err
 }
 
-func (sss *sendSubscribeStream) closeWithError(code SubscribeErrorCode) error {
-	sss.mu.Lock()
-	defer sss.mu.Unlock()
+func (substr *sendSubscribeStream) closeWithError(code SubscribeErrorCode) error {
+	substr.mu.Lock()
+	defer substr.mu.Unlock()
 
 	strErrCode := StreamErrorCode(code)
 	// Cancel the write side of the stream
-	sss.stream.CancelWrite(strErrCode)
+	substr.stream.CancelWrite(strErrCode)
 	// Cancel the read side of the stream
-	sss.stream.CancelRead(strErrCode)
+	substr.stream.CancelRead(strErrCode)
 
 	return nil
 }

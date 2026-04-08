@@ -173,7 +173,7 @@ func BenchmarkSession_TrackReaderOperations(b *testing.B) {
 		mockSubStream.On("Context").Return(context.Background())
 		mockSubStream.On("StreamID").Return(StreamID(i))
 
-		substr := newSendSubscribeStream(id, mockSubStream, &TrackConfig{}, Info{})
+		substr := newSendSubscribeStream(id, mockSubStream, &SubscribeConfig{}, PublishInfo{})
 		trackReader := newTrackReader(
 			BroadcastPath("/test"),
 			TrackName("track"),
@@ -214,7 +214,7 @@ func BenchmarkSession_TrackWriterOperations(b *testing.B) {
 		mockSubStream.On("Context").Return(context.Background())
 		mockSubStream.On("StreamID").Return(StreamID(i))
 
-		substr := newReceiveSubscribeStream(id, mockSubStream, &TrackConfig{})
+		substr := newReceiveSubscribeStream(id, mockSubStream, &SubscribeConfig{})
 		trackWriter := newTrackWriter(
 			BroadcastPath("/test"),
 			TrackName("track"),
@@ -257,7 +257,7 @@ func BenchmarkSession_MapLookup(b *testing.B) {
 				mockSubStream.On("Context").Return(context.Background())
 				mockSubStream.On("StreamID").Return(StreamID(i))
 
-				substr := newSendSubscribeStream(id, mockSubStream, &TrackConfig{}, Info{})
+				substr := newSendSubscribeStream(id, mockSubStream, &SubscribeConfig{}, PublishInfo{})
 				trackReader := newTrackReader(
 					BroadcastPath("/test"),
 					TrackName("track"),
@@ -314,7 +314,7 @@ func BenchmarkSession_MemoryAllocation(b *testing.B) {
 					mockSubStream.On("Context").Return(context.Background())
 					mockSubStream.On("StreamID").Return(StreamID(j))
 
-					substr := newSendSubscribeStream(id, mockSubStream, &TrackConfig{}, Info{})
+					substr := newSendSubscribeStream(id, mockSubStream, &SubscribeConfig{}, PublishInfo{})
 					trackReader := newTrackReader(
 						BroadcastPath("/test"),
 						TrackName("track"),

@@ -13,15 +13,15 @@ import (
 
 func TestNewSendSubscribeStream(t *testing.T) {
 	id := SubscribeID(123)
-	config := &TrackConfig{
-		SubscriberPriority: TrackPriority(1),
+	config := &SubscribeConfig{
+		Priority: TrackPriority(1),
 	}
 	mockStream := &MockQUICStream{
 		ReadFunc: (&bytes.Buffer{}).Read, // Empty buffer returns EOF immediately
 	}
 	mockStream.On("Context").Return(context.Background())
 
-	info := Info{}
+	info := PublishInfo{}
 	sss := newSendSubscribeStream(id, mockStream, config, info)
 
 	assert.NotNil(t, sss, "newSendSubscribeStream should not return nil")
@@ -33,7 +33,7 @@ func TestNewSendSubscribeStream(t *testing.T) {
 
 func TestSendSubscribeStream_SubscribeID(t *testing.T) {
 	id := SubscribeID(456)
-	config := &TrackConfig{}
+	config := &SubscribeConfig{}
 	mockStream := &MockQUICStream{
 		ReadFunc: func(p []byte) (int, error) {
 			return 0, io.EOF
@@ -41,7 +41,7 @@ func TestSendSubscribeStream_SubscribeID(t *testing.T) {
 	}
 	mockStream.On("Context").Return(context.Background())
 
-	info := Info{}
+	info := PublishInfo{}
 	sss := newSendSubscribeStream(id, mockStream, config, info)
 
 	returnedID := sss.SubscribeID()
@@ -51,7 +51,7 @@ func TestSendSubscribeStream_SubscribeID(t *testing.T) {
 
 func TestSendSubscribeStream_ReadInfo(t *testing.T) {
 	id := SubscribeID(999)
-	config := &TrackConfig{}
+	config := &SubscribeConfig{}
 	mockStream := &MockQUICStream{
 		ReadFunc: func(p []byte) (int, error) {
 			return 0, io.EOF
@@ -59,7 +59,7 @@ func TestSendSubscribeStream_ReadInfo(t *testing.T) {
 	}
 	mockStream.On("Context").Return(context.Background())
 
-	info := Info{}
+	info := PublishInfo{}
 	sss := newSendSubscribeStream(id, mockStream, config, info)
 
 	ret := sss.ReadInfo()
@@ -68,8 +68,8 @@ func TestSendSubscribeStream_ReadInfo(t *testing.T) {
 
 func TestSendSubscribeStream_TrackConfig(t *testing.T) {
 	id := SubscribeID(789)
-	config := &TrackConfig{
-		SubscriberPriority: TrackPriority(5),
+	config := &SubscribeConfig{
+		Priority: TrackPriority(5),
 	}
 	mockStream := &MockQUICStream{
 		ReadFunc: func(p []byte) (int, error) {
@@ -78,17 +78,17 @@ func TestSendSubscribeStream_TrackConfig(t *testing.T) {
 	}
 	mockStream.On("Context").Return(context.Background())
 
-	sss := newSendSubscribeStream(id, mockStream, config, Info{})
+	sss := newSendSubscribeStream(id, mockStream, config, PublishInfo{})
 
 	returnedConfig := sss.TrackConfig()
 	assert.Equal(t, config, returnedConfig, "TrackConfig() should return the original config")
-	assert.Equal(t, config.SubscriberPriority, returnedConfig.SubscriberPriority, "TrackPriority should match")
+	assert.Equal(t, config.Priority, returnedConfig.Priority, "TrackPriority should match")
 }
 
 func TestSendSubscribeStream_UpdateSubscribe(t *testing.T) {
 	id := SubscribeID(101)
-	config := &TrackConfig{
-		SubscriberPriority: TrackPriority(1),
+	config := &SubscribeConfig{
+		Priority: TrackPriority(1),
 	}
 	mockStream := &MockQUICStream{
 		ReadFunc: func(p []byte) (int, error) {
@@ -98,11 +98,11 @@ func TestSendSubscribeStream_UpdateSubscribe(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Write", mock.Anything).Return(0, nil)
 
-	sss := newSendSubscribeStream(id, mockStream, config, Info{})
+	sss := newSendSubscribeStream(id, mockStream, config, PublishInfo{})
 
 	// Test valid update
-	newConfig := &TrackConfig{
-		SubscriberPriority: TrackPriority(2),
+	newConfig := &SubscribeConfig{
+		Priority: TrackPriority(2),
 	}
 
 	err := sss.updateSubscribe(newConfig)
@@ -110,15 +110,15 @@ func TestSendSubscribeStream_UpdateSubscribe(t *testing.T) {
 
 	// Verify config was updated
 	updatedConfig := sss.TrackConfig()
-	assert.Equal(t, newConfig.SubscriberPriority, updatedConfig.SubscriberPriority, "TrackPriority should be updated")
+	assert.Equal(t, newConfig.Priority, updatedConfig.Priority, "TrackPriority should be updated")
 
 	mockStream.AssertExpectations(t)
 }
 
 func TestSendSubscribeStream_UpdateSubscribe_InvalidRange(t *testing.T) {
 	id := SubscribeID(102)
-	config := &TrackConfig{
-		SubscriberPriority: TrackPriority(1),
+	config := &SubscribeConfig{
+		Priority: TrackPriority(1),
 	}
 	mockStream := &MockQUICStream{
 		ReadFunc: func(p []byte) (int, error) {
@@ -127,10 +127,10 @@ func TestSendSubscribeStream_UpdateSubscribe_InvalidRange(t *testing.T) {
 	}
 	mockStream.On("Context").Return(context.Background())
 
-	sss := newSendSubscribeStream(id, mockStream, config, Info{})
+	sss := newSendSubscribeStream(id, mockStream, config, PublishInfo{})
 
 	tests := map[string]struct {
-		newConfig *TrackConfig
+		newConfig *SubscribeConfig
 		wantError bool
 	}{
 		"nil config": {
@@ -153,7 +153,7 @@ func TestSendSubscribeStream_UpdateSubscribe_InvalidRange(t *testing.T) {
 
 func TestSendSubscribeStream_Close(t *testing.T) {
 	id := SubscribeID(103)
-	config := &TrackConfig{}
+	config := &SubscribeConfig{}
 	mockStream := &MockQUICStream{
 		ReadFunc: func(p []byte) (int, error) {
 			return 0, io.EOF
@@ -166,7 +166,7 @@ func TestSendSubscribeStream_Close(t *testing.T) {
 	}).Return(nil)
 	mockStream.On("CancelRead", mock.Anything).Return()
 
-	sss := newSendSubscribeStream(id, mockStream, config, Info{})
+	sss := newSendSubscribeStream(id, mockStream, config, PublishInfo{})
 
 	err := sss.close()
 	assert.NoError(t, err, "Close() should not return error")
@@ -178,7 +178,7 @@ func TestSendSubscribeStream_Close(t *testing.T) {
 
 func TestSendSubscribeStream_CloseWithError(t *testing.T) {
 	id := SubscribeID(104)
-	config := &TrackConfig{}
+	config := &SubscribeConfig{}
 	mockStream := &MockQUICStream{
 		ReadFunc: func(p []byte) (int, error) {
 			return 0, io.EOF
@@ -196,9 +196,9 @@ func TestSendSubscribeStream_CloseWithError(t *testing.T) {
 	}).Return()
 	mockStream.On("CancelRead", mock.Anything).Return()
 
-	sss := newSendSubscribeStream(id, mockStream, config, Info{})
+	sss := newSendSubscribeStream(id, mockStream, config, PublishInfo{})
 
-	testErrCode := InternalSubscribeErrorCode
+	testErrCode := SubscribeErrorCodeInternal
 	err := sss.closeWithError(testErrCode)
 	assert.NoError(t, err, "CloseWithError() should not return error")
 	assert.True(t, sss.ctx.Err() != nil, "stream should be marked as closed")
@@ -214,7 +214,7 @@ func TestSendSubscribeStream_CloseWithError(t *testing.T) {
 
 func TestSendSubscribeStream_CloseWithError_NilError(t *testing.T) {
 	id := SubscribeID(105)
-	config := &TrackConfig{}
+	config := &SubscribeConfig{}
 	mockStream := &MockQUICStream{
 		ReadFunc: func(p []byte) (int, error) {
 			return 0, io.EOF
@@ -232,7 +232,7 @@ func TestSendSubscribeStream_CloseWithError_NilError(t *testing.T) {
 	}).Return()
 	mockStream.On("CancelRead", mock.Anything).Return()
 
-	sss := newSendSubscribeStream(id, mockStream, config, Info{})
+	sss := newSendSubscribeStream(id, mockStream, config, PublishInfo{})
 
 	testErrCode := SubscribeErrorCode(0) // Using zero error code
 	err := sss.closeWithError(testErrCode)
@@ -246,8 +246,8 @@ func TestSendSubscribeStream_CloseWithError_NilError(t *testing.T) {
 
 func TestSendSubscribeStream_ConcurrentUpdate(t *testing.T) {
 	id := SubscribeID(106)
-	config := &TrackConfig{
-		SubscriberPriority: TrackPriority(1),
+	config := &SubscribeConfig{
+		Priority: TrackPriority(1),
 	}
 	mockStream := &MockQUICStream{
 		ReadFunc: func(p []byte) (int, error) {
@@ -258,13 +258,13 @@ func TestSendSubscribeStream_ConcurrentUpdate(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Write", mock.Anything).Return(0, nil)
 
-	sss := newSendSubscribeStream(id, mockStream, config, Info{})
+	sss := newSendSubscribeStream(id, mockStream, config, PublishInfo{})
 
 	// Test concurrent updates
 	var wg sync.WaitGroup
 	wg.Go(func() {
-		newConfig := &TrackConfig{
-			SubscriberPriority: TrackPriority(2),
+		newConfig := &SubscribeConfig{
+			Priority: TrackPriority(2),
 		}
 		err := sss.updateSubscribe(newConfig)
 		if err != nil {
@@ -272,8 +272,8 @@ func TestSendSubscribeStream_ConcurrentUpdate(t *testing.T) {
 		}
 	})
 	wg.Go(func() {
-		newConfig := &TrackConfig{
-			SubscriberPriority: TrackPriority(3),
+		newConfig := &SubscribeConfig{
+			Priority: TrackPriority(3),
 		}
 		err := sss.updateSubscribe(newConfig)
 		if err != nil {
@@ -288,12 +288,12 @@ func TestSendSubscribeStream_ConcurrentUpdate(t *testing.T) {
 	// The final config should be one of the two updates
 	finalConfig := sss.TrackConfig()
 	assert.Contains(t, []TrackPriority{TrackPriority(2), TrackPriority(3)},
-		finalConfig.SubscriberPriority, "Final config should be from one of the updates")
+		finalConfig.Priority, "Final config should be from one of the updates")
 }
 
 func TestSendSubscribeStream_ContextCancellation(t *testing.T) {
 	id := SubscribeID(107)
-	config := &TrackConfig{}
+	config := &SubscribeConfig{}
 	mockStream := &MockQUICStream{
 		ReadFunc: func(p []byte) (int, error) {
 			return 0, io.EOF
@@ -302,7 +302,7 @@ func TestSendSubscribeStream_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	mockStream.On("Context").Return(ctx)
 
-	sss := newSendSubscribeStream(id, mockStream, config, Info{})
+	sss := newSendSubscribeStream(id, mockStream, config, PublishInfo{})
 
 	// Cancel the context
 	cancel()
@@ -319,8 +319,8 @@ func TestSendSubscribeStream_ContextCancellation(t *testing.T) {
 
 func TestSendSubscribeStream_UpdateSubscribeWriteError(t *testing.T) {
 	id := SubscribeID(108)
-	config := &TrackConfig{
-		SubscriberPriority: TrackPriority(1),
+	config := &SubscribeConfig{
+		Priority: TrackPriority(1),
 	}
 	mockStream := &MockQUICStream{
 		ReadFunc: func(p []byte) (int, error) {
@@ -340,10 +340,10 @@ func TestSendSubscribeStream_UpdateSubscribeWriteError(t *testing.T) {
 	}).Return()
 	mockStream.On("CancelRead", mock.Anything).Return()
 
-	sss := newSendSubscribeStream(id, mockStream, config, Info{})
+	sss := newSendSubscribeStream(id, mockStream, config, PublishInfo{})
 
-	newConfig := &TrackConfig{
-		SubscriberPriority: TrackPriority(2),
+	newConfig := &SubscribeConfig{
+		Priority: TrackPriority(2),
 	}
 
 	err := sss.updateSubscribe(newConfig)
@@ -360,7 +360,7 @@ func TestSendSubscribeStream_UpdateSubscribeWriteError(t *testing.T) {
 
 func TestSendSubscribeStream_UpdateSubscribeClosedStream(t *testing.T) {
 	id := SubscribeID(109)
-	config := &TrackConfig{}
+	config := &SubscribeConfig{}
 	mockStream := &MockQUICStream{
 		ReadFunc: func(p []byte) (int, error) {
 			return 0, io.EOF
@@ -373,15 +373,15 @@ func TestSendSubscribeStream_UpdateSubscribeClosedStream(t *testing.T) {
 	}).Return(nil)
 	mockStream.On("Context").Return(ctx)
 
-	sss := newSendSubscribeStream(id, mockStream, config, Info{})
+	sss := newSendSubscribeStream(id, mockStream, config, PublishInfo{})
 
 	// Close the stream first
 	err := sss.close()
 	assert.NoError(t, err, "Close() should succeed")
 
 	// Try to update after closing
-	newConfig := &TrackConfig{
-		SubscriberPriority: TrackPriority(1),
+	newConfig := &SubscribeConfig{
+		Priority: TrackPriority(1),
 	}
 
 	err = sss.updateSubscribe(newConfig)
@@ -402,7 +402,7 @@ func TestSendSubscribeStream_CloseAlreadyClosed(t *testing.T) {
 		cancel(nil)
 	}).Return(nil)
 
-	sss := newSendSubscribeStream(SubscribeID(110), mockStream, &TrackConfig{}, Info{})
+	sss := newSendSubscribeStream(SubscribeID(110), mockStream, &SubscribeConfig{}, PublishInfo{})
 
 	// Close once
 	err1 := sss.close()
@@ -437,10 +437,10 @@ func TestSendSubscribeStream_CloseWithError_MultipleClose(t *testing.T) {
 	}).Return().Twice() // Called twice
 	mockStream.On("CancelRead", mock.Anything).Return().Twice() // Called twice
 
-	sss := newSendSubscribeStream(SubscribeID(111), mockStream, &TrackConfig{}, Info{})
+	sss := newSendSubscribeStream(SubscribeID(111), mockStream, &SubscribeConfig{}, PublishInfo{})
 
 	// Close with error once
-	testErrCode := InternalSubscribeErrorCode
+	testErrCode := SubscribeErrorCodeInternal
 	err1 := sss.closeWithError(testErrCode)
 	assert.NoError(t, err1, "first CloseWithError() should succeed")
 	assert.True(t, sss.ctx.Err() != nil, "stream should be marked as closed")
@@ -461,17 +461,17 @@ func TestSendSubscribeStream_UpdateSubscribeValidRangeTransitions(t *testing.T) 
 	id := SubscribeID(112)
 
 	tests := map[string]struct {
-		initialConfig *TrackConfig
-		newConfig     *TrackConfig
+		initialConfig *SubscribeConfig
+		newConfig     *SubscribeConfig
 		expectError   bool
 		description   string
 	}{
 		"update priority": {
-			initialConfig: &TrackConfig{
-				SubscriberPriority: TrackPriority(1),
+			initialConfig: &SubscribeConfig{
+				Priority: TrackPriority(1),
 			},
-			newConfig: &TrackConfig{
-				SubscriberPriority: TrackPriority(2),
+			newConfig: &SubscribeConfig{
+				Priority: TrackPriority(2),
 			},
 			expectError: false,
 			description: "should allow updating priority",
@@ -490,7 +490,7 @@ func TestSendSubscribeStream_UpdateSubscribeValidRangeTransitions(t *testing.T) 
 				mockStream.On("Write", mock.Anything).Return(0, nil)
 			}
 
-			sss := newSendSubscribeStream(id, mockStream, tt.initialConfig, Info{})
+			sss := newSendSubscribeStream(id, mockStream, tt.initialConfig, PublishInfo{})
 
 			err := sss.updateSubscribe(tt.newConfig)
 			if tt.expectError {

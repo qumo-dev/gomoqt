@@ -10,10 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"testing/synctest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"testing/synctest"
 )
 
 // Test NewTrackMux function
@@ -129,19 +130,19 @@ func TestMux_Announce_WithNilHandler_ClosesTrack(t *testing.T) {
 	mockStream := &MockQUICStream{}
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF).Maybe()
-	mockStream.On("CancelWrite", StreamErrorCode(TrackNotFoundErrorCode)).Return().Once()
-	mockStream.On("CancelRead", StreamErrorCode(TrackNotFoundErrorCode)).Return().Once()
+	mockStream.On("CancelWrite", StreamErrorCode(SubscribeErrorCodeNotFound)).Return().Once()
+	mockStream.On("CancelRead", StreamErrorCode(SubscribeErrorCodeNotFound)).Return().Once()
 	mockStream.On("Close").Return(nil).Maybe()
 
-	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() Stream { return mockStream }(), &TrackConfig{}), func() (SendStream, error) {
+	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() Stream { return mockStream }(), &SubscribeConfig{}), func() (SendStream, error) {
 		return &MockQUICSendStream{}, nil
 	}, func() {})
 
 	// serveTrack will call CloseWithError
 	mux.serveTrack(tw)
 
-	mockStream.AssertCalled(t, "CancelWrite", StreamErrorCode(TrackNotFoundErrorCode))
-	mockStream.AssertCalled(t, "CancelRead", StreamErrorCode(TrackNotFoundErrorCode))
+	mockStream.AssertCalled(t, "CancelWrite", StreamErrorCode(SubscribeErrorCodeNotFound))
+	mockStream.AssertCalled(t, "CancelRead", StreamErrorCode(SubscribeErrorCodeNotFound))
 	mockStream.AssertExpectations(t)
 }
 
@@ -153,18 +154,18 @@ func TestMux_ServeTrack_NotFound_ClosesWithError(t *testing.T) {
 	mockStream := &MockQUICStream{}
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF).Maybe()
-	mockStream.On("CancelWrite", StreamErrorCode(TrackNotFoundErrorCode)).Return().Once()
-	mockStream.On("CancelRead", StreamErrorCode(TrackNotFoundErrorCode)).Return().Once()
+	mockStream.On("CancelWrite", StreamErrorCode(SubscribeErrorCodeNotFound)).Return().Once()
+	mockStream.On("CancelRead", StreamErrorCode(SubscribeErrorCodeNotFound)).Return().Once()
 	mockStream.On("Close").Return(nil).Maybe()
 
-	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() Stream { return mockStream }(), &TrackConfig{}), func() (SendStream, error) {
+	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() Stream { return mockStream }(), &SubscribeConfig{}), func() (SendStream, error) {
 		return &MockQUICSendStream{}, nil
 	}, func() {})
 
 	mux.serveTrack(tw)
 
-	mockStream.AssertCalled(t, "CancelWrite", StreamErrorCode(TrackNotFoundErrorCode))
-	mockStream.AssertCalled(t, "CancelRead", StreamErrorCode(TrackNotFoundErrorCode))
+	mockStream.AssertCalled(t, "CancelWrite", StreamErrorCode(SubscribeErrorCodeNotFound))
+	mockStream.AssertCalled(t, "CancelRead", StreamErrorCode(SubscribeErrorCodeNotFound))
 	mockStream.AssertExpectations(t)
 }
 
@@ -680,7 +681,7 @@ func TestNotFound(t *testing.T) {
 					mockStream.On("CancelWrite", mock.Anything).Return()
 					mockStream.On("CancelRead", mock.Anything).Return()
 					return mockStream
-				}(), &TrackConfig{}),
+				}(), &SubscribeConfig{}),
 				func() (SendStream, error) {
 					return &MockQUICSendStream{}, nil
 				}, func() {}),
@@ -718,7 +719,7 @@ func TestNotFoundHandler(t *testing.T) {
 					mockStream.On("CancelWrite", mock.Anything).Return()
 					mockStream.On("CancelRead", mock.Anything).Return()
 					return mockStream
-				}(), &TrackConfig{}),
+				}(), &SubscribeConfig{}),
 				func() (SendStream, error) {
 					return &MockQUICSendStream{}, nil
 				}, func() {}),
@@ -752,7 +753,7 @@ func TestTrackHandlerFunc(t *testing.T) {
 			mockStream.On("Context").Return(context.Background())
 			mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 			return mockStream
-		}(), &TrackConfig{}),
+		}(), &SubscribeConfig{}),
 		func() (SendStream, error) {
 			return &MockQUICSendStream{}, nil
 		}, func() {})
@@ -777,7 +778,7 @@ func TestTrackHandlerFuncServeTrack(t *testing.T) {
 			mockStream.On("Context").Return(context.Background())
 			mockStream.On("Read", mock.Anything).Return(0, io.EOF)
 			return mockStream
-		}(), &TrackConfig{}),
+		}(), &SubscribeConfig{}),
 		func() (SendStream, error) {
 			return &MockQUICSendStream{}, nil
 		}, func() {})
@@ -2012,7 +2013,7 @@ func TestMux_ServeTrack_ClosesWhenAnnouncementEnds(t *testing.T) {
 	// Close should cancel read (and maybe write) with an error code; we accept any code here
 	mockStream.On("CancelRead", mock.Anything).Return().Once()
 
-	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() Stream { return mockStream }(), &TrackConfig{}), func() (SendStream, error) {
+	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() Stream { return mockStream }(), &SubscribeConfig{}), func() (SendStream, error) {
 		return &MockQUICSendStream{}, nil
 	}, func() {})
 
@@ -2330,18 +2331,18 @@ func TestMux_Publish_WithNilHandler_ClosesTrack(t *testing.T) {
 	mockStream := &MockQUICStream{}
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.Anything).Return(0, io.EOF).Maybe()
-	mockStream.On("CancelWrite", StreamErrorCode(TrackNotFoundErrorCode)).Return().Once()
-	mockStream.On("CancelRead", StreamErrorCode(TrackNotFoundErrorCode)).Return().Once()
+	mockStream.On("CancelWrite", StreamErrorCode(SubscribeErrorCodeNotFound)).Return().Once()
+	mockStream.On("CancelRead", StreamErrorCode(SubscribeErrorCodeNotFound)).Return().Once()
 	mockStream.On("Close").Return(nil).Maybe()
 
-	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() Stream { return mockStream }(), &TrackConfig{}), func() (SendStream, error) {
+	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() Stream { return mockStream }(), &SubscribeConfig{}), func() (SendStream, error) {
 		return &MockQUICSendStream{}, nil
 	}, func() {})
 
 	mux.serveTrack(tw)
 
-	mockStream.AssertCalled(t, "CancelWrite", StreamErrorCode(TrackNotFoundErrorCode))
-	mockStream.AssertCalled(t, "CancelRead", StreamErrorCode(TrackNotFoundErrorCode))
+	mockStream.AssertCalled(t, "CancelWrite", StreamErrorCode(SubscribeErrorCodeNotFound))
+	mockStream.AssertCalled(t, "CancelRead", StreamErrorCode(SubscribeErrorCodeNotFound))
 	mockStream.AssertExpectations(t)
 }
 

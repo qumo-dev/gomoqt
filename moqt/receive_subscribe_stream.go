@@ -7,10 +7,10 @@ import (
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
 )
 
-func newReceiveSubscribeStream(id SubscribeID, stream Stream, config *TrackConfig) *receiveSubscribeStream {
+func newReceiveSubscribeStream(id SubscribeID, stream Stream, config *SubscribeConfig) *receiveSubscribeStream {
 	// Ensure config is not nil
 	if config == nil {
-		config = &TrackConfig{}
+		config = &SubscribeConfig{}
 	}
 
 	rss := &receiveSubscribeStream{
@@ -56,12 +56,12 @@ func newReceiveSubscribeStream(id SubscribeID, stream Stream, config *TrackConfi
 				endGroup = GroupSequence(sum.EndGroup - 1)
 			}
 
-			rss.config = &TrackConfig{
-				SubscriberPriority: TrackPriority(sum.SubscriberPriority),
-				Ordered:            ordered,
-				MaxLatency:         sum.SubscriberMaxLatency,
-				StartGroup:         startGroup,
-				EndGroup:           endGroup,
+			rss.config = &SubscribeConfig{
+				Priority:   TrackPriority(sum.SubscriberPriority),
+				Ordered:    ordered,
+				MaxLatency: sum.SubscriberMaxLatency,
+				StartGroup: startGroup,
+				EndGroup:   endGroup,
 			}
 
 			select {
@@ -97,7 +97,7 @@ type receiveSubscribeStream struct {
 	writeInfoWG sync.WaitGroup
 
 	configMu  sync.Mutex
-	config    *TrackConfig
+	config    *SubscribeConfig
 	updatedCh chan struct{}
 
 	closeOnce chan struct{}
@@ -109,7 +109,7 @@ func (rss *receiveSubscribeStream) SubscribeID() SubscribeID {
 	return rss.subscribeID
 }
 
-func (rss *receiveSubscribeStream) writeInfo(info Info) error {
+func (rss *receiveSubscribeStream) writeInfo(info PublishInfo) error {
 	var err error
 	rss.acceptOnce.Do(func() {
 		rss.writeInfoWG.Add(1)
@@ -136,7 +136,7 @@ func (rss *receiveSubscribeStream) writeInfo(info Info) error {
 		}
 
 		sum := message.SubscribeOkMessage{
-			PublisherPriority:   uint8(rss.config.SubscriberPriority),
+			PublisherPriority:   uint8(rss.config.Priority),
 			PublisherOrdered:    ordered,
 			PublisherMaxLatency: rss.config.MaxLatency,
 			StartGroup:          startGroup,
@@ -144,7 +144,7 @@ func (rss *receiveSubscribeStream) writeInfo(info Info) error {
 		}
 		err = sum.Encode(rss.stream)
 		if err != nil {
-			_ = rss.closeWithError(InternalSubscribeErrorCode)
+			_ = rss.closeWithError(SubscribeErrorCodeInternal)
 			return
 		}
 	})
@@ -152,13 +152,13 @@ func (rss *receiveSubscribeStream) writeInfo(info Info) error {
 	return err
 }
 
-func (rss *receiveSubscribeStream) TrackConfig() *TrackConfig {
+func (rss *receiveSubscribeStream) TrackConfig() *SubscribeConfig {
 	rss.configMu.Lock()
 	defer rss.configMu.Unlock()
 
 	// Ensure config is never nil
 	if rss.config == nil {
-		rss.config = &TrackConfig{}
+		rss.config = &SubscribeConfig{}
 	}
 
 	return rss.config

@@ -9,14 +9,14 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-func TestNewTrackReceiver(t *testing.T) {
+func TestNewTrackReader(t *testing.T) {
 	mockStream := &MockQUICStream{}
 	mockStream.On("Context").Return(context.Background())
-	info := Info{}
-	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &TrackConfig{}, info)
+	info := PublishInfo{}
+	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{}, info)
 	receiver := newTrackReader("/broadcastpath", "trackname", substr, func() {})
 
-	assert.NotNil(t, receiver, "newTrackReceiver should not return nil")
+	assert.NotNil(t, receiver, "newTrackReader should not return nil")
 	// Verify info propagation
 	assert.Equal(t, info, substr.ReadInfo(), "sendSubscribeStream should return the Info passed at construction")
 	assert.NotNil(t, receiver.queueing, "queue should be initialized")
@@ -24,10 +24,10 @@ func TestNewTrackReceiver(t *testing.T) {
 	assert.NotNil(t, receiver.dequeued, "dequeued should be initialized")
 }
 
-func TestTrackReceiver_AcceptGroup(t *testing.T) {
+func TestTrackReader_AcceptGroup(t *testing.T) {
 	mockStream := &MockQUICStream{}
 	mockStream.On("Context").Return(context.Background())
-	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &TrackConfig{}, Info{})
+	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{}, PublishInfo{})
 	receiver := newTrackReader("/broadcastpath", "trackname", substr, func() {})
 
 	// Test with a timeout to ensure we don't block forever when no groups are available
@@ -39,11 +39,11 @@ func TestTrackReceiver_AcceptGroup(t *testing.T) {
 	assert.Equal(t, context.DeadlineExceeded, err, "expected deadline exceeded error")
 }
 
-func TestTrackReceiver_ContextCancellation(t *testing.T) {
+func TestTrackReader_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	mockStream := &MockQUICStream{}
 	mockStream.On("Context").Return(ctx)
-	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &TrackConfig{}, Info{})
+	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{}, PublishInfo{})
 	receiver := newTrackReader("/broadcastpath", "trackname", substr, func() {})
 
 	// Cancel the context
@@ -59,10 +59,10 @@ func TestTrackReceiver_ContextCancellation(t *testing.T) {
 	assert.True(t, err == context.Canceled || err == context.DeadlineExceeded, "expected context error")
 }
 
-func TestTrackReceiver_EnqueueGroup(t *testing.T) {
+func TestTrackReader_EnqueueGroup(t *testing.T) {
 	mockStream := &MockQUICStream{}
 	mockStream.On("Context").Return(context.Background())
-	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &TrackConfig{}, Info{})
+	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{}, PublishInfo{})
 	receiver := newTrackReader("/broadcastpath", "trackname", substr, func() {})
 
 	// Mock receive stream
@@ -82,10 +82,10 @@ func TestTrackReceiver_EnqueueGroup(t *testing.T) {
 	mockReceiveStream.AssertExpectations(t)
 }
 
-func TestTrackReceiver_AcceptGroup_RealImplementation(t *testing.T) {
+func TestTrackReader_AcceptGroup_RealImplementation(t *testing.T) {
 	mockStream := &MockQUICStream{}
 	mockStream.On("Context").Return(context.Background())
-	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &TrackConfig{}, Info{})
+	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{}, PublishInfo{})
 	receiver := newTrackReader("/broadcastpath", "trackname", substr, func() {})
 
 	// Test with a timeout to ensure we don't block forever
@@ -102,7 +102,7 @@ func TestTrackReader_Close(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Close").Return(nil)
 	mockStream.On("CancelRead", mock.Anything).Return(nil)
-	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &TrackConfig{}, Info{})
+	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{}, PublishInfo{})
 	receiver := newTrackReader("/broadcastpath", "trackname", substr, func() {})
 
 	err := receiver.Close()
@@ -117,15 +117,15 @@ func TestTrackReader_Update(t *testing.T) {
 	mockStream := &MockQUICStream{}
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Write", mock.Anything).Return(0, nil)
-	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &TrackConfig{}, Info{})
+	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{}, PublishInfo{})
 	receiver := newTrackReader("/broadcastpath", "trackname", substr, func() {})
 
-	newTrackConfig := TrackConfig{}
+	newTrackConfig := SubscribeConfig{}
 
 	_ = receiver.Update(&newTrackConfig)
 
 	// Verify update
-	assert.Equal(t, &TrackConfig{}, receiver.TrackConfig())
+	assert.Equal(t, &SubscribeConfig{}, receiver.TrackConfig())
 }
 
 func TestTrackReader_CloseWithError(t *testing.T) {
@@ -135,25 +135,27 @@ func TestTrackReader_CloseWithError(t *testing.T) {
 	mockStream.On("CancelRead", mock.Anything).Return(nil)
 	mockStream.On("CancelWrite", mock.Anything).Return(nil)
 	mockStream.On("Write", mock.Anything).Return(0, nil)
-	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &TrackConfig{}, Info{})
+	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{}, PublishInfo{})
 	receiver := newTrackReader("/broadcastpath", "trackname", substr, func() {})
 
-	err := receiver.CloseWithError(InternalSubscribeErrorCode)
+	err := receiver.CloseWithError(SubscribeErrorCodeInternal)
 	assert.NoError(t, err)
 }
 
-func TestTrackReader_RemoveGroup(t *testing.T) {
+func TestGroupReader_CancelRead_RemovesFromManager(t *testing.T) {
 	mockStream := &MockQUICStream{}
 	mockStream.On("Context").Return(context.Background())
-	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &TrackConfig{}, Info{})
+	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{}, PublishInfo{})
 	receiver := newTrackReader("/broadcastpath", "trackname", substr, func() {})
 
-	// Add a group to dequeued
-	group := &GroupReader{}
-	receiver.dequeued[group] = struct{}{}
-	assert.Contains(t, receiver.dequeued, group)
+	recvStream := &MockQUICReceiveStream{}
+	recvStream.On("CancelRead", mock.Anything).Return()
+	group := newGroupReader(GroupSequence(1), recvStream, receiver.groupManager)
 
-	// Remove the group
-	receiver.removeGroup(group)
-	assert.NotContains(t, receiver.dequeued, group)
+	assert.Len(t, receiver.groupManager.activeGroups, 1)
+	assert.Contains(t, receiver.groupManager.activeGroups, group)
+
+	group.CancelRead(InternalGroupErrorCode)
+	assert.Len(t, receiver.groupManager.activeGroups, 0)
+	assert.NotContains(t, receiver.groupManager.activeGroups, group)
 }

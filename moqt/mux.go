@@ -243,7 +243,7 @@ func (mux *TrackMux) serveTrack(tw *TrackWriter) {
 	// Use findTrackHandler for consistent lookup with optimized locking
 	ath := mux.findTrackHandler(path)
 	if ath == nil {
-		tw.CloseWithError(TrackNotFoundErrorCode)
+		tw.CloseWithError(SubscribeErrorCodeNotFound)
 		return
 	}
 
@@ -421,7 +421,7 @@ var NotFound = func(tw *TrackWriter) {
 		return
 	}
 
-	tw.CloseWithError(TrackNotFoundErrorCode)
+	tw.CloseWithError(SubscribeErrorCodeNotFound)
 }
 
 // NotFoundTrackHandler is a TrackHandler that implements a not-found

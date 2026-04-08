@@ -3,10 +3,11 @@ package moqt
 import (
 	"context"
 	"fmt"
-	"github.com/stretchr/testify/mock"
 	"io"
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/mock"
 )
 
 // BenchmarkTrackReader_EnqueueDequeue benchmarks group enqueue and dequeue operations
@@ -17,7 +18,7 @@ func BenchmarkTrackReader_EnqueueDequeue(b *testing.B) {
 		b.Run(fmt.Sprintf("size-%d", size), func(b *testing.B) {
 			mockStream := &MockQUICStream{}
 			mockStream.On("Context").Return(context.Background())
-			substr := newSendSubscribeStream(SubscribeID(1), mockStream, &TrackConfig{}, Info{})
+			substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{}, PublishInfo{})
 			reader := newTrackReader("/broadcastpath", "trackname", substr, func() {})
 
 			// Pre-create mock receive streams
@@ -25,6 +26,7 @@ func BenchmarkTrackReader_EnqueueDequeue(b *testing.B) {
 			for i := range streams {
 				mockRecvStream := &MockQUICReceiveStream{}
 				mockRecvStream.On("Context").Return(context.Background())
+				mockRecvStream.On("CancelRead", mock.Anything).Return()
 				streams[i] = mockRecvStream
 			}
 
@@ -37,10 +39,10 @@ func BenchmarkTrackReader_EnqueueDequeue(b *testing.B) {
 				// Enqueue
 				reader.enqueueGroup(GroupSequence(idx), streams[idx])
 
-				// Dequeue
-				group := reader.dequeueGroup()
-				if group != nil {
-					reader.removeGroup(group)
+				// Accept and immediately cancel to keep the queue flowing
+				group, err := reader.AcceptGroup(context.Background())
+				if err == nil && group != nil {
+					group.CancelRead(InternalGroupErrorCode)
 				}
 			}
 		})
@@ -52,7 +54,7 @@ func BenchmarkTrackReader_AcceptGroup(b *testing.B) {
 	mockStream := &MockQUICStream{}
 	ctx := context.Background()
 	mockStream.On("Context").Return(ctx)
-	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &TrackConfig{}, Info{})
+	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{}, PublishInfo{})
 	reader := newTrackReader("/broadcastpath", "trackname", substr, func() {})
 
 	b.ReportAllocs()
@@ -61,12 +63,13 @@ func BenchmarkTrackReader_AcceptGroup(b *testing.B) {
 		// Enqueue a group for this iteration
 		mockRecvStream := &MockQUICReceiveStream{}
 		mockRecvStream.On("Context").Return(ctx)
+		mockRecvStream.On("CancelRead", mock.Anything).Return()
 		reader.enqueueGroup(GroupSequence(i), mockRecvStream)
 
 		// Accept it immediately (non-blocking since queue has data)
 		group, err := reader.AcceptGroup(ctx)
 		if err == nil && group != nil {
-			reader.removeGroup(group)
+			group.CancelRead(InternalGroupErrorCode)
 		}
 	}
 }
@@ -80,13 +83,14 @@ func BenchmarkTrackReader_ConcurrentAccess(b *testing.B) {
 			mockStream := &MockQUICStream{}
 			ctx := context.Background()
 			mockStream.On("Context").Return(ctx)
-			substr := newSendSubscribeStream(SubscribeID(1), mockStream, &TrackConfig{}, Info{})
+			substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{}, PublishInfo{})
 			reader := newTrackReader("/broadcastpath", "trackname", substr, func() {})
 
 			// Pre-populate queue
 			for i := range 100 {
 				mockRecvStream := &MockQUICReceiveStream{}
 				mockRecvStream.On("Context").Return(ctx)
+				mockRecvStream.On("CancelRead", mock.Anything).Return()
 				reader.enqueueGroup(GroupSequence(i), mockRecvStream)
 			}
 
@@ -104,12 +108,13 @@ func BenchmarkTrackReader_ConcurrentAccess(b *testing.B) {
 							// Enqueue
 							mockRecvStream := &MockQUICReceiveStream{}
 							mockRecvStream.On("Context").Return(ctx)
+							mockRecvStream.On("CancelRead", mock.Anything).Return()
 							reader.enqueueGroup(GroupSequence(i+id*1000), mockRecvStream)
 						} else {
-							// Dequeue
-							group := reader.dequeueGroup()
-							if group != nil {
-								reader.removeGroup(group)
+							// Accept and immediately cancel
+							group, err := reader.AcceptGroup(ctx)
+							if err == nil && group != nil {
+								group.CancelRead(InternalGroupErrorCode)
 							}
 						}
 					}
@@ -135,7 +140,7 @@ func BenchmarkTrackWriter_OpenGroup(b *testing.B) {
 			mockStream.On("Close").Return(nil)
 			mockStream.On("Close").Return(nil)
 
-			substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &TrackConfig{})
+			substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
 			streamIdx := 0
 			var streamMu sync.Mutex
@@ -187,7 +192,7 @@ func BenchmarkTrackWriter_ConcurrentOpenGroup(b *testing.B) {
 			mockStream.On("Close").Return(nil)
 			mockStream.On("Close").Return(nil)
 
-			substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &TrackConfig{})
+			substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
 			var streamIdx int64
 			var streamMu sync.Mutex
@@ -240,7 +245,7 @@ func BenchmarkTrackWriter_ActiveGroupManagement(b *testing.B) {
 			mockStream.On("Write", mock.Anything).Return(0, nil)
 			mockStream.On("Close").Return(nil)
 
-			substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &TrackConfig{})
+			substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
 			streamIdx := 0
 			openUniStreamFunc := func() (SendStream, error) {
@@ -300,7 +305,7 @@ func BenchmarkTrackWriter_MemoryAllocation(b *testing.B) {
 		mockStream.On("Write", mock.Anything).Return(0, nil)
 		mockStream.On("Close").Return(nil)
 
-		substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &TrackConfig{})
+		substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
 		openUniStreamFunc := func() (SendStream, error) {
 			mockSendStream := &MockQUICSendStream{}
@@ -331,17 +336,18 @@ func BenchmarkTrackReader_MemoryAllocation(b *testing.B) {
 	for b.Loop() {
 		mockStream := &MockQUICStream{}
 		mockStream.On("Context").Return(context.Background())
-		substr := newSendSubscribeStream(SubscribeID(1), mockStream, &TrackConfig{}, Info{})
+		substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{}, PublishInfo{})
 		reader := newTrackReader("/broadcastpath", "trackname", substr, func() {})
 
 		// Enqueue and dequeue a group
 		mockRecvStream := &MockQUICReceiveStream{}
 		mockRecvStream.On("Context").Return(context.Background())
+		mockRecvStream.On("CancelRead", mock.Anything).Return()
 		reader.enqueueGroup(GroupSequence(1), mockRecvStream)
 
-		group := reader.dequeueGroup()
-		if group != nil {
-			reader.removeGroup(group)
+		group, err := reader.AcceptGroup(context.Background())
+		if err == nil && group != nil {
+			group.CancelRead(InternalGroupErrorCode)
 		}
 
 		_ = reader.Close()
@@ -364,7 +370,7 @@ func BenchmarkTrackWriter_CloseWithActiveGroups(b *testing.B) {
 				mockStream.On("Write", mock.Anything).Return(0, nil)
 				mockStream.On("Close").Return(nil)
 
-				substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &TrackConfig{})
+				substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
 				streamIdx := 0
 				openUniStreamFunc := func() (SendStream, error) {

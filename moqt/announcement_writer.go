@@ -77,7 +77,7 @@ func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) err
 			err = message.AnnounceMessage{
 				AnnounceStatus:      message.ACTIVE,
 				BroadcastPathSuffix: sfx,
-				Hops:                uint64(active.announcement.Hops()),
+				Hops:                uint64(active.announcement.Hops() + 1),
 			}.Encode(aw.stream)
 			if err != nil {
 				if strErr, ok := errors.AsType[*StreamError](err); ok {

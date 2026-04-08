@@ -156,7 +156,7 @@ func (h *trackHandlerEntry) ServeTrack(tw *TrackWriter) {
 		return
 	}
 	if !h.trackStarted(tw) {
-		tw.CloseWithError(TrackNotFoundErrorCode)
+		tw.CloseWithError(SubscribeErrorCodeNotFound)
 		return
 	}
 	defer h.trackEnded(tw)

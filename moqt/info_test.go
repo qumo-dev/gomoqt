@@ -7,7 +7,7 @@ import (
 )
 
 func TestInfo(t *testing.T) {
-	tests := map[string]Info{
+	tests := map[string]PublishInfo{
 		"default values": {},
 		// "high priority": {
 		// },
@@ -17,7 +17,7 @@ func TestInfo(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			info := Info{}
+			info := PublishInfo{}
 
 			assert.Equal(t, tt, info)
 		})
@@ -25,9 +25,9 @@ func TestInfo(t *testing.T) {
 }
 
 func TestInfoZeroValue(t *testing.T) {
-	var info Info
+	var info PublishInfo
 
-	assert.Equal(t, Info{}, info)
+	assert.Equal(t, PublishInfo{}, info)
 }
 
 // func TestInfoComparison(t *testing.T) {

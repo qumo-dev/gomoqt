@@ -202,13 +202,13 @@ func (w *TrackWriter) Context() context.Context {
 	return w.receiveSubscribeStream.Context()
 }
 
-func (w *TrackWriter) WriteInfo(info Info) error {
+func (w *TrackWriter) WriteInfo(info PublishInfo) error {
 	return w.receiveSubscribeStream.writeInfo(info)
 }
 
-func (w *TrackWriter) TrackConfig() *TrackConfig {
+func (w *TrackWriter) TrackConfig() *SubscribeConfig {
 	if w.receiveSubscribeStream == nil {
-		return &TrackConfig{}
+		return &SubscribeConfig{}
 	}
 	return w.receiveSubscribeStream.TrackConfig()
 }
@@ -242,7 +242,9 @@ func (w *TrackWriter) openGroupWithSequence(seq GroupSequence) (*GroupWriter, er
 	}
 
 	// Write the INFO message to the receive subscribe stream.
-	err := w.WriteInfo(Info{})
+	err := w.WriteInfo(PublishInfo{
+		StartGroup: seq,
+	})
 	if err != nil {
 		return nil, err
 	}

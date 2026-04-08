@@ -140,7 +140,7 @@ func (s *Session) CloseWithError(code SessionErrorCode, msg string) error {
 	return nil
 }
 
-func (s *Session) Subscribe(path BroadcastPath, name TrackName, config *TrackConfig) (*TrackReader, error) {
+func (s *Session) Subscribe(path BroadcastPath, name TrackName, config *SubscribeConfig) (*TrackReader, error) {
 	if s.terminating() {
 		if s.sessErr == nil {
 			return nil, ErrClosedSession
@@ -149,7 +149,7 @@ func (s *Session) Subscribe(path BroadcastPath, name TrackName, config *TrackCon
 	}
 
 	if config == nil {
-		config = &TrackConfig{}
+		config = &SubscribeConfig{}
 	}
 
 	id := s.nextSubscribeID()
@@ -174,7 +174,7 @@ func (s *Session) Subscribe(path BroadcastPath, name TrackName, config *TrackCon
 				StreamError: strErr,
 			}
 		}
-		strErrCode := StreamErrorCode(InternalSubscribeErrorCode)
+		strErrCode := StreamErrorCode(SubscribeErrorCodeInternal)
 		stream.CancelWrite(strErrCode)
 		stream.CancelRead(strErrCode)
 		return nil, fmt.Errorf("failed to encode stream type message: %w", err)
@@ -200,7 +200,7 @@ func (s *Session) Subscribe(path BroadcastPath, name TrackName, config *TrackCon
 		SubscribeID:          uint64(id),
 		BroadcastPath:        string(path),
 		TrackName:            string(name),
-		SubscriberPriority:   uint8(config.SubscriberPriority),
+		SubscriberPriority:   uint8(config.Priority),
 		SubscriberOrdered:    ordered,
 		SubscriberMaxLatency: config.MaxLatency,
 		StartGroup:           startGroup,
@@ -219,54 +219,78 @@ func (s *Session) Subscribe(path BroadcastPath, name TrackName, config *TrackCon
 			}
 		}
 
-		strErrCode := StreamErrorCode(InternalSubscribeErrorCode)
+		strErrCode := StreamErrorCode(SubscribeErrorCodeInternal)
 		stream.CancelWrite(strErrCode)
 		stream.CancelRead(strErrCode)
 
 		return nil, fmt.Errorf("failed to encode SUBSCRIBE message: %w", err)
 	}
 
-	// Register TrackReader AFTER sending SUBSCRIBE but BEFORE waiting for SUBSCRIBE_OK
-	// This ensures we're ready to receive data streams immediately when server approves
-	substr := newSendSubscribeStream(id, stream, config, Info{})
+	// Register TrackReader AFTER sending SUBSCRIBE but BEFORE waiting for the response.
+	// This ensures we're ready to receive data streams immediately when server approves.
+	substr := newSendSubscribeStream(id, stream, config, PublishInfo{})
 
+	removeTrackFunc := func() {
+		s.removeTrackReader(id)
+	}
 	// Create a receive group stream queue
 	trackReceiver := newTrackReader(
 		path,
 		name,
 		substr,
-		func() { s.removeTrackReader(id) },
+		removeTrackFunc,
 	)
 	s.addTrackReader(id, trackReceiver)
 
-	cleanup := func() {
-		s.removeTrackReader(id)
-	}
-
-	var subok message.SubscribeOkMessage
-	err = subok.Decode(stream)
+	subok, _, err := readSubscribeResponse(stream)
 	if err != nil {
-		cleanup()
+		removeTrackFunc()
 		if strErr, ok := errors.AsType[*StreamError](err); ok {
-			strErrCode := StreamErrorCode(strErr.ErrorCode)
-			stream.CancelWrite(strErrCode)
-
-			return nil, &SubscribeError{
-				StreamError: strErr,
-			}
+			stream.CancelRead(strErr.ErrorCode)
+			stream.CancelWrite(strErr.ErrorCode)
+			return nil, &SubscribeError{StreamError: strErr}
 		}
-
-		// If Decode returned an error that's not a QUIC StreamError, fail.
-		// For non-QUIC stream errors (e.g., io.EOF), do not cancel the stream
-		// aggressively. Allow the caller to close the session or the remote to
-		// clean up; canceling here may trigger a remote Reset which can break
-		// the normal lifecycle and lead to spurious EOFs on the server side.
-		return nil, fmt.Errorf("failed to read SUBSCRIBE_OK response: %w", err)
-	} else {
-		// Successful receipt of SUBSCRIBE_OK.
+		return nil, fmt.Errorf("failed to read SUBSCRIBE response: %w", err)
 	}
+	if subok == nil {
+		removeTrackFunc()
+		return nil, fmt.Errorf("invalid SUBSCRIBE response: expected SUBSCRIBE_OK")
+	}
+
+	trackReceiver.handleDrops()
 
 	return trackReceiver, nil
+}
+
+func readSubscribeResponse(stream io.Reader) (*message.SubscribeOkMessage, *message.SubscribeDropMessage, error) {
+	head := make([]byte, 1)
+	if _, err := io.ReadFull(stream, head); err != nil {
+		return nil, nil, err
+	}
+
+	msgType, _, err := message.ReadVarint(head)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	switch msgType {
+	case 0x0:
+		var msg message.SubscribeOkMessage
+		err := msg.Decode(stream)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &msg, nil, nil
+	case 0x1:
+		var msg message.SubscribeDropMessage
+		err := msg.Decode(stream)
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, &msg, nil
+	default:
+		return nil, nil, fmt.Errorf("unexpected SUBSCRIBE response type: %d", msgType)
+	}
 }
 
 // nextSubscribeID atomically increments and returns the next SubscribeID for new subscriptions.
@@ -303,7 +327,7 @@ func (s *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
 				StreamError: strErr,
 			}
 		}
-		strErrCode := StreamErrorCode(InternalFetchErrorCode)
+		strErrCode := StreamErrorCode(FetchErrorCodeInternal)
 		stream.CancelWrite(strErrCode)
 		stream.CancelRead(strErrCode)
 		return nil, fmt.Errorf("failed to encode stream type message: %w", err)
@@ -324,7 +348,7 @@ func (s *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
 			}
 		}
 
-		strErrCode := StreamErrorCode(InternalFetchErrorCode)
+		strErrCode := StreamErrorCode(FetchErrorCodeInternal)
 		stream.CancelWrite(strErrCode)
 		stream.CancelRead(strErrCode)
 
@@ -424,9 +448,7 @@ func (sess *Session) Probe(bitrate uint64) (uint64, error) {
 			return 0, err
 		}
 
-		strErrCode := StreamErrorCode(InternalSessionErrorCode)
-		stream.CancelWrite(strErrCode)
-		stream.CancelRead(strErrCode)
+		cancelStreamWithError(stream, StreamErrorCode(ProbeErrorCodeInternal))
 
 		return 0, fmt.Errorf("failed to encode stream type message: %w", err)
 	}
@@ -438,9 +460,7 @@ func (sess *Session) Probe(bitrate uint64) (uint64, error) {
 			return 0, err
 		}
 
-		strErrCode := StreamErrorCode(InternalSessionErrorCode)
-		stream.CancelWrite(strErrCode)
-		stream.CancelRead(strErrCode)
+		cancelStreamWithError(stream, StreamErrorCode(ProbeErrorCodeInternal))
 
 		return 0, fmt.Errorf("failed to send PROBE message: %w", err)
 	}
@@ -511,13 +531,13 @@ func (sess *Session) processBiStream(stream Stream) {
 		var sm message.SubscribeMessage
 		err := sm.Decode(stream)
 		if err != nil {
-			cancelStreamWithError(stream, StreamErrorCode(InternalSubscribeErrorCode))
+			cancelStreamWithError(stream, StreamErrorCode(SubscribeErrorCodeInternal))
 			return
 		}
 
 		// Create a receiveSubscribeStream with draft3 fields decoded from SUBSCRIBE message
-		config := &TrackConfig{
-			SubscriberPriority: TrackPriority(sm.SubscriberPriority),
+		config := &SubscribeConfig{
+			Priority: TrackPriority(sm.SubscriberPriority),
 			Ordered:            sm.SubscriberOrdered != 0,
 			MaxLatency:         sm.SubscriberMaxLatency,
 		}
@@ -549,13 +569,13 @@ func (sess *Session) processBiStream(stream Stream) {
 		var fm message.FetchMessage
 		err := fm.Decode(stream)
 		if err != nil {
-			cancelStreamWithError(stream, StreamErrorCode(InternalFetchErrorCode))
+			cancelStreamWithError(stream, StreamErrorCode(FetchErrorCodeInternal))
 			return
 		}
 
 		handler := sess.fetchHandler
 		if handler == nil {
-			cancelStreamWithError(stream, StreamErrorCode(InternalFetchErrorCode))
+			cancelStreamWithError(stream, StreamErrorCode(FetchErrorCodeInternal))
 			return
 		}
 
@@ -571,11 +591,11 @@ func (sess *Session) processBiStream(stream Stream) {
 		handler.ServeFetch(w, req)
 	case message.StreamTypeProbe:
 		if err := sess.handleProbeStream(stream); err != nil {
-			cancelStreamWithError(stream, StreamErrorCode(InternalSessionErrorCode))
+			cancelStreamWithError(stream, StreamErrorCode(ProbeErrorCodeInternal))
 			return
 		}
 	default:
-		cancelStreamWithError(stream, quic.StreamErrorCode(InternalSessionErrorCode))
+		cancelStreamWithError(stream, StreamErrorCode(InternalSessionErrorCode))
 		return
 	}
 }
@@ -597,6 +617,7 @@ func (sess *Session) processUniStream(stream ReceiveStream) {
 	if err != nil {
 		return
 	}
+	defer stream.CancelRead(StreamErrorCode(InternalSessionErrorCode))
 
 	switch streamType {
 	case message.StreamTypeGroup:
@@ -616,7 +637,6 @@ func (sess *Session) processUniStream(stream ReceiveStream) {
 		track.enqueueGroup(GroupSequence(gm.GroupSequence), stream)
 	default:
 		// Unknown stream types are stream-local and non-fatal for extension probing.
-		stream.CancelRead(quic.StreamErrorCode(InternalSessionErrorCode))
 		return
 	}
 }

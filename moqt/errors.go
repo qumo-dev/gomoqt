@@ -83,42 +83,35 @@ func (err AnnounceError) AnnounceErrorCode() AnnounceErrorCode {
 type SubscribeErrorCode uint32
 
 const (
-	InternalSubscribeErrorCode SubscribeErrorCode = 0x00
-
-	// Error code used internally, basically not used in the application.
-	// These error codes are used before subscribe negotiation is completed,
+	SubscribeErrorCodeInternal SubscribeErrorCode = 0x00
 
 	//
-	InvalidRangeErrorCode SubscribeErrorCode = 0x01
+	SubscribeErrorCodeInvalidRange SubscribeErrorCode = 0x01
 	//
-	DuplicateSubscribeIDErrorCode SubscribeErrorCode = 0x02
+	SubscribeErrorCodeDuplicateID SubscribeErrorCode = 0x02
 	//
-	TrackNotFoundErrorCode SubscribeErrorCode = 0x03
+	SubscribeErrorCodeNotFound SubscribeErrorCode = 0x03
 	//
-	UnauthorizedSubscribeErrorCode SubscribeErrorCode = 0x04 // TODO: Is this necessary?
+	SubscribeErrorCodeUnauthorized SubscribeErrorCode = 0x04 // TODO: Is this necessary?
 	// Subscriber
-	SubscribeTimeoutErrorCode SubscribeErrorCode = 0x05
-	// ClosedTrackErrorCode           SubscribeErrorCode = 0x07 // TODO: Is this necessary?
-
-	// Error code used by the application.
-	// These error codes are used after subscribe negotiation is completed.
+	SubscribeErrorCodeTimeout SubscribeErrorCode = 0x05
 )
 
 // SubscribeErrorText returns a text for the subscribe error code.
 // It returns an empty string if the code is unknown.
 func SubscribeErrorText(code SubscribeErrorCode) string {
 	switch code {
-	case InternalSubscribeErrorCode:
+	case SubscribeErrorCodeInternal:
 		return "moqt: internal error"
-	case InvalidRangeErrorCode:
+	case SubscribeErrorCodeInvalidRange:
 		return "moqt: invalid range"
-	case DuplicateSubscribeIDErrorCode:
+	case SubscribeErrorCodeDuplicateID:
 		return "moqt: duplicated id"
-	case TrackNotFoundErrorCode:
+	case SubscribeErrorCodeNotFound:
 		return "moqt: track does not exist"
-	case UnauthorizedSubscribeErrorCode:
+	case SubscribeErrorCodeUnauthorized:
 		return "moqt: unauthorized"
-	case SubscribeTimeoutErrorCode:
+	case SubscribeErrorCodeTimeout:
 		return "moqt: timeout"
 	default:
 		return ""
@@ -143,15 +136,15 @@ func (err SubscribeError) SubscribeErrorCode() SubscribeErrorCode {
 type FetchErrorCode uint32
 
 const (
-	InternalFetchErrorCode FetchErrorCode = 0x00
-	TimeoutFetchErrorCode  FetchErrorCode = 0x01
+	FetchErrorCodeInternal FetchErrorCode = 0x00
+	FetchErrorCodeTimeout  FetchErrorCode = 0x01
 )
 
 func FetchErrorText(code FetchErrorCode) string {
 	switch code {
-	case InternalFetchErrorCode:
+	case FetchErrorCodeInternal:
 		return "moqt: internal error"
-	case TimeoutFetchErrorCode:
+	case FetchErrorCodeTimeout:
 		return "moqt: timeout"
 	default:
 		return ""
@@ -170,6 +163,41 @@ func (err FetchError) Error() string {
 
 func (err FetchError) FetchErrorCode() FetchErrorCode {
 	return FetchErrorCode(err.ErrorCode)
+}
+
+type ProbeErrorCode uint32
+
+const (
+	ProbeErrorCodeInternal     ProbeErrorCode = 0x00
+	ProbeErrorCodeTimeout      ProbeErrorCode = 0x01
+	ProbeErrorCodeNotSupported ProbeErrorCode = 0x02
+)
+
+func ProbeErrorText(code ProbeErrorCode) string {
+	switch code {
+	case ProbeErrorCodeInternal:
+		return "moqt: internal error"
+	case ProbeErrorCodeTimeout:
+		return "moqt: timeout"
+	case ProbeErrorCodeNotSupported:
+		return "moqt: not supported"
+	default:
+		return ""
+	}
+}
+
+type ProbeError struct{ *StreamError }
+
+func (err ProbeError) Error() string {
+	text := ProbeErrorText(err.ProbeErrorCode())
+	if text != "" {
+		return text
+	}
+	return err.StreamError.Error()
+}
+
+func (err ProbeError) ProbeErrorCode() ProbeErrorCode {
+	return ProbeErrorCode(err.ErrorCode)
 }
 
 /*

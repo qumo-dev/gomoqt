@@ -18,5 +18,7 @@ type (
 	StreamError          = transport.StreamError
 	StreamErrorCode      = transport.StreamErrorCode
 
+	QUICConnectionStats = transport.ConnectionStats
+
 	WebTransportSession = transport.WebTransportSession
 )

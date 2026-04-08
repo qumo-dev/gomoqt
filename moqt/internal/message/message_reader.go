@@ -109,38 +109,3 @@ func ReadStringArray(b []byte) ([]string, int, error) {
 
 	return arr, total, nil
 }
-
-// Read parameters from the reader
-func ReadParameters(b []byte) (map[uint64][]byte, int, error) {
-	count, total, err := ReadVarint(b)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	if count > math.MaxInt {
-		panic("parameters too large")
-	}
-
-	b = b[total:]
-
-	params := make(map[uint64][]byte, count)
-	for range count {
-		key, n, err := ReadVarint(b)
-		if err != nil {
-			return nil, 0, err
-		}
-		b = b[n:]
-		total += n
-
-		value, n, err := ReadBytes(b)
-		if err != nil {
-			return nil, 0, err
-		}
-		b = b[n:]
-		total += n
-
-		params[key] = value
-	}
-
-	return params, total, nil
-}

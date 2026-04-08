@@ -89,27 +89,27 @@ func TestSubscribeErrorText(t *testing.T) {
 		expect string
 	}{
 		"internal error code": {
-			code:   InternalSubscribeErrorCode,
+			code:   SubscribeErrorCodeInternal,
 			expect: "moqt: internal error",
 		},
 		"invalid range error code": {
-			code:   InvalidRangeErrorCode,
+			code:   SubscribeErrorCodeInvalidRange,
 			expect: "moqt: invalid range",
 		},
 		"duplicate subscribe ID error code": {
-			code:   DuplicateSubscribeIDErrorCode,
+			code:   SubscribeErrorCodeDuplicateID,
 			expect: "moqt: duplicated id",
 		},
 		"track not found error code": {
-			code:   TrackNotFoundErrorCode,
+			code:   SubscribeErrorCodeNotFound,
 			expect: "moqt: track does not exist",
 		},
 		"unauthorized subscribe error code": {
-			code:   UnauthorizedSubscribeErrorCode,
+			code:   SubscribeErrorCodeUnauthorized,
 			expect: "moqt: unauthorized",
 		},
 		"subscribe timeout error code": {
-			code:   SubscribeTimeoutErrorCode,
+			code:   SubscribeErrorCodeTimeout,
 			expect: "moqt: timeout",
 		},
 		"unknown code": {
@@ -406,56 +406,56 @@ func TestSubscribeError(t *testing.T) {
 		"internal error": {
 			err: SubscribeError{
 				&StreamError{
-					ErrorCode: StreamErrorCode(InternalSubscribeErrorCode),
+					ErrorCode: StreamErrorCode(SubscribeErrorCodeInternal),
 				},
 			},
 			expectedString: "moqt: internal error",
-			expectedCode:   InternalSubscribeErrorCode,
+			expectedCode:   SubscribeErrorCodeInternal,
 		},
 		"invalid range": {
 			err: SubscribeError{
 				&StreamError{
-					ErrorCode: StreamErrorCode(InvalidRangeErrorCode),
+					ErrorCode: StreamErrorCode(SubscribeErrorCodeInvalidRange),
 				},
 			},
 			expectedString: "moqt: invalid range",
-			expectedCode:   InvalidRangeErrorCode,
+			expectedCode:   SubscribeErrorCodeInvalidRange,
 		},
 		"duplicate subscribe ID": {
 			err: SubscribeError{
 				&StreamError{
-					ErrorCode: StreamErrorCode(DuplicateSubscribeIDErrorCode),
+					ErrorCode: StreamErrorCode(SubscribeErrorCodeDuplicateID),
 				},
 			},
 			expectedString: "moqt: duplicated id",
-			expectedCode:   DuplicateSubscribeIDErrorCode,
+			expectedCode:   SubscribeErrorCodeDuplicateID,
 		},
 		"track not found": {
 			err: SubscribeError{
 				&StreamError{
-					ErrorCode: StreamErrorCode(TrackNotFoundErrorCode),
+					ErrorCode: StreamErrorCode(SubscribeErrorCodeNotFound),
 				},
 			},
 			expectedString: "moqt: track does not exist",
-			expectedCode:   TrackNotFoundErrorCode,
+			expectedCode:   SubscribeErrorCodeNotFound,
 		},
 		"unauthorized": {
 			err: SubscribeError{
 				&StreamError{
-					ErrorCode: StreamErrorCode(UnauthorizedSubscribeErrorCode),
+					ErrorCode: StreamErrorCode(SubscribeErrorCodeUnauthorized),
 				},
 			},
 			expectedString: "moqt: unauthorized",
-			expectedCode:   UnauthorizedSubscribeErrorCode,
+			expectedCode:   SubscribeErrorCodeUnauthorized,
 		},
 		"timeout": {
 			err: SubscribeError{
 				&StreamError{
-					ErrorCode: StreamErrorCode(SubscribeTimeoutErrorCode),
+					ErrorCode: StreamErrorCode(SubscribeErrorCodeTimeout),
 				},
 			},
 			expectedString: "moqt: timeout",
-			expectedCode:   SubscribeTimeoutErrorCode,
+			expectedCode:   SubscribeErrorCodeTimeout,
 		},
 	}
 
@@ -654,113 +654,6 @@ func TestGroupError(t *testing.T) {
 	}
 }
 
-// // Test for InternalError
-// func TestInternalError(t *testing.T) {
-// 	tests := map[string]struct {
-// 		err                      InternalError
-// 		expectedString           string
-// 		expectedAnnounceCode     AnnounceErrorCode
-// 		expectedSubscribeCode    SubscribeErrorCode
-// 		expectedSessionCode      SessionErrorCode
-// 		expectedGroupCode        GroupErrorCode
-// 		shouldMatchInternalError bool
-// 	}{
-// 		"with reason": {
-// 			err:                      InternalError{Reason: "test error"},
-// 			expectedString:           "moqt: internal error: test error",
-// 			expectedAnnounceCode:     InternalAnnounceErrorCode,
-// 			expectedSubscribeCode:    InternalSubscribeErrorCode,
-// 			expectedSessionCode:      InternalSessionErrorCode,
-// 			expectedGroupCode:        InternalGroupErrorCode,
-// 			shouldMatchInternalError: true,
-// 		},
-// 		"empty reason": {
-// 			err:                      InternalError{Reason: ""},
-// 			expectedString:           "moqt: internal error: ",
-// 			expectedAnnounceCode:     InternalAnnounceErrorCode,
-// 			expectedSubscribeCode:    InternalSubscribeErrorCode,
-// 			expectedSessionCode:      InternalSessionErrorCode,
-// 			expectedGroupCode:        InternalGroupErrorCode,
-// 			shouldMatchInternalError: true,
-// 		},
-// 	}
-
-// 	for name, tt := range tests {
-// 		t.Run(name, func(t *testing.T) {
-// 			assert.Equal(t, tt.expectedString, tt.err.Error())
-// 			assert.Equal(t, tt.expectedAnnounceCode, tt.err.AnnounceErrorCode())
-// 			assert.Equal(t, tt.expectedSubscribeCode, tt.err.SubscribeErrorCode())
-// 			assert.Equal(t, tt.expectedSessionCode, tt.err.SessionErrorCode())
-// 			assert.Equal(t, tt.expectedGroupCode, tt.err.GroupErrorCode())
-
-// 			// Test Is method
-// 			var internalErr InternalError
-// 			assert.Equal(t, tt.shouldMatchInternalError, errors.Is(tt.err, internalErr))
-// 		})
-// 	}
-// }
-
-// // Test for UnauthorizedError
-// func TestUnauthorizedError(t *testing.T) {
-// 	tests := map[string]struct {
-// 		err                        UnauthorizedError
-// 		expectedString             string
-// 		expectedSubscribeCode      SubscribeErrorCode
-// 		expectedSessionCode        SessionErrorCode
-// 		shouldMatchUnauthorizedErr bool
-// 	}{
-// 		"default": {
-// 			err:                        UnauthorizedError{},
-// 			expectedString:             "moqt: unauthorized",
-// 			expectedSubscribeCode:      UnauthorizedSubscribeErrorCode,
-// 			expectedSessionCode:        UnauthorizedSessionErrorCode,
-// 			shouldMatchUnauthorizedErr: true,
-// 		},
-// 	}
-
-// 	for name, tt := range tests {
-// 		t.Run(name, func(t *testing.T) {
-// 			assert.Equal(t, tt.expectedString, tt.err.Error())
-// 			assert.Equal(t, tt.expectedSubscribeCode, tt.err.SubscribeErrorCode())
-// 			assert.Equal(t, tt.expectedSessionCode, tt.err.SessionErrorCode())
-
-// 			// Test Is method
-// 			var unauthorizedErr UnauthorizedError
-// 			assert.Equal(t, tt.shouldMatchUnauthorizedErr, errors.Is(tt.err, unauthorizedErr))
-// 		})
-// 	}
-// }
-
-// // Test for error compatibility with standard errors
-// func TestErrorCompatibility(t *testing.T) {
-// 	// Test errors.Is compatibility
-// 	t.Run("errors.Is with InternalError", func(t *testing.T) {
-// 		err := InternalError{Reason: "test"}
-// 		var internalErr InternalError
-// 		assert.True(t, errors.Is(err, internalErr))
-// 	})
-
-// 	t.Run("errors.Is with UnauthorizedError", func(t *testing.T) {
-// 		err := UnauthorizedError{}
-// 		var unauthorizedErr UnauthorizedError
-// 		assert.True(t, errors.Is(err, unauthorizedErr))
-// 	})
-
-// 	// Test errors.As compatibility
-// 	t.Run("errors.As with InternalError", func(t *testing.T) {
-// 		err := InternalError{Reason: "test"}
-// 		var target InternalError
-// 		assert.True(t, errors.As(err, &target))
-// 		assert.Equal(t, "test", target.Reason)
-// 	})
-
-// 	t.Run("errors.As with UnauthorizedError", func(t *testing.T) {
-// 		err := UnauthorizedError{}
-// 		var target UnauthorizedError
-// 		assert.True(t, errors.As(err, &target))
-// 	})
-// }
-
 // Test consistency between ErrorText functions and Error types
 func TestErrorTextConsistency(t *testing.T) {
 	t.Run("AnnounceError consistency", func(t *testing.T) {
@@ -788,12 +681,12 @@ func TestErrorTextConsistency(t *testing.T) {
 	t.Run("SubscribeError consistency", func(t *testing.T) {
 		// Test all defined subscribe error codes
 		codes := []SubscribeErrorCode{
-			InternalSubscribeErrorCode,
-			InvalidRangeErrorCode,
-			DuplicateSubscribeIDErrorCode,
-			TrackNotFoundErrorCode,
-			UnauthorizedSubscribeErrorCode,
-			SubscribeTimeoutErrorCode,
+			SubscribeErrorCodeInternal,
+			SubscribeErrorCodeInvalidRange,
+			SubscribeErrorCodeDuplicateID,
+			SubscribeErrorCodeNotFound,
+			SubscribeErrorCodeUnauthorized,
+			SubscribeErrorCodeTimeout,
 		}
 
 		for _, code := range codes {
@@ -888,12 +781,12 @@ func TestErrorText_NonEmpty(t *testing.T) {
 
 	t.Run("SubscribeErrorText returns non-empty for all defined codes", func(t *testing.T) {
 		codes := []SubscribeErrorCode{
-			InternalSubscribeErrorCode,
-			InvalidRangeErrorCode,
-			DuplicateSubscribeIDErrorCode,
-			TrackNotFoundErrorCode,
-			UnauthorizedSubscribeErrorCode,
-			SubscribeTimeoutErrorCode,
+			SubscribeErrorCodeInternal,
+			SubscribeErrorCodeInvalidRange,
+			SubscribeErrorCodeDuplicateID,
+			SubscribeErrorCodeNotFound,
+			SubscribeErrorCodeUnauthorized,
+			SubscribeErrorCodeTimeout,
 		}
 
 		for _, code := range codes {

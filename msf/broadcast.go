@@ -224,13 +224,13 @@ func (b *Broadcast) ServeTrack(tw *moqt.TrackWriter) {
 func (b *Broadcast) serveCatalogTrack(tw *moqt.TrackWriter) {
 	payload, err := b.CatalogBytes()
 	if err != nil {
-		tw.CloseWithError(moqt.InternalSubscribeErrorCode)
+		tw.CloseWithError(moqt.SubscribeErrorCodeInternal)
 		return
 	}
 
 	group, err := tw.OpenGroup()
 	if err != nil {
-		tw.CloseWithError(moqt.InternalSubscribeErrorCode)
+		tw.CloseWithError(moqt.SubscribeErrorCodeInternal)
 		return
 	}
 
@@ -238,11 +238,11 @@ func (b *Broadcast) serveCatalogTrack(tw *moqt.TrackWriter) {
 	_, _ = frame.Write(payload)
 	if err := group.WriteFrame(frame); err != nil {
 		group.CancelWrite(moqt.InternalGroupErrorCode)
-		tw.CloseWithError(moqt.InternalSubscribeErrorCode)
+		tw.CloseWithError(moqt.SubscribeErrorCodeInternal)
 		return
 	}
 	if err := group.Close(); err != nil {
-		tw.CloseWithError(moqt.InternalSubscribeErrorCode)
+		tw.CloseWithError(moqt.SubscribeErrorCodeInternal)
 		return
 	}
 	_ = tw.Close()

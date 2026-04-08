@@ -178,14 +178,18 @@ func TestSession_Subscribe(t *testing.T) {
 	tests := map[string]struct {
 		path      BroadcastPath
 		name      TrackName
-		config    *TrackConfig
+		config    *SubscribeConfig
 		wantError bool
 	}{
 		"valid track stream": {
 			path: BroadcastPath("/test/track"),
 			name: TrackName("video"),
-			config: &TrackConfig{
-				SubscriberPriority: TrackPriority(1),
+			config: &SubscribeConfig{
+				Priority: TrackPriority(1),
+				Ordered:            true,
+				MaxLatency:         250,
+				StartGroup:         4,
+				EndGroup:           9,
 			},
 			wantError: false,
 		},
@@ -207,13 +211,20 @@ func TestSession_Subscribe(t *testing.T) {
 			mockTrackStream := &MockQUICStream{}
 			mockTrackStream.On("StreamID").Return(StreamID(2))
 			// Create a SubscribeOkMessage response
-			subok := message.SubscribeOkMessage{}
+			subok := message.SubscribeOkMessage{
+				PublisherPriority:   7,
+				PublisherOrdered:    1,
+				PublisherMaxLatency: 500,
+				StartGroup:          5,
+				EndGroup:            10,
+			}
 			var buf bytes.Buffer
 			err := subok.Encode(&buf)
 			assert.NoError(t, err, "failed to encode SubscribeOkMessage")
 
 			// Use ReadFunc for simpler mocking
-			mockTrackStream.ReadFunc = buf.Read
+			resp := bytes.NewReader(append([]byte(nil), buf.Bytes()...))
+			mockTrackStream.ReadFunc = resp.Read
 
 			mockTrackStream.On("Read", mock.Anything)
 			mockTrackStream.On("Write", mock.Anything).Return(0, nil)
@@ -242,6 +253,10 @@ func TestSession_Subscribe(t *testing.T) {
 				assert.Equal(t, tt.name, track.TrackName)
 				gotConfig := track.TrackConfig()
 				assert.Equal(t, tt.config, gotConfig)
+				assert.Equal(t, tt.config.Ordered, gotConfig.Ordered)
+				assert.Equal(t, tt.config.MaxLatency, gotConfig.MaxLatency)
+				assert.Equal(t, tt.config.StartGroup, gotConfig.StartGroup)
+				assert.Equal(t, tt.config.EndGroup, gotConfig.EndGroup)
 			}
 
 			// Cleanup
@@ -264,8 +279,8 @@ func TestSession_Subscribe_OpenError(t *testing.T) {
 
 	session := newSession(conn, nil, nil, nil)
 
-	config := &TrackConfig{
-		SubscriberPriority: TrackPriority(1),
+	config := &SubscribeConfig{
+		Priority: TrackPriority(1),
 	}
 
 	subscriber, err := session.Subscribe(BroadcastPath("/test"), TrackName("video"), config)
@@ -297,7 +312,7 @@ func TestSession_Subscribe_OpenStreamApplicationError(t *testing.T) {
 
 	session := newSession(conn, nil, nil, nil)
 
-	config := &TrackConfig{SubscriberPriority: 1}
+	config := &SubscribeConfig{Priority: 1}
 
 	reader, err := session.Subscribe("/test", "video", config)
 
@@ -333,7 +348,7 @@ func TestSession_Subscribe_EncodeStreamTypeError(t *testing.T) {
 
 	session := newSession(conn, nil, nil, nil)
 
-	config := &TrackConfig{SubscriberPriority: 1}
+	config := &SubscribeConfig{Priority: 1}
 
 	reader, err := session.Subscribe("/test", "video", config)
 
@@ -355,7 +370,7 @@ func TestSession_Subscribe_EncodeStreamTypeStreamError(t *testing.T) {
 
 	// Make Write fail with StreamError
 	strErr := &StreamError{
-		ErrorCode: StreamErrorCode(InternalSubscribeErrorCode),
+		ErrorCode: StreamErrorCode(SubscribeErrorCodeInternal),
 		Remote:    true,
 	}
 	mockTrackStream.On("Write", mock.Anything).Return(0, strErr)
@@ -370,7 +385,7 @@ func TestSession_Subscribe_EncodeStreamTypeStreamError(t *testing.T) {
 
 	session := newSession(conn, nil, nil, nil)
 
-	config := &TrackConfig{SubscriberPriority: 1}
+	config := &SubscribeConfig{Priority: 1}
 
 	reader, err := session.Subscribe("/test", "video", config)
 
@@ -404,7 +419,8 @@ func TestSession_Subscribe_NilConfig(t *testing.T) {
 	err := subok.Encode(&buf)
 	assert.NoError(t, err)
 
-	mockTrackStream.ReadFunc = buf.Read
+	resp := bytes.NewReader(append([]byte(nil), buf.Bytes()...))
+	mockTrackStream.ReadFunc = resp.Read
 	mockTrackStream.On("Read", mock.Anything)
 	mockTrackStream.On("Write", mock.Anything).Return(0, nil)
 
@@ -460,7 +476,7 @@ func TestSession_Subscribe_EncodeSubscribeMessageStreamError(t *testing.T) {
 
 	session := newSession(conn, nil, nil, nil)
 
-	config := &TrackConfig{SubscriberPriority: 1}
+	config := &SubscribeConfig{Priority: 1}
 
 	reader, err := session.Subscribe("/test", "video", config)
 
@@ -483,7 +499,7 @@ func TestSession_Subscribe_EncodeSubscribeMessageRemoteStreamError(t *testing.T)
 	// Use WriteFunc for direct control
 	writeCallCount := 0
 	strErr := &StreamError{
-		ErrorCode: StreamErrorCode(InternalSubscribeErrorCode),
+		ErrorCode: StreamErrorCode(SubscribeErrorCodeInternal),
 		Remote:    true,
 	}
 	mockTrackStream.WriteFunc = func(p []byte) (int, error) {
@@ -506,7 +522,7 @@ func TestSession_Subscribe_EncodeSubscribeMessageRemoteStreamError(t *testing.T)
 
 	session := newSession(conn, nil, nil, nil)
 
-	config := &TrackConfig{SubscriberPriority: 1}
+	config := &SubscribeConfig{Priority: 1}
 
 	reader, err := session.Subscribe("/test", "video", config)
 
@@ -531,7 +547,7 @@ func TestSession_Subscribe_DecodeSubscribeOkStreamError(t *testing.T) {
 
 	// Make Read fail with StreamError
 	strErr := &StreamError{
-		ErrorCode: StreamErrorCode(InternalSubscribeErrorCode),
+		ErrorCode: StreamErrorCode(SubscribeErrorCodeInternal),
 		Remote:    false,
 	}
 	mockTrackStream.On("Read", mock.Anything).Return(0, strErr)
@@ -546,7 +562,7 @@ func TestSession_Subscribe_DecodeSubscribeOkStreamError(t *testing.T) {
 
 	session := newSession(conn, nil, nil, nil)
 
-	config := &TrackConfig{SubscriberPriority: 1}
+	config := &SubscribeConfig{Priority: 1}
 
 	reader, err := session.Subscribe("/test", "video", config)
 
@@ -584,7 +600,7 @@ func TestSession_Subscribe_DecodeSubscribeOkError(t *testing.T) {
 
 	session := newSession(conn, nil, nil, nil)
 
-	config := &TrackConfig{SubscriberPriority: 1}
+	config := &SubscribeConfig{Priority: 1}
 
 	reader, err := session.Subscribe("/test", "video", config)
 
@@ -1563,7 +1579,7 @@ func TestSession_ProcessUniStream_Group(t *testing.T) {
 	mockTrackStream.On("Read", mock.Anything).Return(0, io.EOF).Maybe()
 	mockTrackStream.On("Write", mock.Anything).Return(0, nil).Maybe()
 
-	substr := newSendSubscribeStream(1, mockTrackStream, &TrackConfig{}, Info{})
+	substr := newSendSubscribeStream(1, mockTrackStream, &SubscribeConfig{}, PublishInfo{})
 	trackReader := newTrackReader("/test", "video", substr, func() {})
 	session.addTrackReader(1, trackReader)
 
@@ -1781,7 +1797,7 @@ func TestSession_Subscribe_TerminatingSession(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Try to subscribe - should fail because session is terminating
-	config := &TrackConfig{SubscriberPriority: 1}
+	config := &SubscribeConfig{Priority: 1}
 	reader, err := session.Subscribe("/test", "video", config)
 
 	// Subscribe should fail or return nil because session is terminated

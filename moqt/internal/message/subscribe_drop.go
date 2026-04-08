@@ -7,14 +7,16 @@ import (
 
 var ErrInvalidSubscribeDropMessageType = errors.New("invalid message type for SubscribeDropMessage")
 
+const MessageTypeSubscribeDrop uint64 = 0x1
+
 // SubscribeDropMessage is sent by the publisher when a subscription range
 // cannot be served.
 //
 // Wire format:
 //
 //	SUBSCRIBE_DROP Message {
-//	  Message Length (varint)
 //	  Type (varint) = 0x1
+//	  Message Length (varint)
 //	  Start Group (varint)
 //	  End Group (varint)
 //	  Error Code (varint)
@@ -28,7 +30,6 @@ type SubscribeDropMessage struct {
 func (sdm SubscribeDropMessage) Len() int {
 	var l int
 
-	l += VarintLen(0x1)
 	l += VarintLen(sdm.StartGroup)
 	l += VarintLen(sdm.EndGroup)
 	l += VarintLen(sdm.ErrorCode)
@@ -41,7 +42,6 @@ func (sdm SubscribeDropMessage) Encode(w io.Writer) error {
 	b := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
 
 	b, _ = WriteMessageLength(b, uint64(msgLen))
-	b, _ = WriteVarint(b, 0x1)
 	b, _ = WriteVarint(b, sdm.StartGroup)
 	b, _ = WriteVarint(b, sdm.EndGroup)
 	b, _ = WriteVarint(b, sdm.ErrorCode)
@@ -64,15 +64,6 @@ func (sdm *SubscribeDropMessage) Decode(src io.Reader) error {
 	}
 
 	num, n, err := ReadVarint(b)
-	if err != nil {
-		return err
-	}
-	if num != 0x1 {
-		return ErrInvalidSubscribeDropMessageType
-	}
-	b = b[n:]
-
-	num, n, err = ReadVarint(b)
 	if err != nil {
 		return err
 	}

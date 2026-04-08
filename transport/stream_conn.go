@@ -86,3 +86,5 @@ type ReceiveStream interface {
 
 // StreamID uniquely identifies a stream within a connection.
 type StreamID = quicgo.StreamID
+
+type ConnectionStats = quicgo.ConnectionStats

@@ -43,8 +43,9 @@ func newTrackReader(broadcastPath BroadcastPath, trackName TrackName, subscribeS
 			sequence GroupSequence
 			stream   ReceiveStream
 		}, 0, 1<<3),
-		dequeued:    make(map[*GroupReader]struct{}),
-		onCloseFunc: onCloseFunc,
+		dequeued:     make(map[*GroupReader]struct{}),
+		groupManager: newGroupReaderManager(),
+		onCloseFunc:  onCloseFunc,
 	}
 
 	return track
@@ -76,7 +77,7 @@ func (r *TrackReader) SubscribeID() SubscribeID {
 	return r.sendSubscribeStream.SubscribeID()
 }
 
-func (r *TrackReader) TrackConfig() *TrackConfig {
+func (r *TrackReader) TrackConfig() *SubscribeConfig {
 	return r.sendSubscribeStream.TrackConfig()
 }
 
@@ -175,12 +176,18 @@ func (r *TrackReader) CloseWithError(code SubscribeErrorCode) error {
 }
 
 // Update updates the subscription configuration with a new TrackConfig.
-func (r *TrackReader) Update(config *TrackConfig) error {
+func (r *TrackReader) Update(config *SubscribeConfig) error {
 	if config == nil {
 		return errors.New("subscribe config cannot be nil")
 	}
 
 	return r.sendSubscribeStream.updateSubscribe(config)
+}
+
+func (r *TrackReader) handleResponses() {
+	for {
+		readSubscribeResponse(r.sendSubscribeStream.stream)
+	}
 }
 
 func (r *TrackReader) enqueueGroup(sequence GroupSequence, stream ReceiveStream) {
@@ -210,17 +217,3 @@ func (r *TrackReader) enqueueGroup(sequence GroupSequence, stream ReceiveStream)
 	default:
 	}
 }
-
-// func (r *TrackReader) addGroup(group *GroupReader) {
-// 	r.trackMu.Lock()
-// 	defer r.trackMu.Unlock()
-
-// 	r.dequeued[group] = struct{}{}
-// }
-
-// func (r *TrackReader) removeGroup(group *GroupReader) {
-// 	r.trackMu.Lock()
-// 	defer r.trackMu.Unlock()
-
-// 	delete(r.dequeued, group)
-// }

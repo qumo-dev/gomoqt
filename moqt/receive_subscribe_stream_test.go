@@ -17,24 +17,24 @@ import (
 func TestNewReceiveSubscribeStream(t *testing.T) {
 	tests := map[string]struct {
 		subscribeID SubscribeID
-		config      *TrackConfig
+		config      *SubscribeConfig
 	}{
 		"valid creation": {
 			subscribeID: SubscribeID(123),
-			config: &TrackConfig{
-				SubscriberPriority: TrackPriority(1),
+			config: &SubscribeConfig{
+				Priority: TrackPriority(1),
 			},
 		},
 		"zero subscribe ID": {
 			subscribeID: SubscribeID(0),
-			config: &TrackConfig{
-				SubscriberPriority: TrackPriority(0),
+			config: &SubscribeConfig{
+				Priority: TrackPriority(0),
 			},
 		},
 		"large subscribe ID": {
 			subscribeID: SubscribeID(4294967295),
-			config: &TrackConfig{
-				SubscriberPriority: TrackPriority(255),
+			config: &SubscribeConfig{
+				Priority: TrackPriority(255),
 			},
 		},
 		"nil config": {
@@ -103,8 +103,8 @@ func TestReceiveSubscribeStream_SubscribeID(t *testing.T) {
 			mockStream.On("Context").Return(context.Background())
 			mockStream.On("Read", mock.AnythingOfType("[]uint8")).Return(0, io.EOF).Maybe()
 
-			config := &TrackConfig{
-				SubscriberPriority: TrackPriority(1),
+			config := &SubscribeConfig{
+				Priority: TrackPriority(1),
 			}
 
 			rss := newReceiveSubscribeStream(tt.subscribeID, mockStream, config)
@@ -129,16 +129,16 @@ func TestReceiveSubscribeStream_SubscribeID(t *testing.T) {
 
 func TestReceiveSubscribeStream_TrackConfig(t *testing.T) {
 	tests := map[string]struct {
-		config *TrackConfig
+		config *SubscribeConfig
 	}{
 		"valid config": {
-			config: &TrackConfig{
-				SubscriberPriority: TrackPriority(10),
+			config: &SubscribeConfig{
+				Priority: TrackPriority(10),
 			},
 		},
 		"zero values": {
-			config: &TrackConfig{
-				SubscriberPriority: TrackPriority(0),
+			config: &SubscribeConfig{
+				Priority: TrackPriority(0),
 			},
 		},
 		"nil config": {
@@ -164,7 +164,7 @@ func TestReceiveSubscribeStream_TrackConfig(t *testing.T) {
 
 			assert.NotNil(t, resultConfig, "TrackConfig should not be nil")
 			if tt.config != nil {
-				assert.Equal(t, tt.config.SubscriberPriority, resultConfig.SubscriberPriority, "TrackPriority should match")
+				assert.Equal(t, tt.config.Priority, resultConfig.Priority, "TrackPriority should match")
 			}
 
 			// Wait for goroutine to close cleanly
@@ -193,8 +193,8 @@ func TestReceiveSubscribeStream_Updated(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.AnythingOfType("[]uint8")).Return(0, io.EOF).Maybe()
 
-	config := &TrackConfig{
-		SubscriberPriority: TrackPriority(1),
+	config := &SubscribeConfig{
+		Priority: TrackPriority(1),
 	}
 
 	rss := newReceiveSubscribeStream(subscribeID, mockStream, config)
@@ -237,8 +237,8 @@ func TestReceiveSubscribeStream_ListenUpdates_WithSubscribeUpdateMessage(t *test
 	// Mock the Context method
 	mockStream.On("Context").Return(context.Background())
 
-	config := &TrackConfig{
-		SubscriberPriority: TrackPriority(1),
+	config := &SubscribeConfig{
+		Priority: TrackPriority(1),
 	}
 
 	rss := newReceiveSubscribeStream(subscribeID, mockStream, config)
@@ -253,7 +253,7 @@ func TestReceiveSubscribeStream_ListenUpdates_WithSubscribeUpdateMessage(t *test
 	// Check that config was updated
 	updatedConfig := rss.TrackConfig()
 	if err == nil {
-		assert.Equal(t, TrackPriority(5), updatedConfig.SubscriberPriority, "TrackPriority should be updated")
+		assert.Equal(t, TrackPriority(5), updatedConfig.Priority, "TrackPriority should be updated")
 	}
 
 	// Give some time for the goroutine to complete
@@ -269,15 +269,15 @@ func TestReceiveSubscribeStream_CloseWithError(t *testing.T) {
 		expectErr bool
 	}{
 		"internal error": {
-			errorCode: InternalSubscribeErrorCode,
+			errorCode: SubscribeErrorCodeInternal,
 			expectErr: false,
 		},
 		"invalid range error": {
-			errorCode: InvalidRangeErrorCode,
+			errorCode: SubscribeErrorCodeInvalidRange,
 			expectErr: false,
 		},
 		"track not found error": {
-			errorCode: TrackNotFoundErrorCode,
+			errorCode: SubscribeErrorCodeNotFound,
 			expectErr: false,
 		},
 	}
@@ -302,8 +302,8 @@ func TestReceiveSubscribeStream_CloseWithError(t *testing.T) {
 			}).Return()
 			mockStream.On("CancelRead", StreamErrorCode(tt.errorCode)).Return()
 
-			config := &TrackConfig{
-				SubscriberPriority: TrackPriority(1),
+			config := &SubscribeConfig{
+				Priority: TrackPriority(1),
 			}
 
 			rss := newReceiveSubscribeStream(subscribeID, mockStream, config)
@@ -338,13 +338,13 @@ func TestReceiveSubscribeStream_CloseWithError_MultipleClose(t *testing.T) {
 	}).Return()
 	mockStream.On("CancelRead", mock.Anything).Return()
 
-	config := &TrackConfig{
-		SubscriberPriority: TrackPriority(1),
+	config := &SubscribeConfig{
+		Priority: TrackPriority(1),
 	}
 	// Create stream manually
 	rss := newReceiveSubscribeStream(123, mockStream, config)
 
-	err := rss.closeWithError(InternalSubscribeErrorCode)
+	err := rss.closeWithError(SubscribeErrorCodeInternal)
 	assert.NoError(t, err, "CloseWithError should return error when already closed")
 	assert.Error(t, rss.ctx.Err(), "Context should be cancelled after first closeWithError")
 
@@ -365,8 +365,8 @@ func TestReceiveSubscribeStream_ConcurrentAccess(t *testing.T) {
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Read", mock.AnythingOfType("[]uint8")).Return(0, io.EOF).Maybe()
 
-	config := &TrackConfig{
-		SubscriberPriority: TrackPriority(1),
+	config := &SubscribeConfig{
+		Priority: TrackPriority(1),
 	}
 
 	rss := newReceiveSubscribeStream(subscribeID, mockStream, config)
@@ -428,7 +428,7 @@ func TestReceiveSubscribeStream_Close_DoesNotCancelReadOnGracefulClose(t *testin
 	mockStream.On("Context").Return(context.Background())
 	mockStream.On("Close").Return(nil)
 
-	rss := newReceiveSubscribeStream(SubscribeID(1), mockStream, &TrackConfig{})
+	rss := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
 	// Perform a graceful close; it should not call CancelRead
 	err := rss.close()
@@ -450,7 +450,7 @@ func TestReceiveSubscribeStream_UpdateChannelBehavior(t *testing.T) {
 		// Mock the Read method calls for the listenUpdates goroutine
 		mockStream.On("Context").Return(context.Background())
 		mockStream.On("Read", mock.AnythingOfType("[]uint8")).Return(0, io.EOF).Maybe()
-		config := &TrackConfig{SubscriberPriority: TrackPriority(1)}
+		config := &SubscribeConfig{Priority: TrackPriority(1)}
 
 		rss := newReceiveSubscribeStream(subscribeID, mockStream, config)
 
@@ -501,7 +501,7 @@ func TestReceiveSubscribeStream_UpdateChannelBehavior(t *testing.T) {
 		// Mock the Context method
 		mockStream.On("Context").Return(context.Background())
 
-		config := &TrackConfig{SubscriberPriority: TrackPriority(0)}
+		config := &SubscribeConfig{Priority: TrackPriority(0)}
 		rss := newReceiveSubscribeStream(subscribeID, mockStream, config) // Should receive multiple update notifications
 		updateCount := 0
 		expectedUpdates := 1 // We expect at least 1 update, but may get more

@@ -17,12 +17,11 @@ type SubscribeOkMessage struct {
 	EndGroup            uint64
 }
 
-const subscribeOkMessageType uint64 = 0x0
+const MessageTypeSubscribeOk uint64 = 0x0
 
 func (som SubscribeOkMessage) Len() int {
 	var l int
 
-	l += VarintLen(subscribeOkMessageType)
 	l += VarintLen(uint64(som.PublisherPriority))
 	l += VarintLen(uint64(som.PublisherOrdered))
 	l += VarintLen(som.PublisherMaxLatency)
@@ -37,7 +36,6 @@ func (som SubscribeOkMessage) Encode(w io.Writer) error {
 	b := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
 
 	b, _ = WriteMessageLength(b, uint64(msgLen))
-	b, _ = WriteVarint(b, subscribeOkMessageType)
 	b, _ = WriteVarint(b, uint64(som.PublisherPriority))
 	b, _ = WriteVarint(b, uint64(som.PublisherOrdered))
 	b, _ = WriteVarint(b, som.PublisherMaxLatency)
@@ -61,18 +59,7 @@ func (som *SubscribeOkMessage) Decode(src io.Reader) error {
 		return err
 	}
 
-	var n int
-	msgType, n, err := ReadVarint(b)
-	if err != nil {
-		return err
-	}
-	b = b[n:]
-
-	if msgType != subscribeOkMessageType {
-		return ErrInvalidSubscribeOkMessageType
-	}
-
-	num, n, err = ReadVarint(b)
+	num, n, err := ReadVarint(b)
 	if err != nil {
 		return err
 	}
