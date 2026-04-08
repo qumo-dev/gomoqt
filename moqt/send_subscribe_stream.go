@@ -89,7 +89,6 @@ func (sss *sendSubscribeStream) updateSubscribe(newConfig *TrackConfig) error {
 		return err
 	}
 
-	// Only update config after successful message sending
 	sss.config = newConfig
 
 	return nil

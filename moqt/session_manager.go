@@ -28,6 +28,9 @@ func (s *sessionManager) addSession(sess *Session) {
 	if s.closed {
 		return
 	}
+	if len(s.sessions) == 0 {
+		s.doneChan = make(chan struct{})
+	}
 	s.sessions[sess] = struct{}{}
 }
 
@@ -54,8 +57,12 @@ func (s *sessionManager) countSessions() int {
 }
 
 func (s *sessionManager) Done() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.doneChan == nil {
-		s.doneChan = make(chan struct{})
+		ch := make(chan struct{})
+		close(ch)
+		return ch
 	}
 	return s.doneChan
 }

@@ -80,22 +80,29 @@ func TestSessionManager_RemoveSession(t *testing.T) {
 func TestSessionManager_Done(t *testing.T) {
 	manager := newSessionManager()
 	first := manager.Done()
-	second := manager.Done()
-
-	require.Same(t, first, second)
 
 	select {
 	case <-first:
-		t.Fatal("done channel should not be closed before the last session is removed")
-	default:
+		// expected: no sessions means we're already done
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("done channel should be closed when there are no tracked sessions")
 	}
 
 	session := &Session{}
 	manager.addSession(session)
+	second := manager.Done()
+	assert.NotEqual(t, first, second)
+
+	select {
+	case <-second:
+		t.Fatal("done channel should not be closed while a session is active")
+	default:
+	}
+
 	manager.removeSession(session)
 
 	select {
-	case <-first:
+	case <-second:
 		// expected
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("done channel should close once the tracked session count reaches zero")

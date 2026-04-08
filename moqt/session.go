@@ -27,16 +27,6 @@ func newSession(conn StreamConn, mux *TrackMux, manager *sessionManager) *Sessio
 		sessionManager: manager,
 	}
 
-	// Supervise session closure
-	context.AfterFunc(connCtx, func() {
-		reason := connCtx.Err()
-		if _, ok := errors.AsType[*ApplicationError](reason); ok {
-			return // Normal closure
-		}
-
-		_ = sess.CloseWithError(ProtocolViolationErrorCode, "connection closed unexpectedly")
-	})
-
 	// Listen bidirectional streams
 	sess.wg.Go(func() {
 		sess.handleBiStreams()
@@ -54,8 +44,6 @@ func newSession(conn StreamConn, mux *TrackMux, manager *sessionManager) *Sessio
 // It manages bidirectional and unidirectional streams, subscriptions, and announcements for a single peer connection.
 type Session struct {
 	ctx context.Context // Context for the session
-
-	path string
 
 	wg sync.WaitGroup // WaitGroup for session cleanup
 
@@ -78,12 +66,6 @@ type Session struct {
 
 	sessionManager *sessionManager
 }
-
-func (s *Session) UpdateTrackMux(mux *TrackMux) {
-	s.mux = mux
-}
-
-func (s *Session) Path() string { return s.path }
 
 func (s *Session) terminating() bool {
 	return s.isTerminating.Load()

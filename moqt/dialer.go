@@ -111,7 +111,7 @@ func (c *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *T
 		target = "https://" + host + path
 	}
 
-	_, conn, err := dialer(dialCtx, target, http.Header{}, c.TLSConfig)
+	_, conn, err := dialer(dialCtx, target, nil, c.TLSConfig)
 	if err != nil {
 		return nil, err
 	}

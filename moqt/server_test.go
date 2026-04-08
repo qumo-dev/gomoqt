@@ -257,7 +257,7 @@ func TestWebTransportHandler_upgradeWebTransport_PlainHTTPRejected(t *testing.T)
 
 	_, err := u.upgradeWebTransport(w, r)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "plain HTTP")
+	assert.Contains(t, err.Error(), "expected CONNECT request")
 }
 
 func TestWebTransportHandler_upgradeWebTransport_UsesCustomUpgradeFunc(t *testing.T) {

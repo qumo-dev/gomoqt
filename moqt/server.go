@@ -193,7 +193,11 @@ func (s *Server) connContext(ctx context.Context, conn StreamConn) context.Conte
 	ctx = context.WithValue(ctx, serverContextKey, s.sessionManager)
 
 	if s.ConnContext != nil {
-		return s.ConnContext(ctx, conn)
+		custom := s.ConnContext(ctx, conn)
+		if custom == nil {
+			panic("ConnContext returned nil")
+		}
+		return custom
 	}
 	return ctx
 }
@@ -401,7 +405,6 @@ func (s *Server) Close() error {
 	}
 
 	// Wait for all sessions to close
-	// If there are no active sessions, close the doneChan now so Close doesn't block.
 	<-sessionManager.Done()
 
 	// Close WebTransport server (guard against panics from underlying implementations)
