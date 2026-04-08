@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"net"
 
+	quicgo "github.com/quic-go/quic-go"
 	"github.com/stretchr/testify/mock"
 )
 
@@ -19,6 +20,7 @@ type MockStreamConn struct {
 	OpenUniStreamFunc     func() (SendStream, error)
 	OpenStreamSyncFunc    func(ctx context.Context) (Stream, error)
 	OpenUniStreamSyncFunc func(ctx context.Context) (SendStream, error)
+	ConnectionStatsFunc   func() quicgo.ConnectionStats
 }
 
 // TLS implements [StreamConn].
@@ -114,6 +116,13 @@ func (m *MockStreamConn) CloseWithError(code ConnErrorCode, reason string) error
 func (m *MockStreamConn) Context() context.Context {
 	args := m.Called()
 	return args.Get(0).(context.Context)
+}
+
+func (m *MockStreamConn) ConnectionStats() quicgo.ConnectionStats {
+	if m.ConnectionStatsFunc != nil {
+		return m.ConnectionStatsFunc()
+	}
+	return quicgo.ConnectionStats{}
 }
 
 type MockWebTransportSession struct {

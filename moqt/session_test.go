@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
+	quic "github.com/quic-go/quic-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -1339,6 +1340,145 @@ func TestSession_ProcessBiStream_DecodeSubscribeMessageError(t *testing.T) {
 	session.processBiStream(mockStream)
 
 	mockStream.AssertExpectations(t)
+}
+
+func TestSession_Probe(t *testing.T) {
+	conn := &MockStreamConn{}
+	conn.On("Context").Return(context.Background())
+	conn.On("CloseWithError", mock.Anything, mock.Anything).Return(nil)
+	conn.On("AcceptStream", mock.Anything).Return(nil, io.EOF).Maybe()
+	conn.On("AcceptUniStream", mock.Anything).Return(nil, io.EOF).Maybe()
+	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
+
+	requestStream := &MockQUICStream{}
+	requestStream.On("Context").Return(context.Background())
+	requestStream.On("CancelRead", mock.Anything).Return().Maybe()
+	requestStream.On("CancelWrite", mock.Anything).Return().Maybe()
+	requestStream.On("Close").Return(nil).Maybe()
+
+	var written bytes.Buffer
+	requestStream.WriteFunc = func(p []byte) (int, error) {
+		return written.Write(p)
+	}
+
+	var response bytes.Buffer
+	respMsg := message.ProbeMessage{Bitrate: 250000}
+	require.NoError(t, respMsg.Encode(&response))
+	requestStream.ReadFunc = response.Read
+
+	conn.On("OpenStream").Return(requestStream, nil)
+
+	session := newSession(conn, NewTrackMux(), nil)
+
+	got, err := session.Probe(1000000)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(250000), got)
+
+	var streamType message.StreamType
+	require.NoError(t, streamType.Decode(bytes.NewReader(written.Bytes()[:1])))
+	assert.Equal(t, message.StreamTypeProbe, streamType)
+
+	var sent message.ProbeMessage
+	require.NoError(t, sent.Decode(bytes.NewReader(written.Bytes()[1:])))
+	assert.Equal(t, uint64(1000000), sent.Bitrate)
+
+	_ = session.CloseWithError(NoError, "")
+}
+
+func TestSession_ProcessBiStream_Probe(t *testing.T) {
+	conn := &MockStreamConn{}
+	conn.On("Context").Return(context.Background())
+	conn.On("CloseWithError", mock.Anything, mock.Anything).Return(nil).Maybe()
+	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
+	conn.On("AcceptStream", mock.Anything).Return(nil, io.EOF).Maybe()
+	conn.On("AcceptUniStream", mock.Anything).Return(nil, io.EOF).Maybe()
+
+	session := newSession(conn, NewTrackMux(), nil)
+
+	probeStream := &MockQUICStream{}
+	probeStream.On("Context").Return(context.Background())
+	probeStream.On("CancelRead", mock.Anything).Return().Maybe()
+	probeStream.On("CancelWrite", mock.Anything).Return().Maybe()
+	probeStream.On("Close").Return(nil).Maybe()
+
+	var written bytes.Buffer
+	probeStream.WriteFunc = func(p []byte) (int, error) {
+		return written.Write(p)
+	}
+
+	var incoming bytes.Buffer
+	require.NoError(t, message.StreamTypeProbe.Encode(&incoming))
+	require.NoError(t, message.ProbeMessage{Bitrate: 123456}.Encode(&incoming))
+	data := incoming.Bytes()
+	probeStream.ReadFunc = func(p []byte) (int, error) {
+		if len(data) == 0 {
+			return 0, io.EOF
+		}
+		n := copy(p, data)
+		data = data[n:]
+		return n, nil
+	}
+
+	session.processBiStream(probeStream)
+
+	var resp message.ProbeMessage
+	require.NoError(t, resp.Decode(bytes.NewReader(written.Bytes())))
+	assert.Equal(t, uint64(123456), resp.Bitrate)
+	assert.False(t, session.terminating(), "Session should not terminate after probe handling")
+
+	_ = session.CloseWithError(NoError, "")
+}
+
+func TestSession_ProcessBiStream_ProbeMultipleMessages(t *testing.T) {
+	conn := &MockStreamConn{}
+	conn.On("Context").Return(context.Background())
+	conn.On("CloseWithError", mock.Anything, mock.Anything).Return(nil).Maybe()
+	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
+	conn.On("AcceptStream", mock.Anything).Return(nil, io.EOF).Maybe()
+	conn.On("AcceptUniStream", mock.Anything).Return(nil, io.EOF).Maybe()
+	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
+		return quic.ConnectionStats{}
+	}
+
+	session := newSession(conn, NewTrackMux(), nil)
+
+	probeStream := &MockQUICStream{}
+	probeStream.On("Context").Return(context.Background())
+	probeStream.On("CancelRead", mock.Anything).Return().Maybe()
+	probeStream.On("CancelWrite", mock.Anything).Return().Maybe()
+	probeStream.On("Close").Return(nil).Maybe()
+
+	var written bytes.Buffer
+	probeStream.WriteFunc = func(p []byte) (int, error) {
+		return written.Write(p)
+	}
+
+	var incoming bytes.Buffer
+	require.NoError(t, message.StreamTypeProbe.Encode(&incoming))
+	require.NoError(t, message.ProbeMessage{Bitrate: 111000}.Encode(&incoming))
+	require.NoError(t, message.ProbeMessage{Bitrate: 222000}.Encode(&incoming))
+	data := incoming.Bytes()
+	probeStream.ReadFunc = func(p []byte) (int, error) {
+		if len(data) == 0 {
+			return 0, io.EOF
+		}
+		n := copy(p, data)
+		data = data[n:]
+		return n, nil
+	}
+
+	session.processBiStream(probeStream)
+
+	got := written.Bytes()
+	require.NotEmpty(t, got)
+	reader := bytes.NewReader(got)
+	for _, want := range []uint64{111000, 222000} {
+		var resp message.ProbeMessage
+		require.NoError(t, resp.Decode(reader))
+		assert.Equal(t, want, resp.Bitrate)
+	}
+
+	_ = session.CloseWithError(NoError, "")
 }
 
 func TestSession_ProcessUniStream_Group(t *testing.T) {

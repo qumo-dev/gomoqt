@@ -78,3 +78,7 @@ func (wrapper *connWrapper) RemoteAddr() net.Addr {
 func (wrapper *connWrapper) QUICConn() *quicgo_quicgo.Conn {
 	return wrapper.conn
 }
+
+func (wrapper *connWrapper) ConnectionStats() quicgo_quicgo.ConnectionStats {
+	return wrapper.conn.ConnectionStats()
+}

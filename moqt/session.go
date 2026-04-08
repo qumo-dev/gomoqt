@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
 	"github.com/quic-go/quic-go"
@@ -330,6 +332,65 @@ func (sess *Session) AcceptAnnounce(prefix string) (*AnnouncementReader, error) 
 	return newAnnouncementReader(stream, prefix, nil), nil
 }
 
+// Probe sends a bitrate probe request to the remote peer and returns the
+// bitrate reported by the response.
+func (sess *Session) Probe(bitrate uint64) (uint64, error) {
+	if sess.terminating() {
+		if sess.sessErr == nil {
+			return 0, ErrClosedSession
+		}
+		return 0, sess.sessErr
+	}
+
+	stream, err := sess.conn.OpenStream()
+	if err != nil {
+		if appErr, ok := errors.AsType[*ApplicationError](err); ok {
+			return 0, &SessionError{
+				ApplicationError: appErr,
+			}
+		}
+
+		return 0, fmt.Errorf("failed to open stream for probe: %w", err)
+	}
+	defer stream.Close()
+
+	err = message.StreamTypeProbe.Encode(stream)
+	if err != nil {
+		if strErr, ok := errors.AsType[*StreamError](err); ok {
+			stream.CancelRead(strErr.ErrorCode)
+			return 0, err
+		}
+
+		strErrCode := StreamErrorCode(InternalSessionErrorCode)
+		stream.CancelWrite(strErrCode)
+		stream.CancelRead(strErrCode)
+
+		return 0, fmt.Errorf("failed to encode stream type message: %w", err)
+	}
+
+	err = message.ProbeMessage{Bitrate: bitrate}.Encode(stream)
+	if err != nil {
+		if strErr, ok := errors.AsType[*StreamError](err); ok {
+			stream.CancelRead(strErr.ErrorCode)
+			return 0, err
+		}
+
+		strErrCode := StreamErrorCode(InternalSessionErrorCode)
+		stream.CancelWrite(strErrCode)
+		stream.CancelRead(strErrCode)
+
+		return 0, fmt.Errorf("failed to send PROBE message: %w", err)
+	}
+
+	var resp message.ProbeMessage
+	err = resp.Decode(stream)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read PROBE response: %w", err)
+	}
+
+	return resp.Bitrate, nil
+}
+
 // AcceptAnnounce requests announcements from the remote peer that match the
 // specified prefix. It opens an announce stream and returns an
 // AnnouncementReader that yields Announcement objects for active tracks.
@@ -420,6 +481,12 @@ func (sess *Session) processBiStream(stream Stream) {
 
 		// Ensure the track writer is closed when done
 		w.Close()
+	case message.StreamTypeProbe:
+		defer stream.Close()
+		if err := sess.handleProbeStream(stream); err != nil {
+			cancelStreamWithError(stream, StreamErrorCode(InternalSessionErrorCode))
+			return
+		}
 	default:
 		cancelStreamWithError(stream, quic.StreamErrorCode(InternalSessionErrorCode))
 		return
@@ -428,30 +495,22 @@ func (sess *Session) processBiStream(stream Stream) {
 
 func (sess *Session) handleUniStreams() {
 	for {
-		/*
-		 * Accept a unidirectional stream
-		 */
 		stream, err := sess.conn.AcceptUniStream(sess.ctx)
 		if err != nil {
 			return
 		}
 
-		// Handle the stream
 		go sess.processUniStream(stream)
 	}
 }
 
 func (sess *Session) processUniStream(stream ReceiveStream) {
-	/*
-	 * Get a Stream Type ID
-	 */
 	var streamType message.StreamType
 	err := streamType.Decode(stream)
 	if err != nil {
 		return
 	}
 
-	// Handle the stream by the Stream Type ID
 	switch streamType {
 	case message.StreamTypeGroup:
 		var gm message.GroupMessage
@@ -506,4 +565,74 @@ func (s *Session) removeTrackReader(id SubscribeID) {
 func cancelStreamWithError(stream Stream, code StreamErrorCode) {
 	stream.CancelRead(code)
 	stream.CancelWrite(code)
+}
+
+func (sess *Session) handleProbeStream(stream Stream) error {
+	provider, ok := sess.probeStatsProvider()
+	if !ok {
+		return errors.New("probe unsupported")
+	}
+
+	tracker := &probeMeasurementTracker{}
+	for {
+		var pm message.ProbeMessage
+		err := pm.Decode(stream)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+
+		measured := tracker.measure(provider.ConnectionStats(), pm.Bitrate, time.Now())
+		if err := (message.ProbeMessage{Bitrate: measured}).Encode(stream); err != nil {
+			return err
+		}
+	}
+}
+
+type probeStatsProvider interface {
+	ConnectionStats() quic.ConnectionStats
+}
+
+type probeMeasurementTracker struct {
+	initialized bool
+	bytesSent   uint64
+	sampleTime  time.Time
+}
+
+func (sess *Session) probeStatsProvider() (probeStatsProvider, bool) {
+	provider, ok := sess.conn.(probeStatsProvider)
+	return provider, ok
+}
+
+func (t *probeMeasurementTracker) measure(stats quic.ConnectionStats, fallback uint64, now time.Time) uint64 {
+	if !t.initialized {
+		t.initialized = true
+		t.bytesSent = stats.BytesSent
+		t.sampleTime = now
+		return fallback
+	}
+
+	elapsed := now.Sub(t.sampleTime)
+	if elapsed <= 0 {
+		return fallback
+	}
+
+	bytesSent := stats.BytesSent
+	bytesDelta := bytesSent
+	if bytesDelta >= t.bytesSent {
+		bytesDelta -= t.bytesSent
+	} else {
+		bytesDelta = 0
+	}
+	if bytesDelta == 0 {
+		t.bytesSent = bytesSent
+		t.sampleTime = now
+		return fallback
+	}
+
+	t.bytesSent = bytesSent
+	t.sampleTime = now
+	return uint64((float64(bytesDelta) * 8) / elapsed.Seconds())
 }
