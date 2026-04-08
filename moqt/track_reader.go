@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-func newTrackReader(broadcastPath BroadcastPath, trackName TrackName, subscribeStream *sendSubscribeStream, onCloseTrackFunc func()) *TrackReader {
+func newTrackReader(broadcastPath BroadcastPath, trackName TrackName, subscribeStream *sendSubscribeStream, onCloseFunc func()) *TrackReader {
 	track := &TrackReader{
 		BroadcastPath:       broadcastPath,
 		TrackName:           trackName,
@@ -16,8 +16,8 @@ func newTrackReader(broadcastPath BroadcastPath, trackName TrackName, subscribeS
 			sequence GroupSequence
 			stream   ReceiveStream
 		}, 0, 1<<3),
-		dequeued:         make(map[*GroupReader]struct{}),
-		onCloseTrackFunc: onCloseTrackFunc,
+		dequeued:    make(map[*GroupReader]struct{}),
+		onCloseFunc: onCloseFunc,
 	}
 
 	return track
@@ -41,7 +41,7 @@ type TrackReader struct {
 
 	dequeued map[*GroupReader]struct{}
 
-	onCloseTrackFunc func()
+	onCloseFunc func()
 }
 
 func (r *TrackReader) SubscribeID() SubscribeID {
@@ -126,7 +126,7 @@ func (r *TrackReader) Close() error {
 		r.queuedCh = nil
 	}
 
-	r.onCloseTrackFunc()
+	r.onCloseFunc()
 
 	return r.sendSubscribeStream.close()
 }
@@ -154,7 +154,7 @@ func (r *TrackReader) CloseWithError(code SubscribeErrorCode) error {
 		r.queuedCh = nil
 	}
 
-	r.onCloseTrackFunc()
+	r.onCloseFunc()
 
 	return r.sendSubscribeStream.closeWithError(code)
 }

@@ -427,6 +427,7 @@ func (sess *Session) processBiStream(stream Stream) {
 		_ = sess.CloseWithError(ProtocolViolationErrorCode, err.Error())
 		return
 	}
+	defer stream.Close()
 
 	switch streamType {
 	case message.StreamTypeAnnounce:
@@ -484,7 +485,6 @@ func (sess *Session) processBiStream(stream Stream) {
 		// Ensure the track writer is closed when done
 		w.Close()
 	case message.StreamTypeFetch:
-		defer stream.Close()
 		var fm message.FetchMessage
 		err := fm.Decode(stream)
 		if err != nil {
@@ -509,7 +509,6 @@ func (sess *Session) processBiStream(stream Stream) {
 
 		handler.ServeFetch(w, req)
 	case message.StreamTypeProbe:
-		defer stream.Close()
 		if err := sess.handleProbeStream(stream); err != nil {
 			cancelStreamWithError(stream, StreamErrorCode(InternalSessionErrorCode))
 			return

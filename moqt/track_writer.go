@@ -246,7 +246,5 @@ func (w *TrackWriter) openGroupWithSequence(seq GroupSequence) (*GroupWriter, er
 		return nil, err
 	}
 
-	group := newGroupWriter(stream, seq, w.groupManager)
-
-	return group, nil
+	return newGroupWriter(stream, seq, w.groupManager), nil
 }
