@@ -14,7 +14,7 @@ type Upgrader struct {
 	ReorderingTimeout    time.Duration
 }
 
-func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (transport.StreamConn, error) {
+func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (transport.WebTransportSession, error) {
 	s := quicgo_webtransportgo.Upgrader{
 		CheckOrigin:          u.CheckOrigin,
 		ApplicationProtocols: u.ApplicationProtocols,

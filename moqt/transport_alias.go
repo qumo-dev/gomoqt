@@ -17,4 +17,6 @@ type (
 	ApplicationErrorCode = transport.ApplicationErrorCode
 	StreamError          = transport.StreamError
 	StreamErrorCode      = transport.StreamErrorCode
+
+	WebTransportSession = transport.WebTransportSession
 )

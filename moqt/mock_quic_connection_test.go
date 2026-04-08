@@ -115,3 +115,12 @@ func (m *MockStreamConn) Context() context.Context {
 	args := m.Called()
 	return args.Get(0).(context.Context)
 }
+
+type MockWebTransportSession struct {
+	MockStreamConn
+}
+
+func (m *MockWebTransportSession) Subprotocol() string {
+	args := m.Called()
+	return args.String(0)
+}

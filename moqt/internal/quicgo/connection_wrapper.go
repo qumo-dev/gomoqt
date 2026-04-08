@@ -75,6 +75,6 @@ func (wrapper *connWrapper) RemoteAddr() net.Addr {
 	return wrapper.conn.RemoteAddr()
 }
 
-func (wrapper connWrapper) Unwrap() *quicgo_quicgo.Conn {
+func (wrapper *connWrapper) QUICConn() *quicgo_quicgo.Conn {
 	return wrapper.conn
 }

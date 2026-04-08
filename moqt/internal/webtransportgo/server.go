@@ -36,14 +36,14 @@ func (s *Server) ServeQUICConn(conn transport.StreamConn) error {
 	if conn == nil {
 		return nil
 	}
-	if wrapper, ok := conn.(quicgoUnwrapper); ok {
-		return s.internalServer.ServeQUICConn(wrapper.unwrap())
+	if provider, ok := conn.(quicConnProvider); ok {
+		return s.internalServer.ServeQUICConn(provider.QUICConn())
 	}
-	return errors.New("invalid connection type: expected a wrapped quic-go connection with Unwrap() method")
+	return errors.New("invalid connection type: expected QUICConn() method")
 }
 
-type quicgoUnwrapper interface {
-	unwrap() *quicgo_quicgo.Conn
+type quicConnProvider interface {
+	QUICConn() *quicgo_quicgo.Conn
 }
 
 func (s *Server) Serve(conn net.PacketConn) error {

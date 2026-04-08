@@ -218,14 +218,14 @@ type WebTransportHandler struct {
 
 	// UpgradeFunc performs a custom upgrade from HTTP request to QUIC StreamConn.
 	// If nil, the default WebTransport upgrader is used.
-	UpgradeFunc func(w http.ResponseWriter, r *http.Request) (StreamConn, error)
+	UpgradeFunc func(w http.ResponseWriter, r *http.Request) (WebTransportSession, error)
 
 	// FallbackHandler handles non-WebTransport requests (e.g., plain HTTP on the same endpoint).
 	// Optional; when nil, behavior is determined by the server’s default request handling.
 	FallbackHandler http.Handler
 }
 
-func (u *WebTransportHandler) upgradeWebTransport(w http.ResponseWriter, r *http.Request) (StreamConn, error) {
+func (u *WebTransportHandler) upgradeWebTransport(w http.ResponseWriter, r *http.Request) (WebTransportSession, error) {
 	if u.UpgradeFunc != nil {
 		return u.UpgradeFunc(w, r)
 	}

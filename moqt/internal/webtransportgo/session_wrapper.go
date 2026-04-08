@@ -13,7 +13,7 @@ type sessionWrapper struct {
 	sess *quicgo_webtransportgo.Session
 }
 
-func wrapSession(wtsess *quicgo_webtransportgo.Session) transport.StreamConn {
+func wrapSession(wtsess *quicgo_webtransportgo.Session) transport.WebTransportSession {
 	if wtsess == nil {
 		return nil
 	}

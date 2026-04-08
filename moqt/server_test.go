@@ -228,8 +228,8 @@ func TestServer_addRemoveSession_ShutdownCompletesWhenLastSessionLeaves(t *testi
 
 func TestWebTransportHandler_upgradeWebTransport_WithoutServerContext(t *testing.T) {
 	u := &WebTransportHandler{
-		UpgradeFunc: func(w http.ResponseWriter, r *http.Request) (StreamConn, error) {
-			conn := &MockStreamConn{}
+		UpgradeFunc: func(w http.ResponseWriter, r *http.Request) (WebTransportSession, error) {
+			conn := &MockWebTransportSession{}
 			conn.On("Context").Return(context.Background())
 			conn.On("AcceptStream", mock.Anything).Return(nil, context.Canceled)
 			conn.On("AcceptUniStream", mock.Anything).Return(nil, context.Canceled)
@@ -266,8 +266,8 @@ func TestWebTransportHandler_upgradeWebTransport_UsesCustomUpgradeFunc(t *testin
 
 	u := &WebTransportHandler{
 		TrackMux: NewTrackMux(),
-		UpgradeFunc: func(w http.ResponseWriter, r *http.Request) (StreamConn, error) {
-			conn := &MockStreamConn{}
+		UpgradeFunc: func(w http.ResponseWriter, r *http.Request) (WebTransportSession, error) {
+			conn := &MockWebTransportSession{}
 			conn.On("Context").Return(context.Background())
 			conn.On("AcceptStream", mock.Anything).Return(nil, context.Canceled)
 			conn.On("AcceptUniStream", mock.Anything).Return(nil, context.Canceled)
