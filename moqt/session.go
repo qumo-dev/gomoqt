@@ -456,8 +456,6 @@ func (sess *Session) processBiStream(stream Stream) {
 			SubscriberPriority: TrackPriority(sm.SubscriberPriority),
 			Ordered:            sm.SubscriberOrdered != 0,
 			MaxLatency:         sm.SubscriberMaxLatency,
-			StartGroup:         GroupSequence(sm.StartGroup),
-			EndGroup:           GroupSequence(sm.EndGroup),
 		}
 
 		// Decode 0-sentinel / +1-encoded fields (matching SUBSCRIBE_UPDATE logic)
