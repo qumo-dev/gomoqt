@@ -82,3 +82,7 @@ func (conn *sessionWrapper) RemoteAddr() net.Addr {
 func (conn *sessionWrapper) SendDatagram(b []byte) error {
 	return conn.sess.SendDatagram(b)
 }
+
+func (conn *sessionWrapper) Subprotocol() string {
+	return conn.sess.SessionState().ApplicationProtocol
+}
