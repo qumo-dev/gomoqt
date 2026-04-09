@@ -64,11 +64,8 @@ type Server struct {
 	 */
 	ListenFunc QUICListenFunc
 
-	/*
-	 * WebTransport Server
-	 * If the server is configured with a WebTransport server, it is used to handle WebTransport sessions.
-	 * If not, a default server is used.
-	 */
+	// WebTransport server for handling WebTransport sessions.
+	//  If nil, the server will use a default implementation.
 	WebTransportServer WebTransportServer
 
 	// TrackMux is used for routing announcements and track subscriptions.
@@ -208,6 +205,7 @@ func (s *Server) connContext(ctx context.Context, conn StreamConn) context.Conte
 }
 
 type WebTransportHandler struct {
+	Config   *Config
 	TrackMux *TrackMux
 
 	// CheckOrigin validates the origin of an incoming upgrade request.
@@ -265,7 +263,7 @@ func (u *WebTransportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 
 	manager := r.Context().Value(serverContextKey).(*sessionManager)
 
-	sess := newSession(conn, u.TrackMux, manager, u.FetchHandler)
+	sess := newSession(conn, u.TrackMux, manager, u.FetchHandler, u.Config.subscribeTimeout())
 
 	u.Handler.ServeMOQ(sess)
 }
@@ -290,7 +288,8 @@ func (f HandleFunc) ServeMOQ(sess *Session) {
 
 func (s *Server) handleNativeQUIC(conn StreamConn) error {
 	if s.Handler != nil {
-		s.Handler.ServeMOQ(newSession(conn, s.TrackMux, s.sessionManager, s.FetchHandler))
+		sess := newSession(conn, s.TrackMux, s.sessionManager, s.FetchHandler, s.Config.subscribeTimeout())
+		s.Handler.ServeMOQ(sess)
 	}
 	return fmt.Errorf("no native QUIC handler configured")
 }

@@ -30,9 +30,7 @@ type Dialer struct {
 	// QUIC configuration for raw QUIC connections.
 	QUICConfig *quic.Config
 
-	/*
-	 * MOQ Configuration
-	 */
+	// Config contains additional configuration options for the Dialer.
 	Config *Config
 
 	// DialQUICFunc performs the QUIC handshake and establishes a connection.
@@ -84,20 +82,20 @@ func (c *Dialer) Dial(ctx context.Context, urlStr string, mux *TrackMux) (*Sessi
 // DialWebTransport establishes a new session over WebTransport (HTTP/3).
 // It performs the WebTransport handshake and initializes a MOQ session.
 // `host` should be host:port and `path` is the path used for session setup.
-func (c *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *TrackMux) (*Session, error) {
+func (d *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *TrackMux) (*Session, error) {
 	var baseLogger *slog.Logger
-	if c.Logger != nil {
-		baseLogger = c.Logger
+	if d.Logger != nil {
+		baseLogger = d.Logger
 	} else {
 		baseLogger = slog.New(slog.DiscardHandler)
 	}
 
-	dialCtx, cancelDial := context.WithTimeout(ctx, c.Config.setupTimeout())
+	dialCtx, cancelDial := context.WithTimeout(ctx, d.Config.setupTimeout())
 	defer cancelDial()
 
 	var dialer DialWebTransportFunc
-	if c.DialWebTransportFunc != nil {
-		dialer = c.DialWebTransportFunc
+	if d.DialWebTransportFunc != nil {
+		dialer = d.DialWebTransportFunc
 	} else {
 		dialer = webtransportgo.Dial
 	}
@@ -109,7 +107,7 @@ func (c *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *T
 		target = "https://" + host + path
 	}
 
-	_, conn, err := dialer(dialCtx, target, nil, c.TLSConfig)
+	_, conn, err := dialer(dialCtx, target, nil, d.TLSConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +119,7 @@ func (c *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *T
 	)
 	connLogger.Info("connection established")
 
-	return newSession(conn, mux, nil, c.FetchHandler), nil
+	return newSession(conn, mux, nil, d.FetchHandler, d.Config.subscribeTimeout()), nil
 }
 
 // TODO: Expose this method if QUIC is supported
@@ -154,5 +152,5 @@ func (c *Dialer) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux)
 		return nil, err
 	}
 
-	return newSession(conn, mux, nil, c.FetchHandler), nil
+	return newSession(conn, mux, nil, c.FetchHandler, c.Config.subscribeTimeout()), nil
 }

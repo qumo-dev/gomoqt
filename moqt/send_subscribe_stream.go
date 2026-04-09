@@ -1,8 +1,6 @@
 package moqt
 
 import (
-	"context"
-	"errors"
 	"sync"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
@@ -10,26 +8,56 @@ import (
 
 func newSendSubscribeStream(id SubscribeID, stream Stream, initConfig *SubscribeConfig, info PublishInfo) *sendSubscribeStream {
 	substr := &sendSubscribeStream{
-		ctx:    context.WithValue(stream.Context(), biStreamTypeCtxKey, message.StreamTypeSubscribe),
-		id:     id,
-		config: initConfig,
-		stream: stream,
-		info:   info,
+		id:            id,
+		config:        initConfig,
+		stream:        stream,
+		info:          info,
+		wroteInfoChan: make(chan struct{}, 1),
+		dropCh:        make(chan SubscribeDrop, 1),
 	}
+
+	go func() {
+		for {
+			ok, drop, err := readSubscribeResponse(stream)
+			if err != nil {
+				// Handle error (e.g., log it, close the stream, etc.)
+				return
+			}
+
+			if ok != nil {
+				substr.updateInfo(PublishInfo{
+					Priority:   TrackPriority(ok.PublisherPriority),
+					Ordered:    ok.PublisherOrdered != 0,
+					MaxLatency: ok.PublisherMaxLatency,
+					StartGroup: GroupSequence(ok.StartGroup),
+					EndGroup:   GroupSequence(ok.EndGroup),
+				})
+				continue
+			}
+
+			if drop != nil {
+				substr.notifyDrop()
+				continue
+			}
+		}
+
+	}()
 
 	return substr
 }
 
 type sendSubscribeStream struct {
-	ctx context.Context
+	stream Stream
 
 	config *SubscribeConfig
 
-	stream Stream
+	info PublishInfo
+
+	wroteInfoChan chan struct{}
 
 	mu sync.Mutex
 
-	info PublishInfo
+	dropCh chan SubscribeDrop
 
 	id SubscribeID
 }
@@ -45,16 +73,21 @@ func (substr *sendSubscribeStream) TrackConfig() *SubscribeConfig {
 	return substr.config
 }
 
-func (substr *sendSubscribeStream) updateSubscribe(newConfig *SubscribeConfig) error {
-	if newConfig == nil {
-		return errors.New("new track config cannot be nil")
-	}
-
+func (substr *sendSubscribeStream) updateInfo(newInfo PublishInfo) {
 	substr.mu.Lock()
 	defer substr.mu.Unlock()
 
-	if substr.ctx.Err() != nil {
-		return Cause(substr.ctx)
+	substr.info = newInfo
+	select {
+	case substr.wroteInfoChan <- struct{}{}:
+	default:
+	}
+}
+
+func (substr *sendSubscribeStream) updateSubscribe(newConfig *SubscribeConfig) error {
+	if newConfig == nil {
+		// TODO: Handle nil config case if necessary (e.g., return an error, ignore the update, etc.)
+		return nil
 	}
 
 	// Send the message first before updating config
@@ -82,29 +115,27 @@ func (substr *sendSubscribeStream) updateSubscribe(newConfig *SubscribeConfig) e
 	}
 	err := sum.Encode(substr.stream)
 	if err != nil {
-		// Close the stream with error on write failure
-		substr.mu.Unlock() // Unlock before calling closeWithError to avoid deadlock
-		_ = substr.closeWithError(SubscribeErrorCodeInternal)
-		substr.mu.Lock() // Re-lock for defer
+		substr.closeWithError(SubscribeErrorCodeInternal)
 		return err
 	}
 
+	substr.mu.Lock()
 	substr.config = newConfig
+	substr.mu.Unlock()
 
 	return nil
+}
+
+func (substr *sendSubscribeStream) notifyDrop() {
+
 }
 
 func (substr *sendSubscribeStream) ReadInfo() PublishInfo {
 	return substr.info
 }
 
-func (substr *sendSubscribeStream) Context() context.Context {
-	if substr == nil || substr.ctx == nil {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		return ctx
-	}
-	return substr.ctx
+func (substr *sendSubscribeStream) Dropped() <-chan SubscribeDrop {
+	return substr.dropCh
 }
 
 func (substr *sendSubscribeStream) close() error {
@@ -118,15 +149,9 @@ func (substr *sendSubscribeStream) close() error {
 	return err
 }
 
-func (substr *sendSubscribeStream) closeWithError(code SubscribeErrorCode) error {
+func (substr *sendSubscribeStream) closeWithError(code SubscribeErrorCode) {
 	substr.mu.Lock()
 	defer substr.mu.Unlock()
 
-	strErrCode := StreamErrorCode(code)
-	// Cancel the write side of the stream
-	substr.stream.CancelWrite(strErrCode)
-	// Cancel the read side of the stream
-	substr.stream.CancelRead(strErrCode)
-
-	return nil
+	cancelStreamWithError(substr.stream, StreamErrorCode(code))
 }

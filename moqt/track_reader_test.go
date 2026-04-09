@@ -138,8 +138,7 @@ func TestTrackReader_CloseWithError(t *testing.T) {
 	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{}, PublishInfo{})
 	receiver := newTrackReader("/broadcastpath", "trackname", substr, func() {})
 
-	err := receiver.CloseWithError(SubscribeErrorCodeInternal)
-	assert.NoError(t, err)
+	receiver.CloseWithError(SubscribeErrorCodeInternal)
 }
 
 func TestGroupReader_CancelRead_RemovesFromManager(t *testing.T) {

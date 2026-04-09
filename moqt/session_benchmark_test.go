@@ -62,7 +62,7 @@ func BenchmarkSession_Subscribe(b *testing.B) {
 			}
 
 			mux := NewTrackMux()
-			session := newSession(conn, mux, nil, nil)
+			session := newSession(conn, mux, nil, nil, 0)
 
 			// Pre-generate paths
 			paths := make([]BroadcastPath, size)
@@ -77,7 +77,7 @@ func BenchmarkSession_Subscribe(b *testing.B) {
 
 			for i := range b.N {
 				idx := i % size
-				_, _ = session.Subscribe(paths[idx], names[idx], nil)
+				_, _ = session.Subscribe(context.Background(), paths[idx], names[idx], nil)
 			}
 
 			b.StopTimer()
@@ -130,7 +130,7 @@ func BenchmarkSession_ConcurrentSubscribe(b *testing.B) {
 			}
 
 			mux := NewTrackMux()
-			session := newSession(conn, mux, nil, nil)
+			session := newSession(conn, mux, nil, nil, 0)
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -140,7 +140,7 @@ func BenchmarkSession_ConcurrentSubscribe(b *testing.B) {
 				for pb.Next() {
 					path := BroadcastPath(fmt.Sprintf("/broadcast/%d", i))
 					name := TrackName(fmt.Sprintf("track_%d", i))
-					_, _ = session.Subscribe(path, name, nil)
+					_, _ = session.Subscribe(context.Background(), path, name, nil)
 					i++
 				}
 			})
@@ -161,7 +161,7 @@ func BenchmarkSession_TrackReaderOperations(b *testing.B) {
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
 	mux := NewTrackMux()
-	session := newSession(conn, mux, nil, nil)
+	session := newSession(conn, mux, nil, nil, 0)
 
 	b.ReportAllocs()
 
@@ -202,7 +202,7 @@ func BenchmarkSession_TrackWriterOperations(b *testing.B) {
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
 	mux := NewTrackMux()
-	session := newSession(conn, mux, nil, nil)
+	session := newSession(conn, mux, nil, nil, 0)
 
 	b.ReportAllocs()
 
@@ -248,7 +248,7 @@ func BenchmarkSession_MapLookup(b *testing.B) {
 			conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
 			mux := NewTrackMux()
-			session := newSession(conn, mux, nil, nil)
+			session := newSession(conn, mux, nil, nil, 0)
 
 			// Pre-populate with track readers
 			for i := range size {
@@ -305,7 +305,7 @@ func BenchmarkSession_MemoryAllocation(b *testing.B) {
 				conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
 				mux := NewTrackMux()
-				session := newSession(conn, mux, nil, nil)
+				session := newSession(conn, mux, nil, nil, 0)
 
 				// Create many track readers
 				for j := range size {
@@ -345,7 +345,7 @@ func BenchmarkSession_ContextCancellation(b *testing.B) {
 		conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
 		mux := NewTrackMux()
-		session := newSession(conn, mux, nil, nil)
+			session := newSession(conn, mux, nil, nil, 0)
 
 		// Cancel context
 		cancel()

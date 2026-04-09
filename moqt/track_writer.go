@@ -59,12 +59,13 @@ func newTrackWriter(
 	onCloseTrackFunc func(),
 ) *TrackWriter {
 	track := &TrackWriter{
-		BroadcastPath:          broadcastPath,
-		TrackName:              trackName,
-		receiveSubscribeStream: subscribeStream,
-		groupManager:           newGroupWriterManager(),
-		openUniStreamFunc:      openUniStreamFunc,
-		onCloseTrackFunc:       onCloseTrackFunc,
+		BroadcastPath:     broadcastPath,
+		TrackName:         trackName,
+		subscribeStream:   subscribeStream,
+		groupManager:      newGroupWriterManager(),
+		openUniStreamFunc: openUniStreamFunc,
+		onCloseTrackFunc:  onCloseTrackFunc,
+		ctx:               context.WithValue(subscribeStream.stream.Context(), biStreamTypeCtxKey, message.StreamTypeSubscribe),
 	}
 
 	return track
@@ -77,16 +78,11 @@ type TrackWriter struct {
 	BroadcastPath BroadcastPath
 	TrackName     TrackName
 
+	subscribeStream *receiveSubscribeStream
+
 	groupManager *groupWriterManager
 
-	receiveSubscribeStream *receiveSubscribeStream
-
-	// closeMu controls exclusivity between Close/CloseWithError and OpenGroup.
-	// OpenGroup acquires a read lock so multiple OpenGroup calls may run
-	// concurrently, while Close/CloseWithError acquires a write lock to
-	// make the close exclusive with ongoing and future OpenGroup operations
-	// until close completes.
-	closeMu sync.RWMutex
+	mu sync.RWMutex
 
 	// groupSequence is atomically incremented for each OpenGroup call
 	groupSequence atomic.Uint64
@@ -94,6 +90,8 @@ type TrackWriter struct {
 	openUniStreamFunc func() (SendStream, error)
 
 	onCloseTrackFunc func()
+
+	ctx context.Context
 }
 
 // Close stops publishing and cancels active groups.
@@ -102,8 +100,8 @@ func (w *TrackWriter) Close() error {
 	// This prevents OpenGroup from running concurrently with Close and
 	// provides a deterministic semantics: either the OpenGroup completes
 	// entirely before Close proceeds, or Close waits for OpenGroup to finish.
-	w.closeMu.Lock()
-	defer w.closeMu.Unlock()
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
 	if w.groupManager != nil {
 		groupManager := w.groupManager
@@ -118,26 +116,19 @@ func (w *TrackWriter) Close() error {
 		}
 	}
 
-	// Then close the subscribe stream if present
-	var err error
-	if w.receiveSubscribeStream != nil {
-		err = w.receiveSubscribeStream.close()
-		w.receiveSubscribeStream = nil
-	}
-
 	if w.onCloseTrackFunc != nil {
 		w.onCloseTrackFunc()
 		w.onCloseTrackFunc = nil
 	}
 
-	return err
+	return w.subscribeStream.close()
 }
 
 // CloseWithError stops publishing due to an error and cancels active groups.
 func (w *TrackWriter) CloseWithError(code SubscribeErrorCode) {
 	// Ensure CloseWithError is exclusive with OpenGroup.
-	w.closeMu.Lock()
-	defer w.closeMu.Unlock()
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
 	if w.groupManager != nil {
 		groupManager := w.groupManager
@@ -152,15 +143,12 @@ func (w *TrackWriter) CloseWithError(code SubscribeErrorCode) {
 		}
 	}
 
-	if w.receiveSubscribeStream != nil {
-		_ = w.receiveSubscribeStream.closeWithError(code)
-		w.receiveSubscribeStream = nil
-	}
-
 	if w.onCloseTrackFunc != nil {
 		w.onCloseTrackFunc()
 		w.onCloseTrackFunc = nil
 	}
+
+	w.subscribeStream.closeWithError(code)
 }
 
 // OpenGroup opens a new group with an automatically incremented sequence number
@@ -199,27 +187,21 @@ func (w *TrackWriter) SkipGroups(n uint64) {
 }
 
 func (w *TrackWriter) Context() context.Context {
-	return w.receiveSubscribeStream.Context()
+	return w.ctx
 }
 
 func (w *TrackWriter) WriteInfo(info PublishInfo) error {
-	return w.receiveSubscribeStream.writeInfo(info)
+	var err error
+
+	return err
 }
 
 func (w *TrackWriter) TrackConfig() *SubscribeConfig {
-	if w.receiveSubscribeStream == nil {
-		return &SubscribeConfig{}
-	}
-	return w.receiveSubscribeStream.TrackConfig()
+	return w.subscribeStream.TrackConfig()
 }
 
 func (w *TrackWriter) Updated() <-chan struct{} {
-	if w.receiveSubscribeStream == nil {
-		ch := make(chan struct{})
-		close(ch)
-		return ch
-	}
-	return w.receiveSubscribeStream.Updated()
+	return w.subscribeStream.Updated()
 }
 
 // openGroupWithSequence is the internal implementation for opening a group with a specific sequence.
@@ -232,8 +214,8 @@ func (w *TrackWriter) openGroupWithSequence(seq GroupSequence) (*GroupWriter, er
 	// receiveSubscribeStream under lock so it cannot be set to nil by Close()
 	// Acquire a shared lock so multiple OpenGroup calls can proceed
 	// concurrently while ensuring Close waits for them to finish.
-	w.closeMu.RLock()
-	defer w.closeMu.RUnlock()
+	w.mu.RLock()
+	defer w.mu.RUnlock()
 
 	// Check the context on the captured receiveSubscribeStream instead of s.ctx
 	// to avoid nil deref if the embedded field has been cleared by Close().
@@ -275,7 +257,7 @@ func (w *TrackWriter) openGroupWithSequence(seq GroupSequence) (*GroupWriter, er
 	}
 
 	err = message.GroupMessage{
-		SubscribeID:   uint64(w.receiveSubscribeStream.subscribeID),
+		SubscribeID:   uint64(w.subscribeStream.subscribeID),
 		GroupSequence: uint64(seq),
 	}.Encode(stream)
 	if err != nil {

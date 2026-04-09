@@ -14,20 +14,27 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-func newSession(conn StreamConn, mux *TrackMux, manager *sessionManager, fetchHandler FetchHandler) *Session {
+func newSession(
+	conn StreamConn,
+	mux *TrackMux,
+	manager *sessionManager,
+	fetchHandler FetchHandler,
+	subscribeTimeout time.Duration,
+) *Session {
 	if mux == nil {
 		mux = DefaultMux
 	}
 
 	connCtx := conn.Context()
 	sess := &Session{
-		ctx:            connCtx,
-		conn:           conn,
-		mux:            mux,
-		fetchHandler:   fetchHandler,
-		trackReaders:   make(map[SubscribeID]*TrackReader),
-		trackWriters:   make(map[SubscribeID]*TrackWriter),
-		sessionManager: manager,
+		ctx:              connCtx,
+		conn:             conn,
+		mux:              mux,
+		fetchHandler:     fetchHandler,
+		trackReaders:     make(map[SubscribeID]*TrackReader),
+		trackWriters:     make(map[SubscribeID]*TrackWriter),
+		sessionManager:   manager,
+		subscribeTimeout: subscribeTimeout,
 	}
 
 	// Listen bidirectional streams
@@ -70,10 +77,19 @@ type Session struct {
 	sessErr       error
 
 	sessionManager *sessionManager
+
+	subscribeTimeout time.Duration
 }
 
 func (s *Session) terminating() bool {
 	return s.isTerminating.Load()
+}
+
+func (s *Session) timeout() time.Duration {
+	if s.subscribeTimeout != 0 {
+		return s.subscribeTimeout
+	}
+	return 5 * time.Second // TODO: Tune default timeout based on real-world usage and performance testing.
 }
 
 // Context returns the session's context which is canceled when the session
@@ -140,7 +156,7 @@ func (s *Session) CloseWithError(code SessionErrorCode, msg string) error {
 	return nil
 }
 
-func (s *Session) Subscribe(path BroadcastPath, name TrackName, config *SubscribeConfig) (*TrackReader, error) {
+func (s *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackName, config *SubscribeConfig) (*TrackReader, error) {
 	if s.terminating() {
 		if s.sessErr == nil {
 			return nil, ErrClosedSession
@@ -211,17 +227,14 @@ func (s *Session) Subscribe(path BroadcastPath, name TrackName, config *Subscrib
 		// Message sent successfully
 	}
 	if err != nil {
-		var strErr *StreamError
-		if errors.As(err, &strErr) && strErr.Remote {
+		if strErr, ok := errors.AsType[*StreamError](err); ok && strErr.Remote {
 			stream.CancelRead(strErr.ErrorCode)
 			return nil, &SubscribeError{
 				StreamError: strErr,
 			}
 		}
 
-		strErrCode := StreamErrorCode(SubscribeErrorCodeInternal)
-		stream.CancelWrite(strErrCode)
-		stream.CancelRead(strErrCode)
+		cancelStreamWithError(stream, StreamErrorCode(SubscribeErrorCodeInternal))
 
 		return nil, fmt.Errorf("failed to encode SUBSCRIBE message: %w", err)
 	}
@@ -234,32 +247,25 @@ func (s *Session) Subscribe(path BroadcastPath, name TrackName, config *Subscrib
 		s.removeTrackReader(id)
 	}
 	// Create a receive group stream queue
-	trackReceiver := newTrackReader(
+	track := newTrackReader(
 		path,
 		name,
 		substr,
 		removeTrackFunc,
 	)
-	s.addTrackReader(id, trackReceiver)
+	s.addTrackReader(id, track)
 
-	subok, _, err := readSubscribeResponse(stream)
-	if err != nil {
-		removeTrackFunc()
-		if strErr, ok := errors.AsType[*StreamError](err); ok {
-			stream.CancelRead(strErr.ErrorCode)
-			stream.CancelWrite(strErr.ErrorCode)
-			return nil, &SubscribeError{StreamError: strErr}
-		}
-		return nil, fmt.Errorf("failed to read SUBSCRIBE response: %w", err)
-	}
-	if subok == nil {
-		removeTrackFunc()
-		return nil, fmt.Errorf("invalid SUBSCRIBE response: expected SUBSCRIBE_OK")
+	ctx, cancel := context.WithTimeout(ctx, s.timeout())
+	defer cancel()
+	select {
+	case <-substr.wroteInfoChan:
+	case <-ctx.Done():
+		// Timeout or cancellation occurred
+		track.CloseWithError(SubscribeErrorCodeTimeout)
+		return nil, fmt.Errorf("subscription timed out: %w", ctx.Err())
 	}
 
-	trackReceiver.handleDrops()
-
-	return trackReceiver, nil
+	return track, nil
 }
 
 func readSubscribeResponse(stream io.Reader) (*message.SubscribeOkMessage, *message.SubscribeDropMessage, error) {
@@ -537,9 +543,9 @@ func (sess *Session) processBiStream(stream Stream) {
 
 		// Create a receiveSubscribeStream with draft3 fields decoded from SUBSCRIBE message
 		config := &SubscribeConfig{
-			Priority: TrackPriority(sm.SubscriberPriority),
-			Ordered:            sm.SubscriberOrdered != 0,
-			MaxLatency:         sm.SubscriberMaxLatency,
+			Priority:   TrackPriority(sm.SubscriberPriority),
+			Ordered:    sm.SubscriberOrdered != 0,
+			MaxLatency: sm.SubscriberMaxLatency,
 		}
 
 		// Decode 0-sentinel / +1-encoded fields (matching SUBSCRIBE_UPDATE logic)
@@ -552,19 +558,19 @@ func (sess *Session) processBiStream(stream Stream) {
 
 		substr := newReceiveSubscribeStream(SubscribeID(sm.SubscribeID), stream, config)
 
-		w := newTrackWriter(
+		track := newTrackWriter(
 			BroadcastPath(sm.BroadcastPath),
 			TrackName(sm.TrackName),
 			substr,
 			sess.conn.OpenUniStream,
 			func() { sess.removeTrackWriter(SubscribeID(sm.SubscribeID)) },
 		)
-		sess.addTrackWriter(SubscribeID(sm.SubscribeID), w)
+		sess.addTrackWriter(SubscribeID(sm.SubscribeID), track)
 
-		sess.mux.serveTrack(w)
+		sess.mux.serveTrack(track)
 
 		// Ensure the track writer is closed when done
-		w.Close()
+		track.Close()
 	case message.StreamTypeFetch:
 		var fm message.FetchMessage
 		err := fm.Decode(stream)

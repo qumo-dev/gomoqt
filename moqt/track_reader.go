@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"sync"
+
+	"github.com/okdaichi/gomoqt/moqt/internal/message"
 )
 
 type groupReaderManager struct {
@@ -46,6 +48,7 @@ func newTrackReader(broadcastPath BroadcastPath, trackName TrackName, subscribeS
 		dequeued:     make(map[*GroupReader]struct{}),
 		groupManager: newGroupReaderManager(),
 		onCloseFunc:  onCloseFunc,
+		ctx:          context.WithValue(subscribeStream.stream.Context(), biStreamTypeCtxKey, message.StreamTypeSubscribe),
 	}
 
 	return track
@@ -71,6 +74,8 @@ type TrackReader struct {
 
 	groupManager *groupReaderManager
 	onCloseFunc  func()
+
+	ctx context.Context
 }
 
 func (r *TrackReader) SubscribeID() SubscribeID {
@@ -115,7 +120,7 @@ func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 }
 
 func (r *TrackReader) Context() context.Context {
-	return r.sendSubscribeStream.Context()
+	return r.ctx
 }
 
 // Close cancels queued groups, closes the queued channel, and terminates
@@ -148,7 +153,7 @@ func (r *TrackReader) Close() error {
 }
 
 // CloseWithError cancels the subscription with the provided SubscribeErrorCode and terminates the subscription.
-func (r *TrackReader) CloseWithError(code SubscribeErrorCode) error {
+func (r *TrackReader) CloseWithError(code SubscribeErrorCode) {
 	r.trackMu.Lock()
 	defer r.trackMu.Unlock()
 
@@ -172,7 +177,7 @@ func (r *TrackReader) CloseWithError(code SubscribeErrorCode) error {
 
 	r.onCloseFunc()
 
-	return r.sendSubscribeStream.closeWithError(code)
+	r.sendSubscribeStream.closeWithError(code)
 }
 
 // Update updates the subscription configuration with a new TrackConfig.
@@ -182,12 +187,6 @@ func (r *TrackReader) Update(config *SubscribeConfig) error {
 	}
 
 	return r.sendSubscribeStream.updateSubscribe(config)
-}
-
-func (r *TrackReader) handleResponses() {
-	for {
-		readSubscribeResponse(r.sendSubscribeStream.stream)
-	}
 }
 
 func (r *TrackReader) enqueueGroup(sequence GroupSequence, stream ReceiveStream) {

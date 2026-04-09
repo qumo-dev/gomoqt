@@ -1994,7 +1994,7 @@ func TestMux_ServeTrack_ClosesWhenAnnouncementEnds(t *testing.T) {
 	// Register the handler so it remains active
 	mux.Announce(ann, TrackHandlerFunc(func(tw *TrackWriter) {
 		// Ensure we handle cases where receiveSubscribeStream might be nil (closed early)
-		if tw.receiveSubscribeStream == nil {
+		if tw.subscribeStream == nil {
 			// Nothing to wait on; exit handler immediately
 			return
 		}

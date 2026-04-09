@@ -34,13 +34,13 @@ func TestNewTrackWriter(t *testing.T) {
 		// Mock onCloseTrack function
 	}
 
-	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, onCloseTrack)
+	track := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, onCloseTrack)
 
-	require.NotNil(t, sender, "newTrackWriter should not return nil")
-	assert.NotNil(t, sender.groupManager, "groupManager should be initialized")
-	assert.NotNil(t, sender.openUniStreamFunc, "openUniStreamFunc should be set")
-	assert.NotNil(t, sender.receiveSubscribeStream, "subscribeStream should be set")
-	assert.NotNil(t, sender.onCloseTrackFunc, "onCloseTrack should be set")
+	require.NotNil(t, track, "newTrackWriter should not return nil")
+	assert.NotNil(t, track.groupManager, "groupManager should be initialized")
+	assert.NotNil(t, track.openUniStreamFunc, "openUniStreamFunc should be set")
+	assert.NotNil(t, track.subscribeStream, "subscribeStream should be set")
+	assert.NotNil(t, track.onCloseTrackFunc, "onCloseTrack should be set")
 }
 
 func TestTrackWriter_OpenGroup(t *testing.T) {
@@ -281,7 +281,7 @@ func TestTrackWriter_OpenAfterClose(t *testing.T) {
 	// is canceled.
 	// Simulate Close clearing the embedded receiveSubscribeStream pointer
 	// without invoking underlying network stream methods in the mock.
-	sender.receiveSubscribeStream = nil
+	sender.subscribeStream = nil
 
 	// The underlying subscribe stream is left intact; we simulate
 	// Close by clearing the receiveSubscribeStream pointer on the
@@ -413,7 +413,7 @@ func TestTrackWriter_TrackConfig(t *testing.T) {
 
 	// Test with nil receiveSubscribeStream; current implementation returns
 	// a zero-value config instead of panicking.
-	sender.receiveSubscribeStream = nil
+	sender.subscribeStream = nil
 	assert.NotPanics(t, func() { _ = sender.TrackConfig() })
 	assert.NotNil(t, sender.TrackConfig())
 }
