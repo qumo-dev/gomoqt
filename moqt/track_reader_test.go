@@ -1,12 +1,15 @@
 package moqt
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
 
+	"github.com/okdaichi/gomoqt/moqt/internal/message"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewTrackReader(t *testing.T) {
@@ -126,6 +129,40 @@ func TestTrackReader_Update(t *testing.T) {
 
 	// Verify update
 	assert.Equal(t, &SubscribeConfig{}, receiver.TrackConfig())
+}
+
+func TestTrackReader_HandleDrop(t *testing.T) {
+	var buf bytes.Buffer
+	_, _ = buf.Write([]byte{byte(message.MessageTypeSubscribeDrop)})
+	require.NoError(t, (message.SubscribeDropMessage{
+		StartGroup: 11,
+		EndGroup:   21,
+		ErrorCode:  3,
+	}).Encode(&buf))
+
+	mockStream := &MockQUICStream{
+		ReadFunc: buf.Read,
+	}
+	mockStream.On("Context").Return(context.Background()).Maybe()
+
+	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{}, PublishInfo{})
+	receiver := newTrackReader("/broadcastpath", "trackname", substr, func() {})
+
+	done := make(chan SubscribeDrop, 1)
+	receiver.HandleDrop(func(drop SubscribeDrop) {
+		done <- drop
+	})
+
+	select {
+	case drop := <-done:
+		assert.Equal(t, SubscribeDrop{
+			StartGroup: 10,
+			EndGroup:   20,
+			ErrorCode:  3,
+		}, drop)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected drop callback to be invoked")
+	}
 }
 
 func TestTrackReader_CloseWithError(t *testing.T) {

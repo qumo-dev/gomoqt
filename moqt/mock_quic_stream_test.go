@@ -2,6 +2,7 @@ package moqt
 
 import (
 	"context"
+	"io"
 	"sync"
 	"time"
 
@@ -41,6 +42,12 @@ func (m *MockQUICStream) Read(p []byte) (n int, err error) {
 	if m.ReadFunc != nil {
 		return m.ReadFunc(p)
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			n = 0
+			err = io.EOF
+		}
+	}()
 	args := m.Called(p)
 	return args.Int(0), args.Error(1)
 }

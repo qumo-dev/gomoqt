@@ -202,15 +202,9 @@ func (s *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackN
 		ordered = 1
 	}
 
-	startGroup := uint64(0)
-	if config.StartGroup != 0 {
-		startGroup = uint64(config.StartGroup) + 1
-	}
+	startGroup := groupSequenceToWire(config.StartGroup)
 
-	endGroup := uint64(0)
-	if config.EndGroup != 0 {
-		endGroup = uint64(config.EndGroup) + 1
-	}
+	endGroup := groupSequenceToWire(config.EndGroup)
 
 	sm := message.SubscribeMessage{
 		SubscribeID:          uint64(id),
@@ -549,12 +543,8 @@ func (sess *Session) processBiStream(stream Stream) {
 		}
 
 		// Decode 0-sentinel / +1-encoded fields (matching SUBSCRIBE_UPDATE logic)
-		if sm.StartGroup > 0 {
-			config.StartGroup = GroupSequence(sm.StartGroup - 1)
-		}
-		if sm.EndGroup > 0 {
-			config.EndGroup = GroupSequence(sm.EndGroup - 1)
-		}
+		config.StartGroup = groupSequenceFromWire(sm.StartGroup)
+		config.EndGroup = groupSequenceFromWire(sm.EndGroup)
 
 		substr := newReceiveSubscribeStream(SubscribeID(sm.SubscribeID), stream, config)
 

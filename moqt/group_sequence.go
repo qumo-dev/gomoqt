@@ -31,3 +31,23 @@ func (gs GroupSequence) Next() GroupSequence {
 
 	return gs + 1
 }
+
+// groupSequenceToWire converts a group sequence into the wire form used by draft03.
+// Zero stays zero so it can continue to represent an omitted field.
+func groupSequenceToWire(gs GroupSequence) uint64 {
+	if gs == MinGroupSequence {
+		return 0
+	}
+
+	return uint64(gs) + 1
+}
+
+// groupSequenceFromWire converts a draft03 wire value into a group sequence.
+// Zero stays zero so it can continue to represent an omitted field.
+func groupSequenceFromWire(v uint64) GroupSequence {
+	if v == 0 {
+		return MinGroupSequence
+	}
+
+	return GroupSequence(v - 1)
+}

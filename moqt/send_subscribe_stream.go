@@ -36,8 +36,13 @@ func newSendSubscribeStream(id SubscribeID, stream Stream, initConfig *Subscribe
 			}
 
 			if drop != nil {
-				substr.notifyDrop()
-				continue
+				converted := SubscribeDrop{
+					ErrorCode: SubscribeErrorCode(drop.ErrorCode),
+				}
+				converted.StartGroup = groupSequenceFromWire(drop.StartGroup)
+				converted.EndGroup = groupSequenceFromWire(drop.EndGroup)
+				substr.notifyDrop(converted)
+				return
 			}
 		}
 
@@ -55,9 +60,14 @@ type sendSubscribeStream struct {
 
 	wroteInfoChan chan struct{}
 
-	mu sync.Mutex
+	mu     sync.Mutex
+	dropMu sync.Mutex
 
-	dropCh chan SubscribeDrop
+	dropCh      chan SubscribeDrop
+	dropHandler func(SubscribeDrop)
+	drop        SubscribeDrop
+	dropSeen    bool
+	dropSent    bool
 
 	id SubscribeID
 }
@@ -96,15 +106,9 @@ func (substr *sendSubscribeStream) updateSubscribe(newConfig *SubscribeConfig) e
 		ordered = 1
 	}
 
-	startGroup := uint64(0)
-	if newConfig.StartGroup != 0 {
-		startGroup = uint64(newConfig.StartGroup) + 1
-	}
+	startGroup := groupSequenceToWire(newConfig.StartGroup)
 
-	endGroup := uint64(0)
-	if newConfig.EndGroup != 0 {
-		endGroup = uint64(newConfig.EndGroup) + 1
-	}
+	endGroup := groupSequenceToWire(newConfig.EndGroup)
 
 	sum := message.SubscribeUpdateMessage{
 		SubscriberPriority:   uint8(newConfig.Priority),
@@ -126,8 +130,48 @@ func (substr *sendSubscribeStream) updateSubscribe(newConfig *SubscribeConfig) e
 	return nil
 }
 
-func (substr *sendSubscribeStream) notifyDrop() {
+func (substr *sendSubscribeStream) notifyDrop(drop SubscribeDrop) {
+	substr.dropMu.Lock()
+	if substr.dropSeen {
+		substr.dropMu.Unlock()
+		return
+	}
+	substr.dropSeen = true
+	substr.drop = drop
+	handler := substr.dropHandler
+	shouldDeliver := handler != nil && !substr.dropSent
+	if shouldDeliver {
+		substr.dropSent = true
+	}
+	ch := substr.dropCh
+	substr.dropMu.Unlock()
 
+	if ch != nil {
+		select {
+		case ch <- drop:
+		default:
+		}
+		close(ch)
+	}
+
+	if shouldDeliver {
+		go handler(drop)
+	}
+}
+
+func (substr *sendSubscribeStream) setDropHandler(handler func(SubscribeDrop)) {
+	substr.dropMu.Lock()
+	substr.dropHandler = handler
+	drop := substr.drop
+	shouldDeliver := substr.dropSeen && !substr.dropSent && handler != nil
+	if shouldDeliver {
+		substr.dropSent = true
+	}
+	substr.dropMu.Unlock()
+
+	if shouldDeliver {
+		go handler(drop)
+	}
 }
 
 func (substr *sendSubscribeStream) ReadInfo() PublishInfo {

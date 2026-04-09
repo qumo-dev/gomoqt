@@ -35,15 +35,9 @@ func newReceiveSubscribeStream(id SubscribeID, stream Stream, config *SubscribeC
 				ordered = true
 			}
 
-			startGroup := GroupSequence(0)
-			if updateMsg.StartGroup != 0 {
-				startGroup = GroupSequence(updateMsg.StartGroup - 1)
-			}
+			startGroup := groupSequenceFromWire(updateMsg.StartGroup)
 
-			endGroup := GroupSequence(0)
-			if updateMsg.EndGroup != 0 {
-				endGroup = GroupSequence(updateMsg.EndGroup - 1)
-			}
+			endGroup := groupSequenceFromWire(updateMsg.EndGroup)
 
 			config := &SubscribeConfig{
 				Priority:   TrackPriority(updateMsg.SubscriberPriority),
@@ -100,15 +94,9 @@ func (substr *receiveSubscribeStream) writeInfo(info PublishInfo) error {
 			ordered = 1
 		}
 
-		startGroup := uint64(0)
-		if info.StartGroup != 0 {
-			startGroup = uint64(info.StartGroup) + 1
-		}
+		startGroup := groupSequenceToWire(info.StartGroup)
 
-		endGroup := uint64(0)
-		if info.EndGroup != 0 {
-			endGroup = uint64(info.EndGroup) + 1
-		}
+		endGroup := groupSequenceToWire(info.EndGroup)
 
 		sum := message.SubscribeOkMessage{
 			PublisherPriority:   uint8(info.Priority),

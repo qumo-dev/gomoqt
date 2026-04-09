@@ -86,6 +86,15 @@ func (r *TrackReader) TrackConfig() *SubscribeConfig {
 	return r.sendSubscribeStream.TrackConfig()
 }
 
+// HandleDrop registers a callback that is invoked when the subscription is dropped by the peer.
+// The callback is invoked at most once for the first Drop received.
+func (r *TrackReader) HandleDrop(fn func(SubscribeDrop)) {
+	if r == nil || r.sendSubscribeStream == nil {
+		return
+	}
+	r.sendSubscribeStream.setDropHandler(fn)
+}
+
 // AcceptGroup blocks until the next group is available or context is
 // canceled. It returns a GroupReader tied to the accepted group stream.
 func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
