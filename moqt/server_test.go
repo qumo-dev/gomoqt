@@ -211,7 +211,7 @@ func TestServer_addRemoveSession_ShutdownCompletesWhenLastSessionLeaves(t *testi
 	conn.On("AcceptUniStream", mock.Anything).Return(nil, context.Canceled)
 	conn.On("CloseWithError", mock.Anything, mock.Anything).Return(nil)
 
-	sess := newSession(conn, nil, nil, nil, 0)
+	sess := newSession(conn, nil, nil, nil)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 	s.sessionManager.addSession(sess)

@@ -63,7 +63,7 @@ func BenchmarkSession_Subscribe(b *testing.B) {
 			}
 
 			mux := NewTrackMux()
-			session := newSession(conn, mux, nil, nil, 0)
+			session := newSession(conn, mux, nil, nil)
 
 			// Pre-generate paths
 			paths := make([]BroadcastPath, size)
@@ -136,7 +136,7 @@ func BenchmarkSession_ConcurrentSubscribe(b *testing.B) {
 			}
 
 			mux := NewTrackMux()
-			session := newSession(conn, mux, nil, nil, 0)
+			session := newSession(conn, mux, nil, nil)
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -171,7 +171,7 @@ func BenchmarkSession_TrackReaderOperations(b *testing.B) {
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
 	mux := NewTrackMux()
-	session := newSession(conn, mux, nil, nil, 0)
+	session := newSession(conn, mux, nil, nil)
 
 	b.ReportAllocs()
 
@@ -208,7 +208,7 @@ func BenchmarkSession_TrackWriterOperations(b *testing.B) {
 	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
 	mux := NewTrackMux()
-	session := newSession(conn, mux, nil, nil, 0)
+	session := newSession(conn, mux, nil, nil)
 
 	b.ReportAllocs()
 
@@ -254,7 +254,7 @@ func BenchmarkSession_MapLookup(b *testing.B) {
 			conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
 			mux := NewTrackMux()
-			session := newSession(conn, mux, nil, nil, 0)
+			session := newSession(conn, mux, nil, nil)
 
 			// Pre-populate with track readers
 			for i := range size {
@@ -307,7 +307,7 @@ func BenchmarkSession_MemoryAllocation(b *testing.B) {
 				conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
 				mux := NewTrackMux()
-				session := newSession(conn, mux, nil, nil, 0)
+				session := newSession(conn, mux, nil, nil)
 
 				// Create many track readers
 				for j := range size {
@@ -343,7 +343,7 @@ func BenchmarkSession_ContextCancellation(b *testing.B) {
 		conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
 
 		mux := NewTrackMux()
-		session := newSession(conn, mux, nil, nil, 0)
+		session := newSession(conn, mux, nil, nil)
 
 		// Cancel context
 		cancel()

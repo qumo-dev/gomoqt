@@ -30,21 +30,12 @@ func newReceiveSubscribeStream(id SubscribeID, stream Stream, config *SubscribeC
 				break
 			}
 
-			ordered := false
-			if updateMsg.SubscriberOrdered != 0 {
-				ordered = true
-			}
-
-			startGroup := groupSequenceFromWire(updateMsg.StartGroup)
-
-			endGroup := groupSequenceFromWire(updateMsg.EndGroup)
-
 			config := &SubscribeConfig{
 				Priority:   TrackPriority(updateMsg.SubscriberPriority),
-				Ordered:    ordered,
+				Ordered:    boolFromWireFlag(updateMsg.SubscriberOrdered),
 				MaxLatency: updateMsg.SubscriberMaxLatency,
-				StartGroup: startGroup,
-				EndGroup:   endGroup,
+				StartGroup: groupSequenceFromWire(updateMsg.StartGroup),
+				EndGroup:   groupSequenceFromWire(updateMsg.EndGroup),
 			}
 
 			substr.mu.Lock()
@@ -89,10 +80,7 @@ func (substr *receiveSubscribeStream) writeInfo(info PublishInfo) error {
 		substr.mu.Lock()
 		defer substr.mu.Unlock()
 
-		ordered := uint8(0)
-		if info.Ordered {
-			ordered = 1
-		}
+		ordered := boolToWireFlag(info.Ordered)
 
 		startGroup := groupSequenceToWire(info.StartGroup)
 

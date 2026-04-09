@@ -14,42 +14,6 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-func newSession(
-	conn StreamConn,
-	mux *TrackMux,
-	manager *sessionManager,
-	fetchHandler FetchHandler,
-	subscribeTimeout time.Duration,
-) *Session {
-	if mux == nil {
-		mux = DefaultMux
-	}
-
-	connCtx := conn.Context()
-	sess := &Session{
-		ctx:              connCtx,
-		conn:             conn,
-		mux:              mux,
-		fetchHandler:     fetchHandler,
-		trackReaders:     make(map[SubscribeID]*TrackReader),
-		trackWriters:     make(map[SubscribeID]*TrackWriter),
-		sessionManager:   manager,
-		subscribeTimeout: subscribeTimeout,
-	}
-
-	// Listen bidirectional streams
-	sess.wg.Go(func() {
-		sess.handleBiStreams()
-	})
-
-	// Listen unidirectional streams
-	sess.wg.Go(func() {
-		sess.handleUniStreams()
-	})
-
-	return sess
-}
-
 // Session represents an active MOQ session over a QUIC connection.
 // It manages bidirectional and unidirectional streams, subscriptions, and announcements for a single peer connection.
 type Session struct {
@@ -77,8 +41,40 @@ type Session struct {
 	sessErr       error
 
 	sessionManager *sessionManager
+}
 
-	subscribeTimeout time.Duration
+func newSession(
+	conn StreamConn,
+	mux *TrackMux,
+	manager *sessionManager,
+	fetchHandler FetchHandler,
+) *Session {
+	if mux == nil {
+		mux = DefaultMux
+	}
+
+	connCtx := conn.Context()
+	sess := &Session{
+		ctx:            connCtx,
+		conn:           conn,
+		mux:            mux,
+		fetchHandler:   fetchHandler,
+		trackReaders:   make(map[SubscribeID]*TrackReader),
+		trackWriters:   make(map[SubscribeID]*TrackWriter),
+		sessionManager: manager,
+	}
+
+	// Listen bidirectional streams
+	sess.wg.Go(func() {
+		sess.handleBiStreams()
+	})
+
+	// Listen unidirectional streams
+	sess.wg.Go(func() {
+		sess.handleUniStreams()
+	})
+
+	return sess
 }
 
 func (s *Session) terminating() bool {
@@ -159,8 +155,8 @@ func (s *Session) Subscribe(ctx context.Context, req *SubscribeRequest) (*TrackR
 	if req == nil {
 		return nil, errors.New("subscribe request cannot be nil")
 	}
+	req = req.Clone().normalized()
 
-	req = req.normalized()
 	if !isValidPath(req.BroadcastPath) {
 		return nil, fmt.Errorf("invalid broadcast path: %q", req.BroadcastPath)
 	}
@@ -172,16 +168,11 @@ func (s *Session) Subscribe(ctx context.Context, req *SubscribeRequest) (*TrackR
 		return nil, s.sessErr
 	}
 
-	config := req.Config
-	path := req.BroadcastPath
-	name := req.TrackName
-
 	id := s.nextSubscribeID()
 
 	stream, err := s.conn.OpenStream()
 	if err != nil {
-		var appErr *ApplicationError
-		if errors.As(err, &appErr) {
+		if appErr, ok := errors.AsType[*ApplicationError](err); ok {
 			return nil, &SessionError{
 				ApplicationError: appErr,
 			}
@@ -191,38 +182,25 @@ func (s *Session) Subscribe(ctx context.Context, req *SubscribeRequest) (*TrackR
 
 	err = message.StreamTypeSubscribe.Encode(stream)
 	if err != nil {
-		var strErr *StreamError
-		if errors.As(err, &strErr) && strErr.Remote {
+		if strErr, ok := errors.AsType[*StreamError](err); ok && strErr.Remote {
 			stream.CancelRead(strErr.ErrorCode)
 			return nil, &SubscribeError{
 				StreamError: strErr,
 			}
 		}
-		strErrCode := StreamErrorCode(SubscribeErrorCodeInternal)
-		stream.CancelWrite(strErrCode)
-		stream.CancelRead(strErrCode)
+		cancelStreamWithError(stream, StreamErrorCode(SubscribeErrorCodeInternal))
 		return nil, fmt.Errorf("failed to encode stream type message: %w", err)
 	}
 
-	// Send a SUBSCRIBE message
-	ordered := uint8(0)
-	if config.Ordered {
-		ordered = 1
-	}
-
-	startGroup := groupSequenceToWire(config.StartGroup)
-
-	endGroup := groupSequenceToWire(config.EndGroup)
-
 	err = message.SubscribeMessage{
 		SubscribeID:          uint64(id),
-		BroadcastPath:        string(path),
-		TrackName:            string(name),
-		SubscriberPriority:   uint8(config.Priority),
-		SubscriberOrdered:    ordered,
-		SubscriberMaxLatency: config.MaxLatency,
-		StartGroup:           startGroup,
-		EndGroup:             endGroup,
+		BroadcastPath:        string(req.BroadcastPath),
+		TrackName:            string(req.TrackName),
+		SubscriberPriority:   uint8(req.Config.Priority),
+		SubscriberOrdered:    boolToWireFlag(req.Config.Ordered),
+		SubscriberMaxLatency: req.Config.MaxLatency,
+		StartGroup:           groupSequenceToWire(req.Config.StartGroup),
+		EndGroup:             groupSequenceToWire(req.Config.EndGroup),
 	}.Encode(stream)
 	if err != nil {
 		if strErr, ok := errors.AsType[*StreamError](err); ok && strErr.Remote {
@@ -238,7 +216,7 @@ func (s *Session) Subscribe(ctx context.Context, req *SubscribeRequest) (*TrackR
 	}
 
 	// Create and register a TrackReader for this subscription.
-	substr := newSendSubscribeStream(id, stream, config, PublishInfo{}, req.OnDrop)
+	substr := newSendSubscribeStream(id, stream, req.Config, PublishInfo{}, req.OnDrop)
 
 	removeTrackFunc := func() {
 		s.removeTrackReader(id)
@@ -246,22 +224,13 @@ func (s *Session) Subscribe(ctx context.Context, req *SubscribeRequest) (*TrackR
 	track := newTrackReader(req, substr, removeTrackFunc)
 	s.addTrackReader(id, track)
 
-	waitTimeout := req.Timeout
-	if waitTimeout == 0 {
-		waitTimeout = s.subscribeTimeout
-	}
-
-	waitCtx := ctx
-	cancel := func() {}
-	if waitTimeout > 0 {
-		waitCtx, cancel = context.WithTimeout(ctx, waitTimeout)
-	}
+	ctx, cancel := context.WithTimeout(ctx, s.timeout())
 	defer cancel()
 	select {
 	case <-substr.wroteInfoChan:
-	case <-waitCtx.Done():
+	case <-ctx.Done():
 		track.CloseWithError(SubscribeErrorCodeTimeout)
-		return nil, fmt.Errorf("subscription timed out: %w", waitCtx.Err())
+		return nil, fmt.Errorf("subscription timed out: %w", ctx.Err())
 	}
 
 	return track, nil
@@ -302,6 +271,10 @@ func readSubscribeResponse(stream io.Reader) (*message.SubscribeOkMessage, *mess
 func (s *Session) nextSubscribeID() SubscribeID {
 	// Increment and return the previous value atomically
 	return SubscribeID(s.subscribeIDCounter.Add(1))
+}
+
+func (s *Session) timeout() time.Duration {
+	return 30 * time.Second
 }
 
 func (s *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
@@ -543,7 +516,7 @@ func (sess *Session) processBiStream(stream Stream) {
 		// Create a receiveSubscribeStream with draft3 fields decoded from SUBSCRIBE message
 		config := &SubscribeConfig{
 			Priority:   TrackPriority(sm.SubscriberPriority),
-			Ordered:    sm.SubscriberOrdered != 0,
+			Ordered:    boolFromWireFlag(sm.SubscriberOrdered),
 			MaxLatency: sm.SubscriberMaxLatency,
 		}
 

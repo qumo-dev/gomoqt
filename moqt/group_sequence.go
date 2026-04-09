@@ -51,3 +51,19 @@ func groupSequenceFromWire(v uint64) GroupSequence {
 
 	return GroupSequence(v - 1)
 }
+
+// boolToWireFlag converts a boolean into the draft03 uint8 flag form.
+// false => 0, true => 1.
+func boolToWireFlag(v bool) uint8 {
+	if v {
+		return 1
+	}
+
+	return 0
+}
+
+// boolFromWireFlag converts a draft03 uint8 flag into a boolean.
+// Any non-zero value is treated as true.
+func boolFromWireFlag(v uint8) bool {
+	return v != 0
+}

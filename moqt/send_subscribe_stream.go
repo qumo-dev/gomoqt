@@ -28,7 +28,7 @@ func newSendSubscribeStream(id SubscribeID, stream Stream, initConfig *Subscribe
 			if ok != nil {
 				substr.updateInfo(PublishInfo{
 					Priority:   TrackPriority(ok.PublisherPriority),
-					Ordered:    ok.PublisherOrdered != 0,
+					Ordered:    boolFromWireFlag(ok.PublisherOrdered),
 					MaxLatency: ok.PublisherMaxLatency,
 					StartGroup: GroupSequence(ok.StartGroup),
 					EndGroup:   GroupSequence(ok.EndGroup),
@@ -101,10 +101,7 @@ func (substr *sendSubscribeStream) updateSubscribe(newConfig *SubscribeConfig) e
 	}
 
 	// Send the message first before updating config
-	ordered := uint8(0)
-	if newConfig.Ordered {
-		ordered = 1
-	}
+	ordered := boolToWireFlag(newConfig.Ordered)
 
 	startGroup := groupSequenceToWire(newConfig.StartGroup)
 

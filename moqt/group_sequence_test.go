@@ -129,3 +129,53 @@ func TestGroupSequence_MaxBoundary(t *testing.T) {
 	largeSeq := GroupSequence(0x100000000) // Beyond uint32
 	assert.Equal(t, GroupSequence(0x100000001), largeSeq.Next())
 }
+
+func TestBoolToWireFlag(t *testing.T) {
+	tests := map[string]struct {
+		in   bool
+		want uint8
+	}{
+		"false": {
+			in:   false,
+			want: 0,
+		},
+		"true": {
+			in:   true,
+			want: 1,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := boolToWireFlag(tt.in)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestBoolFromWireFlag(t *testing.T) {
+	tests := map[string]struct {
+		in   uint8
+		want bool
+	}{
+		"zero is false": {
+			in:   0,
+			want: false,
+		},
+		"one is true": {
+			in:   1,
+			want: true,
+		},
+		"non-zero is true": {
+			in:   2,
+			want: true,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := boolFromWireFlag(tt.in)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

@@ -6,20 +6,9 @@ import (
 
 // Config contains configuration options for MOQ sessions.
 type Config struct {
-	// SubscribeTimeout sets the maximum time to wait for a SUBSCRIBE response
-	// during subscription setup on sessions.
-	SubscribeTimeout time.Duration
-
 	// SetupTimeout is the maximum time to wait for session setup to complete.
 	// If zero, a default timeout of 5 seconds is used.
 	SetupTimeout time.Duration
-}
-
-func (c *Config) subscribeTimeout() time.Duration {
-	if c != nil && c.SubscribeTimeout > 0 {
-		return c.SubscribeTimeout
-	}
-	return 5 * time.Second
 }
 
 // setupTimeout returns the configured setup timeout or a default value.

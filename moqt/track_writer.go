@@ -191,9 +191,7 @@ func (w *TrackWriter) Context() context.Context {
 }
 
 func (w *TrackWriter) WriteInfo(info PublishInfo) error {
-	var err error
-
-	return err
+	return w.subscribeStream.writeInfo(info)
 }
 
 func (w *TrackWriter) TrackConfig() *SubscribeConfig {
