@@ -97,30 +97,21 @@ func (substr *receiveSubscribeStream) writeInfoLocked(info PublishInfo) error {
 
 func (substr *receiveSubscribeStream) writeDrop(drop SubscribeDrop) error {
 	substr.mu.Lock()
-	err := error(nil)
+	defer substr.mu.Unlock()
+
 	if !substr.responseStarted {
-		err = substr.writeInfoLocked(PublishInfo{})
-	}
-	if err == nil {
-		err = substr.writeDropLocked(drop)
-	}
-	substr.mu.Unlock()
-
-	if err != nil {
-		_ = substr.closeWithError(SubscribeErrorCodeInternal)
+		err := substr.writeInfoLocked(PublishInfo{})
+		if err != nil {
+			return err
+		}
 	}
 
-	return err
-}
-
-func (substr *receiveSubscribeStream) writeDropLocked(drop SubscribeDrop) error {
-	dropMsg := message.SubscribeDropMessage{
+	err := message.SubscribeDropMessage{
 		StartGroup: groupSequenceToWire(drop.StartGroup),
 		EndGroup:   groupSequenceToWire(drop.EndGroup),
 		ErrorCode:  uint64(drop.ErrorCode),
-	}
-
-	if err := dropMsg.Encode(substr.stream); err != nil {
+	}.Encode(substr.stream)
+	if err != nil {
 		return err
 	}
 
