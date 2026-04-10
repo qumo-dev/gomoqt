@@ -26,8 +26,6 @@ func ListenAndServe(addr string, tlsConfig *tls.Config) error {
 	return server.ListenAndServe()
 }
 
-type QUICListenFunc func(addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (QUICListener, error)
-
 type WebTransportServer interface {
 	ServeQUICConn(conn StreamConn) error
 	Close() error
@@ -39,33 +37,24 @@ type WebTransportServer interface {
 // The server maintains active sessions and listeners. It provides graceful shutdown capabilities and
 // can serve over multiple listeners simultaneously.
 type Server struct {
-	/*
-	 * Server's Address
-	 */
+	// Address to listen on, in the form "host:port".
 	Addr string
 
-	/*
-	 * TLS configuration
-	 */
+	// TLS configuration
 	TLSConfig *tls.Config
 
-	/*
-	 * QUIC configuration
-	 */
+	// QUIC configuration
 	QUICConfig *quic.Config
 
-	/*
-	 * MOQ Configuration
-	 */
+	// MoQ configuration
 	Config *Config
 
-	/*
-	 * Listen QUIC function
-	 */
-	ListenFunc QUICListenFunc
+	// ListenFunc is a function that creates a new QUIC listener
+	// If nil, the server will use quic.ListenAddrEarly from the quic-go library.
+	ListenFunc func(addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (QUICListener, error)
 
 	// WebTransport server for handling WebTransport sessions.
-	//  If nil, the server will use a default implementation.
+	// If nil, the server will use a default implementation.
 	WebTransportServer WebTransportServer
 
 	// TrackMux is used for routing announcements and track subscriptions.
@@ -80,9 +69,7 @@ type Server struct {
 	// If nil, FETCH requests are rejected with an internal stream error.
 	FetchHandler FetchHandler
 
-	/*
-	 * Logger
-	 */
+	// Logger for server events and errors. Optional; if nil, logging is disabled.
 	Logger *slog.Logger
 
 	ConnContext func(ctx context.Context, conn StreamConn) context.Context
