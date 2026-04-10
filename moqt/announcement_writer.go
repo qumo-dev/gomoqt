@@ -194,6 +194,7 @@ func (aw *AnnouncementWriter) SendAnnouncement(announcement *Announcement) error
 	err := message.AnnounceMessage{
 		AnnounceStatus:      message.ACTIVE,
 		BroadcastPathSuffix: suffix,
+		Hops:                uint64(announcement.Hops() + 1),
 	}.Encode(aw.stream)
 	if err != nil {
 		if strErr, ok := errors.AsType[*transport.StreamError](err); ok {

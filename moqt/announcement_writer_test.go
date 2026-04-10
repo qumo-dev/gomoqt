@@ -1,12 +1,14 @@
 package moqt
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"testing"
 	"time"
 
+	"github.com/okdaichi/gomoqt/moqt/internal/message"
 	"github.com/okdaichi/gomoqt/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -414,6 +416,32 @@ func TestAnnouncementWriter_SendAnnouncement(t *testing.T) {
 			mockStream.AssertExpectations(t)
 		})
 	}
+}
+
+func TestAnnouncementWriter_SendAnnouncement_EncodesHops(t *testing.T) {
+	mockStream := &MockQUICStream{}
+	ctx := context.Background()
+	var buf bytes.Buffer
+
+	mockStream.On("Context").Return(ctx)
+	mockStream.WriteFunc = buf.Write
+
+	sas := newAnnouncementWriter(mockStream, "/test/")
+	ann, _ := NewAnnouncement(ctx, BroadcastPath("/test/stream1"))
+
+	err := sas.init(map[*Announcement]struct{}{})
+	require.NoError(t, err)
+
+	err = sas.SendAnnouncement(ann)
+	require.NoError(t, err)
+
+	var decoded message.AnnounceMessage
+	require.NoError(t, decoded.Decode(&buf))
+	assert.Equal(t, message.ACTIVE, decoded.AnnounceStatus)
+	assert.Equal(t, "stream1", decoded.BroadcastPathSuffix)
+	assert.Equal(t, uint64(1), decoded.Hops)
+
+	mockStream.AssertExpectations(t)
 }
 
 func TestAnnouncementWriter_SendAnnouncement_WriteError(t *testing.T) {
