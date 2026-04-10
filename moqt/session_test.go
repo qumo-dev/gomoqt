@@ -3,6 +3,7 @@ package moqt
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"io"
 	"net"
@@ -47,6 +48,7 @@ func TestNewSession(t *testing.T) {
 			mockStream.On("Read", mock.Anything).Return(0, io.EOF) // Create a proper mock connection
 			conn := &MockStreamConn{}
 			conn.On("Context").Return(context.Background())
+			conn.On("TLS").Return(&tls.ConnectionState{NegotiatedProtocol: NextProtoMOQ})
 			// Provide a default OpenStream behavior for tests that don't explicitly set it
 			conn.On("OpenStream").Return(nil, io.EOF).Maybe()
 			conn.On("CloseWithError", mock.Anything, mock.Anything).Return(nil)
@@ -62,6 +64,7 @@ func TestNewSession(t *testing.T) {
 				assert.NotNil(t, session, "newSession should not return nil")
 				assert.Equal(t, tt.mux, session.mux, "mux should be set correctly")
 				assert.NotNil(t, session.trackReaders, "receive group stream queues should not be nil")
+				assert.Equal(t, moqtVersion, session.ConnectionState().Version, "ConnectionState() should expose the MOQ version")
 				// remote address method should return connection's address
 				assert.Equal(t, "127.0.0.1:8080", session.RemoteAddr().String(), "RemoteAddr() should forward to connection")
 			}
@@ -70,6 +73,25 @@ func TestNewSession(t *testing.T) {
 			_ = session.CloseWithError(NoError, "")
 		})
 	}
+}
+
+func TestNewSessionConnectionState(t *testing.T) {
+	conn := &MockStreamConn{}
+	conn.On("Context").Return(context.Background())
+	conn.On("TLS").Return(&tls.ConnectionState{NegotiatedProtocol: NextProtoMOQ})
+	conn.On("CloseWithError", mock.Anything, mock.Anything).Return(nil)
+	conn.On("AcceptStream", mock.Anything).Return(nil, io.EOF)
+	conn.On("AcceptUniStream", mock.Anything).Return(nil, io.EOF)
+	conn.On("RemoteAddr").Return(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080})
+
+	session := newTestSession(conn)
+
+	state := session.ConnectionState()
+	assert.Equal(t, moqtVersion, state.Version, "ConnectionState() should expose the MOQ version")
+	require.NotNil(t, state.TLS, "ConnectionState().TLS should be populated")
+	assert.Equal(t, NextProtoMOQ, state.TLS.NegotiatedProtocol, "TLS negotiated protocol should reflect quic")
+
+	_ = session.CloseWithError(NoError, "")
 }
 
 func TestNewSessionWithNilMux(t *testing.T) {

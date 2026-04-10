@@ -1,17 +1,48 @@
 package moqt
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"sync"
 	"testing"
 
+	"github.com/okdaichi/gomoqt/moqt/internal/message"
 	"github.com/okdaichi/gomoqt/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
+
+func newTrackWriterDropTestSender(t *testing.T) (*TrackWriter, *bytes.Buffer) {
+	t.Helper()
+
+	mockStream := &MockQUICStream{}
+	mockStream.On("StreamID").Return(transport.StreamID(1))
+	mockStream.On("Context").Return(context.Background())
+	mockStream.On("Read", mock.Anything).Return(0, io.EOF)
+
+	var buf bytes.Buffer
+	mockStream.On("Write", mock.Anything).Return(0, nil)
+	mockStream.WriteFunc = func(p []byte) (int, error) {
+		return buf.Write(p)
+	}
+
+	substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
+
+	openUniStreamFunc := func() (transport.SendStream, error) {
+		mockSendStream := &MockQUICSendStream{}
+		mockSendStream.On("Context").Return(context.Background())
+		mockSendStream.On("CancelWrite", mock.Anything).Return()
+		mockSendStream.On("StreamID").Return(transport.StreamID(1))
+		mockSendStream.On("Close").Return(nil)
+		mockSendStream.On("Write", mock.Anything).Return(0, nil)
+		return mockSendStream, nil
+	}
+
+	return newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {}), &buf
+}
 
 func TestNewTrackWriter(t *testing.T) {
 	openUniStreamFunc := func() (transport.SendStream, error) {
@@ -524,4 +555,49 @@ func TestTrackWriter_SkipGroups(t *testing.T) {
 	group3, err := sender.OpenGroup()
 	assert.NoError(t, err)
 	assert.Equal(t, GroupSequence(7), group3.GroupSequence())
+}
+
+func TestTrackWriter_DropGroups(t *testing.T) {
+	sender, buf := newTrackWriterDropTestSender(t)
+
+	err := sender.DropGroups(SubscribeDrop{
+		StartGroup: 2,
+		EndGroup:   4,
+		ErrorCode:  SubscribeErrorCodeInternal,
+	})
+	require.NoError(t, err)
+
+	var okMsg message.SubscribeOkMessage
+	require.NoError(t, okMsg.Decode(buf))
+	assert.Equal(t, uint64(0), okMsg.StartGroup)
+	assert.Equal(t, uint64(0), okMsg.EndGroup)
+
+	var dropMsg message.SubscribeDropMessage
+	require.NoError(t, dropMsg.Decode(buf))
+	assert.Equal(t, uint64(3), dropMsg.StartGroup)
+	assert.Equal(t, uint64(5), dropMsg.EndGroup)
+	assert.Equal(t, uint64(SubscribeErrorCodeInternal), dropMsg.ErrorCode)
+}
+
+func TestTrackWriter_DropNextGroups(t *testing.T) {
+	sender, buf := newTrackWriterDropTestSender(t)
+
+	group, err := sender.OpenGroup()
+	require.NoError(t, err)
+	require.Equal(t, GroupSequence(1), group.GroupSequence())
+
+	err = sender.DropNextGroups(3, SubscribeErrorCodeInternal)
+	require.NoError(t, err)
+
+	group2, err := sender.OpenGroup()
+	require.NoError(t, err)
+	require.Equal(t, GroupSequence(5), group2.GroupSequence())
+
+	var okMsg message.SubscribeOkMessage
+	require.NoError(t, okMsg.Decode(buf))
+
+	var dropMsg message.SubscribeDropMessage
+	require.NoError(t, dropMsg.Decode(buf))
+	assert.Equal(t, uint64(3), dropMsg.StartGroup)
+	assert.Equal(t, uint64(5), dropMsg.EndGroup)
 }

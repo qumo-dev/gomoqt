@@ -15,6 +15,10 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
+const (
+	moqtVersion = "moq-lite-03"
+)
+
 // Session represents an active MOQ session over a QUIC connection.
 // It manages bidirectional and unidirectional streams, subscriptions, and announcements for a single peer connection.
 type Session struct {
@@ -23,8 +27,6 @@ type Session struct {
 	wg sync.WaitGroup // WaitGroup for session cleanup
 
 	conn StreamConn
-
-	transport string // "quic" or "webtransport"
 
 	mux *TrackMux
 
@@ -88,28 +90,28 @@ func (s *Session) Context() context.Context {
 	return s.ctx
 }
 
+// ConnectionState returns connection metadata for the session.
+func (s *Session) ConnectionState() ConnectionState {
+	return ConnectionState{
+		Version: moqtVersion,
+		TLS:     s.conn.TLS(),
+	}
+}
+
 // LocalAddr returns the local network address.
-// The returned value implements [TransportAddr], which can be used to
-// retrieve the transport protocol ("quic" or "webtransport").
 func (s *Session) LocalAddr() net.Addr {
 	if s == nil || s.conn == nil {
 		return nil
 	}
-	return &addr{addr: s.conn.LocalAddr(), transport: s.transport}
+	return s.conn.LocalAddr()
 }
 
 // RemoteAddr returns the remote network address of the peer.
-// The returned value implements [TransportAddr], which can be used to
-// retrieve the transport protocol ("quic" or "webtransport"):
-//
-//	if ta, ok := sess.RemoteAddr().(moqt.TransportAddr); ok {
-//	    fmt.Println(ta.Transport()) // "quic" or "webtransport"
-//	}
 func (s *Session) RemoteAddr() net.Addr {
 	if s == nil || s.conn == nil {
 		return nil
 	}
-	return &addr{addr: s.conn.RemoteAddr(), transport: s.transport}
+	return s.conn.RemoteAddr()
 }
 
 // CloseWithError closes the connection with an error code and message.

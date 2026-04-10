@@ -54,13 +54,11 @@ type receiveSubscribeStream struct {
 
 	stream transport.Stream
 
-	acceptOnce sync.Once
-	// writeInfoWG tracks active WriteInfo calls so close waits for them.
-	writeInfoWG sync.WaitGroup
+	mu sync.Mutex
 
-	mu        sync.Mutex
-	config    *SubscribeConfig
-	updatedCh chan struct{}
+	config          *SubscribeConfig
+	updatedCh       chan struct{}
+	responseStarted bool
 }
 
 func (substr *receiveSubscribeStream) SubscribeID() SubscribeID {
@@ -68,35 +66,65 @@ func (substr *receiveSubscribeStream) SubscribeID() SubscribeID {
 }
 
 func (substr *receiveSubscribeStream) writeInfo(info PublishInfo) error {
-	var err error
-	substr.acceptOnce.Do(func() {
-		substr.writeInfoWG.Add(1)
-		defer substr.writeInfoWG.Done()
+	substr.mu.Lock()
+	err := substr.writeInfoLocked(info)
+	substr.mu.Unlock()
 
-		substr.mu.Lock()
-		defer substr.mu.Unlock()
-
-		ordered := boolToWireFlag(info.Ordered)
-
-		startGroup := groupSequenceToWire(info.StartGroup)
-
-		endGroup := groupSequenceToWire(info.EndGroup)
-
-		sum := message.SubscribeOkMessage{
-			PublisherPriority:   uint8(info.Priority),
-			PublisherOrdered:    ordered,
-			PublisherMaxLatency: info.MaxLatency,
-			StartGroup:          startGroup,
-			EndGroup:            endGroup,
-		}
-		err = sum.Encode(substr.stream)
-		if err != nil {
-			_ = substr.closeWithError(SubscribeErrorCodeInternal)
-			return
-		}
-	})
+	if err != nil {
+		_ = substr.closeWithError(SubscribeErrorCodeInternal)
+	}
 
 	return err
+}
+
+func (substr *receiveSubscribeStream) writeInfoLocked(info PublishInfo) error {
+	err := message.SubscribeOkMessage{
+		PublisherPriority:   uint8(info.Priority),
+		PublisherOrdered:    boolToWireFlag(info.Ordered),
+		PublisherMaxLatency: info.MaxLatency,
+		StartGroup:          groupSequenceToWire(info.StartGroup),
+		EndGroup:            groupSequenceToWire(info.EndGroup),
+	}.Encode(substr.stream)
+
+	if err != nil {
+		return err
+	}
+
+	substr.responseStarted = true
+
+	return nil
+}
+
+func (substr *receiveSubscribeStream) writeDrop(drop SubscribeDrop) error {
+	substr.mu.Lock()
+	err := error(nil)
+	if !substr.responseStarted {
+		err = substr.writeInfoLocked(PublishInfo{})
+	}
+	if err == nil {
+		err = substr.writeDropLocked(drop)
+	}
+	substr.mu.Unlock()
+
+	if err != nil {
+		_ = substr.closeWithError(SubscribeErrorCodeInternal)
+	}
+
+	return err
+}
+
+func (substr *receiveSubscribeStream) writeDropLocked(drop SubscribeDrop) error {
+	dropMsg := message.SubscribeDropMessage{
+		StartGroup: groupSequenceToWire(drop.StartGroup),
+		EndGroup:   groupSequenceToWire(drop.EndGroup),
+		ErrorCode:  uint64(drop.ErrorCode),
+	}
+
+	if err := dropMsg.Encode(substr.stream); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (substr *receiveSubscribeStream) TrackConfig() *SubscribeConfig {

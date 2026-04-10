@@ -38,12 +38,10 @@ type Dialer struct {
 	DialWebTransportFunc func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config) (*http.Response, WebTransportSession, error)
 
 	// FetchHandler handles incoming fetch requests on WebTransport sessions.
-	// Optional; when nil, fetch requests on WebTransport sessions are not handled.
+	// If nil, fetch requests on WebTransport sessions are not handled.
 	FetchHandler FetchHandler
 
-	/*
-	 * Logger
-	 */
+	// Logger is used for logging connection and session events. If nil, logging is disabled.
 	Logger *slog.Logger
 }
 

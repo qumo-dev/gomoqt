@@ -3,6 +3,7 @@ package moqt
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -201,6 +202,56 @@ func (w *TrackWriter) Context() context.Context {
 
 func (w *TrackWriter) WriteInfo(info PublishInfo) error {
 	return w.subscribeStream.writeInfo(info)
+}
+
+// DropGroups sends a SUBSCRIBE_DROP message for an explicit inclusive range.
+// The range is expressed in absolute group sequence numbers.
+func (w *TrackWriter) DropGroups(drop SubscribeDrop) error {
+	if drop.StartGroup == MinGroupSequence || drop.EndGroup == MinGroupSequence {
+		return fmt.Errorf("invalid drop range: start=%d end=%d", drop.StartGroup, drop.EndGroup)
+	}
+	if drop.StartGroup > drop.EndGroup {
+		return fmt.Errorf("invalid drop range: start=%d end=%d", drop.StartGroup, drop.EndGroup)
+	}
+
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if w.Context().Err() != nil {
+		return Cause(w.Context())
+	}
+
+	if w.subscribeStream == nil {
+		return fmt.Errorf("track writer is closed")
+	}
+
+	return w.subscribeStream.writeDrop(drop)
+}
+
+// DropNextGroups skips the next n groups and emits a SUBSCRIBE_DROP for the
+// skipped inclusive range.
+func (w *TrackWriter) DropNextGroups(n uint64, code SubscribeErrorCode) error {
+	if n == 0 {
+		return nil
+	}
+
+	for {
+		cur := w.groupSequence.Load()
+		start := GroupSequence(cur + 1)
+		end := GroupSequence(cur + n)
+
+		if end < start {
+			return fmt.Errorf("drop range overflow: start=%d end=%d", start, end)
+		}
+
+		if w.groupSequence.CompareAndSwap(cur, uint64(end)) {
+			return w.DropGroups(SubscribeDrop{
+				StartGroup: start,
+				EndGroup:   end,
+				ErrorCode:  code,
+			})
+		}
+	}
 }
 
 func (w *TrackWriter) TrackConfig() *SubscribeConfig {
