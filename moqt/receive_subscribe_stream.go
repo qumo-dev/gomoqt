@@ -43,7 +43,6 @@ func newReceiveSubscribeStream(id SubscribeID, stream transport.Stream, config *
 			}
 			substr.mu.Unlock()
 		}
-
 	}()
 
 	return substr

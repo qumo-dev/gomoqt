@@ -25,10 +25,6 @@ func (c *Config) Clone() *Config {
 		return nil
 	}
 	return &Config{
-		// ServerSetupExtensions: c.ServerSetupExtensions,
-		// MaxSubscribeID: c.MaxSubscribeID,
-		// NewSessionURI:  c.NewSessionURI,
-		// CheckRoot:      c.CheckRoot,
 		SetupTimeout: c.SetupTimeout,
 	}
 }

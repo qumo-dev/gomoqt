@@ -46,11 +46,9 @@ func Announce(announcement *Announcement, handler TrackHandler) {
 	DefaultMux.Announce(announcement, handler)
 }
 
-// TrackMux is a multiplexer for routing track requests and announcements.
-// It maintains separate trees for track routing and announcements.
-// TrackMux routes announcements and subscribe requests to the correct TrackHandler.
-// It keeps an index of broadcast paths to handlers and an announcement routing tree
-// that efficiently notifies listeners of announcements matching a prefix.
+// TrackMux routes announcements and track subscriptions to the correct TrackHandler.
+// It keeps an index of broadcast paths to handlers and an announcement tree that
+// notifies listeners matching a broadcast-path prefix.
 type TrackMux struct {
 	mu                sync.RWMutex
 	trackHandlerIndex map[BroadcastPath]*announcedTrackHandler
@@ -65,9 +63,7 @@ func (mux *TrackMux) PublishFunc(ctx context.Context, path BroadcastPath, f func
 	mux.Publish(ctx, path, TrackHandlerFunc(f))
 }
 
-// Handle registers the handler for the given track path on the TrackMux.
-// The handler remains active until the provided context is canceled.
-// Publish registers the handler for a specific track path on the TrackMux.
+// Publish registers the handler for the given track path on the TrackMux.
 // The handler remains active until the provided context is canceled.
 func (mux *TrackMux) Publish(ctx context.Context, path BroadcastPath, handler TrackHandler) {
 	if ctx == nil {
@@ -196,8 +192,8 @@ func (mux *TrackMux) Announce(announcement *Announcement, handler TrackHandler) 
 	})
 }
 
-// TrackHandler returns the Announcement and associated TrackHandler for the specified broadcast path.
-// If no handler is found, TrackHandler returns nil and NotFoundTrackHandler.
+// TrackHandler returns the Announcement and associated TrackHandler for the specified
+// broadcast path. If no handler is found, it returns nil and NotFoundTrackHandler.
 func (mux *TrackMux) TrackHandler(path BroadcastPath) (*Announcement, TrackHandler) {
 	ath := mux.findTrackHandler(path)
 	if ath == nil {
@@ -231,8 +227,7 @@ func (mux *TrackMux) findTrackHandler(path BroadcastPath) *announcedTrackHandler
 	return ath
 }
 
-// serveTrack serves the track at the specified path using the appropriate handler.
-// It finds the handler for the path and delegates the serving to it.
+// serveTrack serves the track at the specified path using the registered handler.
 func (mux *TrackMux) serveTrack(tw *TrackWriter) {
 	if tw == nil {
 		return

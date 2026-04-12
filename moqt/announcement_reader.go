@@ -103,9 +103,9 @@ func newAnnouncementReader(stream transport.Stream, prefix prefix, initSuffixes 
 	return ar
 }
 
-// AnnouncementReader receives and manages broadcast announcements from a remote peer.
-// It maintains a list of active announcements and notifies when new announcements
-// are received or existing ones are canceled.
+// AnnouncementReader receives and manages broadcast announcements for a prefix from
+// a remote peer. It maintains active announcements and notifies the caller when new
+// announcements arrive or existing ones end.
 type AnnouncementReader struct {
 	stream transport.Stream
 	prefix prefix

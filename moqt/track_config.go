@@ -4,8 +4,9 @@ import (
 	"fmt"
 )
 
-// SubscribeConfig holds subscription parameters for a track. It is used to
-// specify the delivery priority for the track.
+// SubscribeConfig holds subscription parameters for a track.
+// It describes the subscriber's requested delivery priority, ordering, latency,
+// and group range.
 type SubscribeConfig struct {
 	Priority   TrackPriority
 	Ordered    bool

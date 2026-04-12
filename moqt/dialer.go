@@ -14,11 +14,11 @@ import (
 )
 
 // Dialer is a MOQ client that can establish sessions with MOQ servers.
-// It supports both WebTransport (for browser compatibility) and raw QUIC connections.
+// It supports both WebTransport and native QUIC connections.
 //
-// A Dialer can dial multiple servers and maintain multiple active sessions.
-// Sessions are tracked and managed automatically. When the client shuts down,
-// all active sessions are terminated gracefully.
+// A Dialer can connect to multiple servers and maintain multiple active sessions.
+// When the caller closes a session or shuts down the client lifecycle, active
+// sessions are terminated gracefully.
 type Dialer struct {
 	// TLS configuration for both WebTransport and QUIC connections.
 	TLSConfig *tls.Config
@@ -45,18 +45,10 @@ type Dialer struct {
 	Logger *slog.Logger
 }
 
-// log returns Client.Logger if set, otherwise a discard logger.
-func (c *Dialer) log() *slog.Logger {
-	if c.Logger != nil {
-		return c.Logger
-	}
-	return slog.New(slog.DiscardHandler)
-}
-
 // Dial establishes a new session to the specified URL using either WebTransport (https scheme) or QUIC (moqt scheme).
 // The provided TrackMux is used to route incoming service tracks if non-nil.
 // Dial returns the newly created Session or an error.
-func (c *Dialer) Dial(ctx context.Context, urlStr string, mux *TrackMux) (*Session, error) {
+func (d *Dialer) Dial(ctx context.Context, urlStr string, mux *TrackMux) (*Session, error) {
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
 		return nil, err
@@ -65,9 +57,9 @@ func (c *Dialer) Dial(ctx context.Context, urlStr string, mux *TrackMux) (*Sessi
 	// Dial based on the scheme
 	switch parsedURL.Scheme {
 	case "https":
-		return c.DialWebTransport(ctx, parsedURL.Host, parsedURL.Path, mux)
+		return d.DialWebTransport(ctx, parsedURL.Host, parsedURL.Path, mux)
 	case "moqt":
-		return c.DialQUIC(ctx, parsedURL.Host, parsedURL.Path, mux)
+		return d.DialQUIC(ctx, parsedURL.Host, parsedURL.Path, mux)
 	default:
 		return nil, ErrInvalidScheme
 	}
@@ -113,19 +105,18 @@ func (d *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *T
 	)
 	connLogger.Info("connection established")
 
-	return newSession(conn, mux, nil, d.FetchHandler), nil
+	return newSession(conn, mux, nil, d.FetchHandler, d.Logger), nil
 }
 
-// TODO: Expose this method if QUIC is supported
 // DialQUIC establishes a new session over native QUIC by dialing the provided
 // address and negotiating the transport protocol. This uses the QUIC dial
-// function configured on the Client (DialQUICFunc) if present.
-func (c *Dialer) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux) (*Session, error) {
-	dialTimeout := c.Config.setupTimeout()
+// function configured on the Dialer (DialQUICFunc) if present.
+func (d *Dialer) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux) (*Session, error) {
+	dialTimeout := d.Config.setupTimeout()
 	dialCtx, cancelDial := context.WithTimeout(ctx, dialTimeout)
 	defer cancelDial()
 
-	tlsConfig := c.TLSConfig
+	tlsConfig := d.TLSConfig
 	if tlsConfig == nil {
 		tlsConfig = &tls.Config{}
 	} else {
@@ -136,15 +127,15 @@ func (c *Dialer) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux)
 	}
 
 	var dialFunc func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (StreamConn, error)
-	if c.DialQUICFunc != nil {
-		dialFunc = c.DialQUICFunc
+	if d.DialQUICFunc != nil {
+		dialFunc = d.DialQUICFunc
 	} else {
 		dialFunc = quicgo.DialAddrEarly
 	}
-	conn, err := dialFunc(dialCtx, addr, tlsConfig, c.QUICConfig)
+	conn, err := dialFunc(dialCtx, addr, tlsConfig, d.QUICConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	return newSession(conn, mux, nil, c.FetchHandler), nil
+	return newSession(conn, mux, nil, d.FetchHandler, d.Logger), nil
 }

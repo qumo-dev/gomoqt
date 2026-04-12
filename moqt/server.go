@@ -17,8 +17,9 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-// ListenAndServe starts a new Server bound to the specified address and TLS configuration and runs it until an error occurs.
-// This is a convenience helper that constructs a Server with the default setup handler and calls its ListenAndServe method.
+// ListenAndServe starts a new Server bound to the specified address and TLS
+// configuration. It is a convenience helper that constructs a Server with the
+// provided settings and calls its ListenAndServe method.
 func ListenAndServe(addr string, tlsConfig *tls.Config) error {
 	server := &Server{
 		Addr:      addr,
@@ -32,11 +33,12 @@ type WebTransportServer interface {
 	Close() error
 }
 
-// Server is a MOQ server that accepts both WebTransport and raw QUIC connections.
-// It handles session setup, track announcements, and subscriptions according to the MOQ Lite specification.
+// Server is a MOQ server that accepts both WebTransport and native QUIC
+// connections. It handles session setup, track announcements, and subscriptions
+// according to the MOQ Lite specification.
 //
-// The server maintains active sessions and listeners. It provides graceful shutdown capabilities and
-// can serve over multiple listeners simultaneously.
+// The server maintains active sessions and listeners and provides graceful
+// shutdown capabilities.
 type Server struct {
 	// Address to listen on, in the form "host:port".
 	Addr string
@@ -100,14 +102,6 @@ func (s *Server) init() {
 type serverContextKeyType struct{}
 
 var serverContextKey = serverContextKeyType{}
-
-// log returns Server.Logger if set, otherwise a discard logger.
-func (s *Server) log() *slog.Logger {
-	if s.Logger != nil {
-		return s.Logger
-	}
-	return slog.New(slog.DiscardHandler)
-}
 
 // ServeQUICListener accepts connections on the provided QUIC listener and handles them using the Server's configuration.
 // This runs until the listener is closed or the server shuts down.
@@ -240,8 +234,9 @@ func (u *WebTransportHandler) upgradeWebTransport(w http.ResponseWriter, r *http
 	return defaultUpgrader.Upgrade(w, r)
 }
 
-// Upgrade upgrades an incoming HTTP request to a WebTransport session and registers it with the server's session management.
-// It returns the established session or an error if the upgrade fails.
+// ServeHTTP upgrades an incoming HTTP request to a WebTransport session and
+// dispatches it to the configured handler. If the upgrade fails, it falls back
+// to FallbackHandler or returns a 400 response.
 func (u *WebTransportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	conn, err := u.upgradeWebTransport(w, r)
 	if err != nil {
@@ -276,7 +271,7 @@ func (f HandleFunc) ServeMOQ(sess *Session) {
 
 func (s *Server) handleNativeQUIC(conn StreamConn) error {
 	if s.Handler != nil {
-		sess := newSession(conn, s.TrackMux, s.connManager, s.FetchHandler)
+		sess := newSession(conn, s.TrackMux, s.connManager, s.FetchHandler, s.Logger)
 		s.Handler.ServeMOQ(sess)
 	}
 	return fmt.Errorf("no native QUIC handler configured")

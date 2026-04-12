@@ -23,8 +23,6 @@ func (substr *sendSubscribeStream) startResponseLoop() {
 		for {
 			ok, drop, err := readSubscribeResponse(substr.stream)
 			if err != nil {
-				// errors are ignored after first SUBSCRIBE_OK has been consumed
-				// by Session.Subscribe.
 				return
 			}
 
@@ -164,11 +162,7 @@ func (substr *sendSubscribeStream) close() error {
 	substr.mu.Lock()
 	defer substr.mu.Unlock()
 
-	// Close the write side of the stream
-	err := substr.stream.Close()
-	// Do not cancel the read side on a graceful close: allow peer to finish sending
-
-	return err
+	return substr.stream.Close()
 }
 
 func (substr *sendSubscribeStream) closeWithError(code SubscribeErrorCode) {

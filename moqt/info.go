@@ -2,10 +2,9 @@ package moqt
 
 import "fmt"
 
-// PublishInfo holds publication parameters for a track.
-// It is used to specify the delivery priority for the track.
-// It is sent by the publisher to the server when a track is published,
-// and is used by the server to determine how to deliver the track to subscribers.
+// PublishInfo holds publication metadata for a track.
+// It describes delivery preferences such as priority, ordering, latency, and
+// the group range that a publisher intends to serve.
 type PublishInfo struct {
 	Priority   TrackPriority
 	Ordered    bool

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -20,7 +21,8 @@ const (
 )
 
 // Session represents an active MOQ session over a QUIC connection.
-// It manages bidirectional and unidirectional streams, subscriptions, and announcements for a single peer connection.
+// It manages bidirectional and unidirectional streams, subscriptions, and
+// announcements for a single peer connection.
 type Session struct {
 	ctx context.Context // Context for the session
 
@@ -39,6 +41,7 @@ type Session struct {
 	trackWriterMapLocker sync.RWMutex
 
 	fetchHandler FetchHandler
+	logger       *slog.Logger
 
 	isTerminating atomic.Bool
 	// sessErr       error
@@ -51,6 +54,7 @@ func newSession(
 	mux *TrackMux,
 	manager *connManager,
 	fetchHandler FetchHandler,
+	logger ...*slog.Logger,
 ) *Session {
 	if mux == nil {
 		mux = DefaultMux
@@ -62,9 +66,13 @@ func newSession(
 		conn:         conn,
 		mux:          mux,
 		fetchHandler: fetchHandler,
+		logger:       nil,
 		trackReaders: make(map[SubscribeID]*TrackReader),
 		trackWriters: make(map[SubscribeID]*TrackWriter),
 		connManager:  manager,
+	}
+	if len(logger) > 0 {
+		sess.logger = logger[0]
 	}
 
 	// Listen bidirectional streams
@@ -82,6 +90,16 @@ func newSession(
 
 func (s *Session) terminating() bool {
 	return s.isTerminating.Load()
+}
+
+func (s *Session) logError(msg string, err error, args ...any) {
+	if s == nil || err == nil {
+		return
+	}
+
+	if s.logger != nil {
+		s.logger.Error(msg, append(args, "error", err)...)
+	}
 }
 
 // Context returns the session's context which is canceled when the session
@@ -114,7 +132,7 @@ func (s *Session) RemoteAddr() net.Addr {
 	return s.conn.RemoteAddr()
 }
 
-// CloseWithError closes the connection with an error code and message.
+// CloseWithError closes the session with an error code and message.
 func (s *Session) CloseWithError(code SessionErrorCode, msg string) error {
 	if s.terminating() {
 		return nil
@@ -493,7 +511,7 @@ func (sess *Session) processBiStream(stream transport.Stream) {
 
 		prefix := apm.TrackPrefix
 
-		annstr := newAnnouncementWriter(stream, prefix)
+		annstr := newAnnouncementWriter(stream, prefix, sess.logger)
 
 		sess.mux.serveAnnouncements(annstr)
 
@@ -551,7 +569,7 @@ func (sess *Session) processBiStream(stream transport.Stream) {
 		}
 
 		w := newGroupWriter(stream, req.GroupSequence, nil)
-		if safeServeFetch(handler, w, req) {
+		if err := safeServeFetch(handler, w, req); err != nil {
 			cancelStreamWithError(stream, transport.StreamErrorCode(FetchErrorCodeInternal))
 			return
 		}

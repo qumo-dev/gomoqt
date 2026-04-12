@@ -1,90 +1,71 @@
-// Package moqt implements the protocol handling for Media over QUIC.
-// This follows the MOQ Lite specification (draft-lcurley-moq-lite).
+// Package moqt provides MOQ Lite client and server primitives for Media over QUIC.
+// It follows the MOQ Lite specification (draft-lcurley-moq-lite-03) and supports both
+// native QUIC and WebTransport transports.
 //
 // # Clients
 //
-// Dial, DialWebTransport, DialQUIC create a new MOQ client session.
+// Use a Dialer to create client sessions from a URL. The Dial method selects the
+// transport from the URL scheme: https for WebTransport and moqt for native QUIC.
+// DialWebTransport and DialQUIC can also be used directly when you already know the
+// target transport.
 //
-/*
-	client := &moqt.Client{}
-
-	sess, err := client.Dial(ctx, "https://example.com:4433", mux)
-	...
-	session, err := client.DialWebTransport(ctx, "example.com:4433", "/path", mux)
-	...
-	sess, err := client.DialQUIC(ctx, "example.com:4433", "/path", mux)
-*/
+// Native QUIC client example:
+//
+//	client := &moqt.Dialer{}
+//	sess, err := client.Dial(ctx, "moqt://example.com:4433/live", mux)
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	defer sess.Close()
+//
+// WebTransport client example:
+//
+//	client := &moqt.Dialer{}
+//	sess, err := client.Dial(ctx, "https://example.com:4433/live", mux)
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	defer sess.Close()
 //
 // # Servers
 //
-// Server listens for incoming connections and handles subscriptions.
-// ListenAndServe starts the server and routes incoming connections to a setup handler. The setup handler is usually nil, which means to use DefaultRouter.
-// Handle and HandleFunc register handlers to DefaultRouter for a URL paths.
+// Use Server or ListenAndServe to accept incoming native QUIC connections. Server
+// routes those sessions through Handler. For HTTP upgrade-based WebTransport
+// endpoints, WebTransportHandler upgrades the request, creates a session, and
+// dispatches it to Handler. TrackMux can be used to route announcements and
+// subscriptions for published tracks.
 //
-/*
-	moqt.Handle("/foo", fooHandler)
-
-	moqt.HandleFunc("/bar", func(w moqt.SetupResponseWriter, r *moqt.SetupRequest) {
-	    // handle setup request
-	})
-
-	err := moqt.ListenAndServe(":4433", tlsConfig)
-	if err != nil {
-	    log.Fatal(err)
-	}
-*/
+// Native QUIC server example:
 //
-// moqt.Accept accepts a new MOQ server session from a setup request within a setup handler.
+//	server := &moqt.Server{
+//		Addr:      ":4433",
+//		TLSConfig: tlsConfig,
+//		Handler: moqt.HandleFunc(func(sess *moqt.Session) {
+//			defer sess.Close()
+//			// handle native QUIC session
+//		}),
+//		TrackMux: moqt.NewTrackMux(),
+//	}
+//	if err := server.ListenAndServe(); err != nil {
+//		log.Fatal(err)
+//	}
 //
-/*
-	moqt.HandleFunc("/broadcast", func(w moqt.SetupResponseWriter, r *moqt.SetupRequest) {
-	    sess, err := moqt.Accept(w, r, nil)
-		if err != nil {
-		    w.Reject(moqt.ProtocolViolationErrorCode)
-		    return
-		}
-		// handle session
-	})
-*/
+// WebTransport server example:
 //
-// More control over the server can be achieved by creating a custom moqt.Server.
+//	handler := &moqt.WebTransportHandler{
+//		TrackMux: moqt.NewTrackMux(),
+//		Handler: moqt.HandleFunc(func(sess *moqt.Session) {
+//			defer sess.Close()
+//			// handle WebTransport session
+//		}),
+//	}
+//	if err := http.ListenAndServe(":8080", handler); err != nil {
+//		log.Fatal(err)
+//	}
 //
-/*
-	server := &moqt.Server{
-	    Addr:       	":4433",
-		TLSConfig:  	tlsConfig,
-		QUICConfig: 	quicConfig,
-		SetupHandler: 	myRouter,
-		Logger:     	myLogger,
-	}
-	err := server.ListenAndServe()
-	if err != nil {
-	    log.Fatal(err)
-	}
-*/
+// # Transport customization
 //
-// # Underlying Transport
-//
-// MOQ supports both QUIC and WebTransport.
-// The package abstracts the underlying transports into the `quic` and `webtransport` subpackages.
-// By default it uses github.com/quic-go/quic-go for QUIC and github.com/quic-go/webtransport for WebTransport.
-// Custom transports can be provided by setting the client's `DialAddrFunc` and `DialWebTransportFunc`,
-// and the server's `ListenFunc` and `NewWebtransportServerFunc`.
-//
-// Client example:
-/*
-	client := &moqt.Client{
-	    DialAddrFunc: myDialQUICFunc,
-	    DialWebTransportFunc: myDialWebTransportFunc,
-	}
-*/
-//
-// Server example:
-//
-/*
-	server := &moqt.Server{
-	    ListenFunc: myListenQUICFunc,
-	    NewWebtransportServerFunc: myNewWebTransportServerFunc,
-	}
-*/
+// Custom transport hooks can be supplied through Dialer.DialQUICFunc,
+// Dialer.DialWebTransportFunc, Server.ListenFunc, Server.WebTransportServer, and
+// WebTransportHandler.UpgradeFunc.
 package moqt

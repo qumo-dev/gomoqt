@@ -30,13 +30,13 @@ type AnnounceErrorCode uint32
 const (
 	AnnounceErrorCodeInternal AnnounceErrorCode = 0x0
 
-	// Subscriber
+	// Subscriber-side errors.
 	AnnounceErrorCodeDuplicated    AnnounceErrorCode = 0x1
 	AnnounceErrorCodeInvalidStatus AnnounceErrorCode = 0x2
-	UninterestedErrorCode          AnnounceErrorCode = 0x3 // TODO: Is this necessary?
+	UninterestedErrorCode          AnnounceErrorCode = 0x3
 
-	// Publisher
-	BannedPrefixErrorCode          AnnounceErrorCode = 0x4 // TODO: Is this necessary?
+	// Publisher-side errors.
+	BannedPrefixErrorCode          AnnounceErrorCode = 0x4
 	AnnounceErrorCodeInvalidPrefix AnnounceErrorCode = 0x5
 )
 
@@ -87,15 +87,13 @@ type SubscribeErrorCode uint32
 const (
 	SubscribeErrorCodeInternal SubscribeErrorCode = 0x00
 
-	//
+	// Range and identity validation errors.
 	SubscribeErrorCodeInvalidRange SubscribeErrorCode = 0x01
-	//
-	SubscribeErrorCodeDuplicateID SubscribeErrorCode = 0x02
-	//
-	SubscribeErrorCodeNotFound SubscribeErrorCode = 0x03
-	//
-	SubscribeErrorCodeUnauthorized SubscribeErrorCode = 0x04 // TODO: Is this necessary?
-	// Subscriber
+	SubscribeErrorCodeDuplicateID  SubscribeErrorCode = 0x02
+	SubscribeErrorCodeNotFound     SubscribeErrorCode = 0x03
+	SubscribeErrorCodeUnauthorized SubscribeErrorCode = 0x04
+
+	// Subscriber-side timeout.
 	SubscribeErrorCodeTimeout SubscribeErrorCode = 0x05
 )
 
@@ -284,10 +282,10 @@ const (
 
 	OutOfRangeErrorCode         GroupErrorCode = 0x02
 	ExpiredGroupErrorCode       GroupErrorCode = 0x03
-	SubscribeCanceledErrorCode  GroupErrorCode = 0x04 // TODO: Is this necessary?
+	SubscribeCanceledErrorCode  GroupErrorCode = 0x04
 	PublishAbortedErrorCode     GroupErrorCode = 0x05
 	ClosedSessionGroupErrorCode GroupErrorCode = 0x06
-	InvalidSubscribeIDErrorCode GroupErrorCode = 0x07 // TODO: Is this necessary?
+	InvalidSubscribeIDErrorCode GroupErrorCode = 0x07
 )
 
 // GroupErrorText returns a text for the group error code.

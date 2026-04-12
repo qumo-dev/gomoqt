@@ -29,16 +29,16 @@ func validateFetchHandler(handler FetchHandler) error {
 	return nil
 }
 
-func safeServeFetch(handler FetchHandler, w *GroupWriter, r *FetchRequest) (failed bool) {
-	if err := validateFetchHandler(handler); err != nil {
-		return true
+func safeServeFetch(handler FetchHandler, w *GroupWriter, r *FetchRequest) (err error) {
+	if e := validateFetchHandler(handler); e != nil {
+		return e
 	}
 
 	defer func() {
-		if recover() != nil {
-			failed = true
+		if p := recover(); p != nil {
+			err = fmt.Errorf("panic during fetch handling: %v", p)
 		}
 	}()
 	handler.ServeFetch(w, r)
-	return false
+	return nil
 }

@@ -3,6 +3,7 @@ package moqt
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
@@ -10,7 +11,7 @@ import (
 )
 
 // newAnnouncementWriter creates a new AnnouncementWriter for the given stream and prefix.
-func newAnnouncementWriter(stream transport.Stream, prefix prefix) *AnnouncementWriter {
+func newAnnouncementWriter(stream transport.Stream, prefix prefix, logger *slog.Logger) *AnnouncementWriter {
 	if !isValidPrefix(prefix) {
 		panic("invalid prefix for AnnouncementWriter")
 	}
@@ -21,6 +22,7 @@ func newAnnouncementWriter(stream transport.Stream, prefix prefix) *Announcement
 		ctx:      context.WithValue(stream.Context(), biStreamTypeCtxKey, message.StreamTypeAnnounce),
 		actives:  make(map[suffix]*activeAnnouncement),
 		initDone: make(chan struct{}),
+		logger:   logger,
 	}
 
 	return sas
@@ -32,6 +34,7 @@ type AnnouncementWriter struct {
 	prefix prefix
 	stream transport.Stream
 	ctx    context.Context
+	logger *slog.Logger
 
 	mu      sync.RWMutex
 	actives map[suffix]*activeAnnouncement
@@ -39,6 +42,15 @@ type AnnouncementWriter struct {
 	initDone chan struct{}
 	initOnce sync.Once
 	initErr  error
+}
+
+func (aw *AnnouncementWriter) logError(msg string, err error, args ...any) {
+	if aw == nil || err == nil {
+		return
+	}
+	if aw.logger != nil {
+		aw.logger.Error(msg, append(args, "error", err)...)
+	}
 }
 
 // init snapshots the currently active announcements, sends an ACTIVE AnnounceMessage
@@ -114,11 +126,12 @@ func (aw *AnnouncementWriter) registerEndHandler(sfx suffix, ann *Announcement) 
 		current, exists := aw.actives[sfx]
 		if exists && current.announcement == ann {
 			delete(aw.actives, sfx)
-			if err := (message.AnnounceMessage{
+			err := message.AnnounceMessage{
 				AnnounceStatus:      message.ENDED,
 				BroadcastPathSuffix: sfx,
-			}).Encode(aw.stream); err != nil {
-				// Silently ignore encode errors
+			}.Encode(aw.stream)
+			if err != nil {
+				aw.logError("failed to encode ANNOUNCE end message", err)
 			}
 		}
 	})
@@ -134,7 +147,7 @@ func (aw *AnnouncementWriter) registerEndHandler(sfx suffix, ann *Announcement) 
 			AnnounceStatus:      message.ENDED,
 			BroadcastPathSuffix: sfx,
 		}).Encode(aw.stream); err != nil {
-			// Silently ignore encode errors
+			aw.logError("failed to encode ANNOUNCE end message", err)
 		}
 	}
 }
