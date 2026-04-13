@@ -233,7 +233,8 @@ export class ReceiveSubscribeStream {
 			return err;
 		}
 
-		const i = info ?? { priority: 0, ordered: false, maxLatency: 0, startGroup: 0, endGroup: 0 };
+		const i = info ??
+			{ priority: 0, ordered: false, maxLatency: 0, startGroup: 0, endGroup: 0 };
 		// Write type byte for SUBSCRIBE_OK
 		let [, writeErr] = await writeVarint(this.#stream.writable, MESSAGE_TYPE_SUBSCRIBE_OK);
 		if (writeErr) {
@@ -318,9 +319,9 @@ export class ReceiveSubscribeStream {
 async function readSubscribeResponse(
 	r: Reader,
 ): Promise<
-	[SubscribeOkMessage, undefined, undefined] |
-	[undefined, SubscribeDropMessage, undefined] |
-	[undefined, undefined, Error]
+	| [SubscribeOkMessage, undefined, undefined]
+	| [undefined, SubscribeDropMessage, undefined]
+	| [undefined, undefined, Error]
 > {
 	// Read the type byte: 0x0 = SUBSCRIBE_OK, 0x1 = SUBSCRIBE_DROP
 	const [msgType, , err] = await readVarint(r);
@@ -346,6 +347,10 @@ async function readSubscribeResponse(
 			return [undefined, msg, undefined];
 		}
 		default:
-			return [undefined, undefined, new Error(`unexpected SUBSCRIBE response type: ${msgType}`)];
+			return [
+				undefined,
+				undefined,
+				new Error(`unexpected SUBSCRIBE response type: ${msgType}`),
+			];
 	}
 }

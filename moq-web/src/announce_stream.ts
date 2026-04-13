@@ -91,7 +91,11 @@ export class AnnouncementWriter {
 
 		// Send ACTIVE AnnounceMessage for each initial announcement
 		for (const [sfx, announcement] of this.#announcements.entries()) {
-			const msg = new AnnounceMessage({ suffix: sfx, active: true, hops: announcement.hops + 1 });
+			const msg = new AnnounceMessage({
+				suffix: sfx,
+				active: true,
+				hops: announcement.hops + 1,
+			});
 			const err = await msg.encode(this.#stream.writable);
 			if (err) {
 				return err;

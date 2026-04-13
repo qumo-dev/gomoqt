@@ -63,7 +63,7 @@ const OriginalWebTransport = (globalThis as any).WebTransport;
 (globalThis as any).WebTransport = MockWebTransport;
 
 // Import after setting up mocks
-import { Client, ALPN } from "./client.ts";
+import { ALPN, Client } from "./client.ts";
 import { TrackMux } from "./track_mux.ts";
 import type { MOQOptions } from "./options.ts";
 

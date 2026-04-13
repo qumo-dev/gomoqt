@@ -247,7 +247,6 @@ class MockWebTransportSession implements StreamConn {
 	get acceptStreamWrittenData(): Uint8Array[][] {
 		return this.#acceptStreamWrittenData;
 	}
-
 }
 
 Deno.test({
@@ -396,8 +395,12 @@ Deno.test({
 
 				const written = mock.acceptStreamWrittenData[0] ?? [];
 				const rsp = new ProbeMessage({ bitrate: 4321 });
-				const expectedResponse = await encodeMessageToUint8Array(async (w) => rsp.encode(w));
-				const actualResponse = new Uint8Array(written.flatMap((chunk) => Array.from(chunk)));
+				const expectedResponse = await encodeMessageToUint8Array(async (w) =>
+					rsp.encode(w)
+				);
+				const actualResponse = new Uint8Array(
+					written.flatMap((chunk) => Array.from(chunk)),
+				);
 				assertEquals(actualResponse, expectedResponse);
 
 				await session.close();

@@ -65,18 +65,26 @@ Deno.test("FetchMessage - encode/decode roundtrip", async (t) => {
 		});
 	}
 
-	await t.step("decode should return error when readVarint fails for message length", async () => {
-		const buffer = Buffer.make(0);
-		const message = new FetchMessage({});
-		const err = await message.decode(buffer);
-		assertEquals(err !== undefined, true);
-	});
+	await t.step(
+		"decode should return error when readVarint fails for message length",
+		async () => {
+			const buffer = Buffer.make(0);
+			const message = new FetchMessage({});
+			const err = await message.decode(buffer);
+			assertEquals(err !== undefined, true);
+		},
+	);
 
 	await t.step("decode should return error on message length mismatch", async () => {
 		const buffer = Buffer.make(20);
 		// Write message length = 10, then only fill part of the data
 		// The extra bytes after proper decode will trigger mismatch
-		const message = new FetchMessage({ broadcastPath: "a", trackName: "b", priority: 1, groupSequence: 1 });
+		const message = new FetchMessage({
+			broadcastPath: "a",
+			trackName: "b",
+			priority: 1,
+			groupSequence: 1,
+		});
 		const encodeErr = await message.encode(buffer);
 		assertEquals(encodeErr, undefined);
 

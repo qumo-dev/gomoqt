@@ -303,7 +303,11 @@ export class Session {
 			return [undefined, err];
 		}
 
-		const group = new GroupReader(this.#ctx, stream.readable, new GroupMessage({ sequence: req.groupSequence }));
+		const group = new GroupReader(
+			this.#ctx,
+			stream.readable,
+			new GroupMessage({ sequence: req.groupSequence }),
+		);
 
 		// Cancel the group when the request is done
 		req.done().then(() => {
@@ -435,7 +439,11 @@ export class Session {
 			done: fetchCtx.done(),
 		});
 
-		const group = new GroupWriter(fetchCtx, stream.writable, new GroupMessage({ sequence: fm.groupSequence }));
+		const group = new GroupWriter(
+			fetchCtx,
+			stream.writable,
+			new GroupMessage({ sequence: fm.groupSequence }),
+		);
 
 		try {
 			await handler.serveFetch(group, req);

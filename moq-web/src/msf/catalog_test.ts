@@ -2,15 +2,15 @@ import {
 	applyCatalogDelta,
 	decodeLocation,
 	effectiveNamespace,
-	parseTrack,
 	parseCatalog,
 	parseCatalogDelta,
+	parseTrack,
 	stringifyCatalog,
-	validateCatalog,
-	validateTrack,
-	validateEventTimelineRecord,
-	ValidationError,
 	trackId,
+	validateCatalog,
+	validateEventTimelineRecord,
+	validateTrack,
+	ValidationError,
 } from "./mod.ts";
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 

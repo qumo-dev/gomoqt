@@ -2,10 +2,7 @@ import { assertEquals, assertExists } from "@std/assert";
 import { spy } from "@std/testing/mock";
 import { Announcement, AnnouncementReader, AnnouncementWriter } from "./announce_stream.ts";
 import { background, withCancelCause } from "@okdaichi/golikejs/context";
-import {
-	AnnounceMessage,
-	AnnouncePleaseMessage,
-} from "./internal/message/mod.ts";
+import { AnnounceMessage, AnnouncePleaseMessage } from "./internal/message/mod.ts";
 import { MockReceiveStream, MockSendStream, MockStream } from "./mock_stream_test.ts";
 import { Buffer } from "@okdaichi/golikejs/bytes";
 
