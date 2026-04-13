@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"sync"
 	"testing"
 	"time"
@@ -20,10 +19,7 @@ func BenchmarkSession_Subscribe(b *testing.B) {
 
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("size-%d", size), func(b *testing.B) {
-			conn := &MockStreamConn{}
-			conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) { return nil, io.EOF }
-			conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) { return nil, io.EOF }
-			conn.RemoteAddrFunc = func() net.Addr { return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080} }
+			conn := &FakeStreamConn{}
 
 			// Mock OpenStream to return streams that will complete the subscribe handshake
 			streamIndex := 0
@@ -84,10 +80,7 @@ func BenchmarkSession_ConcurrentSubscribe(b *testing.B) {
 
 	for _, conc := range concurrency {
 		b.Run(fmt.Sprintf("goroutines-%d", conc), func(b *testing.B) {
-			conn := &MockStreamConn{}
-			conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) { return nil, io.EOF }
-			conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) { return nil, io.EOF }
-			conn.RemoteAddrFunc = func() net.Addr { return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080} }
+			conn := &FakeStreamConn{}
 
 			var streamMu sync.Mutex
 			streamIndex := 0
@@ -140,10 +133,7 @@ func BenchmarkSession_ConcurrentSubscribe(b *testing.B) {
 
 // BenchmarkSession_TrackReaderOperations benchmarks adding/removing track readers
 func BenchmarkSession_TrackReaderOperations(b *testing.B) {
-	conn := &MockStreamConn{}
-	conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) { return nil, io.EOF }
-	conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) { return nil, io.EOF }
-	conn.RemoteAddrFunc = func() net.Addr { return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080} }
+	conn := &FakeStreamConn{}
 
 	mux := NewTrackMux()
 	session := newSession(conn, mux, nil, nil)
@@ -173,10 +163,7 @@ func BenchmarkSession_TrackReaderOperations(b *testing.B) {
 
 // BenchmarkSession_TrackWriterOperations benchmarks adding/removing track writers
 func BenchmarkSession_TrackWriterOperations(b *testing.B) {
-	conn := &MockStreamConn{}
-	conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) { return nil, io.EOF }
-	conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) { return nil, io.EOF }
-	conn.RemoteAddrFunc = func() net.Addr { return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080} }
+	conn := &FakeStreamConn{}
 
 	mux := NewTrackMux()
 	session := newSession(conn, mux, nil, nil)
@@ -215,10 +202,7 @@ func BenchmarkSession_MapLookup(b *testing.B) {
 
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("size-%d", size), func(b *testing.B) {
-			conn := &MockStreamConn{}
-			conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) { return nil, io.EOF }
-			conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) { return nil, io.EOF }
-			conn.RemoteAddrFunc = func() net.Addr { return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080} }
+			conn := &FakeStreamConn{}
 
 			mux := NewTrackMux()
 			session := newSession(conn, mux, nil, nil)
@@ -264,10 +248,7 @@ func BenchmarkSession_MemoryAllocation(b *testing.B) {
 			b.ReportAllocs()
 
 			for range b.N {
-				conn := &MockStreamConn{}
-				conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) { return nil, io.EOF }
-				conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) { return nil, io.EOF }
-				conn.RemoteAddrFunc = func() net.Addr { return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080} }
+				conn := &FakeStreamConn{}
 
 				mux := NewTrackMux()
 				session := newSession(conn, mux, nil, nil)
@@ -296,11 +277,8 @@ func BenchmarkSession_ContextCancellation(b *testing.B) {
 	for range b.N {
 		ctx, cancel := context.WithCancel(context.Background())
 
-		conn := &MockStreamConn{}
+		conn := &FakeStreamConn{}
 		conn.ParentCtx = ctx
-		conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) { return nil, io.EOF }
-		conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) { return nil, io.EOF }
-		conn.RemoteAddrFunc = func() net.Addr { return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080} }
 
 		mux := NewTrackMux()
 		session := newSession(conn, mux, nil, nil)

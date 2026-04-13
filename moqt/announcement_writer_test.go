@@ -17,11 +17,14 @@ import (
 
 // newTestAnnouncementWriter creates a test AnnouncementWriter with default setup.
 // It uses the default prefix "/test/" unless a custom prefix is provided.
-// mockSetups allows passing custom mock configuration functions.
-func newTestAnnouncementWriter(t *testing.T, f func(*FakeQUICStream)) *AnnouncementWriter {
+// Optional setup functions configure the underlying FakeQUICStream.
+func newTestAnnouncementWriter(t *testing.T, opts ...func(*FakeQUICStream)) *AnnouncementWriter {
 	mockStream := &FakeQUICStream{}
-	f(mockStream)
-
+	for _, f := range opts {
+		if f != nil {
+			f(mockStream)
+		}
+	}
 	return newAnnouncementWriter(mockStream, "/test/", nil)
 }
 
@@ -55,8 +58,6 @@ func TestAnnouncementWriter_Init(t *testing.T) {
 			expectError:      false,
 			expectedActives:  0,
 			expectedSuffixes: []string{},
-			setupMocks: func(mockStream *FakeQUICStream) {
-			},
 		},
 		"single active announcement": {
 			initialAnnouncements: func(ctx context.Context) map[*Announcement]struct{} {
@@ -66,8 +67,6 @@ func TestAnnouncementWriter_Init(t *testing.T) {
 			expectError:      false,
 			expectedActives:  1,
 			expectedSuffixes: []string{"stream1"},
-			setupMocks: func(mockStream *FakeQUICStream) {
-			},
 		},
 		"multiple active announcements": {
 			initialAnnouncements: func(ctx context.Context) map[*Announcement]struct{} {
@@ -78,8 +77,6 @@ func TestAnnouncementWriter_Init(t *testing.T) {
 			expectError:      false,
 			expectedActives:  2,
 			expectedSuffixes: []string{"stream1", "stream2"},
-			setupMocks: func(mockStream *FakeQUICStream) {
-			},
 		},
 		"inactive announcement": {
 			initialAnnouncements: func(ctx context.Context) map[*Announcement]struct{} {
@@ -90,8 +87,6 @@ func TestAnnouncementWriter_Init(t *testing.T) {
 			expectError:      false,
 			expectedActives:  0,
 			expectedSuffixes: []string{},
-			setupMocks: func(mockStream *FakeQUICStream) {
-			},
 		},
 		"write error": {
 			initialAnnouncements: func(ctx context.Context) map[*Announcement]struct{} {
@@ -112,16 +107,13 @@ func TestAnnouncementWriter_Init(t *testing.T) {
 			expectError:      false,
 			expectedActives:  0,
 			expectedSuffixes: []string{},
-			setupMocks: func(mockStream *FakeQUICStream) {
-			},
 		},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			aw := newTestAnnouncementWriter(t, tt.setupMocks)
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx := t.Context()
 			announcements := tt.initialAnnouncements(ctx)
 
 			err := aw.init(announcements)
@@ -175,8 +167,7 @@ func TestAnnouncementWriter_SendAnnouncement_AfterInitError(t *testing.T) {
 }
 
 func TestAnnouncementWriter_Init_OnlyOnce(t *testing.T) {
-	aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-	})
+	aw := newTestAnnouncementWriter(t)
 
 	ann, _ := NewAnnouncement(context.Background(), BroadcastPath("/test/stream1"))
 
@@ -212,8 +203,7 @@ func TestAnnouncementWriter_Init_StreamError(t *testing.T) {
 }
 
 func TestAnnouncementWriter_Init_DuplicateAnnouncements(t *testing.T) {
-	aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-	})
+	aw := newTestAnnouncementWriter(t)
 
 	ann1, _ := NewAnnouncement(context.Background(), BroadcastPath("/test/stream1"))
 	ann2, _ := NewAnnouncement(context.Background(), BroadcastPath("/test/stream1")) // Same suffix - should replace first
@@ -241,8 +231,7 @@ func TestAnnouncementWriter_Init_DuplicateAnnouncements(t *testing.T) {
 }
 
 func TestAnnouncementWriter_Init_MultipleDifferentAnnouncements(t *testing.T) {
-	aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-	})
+	aw := newTestAnnouncementWriter(t)
 
 	// Create two announcements with different paths
 	ann1, _ := NewAnnouncement(context.Background(), BroadcastPath("/test/stream1"))
@@ -263,8 +252,7 @@ func TestAnnouncementWriter_Init_DeadlockIssue(t *testing.T) {
 	// This test verifies that init() with duplicate announcements doesn't cause deadlock
 	// after the implementation was fixed to use goroutines in OnEnd callbacks.
 
-	aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-	})
+	aw := newTestAnnouncementWriter(t)
 
 	ann1, _ := NewAnnouncement(context.Background(), BroadcastPath("/test/stream1"))
 	ann2, _ := NewAnnouncement(context.Background(), BroadcastPath("/test/stream1")) // Same suffix - should replace first
@@ -339,13 +327,7 @@ func TestAnnouncementWriter_SendAnnouncement(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			mockSetup := func(m *FakeQUICStream) {}
-			if !tt.expectError {
-				mockSetup = func(m *FakeQUICStream) {
-				}
-			}
-
-			aw := newTestAnnouncementWriter(t, mockSetup)
+			aw := newTestAnnouncementWriter(t)
 			ann, _ := NewAnnouncement(context.Background(), BroadcastPath(tt.broadcastPath))
 
 			// Initialize the AnnouncementWriter first
@@ -431,8 +413,7 @@ func TestAnnouncementWriter_SendAnnouncement_WriteError(t *testing.T) {
 
 func TestAnnouncementWriter_Close(t *testing.T) {
 	t.Run("closes with no active announcements", func(t *testing.T) {
-		aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-		})
+		aw := newTestAnnouncementWriter(t)
 
 		err := aw.Close()
 
@@ -443,8 +424,7 @@ func TestAnnouncementWriter_Close(t *testing.T) {
 	})
 
 	t.Run("closes with active announcements", func(t *testing.T) {
-		aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-		})
+		aw := newTestAnnouncementWriter(t)
 
 		// Initialize the AnnouncementWriter first
 		err := aw.init(map[*Announcement]struct{}{})
@@ -499,8 +479,7 @@ func TestAnnouncementWriter_CloseWithError(t *testing.T) {
 
 		for name, tt := range tests {
 			t.Run(name, func(t *testing.T) {
-				aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-				})
+				aw := newTestAnnouncementWriter(t)
 
 				err := aw.CloseWithError(tt.errorCode)
 
@@ -513,8 +492,7 @@ func TestAnnouncementWriter_CloseWithError(t *testing.T) {
 	})
 
 	t.Run("closes with error and active announcements", func(t *testing.T) {
-		aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-		})
+		aw := newTestAnnouncementWriter(t)
 
 		// Initialize the AnnouncementWriter first
 		err := aw.init(map[*Announcement]struct{}{})
@@ -539,8 +517,7 @@ func TestAnnouncementWriter_CloseWithError(t *testing.T) {
 }
 
 func TestAnnouncementWriter_SendAnnouncement_MultipleAnnouncements(t *testing.T) {
-	aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-	})
+	aw := newTestAnnouncementWriter(t)
 
 	ann1, _ := NewAnnouncement(context.Background(), BroadcastPath("/test/stream1"))
 	ann2, _ := NewAnnouncement(context.Background(), BroadcastPath("/test/stream2"))
@@ -563,8 +540,7 @@ func TestAnnouncementWriter_SendAnnouncement_MultipleAnnouncements(t *testing.T)
 }
 
 func TestAnnouncementWriter_SendAnnouncement_ReplaceExisting(t *testing.T) {
-	aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-	})
+	aw := newTestAnnouncementWriter(t)
 
 	ann1, _ := NewAnnouncement(context.Background(), BroadcastPath("/test/stream1"))
 	ann2, _ := NewAnnouncement(context.Background(), BroadcastPath("/test/stream1")) // Same suffix
@@ -591,8 +567,7 @@ func TestAnnouncementWriter_SendAnnouncement_ReplaceExisting(t *testing.T) {
 }
 
 func TestAnnouncementWriter_SendAnnouncement_SameInstance(t *testing.T) {
-	aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-	})
+	aw := newTestAnnouncementWriter(t)
 	ann, _ := NewAnnouncement(context.Background(), BroadcastPath("/test/stream1"))
 
 	// Initialize the AnnouncementWriter first
@@ -610,8 +585,7 @@ func TestAnnouncementWriter_SendAnnouncement_SameInstance(t *testing.T) {
 }
 
 func TestAnnouncementWriter_AnnouncementEnd_BackgroundProcessing(t *testing.T) {
-	aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-	})
+	aw := newTestAnnouncementWriter(t)
 	ann, end := NewAnnouncement(context.Background(), BroadcastPath("/test/stream1"))
 
 	// Initialize the AnnouncementWriter first
@@ -704,8 +678,7 @@ func TestAnnouncementWriter_Performance_LargeNumberOfAnnouncements(t *testing.T)
 		t.Skip("Skipping performance test in short mode")
 	}
 
-	aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-	})
+	aw := newTestAnnouncementWriter(t)
 
 	// Initialize the AnnouncementWriter first
 	err := aw.init(map[*Announcement]struct{}{})
@@ -727,8 +700,7 @@ func TestAnnouncementWriter_Performance_LargeNumberOfAnnouncements(t *testing.T)
 }
 
 func TestAnnouncementWriter_CleanupResourceLeaks(t *testing.T) {
-	aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-	})
+	aw := newTestAnnouncementWriter(t)
 
 	// Initialize the AnnouncementWriter first
 	err := aw.init(map[*Announcement]struct{}{})
@@ -772,8 +744,7 @@ func TestAnnouncementWriter_CleanupResourceLeaks(t *testing.T) {
 }
 
 func TestAnnouncementWriter_PartialCleanup(t *testing.T) {
-	aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-	})
+	aw := newTestAnnouncementWriter(t)
 
 	// Initialize the AnnouncementWriter first
 	err := aw.init(map[*Announcement]struct{}{})
@@ -849,8 +820,7 @@ func TestAnnouncementWriter_ConcurrentAccess(t *testing.T) {
 	// can deadlock between mutex acquisition and OnEnd callback processing.
 	// The implementation should be fixed to avoid holding the mutex while calling End().
 
-	aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-	})
+	aw := newTestAnnouncementWriter(t)
 
 	// Initialize the AnnouncementWriter first
 	err := aw.init(map[*Announcement]struct{}{})
@@ -900,8 +870,7 @@ func TestAnnouncementWriter_ConcurrentAccess_SameSuffix_DeadlockRisk(t *testing.
 	// This test verifies that concurrent access to the same suffix doesn't cause deadlock
 	// after the implementation was fixed to use goroutines in OnEnd callbacks.
 
-	aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-	})
+	aw := newTestAnnouncementWriter(t)
 
 	// Initialize the AnnouncementWriter first
 	err := aw.init(map[*Announcement]struct{}{})
@@ -975,8 +944,7 @@ func TestAnnouncementWriter_ConcurrentAccess_SameSuffix_DeadlockRisk(t *testing.
 }
 
 func TestAnnouncementWriter_MultipleClose(t *testing.T) {
-	aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-	})
+	aw := newTestAnnouncementWriter(t)
 
 	err1 := aw.Close()
 	assert.NoError(t, err1)
@@ -988,8 +956,7 @@ func TestAnnouncementWriter_MultipleClose(t *testing.T) {
 }
 
 func TestAnnouncementWriter_Context(t *testing.T) {
-	aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-	})
+	aw := newTestAnnouncementWriter(t)
 
 	assert.NotNil(t, aw.Context())
 	assert.NoError(t, aw.Context().Err())
@@ -1001,8 +968,7 @@ func TestAnnouncementWriter_StressTest_HeavyConcurrentAccess(t *testing.T) {
 		t.Skip("Skipping stress test in short mode")
 	}
 
-	aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-	})
+	aw := newTestAnnouncementWriter(t)
 
 	// Initialize the AnnouncementWriter first
 	err := aw.init(map[*Announcement]struct{}{})

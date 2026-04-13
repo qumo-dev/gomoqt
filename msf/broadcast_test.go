@@ -13,7 +13,12 @@ func TestBroadcastRegisterTrack_UpdatesCatalogAndHandler(t *testing.T) {
 	broadcast, err := NewBroadcast(Catalog{Version: 1})
 	require.NoError(t, err)
 
-	handler := &FakeTrackHandler{}
+	servedTracks := make([]*moqt.TrackWriter, 0)
+	handler := &FakeTrackHandler{
+		ServeTrackFunc: func(tw *moqt.TrackWriter) {
+			servedTracks = append(servedTracks, tw)
+		},
+	}
 	err = broadcast.RegisterTrack(Track{
 		Name:      "video",
 		Packaging: PackagingLOC,
@@ -26,15 +31,20 @@ func TestBroadcastRegisterTrack_UpdatesCatalogAndHandler(t *testing.T) {
 	assert.Equal(t, "video", catalog.Tracks[0].Name)
 	tw := &moqt.TrackWriter{TrackName: "video"}
 	broadcast.Handler("video").ServeTrack(tw)
-	require.Len(t, handler.ServeTrackCalls, 1)
-	assert.Equal(t, tw, handler.ServeTrackCalls[0])
+	require.Len(t, servedTracks, 1)
+	assert.Equal(t, tw, servedTracks[0])
 }
 
 func TestBroadcastHandler_ResolvesCatalogAndTrackHandlers(t *testing.T) {
 	broadcast, err := NewBroadcast(Catalog{Version: 1})
 	require.NoError(t, err)
 
-	handler := &FakeTrackHandler{}
+	servedTracks := make([]*moqt.TrackWriter, 0)
+	handler := &FakeTrackHandler{
+		ServeTrackFunc: func(tw *moqt.TrackWriter) {
+			servedTracks = append(servedTracks, tw)
+		},
+	}
 	err = broadcast.RegisterTrack(Track{
 		Name:      "audio",
 		Packaging: PackagingLOC,
@@ -44,17 +54,22 @@ func TestBroadcastHandler_ResolvesCatalogAndTrackHandlers(t *testing.T) {
 
 	tw := &moqt.TrackWriter{TrackName: "audio"}
 	broadcast.Handler("audio").ServeTrack(tw)
-	require.Len(t, handler.ServeTrackCalls, 1)
-	assert.Equal(t, tw, handler.ServeTrackCalls[0])
+	require.Len(t, servedTracks, 1)
+	assert.Equal(t, tw, servedTracks[0])
 	broadcast.Handler("missing").ServeTrack(tw)
-	assert.Len(t, handler.ServeTrackCalls, 1)
+	assert.Len(t, servedTracks, 1)
 }
 
 func TestBroadcastRemoveTrack_RemovesCatalogEntryAndHandler(t *testing.T) {
 	broadcast, err := NewBroadcast(Catalog{Version: 1})
 	require.NoError(t, err)
 
-	handler := &FakeTrackHandler{}
+	servedTracks := make([]*moqt.TrackWriter, 0)
+	handler := &FakeTrackHandler{
+		ServeTrackFunc: func(tw *moqt.TrackWriter) {
+			servedTracks = append(servedTracks, tw)
+		},
+	}
 	err = broadcast.RegisterTrack(Track{
 		Name:      "video",
 		Packaging: PackagingLOC,
@@ -67,7 +82,7 @@ func TestBroadcastRemoveTrack_RemovesCatalogEntryAndHandler(t *testing.T) {
 	assert.Empty(t, broadcast.Catalog().Tracks)
 	tw := &moqt.TrackWriter{TrackName: "video"}
 	broadcast.Handler("video").ServeTrack(tw)
-	assert.Empty(t, handler.ServeTrackCalls)
+	assert.Empty(t, servedTracks)
 }
 
 func TestBroadcastCatalogBytes_EncodesCurrentCatalog(t *testing.T) {
@@ -144,8 +159,18 @@ func TestBroadcastRegisterTrack_ReplacesExistingTrackAndHandler(t *testing.T) {
 	broadcast, err := NewBroadcast(Catalog{Version: 1})
 	require.NoError(t, err)
 
-	firstHandler := &FakeTrackHandler{}
-	secondHandler := &FakeTrackHandler{}
+	firstServedTracks := make([]*moqt.TrackWriter, 0)
+	firstHandler := &FakeTrackHandler{
+		ServeTrackFunc: func(tw *moqt.TrackWriter) {
+			firstServedTracks = append(firstServedTracks, tw)
+		},
+	}
+	secondServedTracks := make([]*moqt.TrackWriter, 0)
+	secondHandler := &FakeTrackHandler{
+		ServeTrackFunc: func(tw *moqt.TrackWriter) {
+			secondServedTracks = append(secondServedTracks, tw)
+		},
+	}
 
 	err = broadcast.RegisterTrack(Track{
 		Name:      "video",
@@ -170,8 +195,8 @@ func TestBroadcastRegisterTrack_ReplacesExistingTrackAndHandler(t *testing.T) {
 	assert.False(t, *catalog.Tracks[0].IsLive)
 	tw := &moqt.TrackWriter{TrackName: "video"}
 	broadcast.Handler("video").ServeTrack(tw)
-	require.Len(t, secondHandler.ServeTrackCalls, 1)
-	assert.Equal(t, tw, secondHandler.ServeTrackCalls[0])
+	require.Len(t, secondServedTracks, 1)
+	assert.Equal(t, tw, secondServedTracks[0])
 }
 
 func TestBroadcastZeroValue_UsesDefaultCatalogTrackName(t *testing.T) {
@@ -188,7 +213,12 @@ func TestBroadcastZeroValue_UsesDefaultCatalogTrackName(t *testing.T) {
 	assert.NotNil(t, broadcast.Handler(DefaultCatalogTrackName))
 	assert.False(t, broadcast.RemoveTrack(DefaultCatalogTrackName))
 	assert.False(t, broadcast.RemoveTrack(""))
-	handler := &FakeTrackHandler{}
+	servedTracks := make([]*moqt.TrackWriter, 0)
+	handler := &FakeTrackHandler{
+		ServeTrackFunc: func(tw *moqt.TrackWriter) {
+			servedTracks = append(servedTracks, tw)
+		},
+	}
 	assert.Error(t, broadcast.RegisterTrack(Track{Name: string(DefaultCatalogTrackName)}, handler))
 }
 
@@ -196,7 +226,12 @@ func TestBroadcastSetCatalog_PrunesRemovedTrackHandlers(t *testing.T) {
 	broadcast, err := NewBroadcast(Catalog{Version: 1})
 	require.NoError(t, err)
 
-	handler := &FakeTrackHandler{}
+	servedTracks := make([]*moqt.TrackWriter, 0)
+	handler := &FakeTrackHandler{
+		ServeTrackFunc: func(tw *moqt.TrackWriter) {
+			servedTracks = append(servedTracks, tw)
+		},
+	}
 	err = broadcast.RegisterTrack(Track{
 		Name:      "video",
 		Packaging: PackagingLOC,
@@ -213,7 +248,7 @@ func TestBroadcastSetCatalog_PrunesRemovedTrackHandlers(t *testing.T) {
 
 	tw := &moqt.TrackWriter{TrackName: "video"}
 	broadcast.Handler("video").ServeTrack(tw)
-	assert.Empty(t, handler.ServeTrackCalls)
+	assert.Empty(t, servedTracks)
 }
 
 func TestBroadcastSetCatalog_RejectsReservedCatalogTrackName(t *testing.T) {

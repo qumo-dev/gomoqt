@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"io"
 	"sync"
 	"testing"
 	"time"
@@ -80,11 +79,7 @@ func TestReceiveSubscribeStream_SubscribeID(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			mockStream := &FakeQUICStream{
-				ReadFunc: func(p []byte) (int, error) {
-					return 0, io.EOF
-				},
-			}
+			mockStream := &FakeQUICStream{}
 
 			config := &SubscribeConfig{
 				Priority: TrackPriority(1),
@@ -122,11 +117,7 @@ func TestReceiveSubscribeStream_TrackConfig(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			subscribeID := SubscribeID(123)
-			mockStream := &FakeQUICStream{
-				ReadFunc: func(p []byte) (int, error) {
-					return 0, io.EOF
-				},
-			}
+			mockStream := &FakeQUICStream{}
 
 			rss := newReceiveSubscribeStream(subscribeID, mockStream, tt.config)
 
@@ -144,11 +135,7 @@ func TestReceiveSubscribeStream_TrackConfig(t *testing.T) {
 
 func TestReceiveSubscribeStream_Updated(t *testing.T) {
 	subscribeID := SubscribeID(123)
-	mockStream := &FakeQUICStream{
-		ReadFunc: func(p []byte) (int, error) {
-			return 0, io.EOF
-		},
-	}
+	mockStream := &FakeQUICStream{}
 
 	config := &SubscribeConfig{
 		Priority: TrackPriority(1),
@@ -263,9 +250,6 @@ func TestReceiveSubscribeStream_CloseWithError(t *testing.T) {
 
 func TestReceiveSubscribeStream_CloseWithError_MultipleClose(t *testing.T) {
 	mockStream := &FakeQUICStream{}
-	mockStream.ReadFunc = func(p []byte) (int, error) {
-		return 0, io.EOF
-	}
 
 	config := &SubscribeConfig{
 		Priority: TrackPriority(1),
@@ -287,11 +271,7 @@ func TestReceiveSubscribeStream_CloseWithError_MultipleClose(t *testing.T) {
 
 func TestReceiveSubscribeStream_ConcurrentAccess(t *testing.T) {
 	subscribeID := SubscribeID(123)
-	mockStream := &FakeQUICStream{
-		ReadFunc: func(p []byte) (int, error) {
-			return 0, io.EOF
-		},
-	}
+	mockStream := &FakeQUICStream{}
 
 	config := &SubscribeConfig{
 		Priority: TrackPriority(1),
@@ -348,9 +328,7 @@ func TestReceiveSubscribeStream_ConcurrentAccess(t *testing.T) {
 
 func TestReceiveSubscribeStream_Close_DoesNotCancelReadOnGracefulClose(t *testing.T) {
 	// Create a mock stream that returns EOF on Read and a background context.
-	mockStream := &FakeQUICStream{
-		ReadFunc: func(p []byte) (int, error) { return 0, io.EOF },
-	}
+	mockStream := &FakeQUICStream{}
 
 	rss := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
@@ -368,11 +346,7 @@ func TestReceiveSubscribeStream_Close_DoesNotCancelReadOnGracefulClose(t *testin
 func TestReceiveSubscribeStream_UpdateChannelBehavior(t *testing.T) {
 	t.Run("channel closes on EOF", func(t *testing.T) {
 		subscribeID := SubscribeID(123)
-		mockStream := &FakeQUICStream{
-			ReadFunc: func(p []byte) (int, error) {
-				return 0, io.EOF
-			},
-		}
+		mockStream := &FakeQUICStream{}
 		config := &SubscribeConfig{Priority: TrackPriority(1)}
 
 		rss := newReceiveSubscribeStream(subscribeID, mockStream, config)

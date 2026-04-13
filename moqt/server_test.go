@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/okdaichi/gomoqt/transport"
 	"github.com/quic-go/quic-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,7 +44,7 @@ func TestServer_connContext_AppliesCustomAndInjectsServer(t *testing.T) {
 	}
 	s.init()
 
-	ctx := s.connContext(context.Background(), &MockStreamConn{})
+	ctx := s.connContext(context.Background(), &FakeStreamConn{})
 
 	assert.Equal(t, "ok", ctx.Value(customKey{}))
 	ctxServer, ok := ctx.Value(serverContextKey).(*connManager)
@@ -61,7 +60,7 @@ func TestServer_connContext_PanicsOnNilCustomContext(t *testing.T) {
 	}
 
 	assert.Panics(t, func() {
-		_ = s.connContext(context.Background(), &MockStreamConn{})
+		_ = s.connContext(context.Background(), &FakeStreamConn{})
 	})
 }
 
@@ -75,7 +74,7 @@ func TestServer_ServeQUICListener_ShuttingDown(t *testing.T) {
 
 func TestServer_ServeQUICConn_UnsupportedProtocol(t *testing.T) {
 	s := &Server{}
-	conn := &MockStreamConn{}
+	conn := &FakeStreamConn{}
 	conn.TLSFunc = func() *tls.ConnectionState {
 		return &tls.ConnectionState{NegotiatedProtocol: "unknown"}
 	}
@@ -87,7 +86,7 @@ func TestServer_ServeQUICConn_UnsupportedProtocol(t *testing.T) {
 
 func TestServer_ServeQUICConn_WebTransport(t *testing.T) {
 	s := &Server{WebTransportServer: &stubWTServer{}}
-	conn := &MockStreamConn{}
+	conn := &FakeStreamConn{}
 	conn.TLSFunc = func() *tls.ConnectionState {
 		return &tls.ConnectionState{NegotiatedProtocol: NextProtoH3}
 	}
@@ -104,12 +103,10 @@ func TestServer_ServeQUICConn_NativeQUICCallsHandlerAndReturnsError(t *testing.T
 		}),
 	}
 
-	conn := &MockStreamConn{}
+	conn := &FakeStreamConn{}
 	conn.TLSFunc = func() *tls.ConnectionState {
 		return &tls.ConnectionState{NegotiatedProtocol: NextProtoMOQ}
 	}
-	conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) { return nil, context.Canceled }
-	conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) { return nil, context.Canceled }
 
 	err := s.ServeQUICConn(conn)
 	assert.Error(t, err)
@@ -119,7 +116,7 @@ func TestServer_ServeQUICConn_NativeQUICCallsHandlerAndReturnsError(t *testing.T
 
 func TestServer_ServeQUICConn_NativeQUICWithoutHandlerReturnsError(t *testing.T) {
 	s := &Server{}
-	conn := &MockStreamConn{}
+	conn := &FakeStreamConn{}
 	conn.TLSFunc = func() *tls.ConnectionState {
 		return &tls.ConnectionState{NegotiatedProtocol: NextProtoMOQ}
 	}
@@ -189,7 +186,7 @@ func TestServer_Close_ClosesListenersAndWTServer(t *testing.T) {
 	err := s.Close()
 	assert.NoError(t, err)
 	assert.True(t, s.shuttingDown())
-	assert.True(t, ln.closeCalled)
+	assert.True(t, ln.closed)
 	assert.True(t, s.WebTransportServer.(*stubWTServer).closed)
 }
 
@@ -210,9 +207,7 @@ func TestServer_addRemoveSession_ShutdownCompletesWhenLastSessionLeaves(t *testi
 	s.init()
 	s.inShutdown.Store(true)
 
-	conn := &MockStreamConn{}
-	conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) { return nil, context.Canceled }
-	conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) { return nil, context.Canceled }
+	conn := &FakeStreamConn{}
 
 	sess := newSession(conn, nil, nil, nil)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
@@ -233,8 +228,6 @@ func TestWebTransportHandler_upgradeWebTransport_WithoutServerContext(t *testing
 	u := &WebTransportHandler{
 		UpgradeFunc: func(w http.ResponseWriter, r *http.Request) (WebTransportSession, error) {
 			conn := &FakeWebTransportSession{}
-			conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) { return nil, context.Canceled }
-			conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) { return nil, context.Canceled }
 			return conn, nil
 		},
 	}
@@ -266,8 +259,6 @@ func TestWebTransportHandler_upgradeWebTransport_UsesCustomUpgradeFunc(t *testin
 		TrackMux: NewTrackMux(),
 		UpgradeFunc: func(w http.ResponseWriter, r *http.Request) (WebTransportSession, error) {
 			conn := &FakeWebTransportSession{}
-			conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) { return nil, context.Canceled }
-			conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) { return nil, context.Canceled }
 			conn.RemoteAddrFunc = func() net.Addr { return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443} }
 			conn.LocalAddrFunc = func() net.Addr { return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443} }
 			return conn, nil
@@ -286,7 +277,7 @@ func TestWebTransportHandler_upgradeWebTransport_UsesCustomUpgradeFunc(t *testin
 
 func TestServer_handleNativeQUIC_NoHandlerConfigured(t *testing.T) {
 	s := &Server{}
-	err := s.handleNativeQUIC(&MockStreamConn{})
+	err := s.handleNativeQUIC(&FakeStreamConn{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no native QUIC handler configured")
 }
@@ -299,9 +290,7 @@ func TestServer_handleNativeQUIC_CallsHandlerAndReturnsError(t *testing.T) {
 		}),
 	}
 
-	conn := &MockStreamConn{}
-	conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) { return nil, context.Canceled }
-	conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) { return nil, context.Canceled }
+	conn := &FakeStreamConn{}
 
 	err := s.handleNativeQUIC(conn)
 	assert.Error(t, err)

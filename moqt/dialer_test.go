@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"io"
 	"net"
 	"net/http"
 	"testing"
@@ -64,9 +63,7 @@ func TestDialer_Dial_MOQTRoutesToDialQUIC(t *testing.T) {
 			assert.Equal(t, []string{NextProtoMOQ}, tlsConfig.NextProtos)
 			assert.Nil(t, quicConfig)
 
-			conn := &MockStreamConn{}
-			conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) { return nil, io.EOF }
-			conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) { return nil, io.EOF }
+			conn := &FakeStreamConn{}
 			return conn, nil
 		},
 	}
@@ -129,9 +126,7 @@ func TestDialer_DialQUIC_DefaultTLSConfig(t *testing.T) {
 			assert.Nil(t, quicConfig)
 			assert.Equal(t, []string{NextProtoMOQ}, tlsConfig.NextProtos)
 
-			conn := &MockStreamConn{}
-			conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) { return nil, io.EOF }
-			conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) { return nil, io.EOF }
+			conn := &FakeStreamConn{}
 			return conn, nil
 		},
 	}

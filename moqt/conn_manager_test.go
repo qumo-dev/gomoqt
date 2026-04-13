@@ -19,13 +19,13 @@ func TestConnManager_AddSession(t *testing.T) {
 		},
 		"duplicate session is counted once": {
 			sessions: func() []StreamConn {
-				session := &MockStreamConn{}
+				session := &FakeStreamConn{}
 				return []StreamConn{session, session}
 			}(),
 			wantCount: 1,
 		},
 		"multiple distinct sessions are counted": {
-			sessions:  []StreamConn{&MockStreamConn{}, &MockStreamConn{}},
+			sessions:  []StreamConn{&FakeStreamConn{}, &FakeStreamConn{}},
 			wantCount: 2,
 		},
 	}
@@ -44,8 +44,8 @@ func TestConnManager_AddSession(t *testing.T) {
 
 func TestConnManager_RemoveSession(t *testing.T) {
 	manager := newConnManager()
-	first := &MockStreamConn{}
-	second := &MockStreamConn{}
+	first := &FakeStreamConn{}
+	second := &FakeStreamConn{}
 	manager.addConn(first)
 	manager.addConn(second)
 	done := manager.Done()
@@ -88,7 +88,7 @@ func TestConnManager_Done(t *testing.T) {
 		t.Fatal("done channel should be closed when there are no tracked sessions")
 	}
 
-	session := &MockStreamConn{}
+	session := &FakeStreamConn{}
 	manager.addConn(session)
 	second := manager.Done()
 	assert.NotEqual(t, first, second)
@@ -122,7 +122,7 @@ func TestConnManager_Close(t *testing.T) {
 		"active sessions prevent close": {
 			setup: func() *connManager {
 				manager := newConnManager()
-				manager.addConn(&MockStreamConn{})
+				manager.addConn(&FakeStreamConn{})
 				return manager
 			},
 			wantErr: "cannot close session manager with active sessions",
@@ -152,7 +152,7 @@ func TestConnManager_Close(t *testing.T) {
 		manager := newConnManager()
 		require.NoError(t, manager.Close())
 
-		manager.addConn(&MockStreamConn{})
+		manager.addConn(&FakeStreamConn{})
 		assert.Zero(t, manager.countSessions())
 	})
 }
