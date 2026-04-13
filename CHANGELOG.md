@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [v0.12.0] - 2026-04-14
+
 ### Added
 
 - **moqt/session:** `Session.handleProbeStream` now returns `ProbeErrorCodeNotSupported` when the underlying connection does not expose `ConnectionStats()` (e.g. WebTransport sessions prior to the stats delegation below), allowing clients to detect unsupported probe capability cleanly rather than receiving an internal error.
