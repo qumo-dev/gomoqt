@@ -145,13 +145,7 @@ func runInteropSession(sess *moqt.Session, mux *moqt.TrackMux, serverDone chan s
 	fmt.Printf("Discovered broadcast: %s\n", string(ann.BroadcastPath()))
 
 	fmt.Print("Subscribing to broadcast...")
-	req, err := moqt.NewSubscribeRequest(ann.BroadcastPath(), "", nil)
-	if err != nil {
-		fmt.Printf("failed\n  Error: %v\n", err)
-		return
-	}
-
-	track, err := sess.Subscribe(context.Background(), req)
+	track, err := sess.Subscribe(context.Background(), ann.BroadcastPath(), "", nil)
 	if err != nil {
 		fmt.Printf("failed\n  Error: %v\n", err)
 		return

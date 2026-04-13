@@ -61,11 +61,7 @@ func BenchmarkSession_Subscribe(b *testing.B) {
 
 			for i := range b.N {
 				idx := i % size
-				req, err := NewSubscribeRequest(paths[idx], names[idx], nil)
-				if err != nil {
-					b.Fatalf("failed to create subscribe request: %v", err)
-				}
-				_, _ = session.Subscribe(context.Background(), req)
+				_, _ = session.Subscribe(context.Background(), paths[idx], names[idx], nil)
 			}
 
 			b.StopTimer()
@@ -116,11 +112,7 @@ func BenchmarkSession_ConcurrentSubscribe(b *testing.B) {
 				for pb.Next() {
 					path := BroadcastPath(fmt.Sprintf("/broadcast/%d", i))
 					name := TrackName(fmt.Sprintf("track_%d", i))
-					req, err := NewSubscribeRequest(path, name, nil)
-					if err != nil {
-						b.Fatalf("failed to create subscribe request: %v", err)
-					}
-					_, _ = session.Subscribe(context.Background(), req)
+					_, _ = session.Subscribe(context.Background(), path, name, nil)
 					i++
 				}
 			})
@@ -147,8 +139,7 @@ func BenchmarkSession_TrackReaderOperations(b *testing.B) {
 		mockSubStream := &FakeQUICStream{}
 
 		substr := newSendSubscribeStream(id, mockSubStream, &SubscribeConfig{})
-		req := testSubscribeRequest(b, nil)
-		trackReader := newTrackReader(req, substr, func() {})
+		trackReader := newTrackReader("/test", "video", substr, func() {})
 
 		// Add track reader
 		session.addTrackReader(id, trackReader)
@@ -213,8 +204,7 @@ func BenchmarkSession_MapLookup(b *testing.B) {
 				mockSubStream := &FakeQUICStream{}
 
 				substr := newSendSubscribeStream(id, mockSubStream, &SubscribeConfig{})
-				req := testSubscribeRequest(b, nil)
-				trackReader := newTrackReader(req, substr, func() {})
+				trackReader := newTrackReader("/test", "video", substr, func() {})
 				session.addTrackReader(id, trackReader)
 			}
 
@@ -259,8 +249,7 @@ func BenchmarkSession_MemoryAllocation(b *testing.B) {
 					mockSubStream := &FakeQUICStream{}
 
 					substr := newSendSubscribeStream(id, mockSubStream, &SubscribeConfig{})
-					req := testSubscribeRequest(b, nil)
-					trackReader := newTrackReader(req, substr, func() {})
+					trackReader := newTrackReader("/test", "video", substr, func() {})
 					session.addTrackReader(id, trackReader)
 				}
 

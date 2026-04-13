@@ -50,13 +50,7 @@ func main() {
 						return
 					}
 
-					req, err := moqt.NewSubscribeRequest(ann.BroadcastPath(), "index", nil)
-					if err != nil {
-						slog.Error("failed to create subscribe request", "error", err)
-						return
-					}
-
-					tr, err := sess.Subscribe(context.Background(), req)
+					tr, err := sess.Subscribe(context.Background(), ann.BroadcastPath(), "index", nil)
 					if err != nil {
 						slog.Error("failed to open track stream", "error", err)
 						return

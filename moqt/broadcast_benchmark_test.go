@@ -286,12 +286,7 @@ func runBroadcastClient(ctx context.Context, serverAddr string, framesReceived, 
 		return fmt.Errorf("announcement not active")
 	}
 
-	req, err := NewSubscribeRequest(ann.BroadcastPath(), TrackName("index"), nil)
-	if err != nil {
-		return fmt.Errorf("failed to create subscribe request: %w", err)
-	}
-
-	tr, err := sess.Subscribe(ctx, req)
+	tr, err := sess.Subscribe(ctx, ann.BroadcastPath(), TrackName("index"), nil)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe: %w", err)
 	}

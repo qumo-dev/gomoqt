@@ -79,8 +79,13 @@ func newTrackWriter(
 // It manages the lifecycle of active groups for that track.
 // The TrackWriter provides output-side methods to send track data.
 type TrackWriter struct {
+	// BroadcastPath is the path of the broadcast this track belongs to.
+	// The value is set when the subscription is accepted and does not change.
 	BroadcastPath BroadcastPath
-	TrackName     TrackName
+
+	// TrackName is the name of the track within the broadcast.
+	// The value is set when the subscription is accepted and does not change.
+	TrackName TrackName
 
 	subscribeStream *receiveSubscribeStream
 

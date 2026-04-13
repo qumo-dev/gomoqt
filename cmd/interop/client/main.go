@@ -62,13 +62,7 @@ func main() {
 
 	// Step 2: Subscribe to the server's broadcast and receive data (in goroutine)
 	fmt.Print("Subscribing to server broadcast...")
-	req, err := moqt.NewSubscribeRequest(ann.BroadcastPath(), "", nil)
-	if err != nil {
-		fmt.Printf("failed\n  Error: %v\n", err)
-		return
-	}
-
-	track, err := sess.Subscribe(context.Background(), req)
+	track, err := sess.Subscribe(context.Background(), ann.BroadcastPath(), "", nil)
 	if err != nil {
 		fmt.Printf("failed\n  Error: %v\n", err)
 		return

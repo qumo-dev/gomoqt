@@ -16,19 +16,18 @@ func newTestTrackReader(tb testing.TB) (*TrackReader, *FakeQUICStream) {
 	mockStream := &FakeQUICStream{}
 
 	substr := newTestSendSubscribeStreamFromStream(mockStream, &SubscribeConfig{})
-	receiver := newTrackReader(testSubscribeRequest(tb, nil), substr, func() {})
+	receiver := newTrackReader("/test", "video", substr, func() {})
 	return receiver, mockStream
 }
 
 func TestNewTrackReader(t *testing.T) {
 	mockStream := &FakeQUICStream{}
 	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
-	receiver := newTrackReader(testSubscribeRequest(t, nil), substr, func() {})
+	receiver := newTrackReader("/test", "video", substr, func() {})
 
 	assert.NotNil(t, receiver, "newTrackReader should not return nil")
-	require.NotNil(t, receiver.Request)
-	assert.Equal(t, BroadcastPath("/test"), receiver.Request.BroadcastPath)
-	assert.Equal(t, TrackName("video"), receiver.Request.TrackName)
+	assert.Equal(t, BroadcastPath("/test"), receiver.BroadcastPath)
+	assert.Equal(t, TrackName("video"), receiver.TrackName)
 	// Verify info propagation
 	assert.Equal(t, PublishInfo{}, substr.ReadInfo(), "sendSubscribeStream should return the Info passed at construction")
 	assert.NotNil(t, receiver.queueing, "queue should be initialized")
@@ -54,7 +53,7 @@ func TestTrackReader_ContextCancellation(t *testing.T) {
 		ParentCtx: ctx,
 	}
 	substr := newTestSendSubscribeStreamFromStream(mockStream, &SubscribeConfig{})
-	receiver := newTrackReader(testSubscribeRequest(t, nil), substr, func() {})
+	receiver := newTrackReader("/test", "video", substr, func() {})
 
 	// Cancel the context
 	cancel()
@@ -76,7 +75,7 @@ func TestTrackReader_Context_FollowsStreamLifecycle(t *testing.T) {
 	mockStream := &FakeQUICStream{}
 
 	substr := newTestSendSubscribeStreamFromStream(mockStream, &SubscribeConfig{})
-	receiver := newTrackReader(testSubscribeRequest(t, nil), substr, func() {})
+	receiver := newTrackReader("/test", "video", substr, func() {})
 
 	// Cancel setup context; TrackReader context should remain alive while stream is alive.
 	cancelSetup()
@@ -165,7 +164,7 @@ func TestTrackReader_AcceptDrop(t *testing.T) {
 	}
 
 	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
-	receiver := newTrackReader(testSubscribeRequest(t, nil), substr, func() {})
+	receiver := newTrackReader("/test", "video", substr, func() {})
 
 	go substr.readSubscribeResponses()
 

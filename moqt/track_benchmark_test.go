@@ -17,8 +17,7 @@ func BenchmarkTrackReader_EnqueueDequeue(b *testing.B) {
 		b.Run(fmt.Sprintf("size-%d", size), func(b *testing.B) {
 			mockStream := &FakeQUICStream{}
 			substr := newTestSendSubscribeStreamFromStream(mockStream, &SubscribeConfig{})
-			req := testSubscribeRequest(b, nil)
-			reader := newTrackReader(req, substr, func() {})
+			reader := newTrackReader("/test", "video", substr, func() {})
 
 			// Pre-create mock receive streams
 			streams := make([]transport.ReceiveStream, size)
@@ -51,8 +50,7 @@ func BenchmarkTrackReader_AcceptGroup(b *testing.B) {
 	mockStream := &FakeQUICStream{}
 	ctx := context.Background()
 	substr := newTestSendSubscribeStreamFromStream(mockStream, &SubscribeConfig{})
-	req := testSubscribeRequest(b, nil)
-	reader := newTrackReader(req, substr, func() {})
+	reader := newTrackReader("/test", "video", substr, func() {})
 
 	b.ReportAllocs()
 
@@ -78,8 +76,7 @@ func BenchmarkTrackReader_ConcurrentAccess(b *testing.B) {
 			mockStream := &FakeQUICStream{}
 			ctx := context.Background()
 			substr := newTestSendSubscribeStreamFromStream(mockStream, &SubscribeConfig{})
-			req := testSubscribeRequest(b, nil)
-			reader := newTrackReader(req, substr, func() {})
+			reader := newTrackReader("/test", "video", substr, func() {})
 
 			// Pre-populate queue
 			for i := range 100 {
@@ -283,8 +280,7 @@ func BenchmarkTrackReader_MemoryAllocation(b *testing.B) {
 	for b.Loop() {
 		mockStream := &FakeQUICStream{}
 		substr := newTestSendSubscribeStreamFromStream(mockStream, &SubscribeConfig{})
-		req := testSubscribeRequest(b, nil)
-		reader := newTrackReader(req, substr, func() {})
+		reader := newTrackReader("/test", "video", substr, func() {})
 
 		// Enqueue and dequeue a group
 		mockRecvStream := &FakeQUICReceiveStream{}

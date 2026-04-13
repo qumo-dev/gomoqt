@@ -162,23 +162,22 @@ func (s *Session) CloseWithError(code SessionErrorCode, msg string) error {
 
 // Subscribe sends SUBSCRIBE and waits for SUBSCRIBE_OK.
 // ctx is used while opening the stream, sending SUBSCRIBE, and waiting for the response.
-func (s *Session) Subscribe(ctx context.Context, req *SubscribeRequest) (*TrackReader, error) {
+// If config is nil, a zero-value SubscribeConfig is used.
+func (s *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackName, config *SubscribeConfig) (*TrackReader, error) {
 	if ctx == nil {
 		return nil, errors.New("nil context")
-	}
-
-	if req == nil {
-		return nil, errors.New("subscribe request cannot be nil")
 	}
 
 	if s.terminating() {
 		return nil, ErrClosedSession
 	}
 
-	req = req.Clone().normalized()
+	if !isValidPath(path) {
+		return nil, fmt.Errorf("invalid broadcast path: %q", path)
+	}
 
-	if !isValidPath(req.BroadcastPath) {
-		return nil, fmt.Errorf("invalid broadcast path: %q", req.BroadcastPath)
+	if config == nil {
+		config = &SubscribeConfig{}
 	}
 
 	id := s.nextSubscribeID()
@@ -207,13 +206,13 @@ func (s *Session) Subscribe(ctx context.Context, req *SubscribeRequest) (*TrackR
 
 	err = message.SubscribeMessage{
 		SubscribeID:          uint64(id),
-		BroadcastPath:        string(req.BroadcastPath),
-		TrackName:            string(req.TrackName),
-		SubscriberPriority:   uint8(req.Config.Priority),
-		SubscriberOrdered:    boolToWireFlag(req.Config.Ordered),
-		SubscriberMaxLatency: req.Config.MaxLatency,
-		StartGroup:           groupSequenceToWire(req.Config.StartGroup),
-		EndGroup:             groupSequenceToWire(req.Config.EndGroup),
+		BroadcastPath:        string(path),
+		TrackName:            string(name),
+		SubscriberPriority:   uint8(config.Priority),
+		SubscriberOrdered:    boolToWireFlag(config.Ordered),
+		SubscriberMaxLatency: config.MaxLatency,
+		StartGroup:           groupSequenceToWire(config.StartGroup),
+		EndGroup:             groupSequenceToWire(config.EndGroup),
 	}.Encode(stream)
 	if err != nil {
 		if strErr, ok := errors.AsType[*transport.StreamError](err); ok && strErr.Remote {
@@ -228,9 +227,9 @@ func (s *Session) Subscribe(ctx context.Context, req *SubscribeRequest) (*TrackR
 		return nil, fmt.Errorf("failed to encode SUBSCRIBE message: %w", err)
 	}
 
-	substr := newSendSubscribeStream(id, stream, req.Config)
+	substr := newSendSubscribeStream(id, stream, config)
 
-	track := newTrackReader(req, substr, func() { s.removeTrackReader(id) })
+	track := newTrackReader(path, name, substr, func() { s.removeTrackReader(id) })
 	s.addTrackReader(id, track)
 	ctx, cancel := context.WithTimeout(ctx, s.timeout())
 	defer cancel()

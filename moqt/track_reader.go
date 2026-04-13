@@ -37,9 +37,10 @@ func (m *groupReaderManager) removeGroup(group *GroupReader) {
 	delete(m.activeGroups, group)
 }
 
-func newTrackReader(request *SubscribeRequest, subscribeStream *sendSubscribeStream, onCloseFunc func()) *TrackReader {
+func newTrackReader(path BroadcastPath, name TrackName, subscribeStream *sendSubscribeStream, onCloseFunc func()) *TrackReader {
 	track := &TrackReader{
-		Request:             request,
+		BroadcastPath:       path,
+		TrackName:           name,
 		sendSubscribeStream: subscribeStream,
 		queuedCh:            make(chan struct{}, 1),
 		queueing: make([]struct {
@@ -59,8 +60,13 @@ func newTrackReader(request *SubscribeRequest, subscribeStream *sendSubscribeStr
 // It queues incoming group streams and allows the application to accept them via AcceptGroup.
 // TrackReader provides lifecycle and update APIs for managing subscriptions.
 type TrackReader struct {
-	// Request stores the subscribe request used to create this reader.
-	Request *SubscribeRequest
+	// BroadcastPath is the path of the broadcast this subscription targets.
+	// The value is set at subscription time and does not change.
+	BroadcastPath BroadcastPath
+
+	// TrackName is the name of the track within the broadcast.
+	// The value is set at subscription time and does not change.
+	TrackName TrackName
 
 	sendSubscribeStream *sendSubscribeStream
 
