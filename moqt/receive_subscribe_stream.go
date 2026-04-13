@@ -93,6 +93,10 @@ func (substr *receiveSubscribeStream) writeInfo(info PublishInfo) error {
 }
 
 func (substr *receiveSubscribeStream) writeInfoLocked(info PublishInfo) error {
+	if _, err := substr.stream.Write([]byte{byte(message.MessageTypeSubscribeOk)}); err != nil {
+		return err
+	}
+
 	err := message.SubscribeOkMessage{
 		PublisherPriority:   uint8(info.Priority),
 		PublisherOrdered:    boolToWireFlag(info.Ordered),
@@ -119,6 +123,10 @@ func (substr *receiveSubscribeStream) writeDrop(drop SubscribeDrop) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	if _, err := substr.stream.Write([]byte{byte(message.MessageTypeSubscribeDrop)}); err != nil {
+		return err
 	}
 
 	err := message.SubscribeDropMessage{

@@ -179,6 +179,12 @@ func runInteropSession(sess *moqt.Session, mux *moqt.TrackMux, serverDone chan s
 		return
 	}
 	fmt.Printf("ok (payload: %s)\n", string(frame.Body()))
+
+	// Wait for client to close the session (e.g. after Probe completes) or timeout.
+	select {
+	case <-sess.Context().Done():
+	case <-time.After(5 * time.Second):
+	}
 }
 
 func generateCert() tls.Certificate {

@@ -434,10 +434,20 @@ func TestTrackWriter_DropGroups(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	// Read type prefix for SUBSCRIBE_OK
+	okType, err := buf.ReadByte()
+	require.NoError(t, err)
+	assert.Equal(t, byte(message.MessageTypeSubscribeOk), okType)
+
 	var okMsg message.SubscribeOkMessage
 	require.NoError(t, okMsg.Decode(buf))
 	assert.Equal(t, uint64(0), okMsg.StartGroup)
 	assert.Equal(t, uint64(0), okMsg.EndGroup)
+
+	// Read type prefix for SUBSCRIBE_DROP
+	dropType, err := buf.ReadByte()
+	require.NoError(t, err)
+	assert.Equal(t, byte(message.MessageTypeSubscribeDrop), dropType)
 
 	var dropMsg message.SubscribeDropMessage
 	require.NoError(t, dropMsg.Decode(buf))
@@ -460,8 +470,18 @@ func TestTrackWriter_DropNextGroups(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, GroupSequence(5), group2.GroupSequence())
 
+	// Read type prefix for SUBSCRIBE_OK
+	okType, err := buf.ReadByte()
+	require.NoError(t, err)
+	assert.Equal(t, byte(message.MessageTypeSubscribeOk), okType)
+
 	var okMsg message.SubscribeOkMessage
 	require.NoError(t, okMsg.Decode(buf))
+
+	// Read type prefix for SUBSCRIBE_DROP
+	dropType, err := buf.ReadByte()
+	require.NoError(t, err)
+	assert.Equal(t, byte(message.MessageTypeSubscribeDrop), dropType)
 
 	var dropMsg message.SubscribeDropMessage
 	require.NoError(t, dropMsg.Decode(buf))

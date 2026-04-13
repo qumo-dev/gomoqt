@@ -94,7 +94,6 @@ func (s *Server) init() {
 		s.connManager = newConnManager()
 		if s.WebTransportServer == nil {
 			s.WebTransportServer = &webtransportgo.Server{}
-			return
 		}
 	})
 }
@@ -165,7 +164,9 @@ func (s *Server) ServeQUICConn(conn StreamConn) error {
 	}
 	switch protocol := tlsInfo.NegotiatedProtocol; protocol {
 	case NextProtoH3:
-		return s.WebTransportServer.ServeQUICConn(conn)
+		ctx := s.connContext(conn.Context(), conn)
+		wrapped := &streamConnContext{StreamConn: conn, ctx: ctx}
+		return s.WebTransportServer.ServeQUICConn(wrapped)
 	case NextProtoMOQ:
 		return s.handleNativeQUIC(conn)
 	default:
@@ -184,6 +185,28 @@ func (s *Server) connContext(ctx context.Context, conn StreamConn) context.Conte
 		return custom
 	}
 	return ctx
+}
+
+// streamConnContext wraps a StreamConn to override its Context.
+// It also delegates QUICConn() to the inner connection so that
+// webtransportgo.Server can extract the raw *quic.Conn.
+type streamConnContext struct {
+	StreamConn
+	ctx context.Context
+}
+
+func (w *streamConnContext) Context() context.Context {
+	return w.ctx
+}
+
+func (w *streamConnContext) QUICConn() *quic.Conn {
+	type quicConnProvider interface {
+		QUICConn() *quic.Conn
+	}
+	if p, ok := w.StreamConn.(quicConnProvider); ok {
+		return p.QUICConn()
+	}
+	return nil
 }
 
 type WebTransportHandler struct {
@@ -247,7 +270,12 @@ func (u *WebTransportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	manager := r.Context().Value(serverContextKey).(*connManager)
+	// When WebTransportHandler is used standalone (not via Server),
+	// the context does not contain a connManager.
+	var manager *connManager
+	if v := r.Context().Value(serverContextKey); v != nil {
+		manager = v.(*connManager)
+	}
 
 	sess := newSession(conn, u.TrackMux, manager, u.FetchHandler, u.Logger)
 

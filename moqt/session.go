@@ -572,7 +572,6 @@ func (sess *Session) processUniStream(stream transport.ReceiveStream) {
 	if err != nil {
 		return
 	}
-	defer stream.CancelRead(transport.StreamErrorCode(InternalSessionErrorCode))
 
 	switch streamType {
 	case message.StreamTypeGroup:
@@ -588,10 +587,11 @@ func (sess *Session) processUniStream(stream transport.ReceiveStream) {
 			return
 		}
 
-		// Enqueue the receiver
+		// Enqueue the receiver — ownership of the stream transfers to the TrackReader.
 		track.enqueueGroup(GroupSequence(gm.GroupSequence), stream)
 	default:
 		// Unknown stream types are stream-local and non-fatal for extension probing.
+		stream.CancelRead(transport.StreamErrorCode(InternalSessionErrorCode))
 		return
 	}
 }
