@@ -2,6 +2,8 @@ import { assertEquals } from "@std/assert";
 import {
 	AnnounceError,
 	AnnounceErrorCode,
+	FetchError,
+	FetchErrorCode,
 	GroupError,
 	GroupErrorCode,
 	SessionError,
@@ -163,6 +165,22 @@ Deno.test("Error", async (t) => {
 		assertEquals(gErr.message, GroupError.textOf(GroupErrorCode.ExpiredGroup));
 	});
 
+	await t.step("FetchError textOf known codes", () => {
+		assertEquals(
+			FetchError.textOf(FetchErrorCode.InternalError),
+			"internal error",
+		);
+		assertEquals(FetchError.textOf(FetchErrorCode.Timeout), "timeout");
+		assertEquals(FetchError.textOf(9999), "unknown fetch error (9999)");
+	});
+
+	await t.step("FetchError constructor sets proper fields", () => {
+		const fErr = new FetchError(FetchErrorCode.Timeout, true);
+		assertEquals(fErr.code, FetchErrorCode.Timeout);
+		assertEquals(fErr.message, FetchError.textOf(FetchErrorCode.Timeout));
+		assertEquals(fErr.name, "FetchError");
+	});
+
 	await t.step("Error textOf returns default for unknown codes", () => {
 		const code = 0xff;
 		assertEquals(SessionError.textOf(code), `unknown session error (${code})`);
@@ -175,5 +193,6 @@ Deno.test("Error", async (t) => {
 			`unknown subscribe error (${code})`,
 		);
 		assertEquals(GroupError.textOf(code), `unknown group error (${code})`);
+		assertEquals(FetchError.textOf(code), `unknown fetch error (${code})`);
 	});
 });

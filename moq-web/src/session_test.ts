@@ -3,6 +3,7 @@ import { spy } from "@std/testing/mock";
 import { Session } from "./session.ts";
 import {
 	AnnouncePleaseMessage,
+	FetchMessage,
 	GroupMessage,
 	ProbeMessage,
 	SubscribeMessage,
@@ -15,6 +16,9 @@ import type { TrackPrefix } from "./track_prefix.ts";
 import { Writer } from "@okdaichi/golikejs/io";
 import { EOFError } from "@okdaichi/golikejs/io";
 import { ReceiveStream, SendStream, Stream, StreamConn } from "./internal/webtransport/mod.ts";
+import { FetchRequest } from "./fetch.ts";
+import type { FetchHandler } from "./fetch.ts";
+import type { GroupWriter } from "./group_stream.ts";
 
 // Utility class to implement Writer for encoding messages
 class Uint8ArrayWriter implements Writer {
@@ -812,6 +816,129 @@ Deno.test({
 					}],
 				});
 
+				const session = new Session({ transport: mock });
+				await session.ready;
+
+				await new Promise((resolve) => setTimeout(resolve, 10));
+				await session.close();
+			},
+		);
+
+		await t.step("fetch sends FETCH message and returns GroupReader", async () => {
+			// The response stream will be empty (EOF) — that's fine for testing the request path
+			const mock = new MockWebTransportSession({
+				openStreamResponses: [new Uint8Array(0)],
+			});
+
+			const session = new Session({ transport: mock });
+			await session.ready;
+
+			const req = new FetchRequest({
+				broadcastPath: "/live/stream",
+				trackName: "video",
+				priority: 5,
+				groupSequence: 42,
+			});
+
+			const [group, err] = await session.fetch(req);
+			assertExists(group);
+			assertEquals(err, undefined);
+
+			await session.close();
+		});
+
+		await t.step("fetch returns error when openStream fails", async () => {
+			const mock = new MockWebTransportSession({
+				openStreamResponses: [],
+			});
+
+			const session = new Session({ transport: mock });
+			await session.ready;
+
+			mock.close();
+
+			const req = new FetchRequest({
+				broadcastPath: "/live/stream",
+				trackName: "video",
+				priority: 5,
+				groupSequence: 1,
+			});
+
+			const [group, err] = await session.fetch(req);
+			assertEquals(group, undefined);
+			assertExists(err);
+		});
+
+		await t.step(
+			"incoming fetch stream calls fetchHandler.serveFetch",
+			async () => {
+				let served = false;
+				let servedPath: string | undefined;
+				let servedTrackName: string | undefined;
+				const handler: FetchHandler = {
+					serveFetch: async (_w: GroupWriter, r: FetchRequest) => {
+						served = true;
+						servedPath = r.broadcastPath;
+						servedTrackName = r.trackName;
+					},
+				};
+
+				const fm = new FetchMessage({
+					broadcastPath: "/live/fetch",
+					trackName: "audio",
+					priority: 3,
+					groupSequence: 10,
+				});
+				const buf = await encodeMessageToUint8Array(async (w) => {
+					await writeVarint(w, BiStreamTypes.FetchStreamType);
+					return await fm.encode(w);
+				});
+
+				const mock = new MockWebTransportSession({
+					openStreamResponses: [],
+					acceptStreamData: [{
+						type: BiStreamTypes.FetchStreamType,
+						data: buf,
+					}],
+				});
+
+				const session = new Session({
+					transport: mock,
+					fetchHandler: handler,
+				});
+				await session.ready;
+
+				await new Promise((resolve) => setTimeout(resolve, 10));
+				assertEquals(served, true);
+				assertEquals(servedPath, "/live/fetch");
+				assertEquals(servedTrackName, "audio");
+				await session.close();
+			},
+		);
+
+		await t.step(
+			"incoming fetch stream without handler cancels stream",
+			async () => {
+				const fm = new FetchMessage({
+					broadcastPath: "/live/fetch",
+					trackName: "audio",
+					priority: 3,
+					groupSequence: 10,
+				});
+				const buf = await encodeMessageToUint8Array(async (w) => {
+					await writeVarint(w, BiStreamTypes.FetchStreamType);
+					return await fm.encode(w);
+				});
+
+				const mock = new MockWebTransportSession({
+					openStreamResponses: [],
+					acceptStreamData: [{
+						type: BiStreamTypes.FetchStreamType,
+						data: buf,
+					}],
+				});
+
+				// No fetchHandler provided
 				const session = new Session({ transport: mock });
 				await session.ready;
 
