@@ -832,3 +832,170 @@ func TestErrorText_NonEmpty(t *testing.T) {
 		}
 	})
 }
+
+// Test for FetchErrorCode.String method
+func TestFetchErrorCode_String(t *testing.T) {
+	tests := map[string]struct {
+		code   FetchErrorCode
+		expect string
+	}{
+		"internal error code": {
+			code:   FetchErrorCodeInternal,
+			expect: "moqt: internal error",
+		},
+		"timeout error code": {
+			code:   FetchErrorCodeTimeout,
+			expect: "moqt: timeout",
+		},
+		"unknown code": {
+			code:   FetchErrorCode(0xFF),
+			expect: "",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			result := tt.code.String()
+			assert.Equal(t, tt.expect, result)
+		})
+	}
+}
+
+// Test for FetchError
+func TestFetchError(t *testing.T) {
+	tests := map[string]struct {
+		err            FetchError
+		expectedString string
+		expectedCode   FetchErrorCode
+	}{
+		"internal error": {
+			err: FetchError{
+				&transport.StreamError{
+					ErrorCode: transport.StreamErrorCode(FetchErrorCodeInternal),
+				},
+			},
+			expectedString: "moqt: internal error",
+			expectedCode:   FetchErrorCodeInternal,
+		},
+		"timeout": {
+			err: FetchError{
+				&transport.StreamError{
+					ErrorCode: transport.StreamErrorCode(FetchErrorCodeTimeout),
+				},
+			},
+			expectedString: "moqt: timeout",
+			expectedCode:   FetchErrorCodeTimeout,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tt.expectedString, tt.err.Error())
+			assert.Equal(t, tt.expectedCode, tt.err.FetchErrorCode())
+		})
+	}
+}
+
+// Test for FetchError with unknown code fallback
+func TestFetchError_UnknownCodeFallback(t *testing.T) {
+	unknownCode := FetchErrorCode(0x99)
+	err := FetchError{
+		&transport.StreamError{
+			ErrorCode: transport.StreamErrorCode(unknownCode),
+		},
+	}
+
+	result := err.Error()
+	assert.Equal(t, unknownCode, err.FetchErrorCode())
+	assert.NotEmpty(t, result)
+}
+
+// Test for ProbeErrorCode.String method
+func TestProbeErrorCode_String(t *testing.T) {
+	tests := map[string]struct {
+		code   ProbeErrorCode
+		expect string
+	}{
+		"internal error code": {
+			code:   ProbeErrorCodeInternal,
+			expect: "moqt: internal error",
+		},
+		"timeout error code": {
+			code:   ProbeErrorCodeTimeout,
+			expect: "moqt: timeout",
+		},
+		"not supported error code": {
+			code:   ProbeErrorCodeNotSupported,
+			expect: "moqt: not supported",
+		},
+		"unknown code": {
+			code:   ProbeErrorCode(0xFF),
+			expect: "",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			result := tt.code.String()
+			assert.Equal(t, tt.expect, result)
+		})
+	}
+}
+
+// Test for ProbeError
+func TestProbeError(t *testing.T) {
+	tests := map[string]struct {
+		err            ProbeError
+		expectedString string
+		expectedCode   ProbeErrorCode
+	}{
+		"internal error": {
+			err: ProbeError{
+				&transport.StreamError{
+					ErrorCode: transport.StreamErrorCode(ProbeErrorCodeInternal),
+				},
+			},
+			expectedString: "moqt: internal error",
+			expectedCode:   ProbeErrorCodeInternal,
+		},
+		"timeout": {
+			err: ProbeError{
+				&transport.StreamError{
+					ErrorCode: transport.StreamErrorCode(ProbeErrorCodeTimeout),
+				},
+			},
+			expectedString: "moqt: timeout",
+			expectedCode:   ProbeErrorCodeTimeout,
+		},
+		"not supported": {
+			err: ProbeError{
+				&transport.StreamError{
+					ErrorCode: transport.StreamErrorCode(ProbeErrorCodeNotSupported),
+				},
+			},
+			expectedString: "moqt: not supported",
+			expectedCode:   ProbeErrorCodeNotSupported,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tt.expectedString, tt.err.Error())
+			assert.Equal(t, tt.expectedCode, tt.err.ProbeErrorCode())
+		})
+	}
+}
+
+// Test for ProbeError with unknown code fallback
+func TestProbeError_UnknownCodeFallback(t *testing.T) {
+	unknownCode := ProbeErrorCode(0x99)
+	err := ProbeError{
+		&transport.StreamError{
+			ErrorCode: transport.StreamErrorCode(unknownCode),
+		},
+	}
+
+	result := err.Error()
+	assert.Equal(t, unknownCode, err.ProbeErrorCode())
+	assert.NotEmpty(t, result)
+}

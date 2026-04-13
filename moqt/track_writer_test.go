@@ -488,3 +488,163 @@ func TestTrackWriter_DropNextGroups(t *testing.T) {
 	assert.Equal(t, uint64(3), dropMsg.StartGroup)
 	assert.Equal(t, uint64(5), dropMsg.EndGroup)
 }
+
+func TestTrackWriter_OpenGroupAt(t *testing.T) {
+	mockStream := &FakeQUICStream{}
+	substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
+
+	openUniStreamFunc := func() (transport.SendStream, error) {
+		return &FakeQUICSendStream{}, nil
+	}
+
+	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {})
+
+	// Open at a specific sequence
+	group, err := sender.OpenGroupAt(GroupSequence(10))
+	assert.NoError(t, err)
+	assert.NotNil(t, group)
+	assert.Equal(t, GroupSequence(10), group.GroupSequence())
+
+	// Next OpenGroup should be at 12 (counter was advanced to 11, Add(1) → 12)
+	group2, err := sender.OpenGroup()
+	assert.NoError(t, err)
+	assert.Equal(t, GroupSequence(12), group2.GroupSequence())
+}
+
+func TestTrackWriter_OpenGroupAt_AdvancesCounter(t *testing.T) {
+	mockStream := &FakeQUICStream{}
+	substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
+
+	openUniStreamFunc := func() (transport.SendStream, error) {
+		return &FakeQUICSendStream{}, nil
+	}
+
+	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {})
+
+	// Open some groups first
+	g1, err := sender.OpenGroup()
+	assert.NoError(t, err)
+	assert.Equal(t, GroupSequence(1), g1.GroupSequence())
+
+	// OpenGroupAt at a lower sequence than current counter should still work
+	// but not reduce the counter
+	g2, err := sender.OpenGroupAt(GroupSequence(1))
+	assert.NoError(t, err)
+	assert.Equal(t, GroupSequence(1), g2.GroupSequence())
+
+	// Next OpenGroup should still be at 3 (counter stayed at 2, Add(1) → 3)
+	g3, err := sender.OpenGroup()
+	assert.NoError(t, err)
+	assert.Equal(t, GroupSequence(3), g3.GroupSequence())
+
+	// OpenGroupAt at a high sequence advances counter to 101
+	g4, err := sender.OpenGroupAt(GroupSequence(100))
+	assert.NoError(t, err)
+	assert.Equal(t, GroupSequence(100), g4.GroupSequence())
+
+	// counter is now 101, Add(1) → 102
+	g5, err := sender.OpenGroup()
+	assert.NoError(t, err)
+	assert.Equal(t, GroupSequence(102), g5.GroupSequence())
+}
+
+func TestTrackWriter_WriteInfo(t *testing.T) {
+	sender, buf := newTrackWriterDropTestSender(t)
+
+	info := PublishInfo{
+		Priority:   5,
+		Ordered:    true,
+		MaxLatency: 100,
+		StartGroup: 1,
+		EndGroup:   10,
+	}
+
+	err := sender.WriteInfo(info)
+	require.NoError(t, err)
+
+	// Read SUBSCRIBE_OK from buffer
+	okType, err := buf.ReadByte()
+	require.NoError(t, err)
+	assert.Equal(t, byte(message.MessageTypeSubscribeOk), okType)
+
+	var okMsg message.SubscribeOkMessage
+	require.NoError(t, okMsg.Decode(buf))
+	assert.Equal(t, uint8(5), okMsg.PublisherPriority)
+	assert.Equal(t, uint8(1), okMsg.PublisherOrdered)
+	assert.Equal(t, uint64(100), okMsg.PublisherMaxLatency)
+}
+
+func TestTrackWriter_Updated(t *testing.T) {
+	mockStream := &FakeQUICStream{}
+	substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
+
+	openUniStreamFunc := func() (transport.SendStream, error) {
+		return &FakeQUICSendStream{}, nil
+	}
+
+	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {})
+
+	ch := sender.Updated()
+	assert.NotNil(t, ch)
+
+	// The channel should not be closed initially
+	select {
+	case <-ch:
+		t.Fatal("Updated channel should not be signaled initially")
+	default:
+		// expected
+	}
+}
+
+func TestTrackWriter_DropGroups_InvalidRange(t *testing.T) {
+	sender, _ := newTrackWriterDropTestSender(t)
+
+	// StartGroup > EndGroup
+	err := sender.DropGroups(SubscribeDrop{
+		StartGroup: 10,
+		EndGroup:   5,
+		ErrorCode:  SubscribeErrorCodeInternal,
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid drop range")
+}
+
+func TestTrackWriter_DropGroups_MinGroupSequence(t *testing.T) {
+	sender, _ := newTrackWriterDropTestSender(t)
+
+	err := sender.DropGroups(SubscribeDrop{
+		StartGroup: MinGroupSequence,
+		EndGroup:   5,
+		ErrorCode:  SubscribeErrorCodeInternal,
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid drop range")
+}
+
+func TestTrackWriter_DropNextGroups_Zero(t *testing.T) {
+	sender, _ := newTrackWriterDropTestSender(t)
+
+	err := sender.DropNextGroups(0, SubscribeErrorCodeInternal)
+	assert.NoError(t, err)
+}
+
+func TestTrackWriter_DropGroups_ContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	mockStream := &FakeQUICStream{ParentCtx: ctx}
+	substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
+
+	openUniStreamFunc := func() (transport.SendStream, error) {
+		return &FakeQUICSendStream{}, nil
+	}
+
+	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {})
+
+	err := sender.DropGroups(SubscribeDrop{
+		StartGroup: 2,
+		EndGroup:   4,
+		ErrorCode:  SubscribeErrorCodeInternal,
+	})
+	assert.Error(t, err)
+}

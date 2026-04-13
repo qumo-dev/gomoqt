@@ -1,6 +1,7 @@
 package moqt
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -155,4 +156,141 @@ func TestBroadcastRegisterReplacementClosesPreviousActiveTracks(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("expected replacement handler to receive track writer")
 	}
+}
+
+func TestBroadcastClose(t *testing.T) {
+	broadcast := NewBroadcast()
+
+	started := make(chan struct{})
+	closed := make(chan struct{})
+	done := make(chan struct{})
+
+	err := broadcast.Register("video", TrackHandlerFunc(func(tw *TrackWriter) {
+		close(started)
+		<-closed
+	}))
+	require.NoError(t, err)
+
+	tw := &TrackWriter{
+		TrackName:    "video",
+		groupManager: newGroupWriterManager(),
+		onCloseTrackFunc: func() {
+			close(closed)
+		},
+	}
+
+	go func() {
+		broadcast.ServeTrack(tw)
+		close(done)
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected handler to start serving track")
+	}
+
+	broadcast.Close()
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected active track to stop after Close")
+	}
+
+	// Handler should be empty; ServeTrack should fall back to NotFoundTrackHandler
+	handler := broadcast.Handler("video")
+	assert.Equal(t, reflect.ValueOf(NotFoundTrackHandler).Pointer(), reflect.ValueOf(handler).Pointer())
+}
+
+func TestBroadcastClose_Empty(t *testing.T) {
+	broadcast := NewBroadcast()
+	broadcast.Close() // should not panic
+}
+
+func TestBroadcastClose_Nil(t *testing.T) {
+	var broadcast *Broadcast
+	broadcast.Close() // should not panic
+}
+
+func TestBroadcastClose_MultipleHandlers(t *testing.T) {
+	broadcast := NewBroadcast()
+
+	videoClosed := make(chan struct{})
+	audioClosed := make(chan struct{})
+
+	videoStarted := make(chan struct{})
+	audioStarted := make(chan struct{})
+
+	err := broadcast.Register("video", TrackHandlerFunc(func(tw *TrackWriter) {
+		close(videoStarted)
+		<-videoClosed
+	}))
+	require.NoError(t, err)
+
+	err = broadcast.Register("audio", TrackHandlerFunc(func(tw *TrackWriter) {
+		close(audioStarted)
+		<-audioClosed
+	}))
+	require.NoError(t, err)
+
+	videoTW := &TrackWriter{
+		TrackName:    "video",
+		groupManager: newGroupWriterManager(),
+		onCloseTrackFunc: func() {
+			close(videoClosed)
+		},
+	}
+	audioTW := &TrackWriter{
+		TrackName:    "audio",
+		groupManager: newGroupWriterManager(),
+		onCloseTrackFunc: func() {
+			close(audioClosed)
+		},
+	}
+
+	videoDone := make(chan struct{})
+	audioDone := make(chan struct{})
+
+	go func() {
+		broadcast.ServeTrack(videoTW)
+		close(videoDone)
+	}()
+	go func() {
+		broadcast.ServeTrack(audioTW)
+		close(audioDone)
+	}()
+
+	select {
+	case <-videoStarted:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected video handler to start")
+	}
+	select {
+	case <-audioStarted:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected audio handler to start")
+	}
+
+	broadcast.Close()
+
+	select {
+	case <-videoDone:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected video track to stop after Close")
+	}
+	select {
+	case <-audioDone:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected audio track to stop after Close")
+	}
+
+	assert.Equal(t, reflect.ValueOf(NotFoundTrackHandler).Pointer(), reflect.ValueOf(broadcast.Handler("video")).Pointer())
+	assert.Equal(t, reflect.ValueOf(NotFoundTrackHandler).Pointer(), reflect.ValueOf(broadcast.Handler("audio")).Pointer())
+}
+
+func TestBroadcastRegisterOnNilBroadcast(t *testing.T) {
+	var broadcast *Broadcast
+	err := broadcast.Register("video", TrackHandlerFunc(func(tw *TrackWriter) {}))
+	assert.Error(t, err)
 }

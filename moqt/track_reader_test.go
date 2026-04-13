@@ -199,3 +199,72 @@ func TestGroupReader_CancelRead_RemovesFromManager(t *testing.T) {
 	assert.Len(t, receiver.groupManager.activeGroups, 0)
 	assert.NotContains(t, receiver.groupManager.activeGroups, group)
 }
+
+func TestTrackReader_Drops(t *testing.T) {
+	var buf bytes.Buffer
+
+	// Write a SUBSCRIBE_DROP response (readSubscribeResponses returns after one drop)
+	_, _ = buf.Write([]byte{byte(message.MessageTypeSubscribeDrop)})
+	require.NoError(t, (message.SubscribeDropMessage{
+		StartGroup: 11, // wire value 11 → groupSequenceFromWire → GroupSequence(10)
+		EndGroup:   21, // wire value 21 → groupSequenceFromWire → GroupSequence(20)
+		ErrorCode:  3,
+	}).Encode(&buf))
+
+	mockStream := &FakeQUICStream{
+		ReadFunc: buf.Read,
+	}
+
+	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
+	receiver := newTrackReader("/test", "video", substr, func() {})
+
+	go substr.readSubscribeResponses()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	var drops []SubscribeDrop
+	for drop := range receiver.Drops(ctx) {
+		drops = append(drops, drop)
+	}
+
+	require.Len(t, drops, 1)
+	assert.Equal(t, GroupSequence(10), drops[0].StartGroup)
+	assert.Equal(t, GroupSequence(20), drops[0].EndGroup)
+	assert.Equal(t, SubscribeErrorCode(3), drops[0].ErrorCode)
+}
+
+func TestTrackReader_Drops_ContextCanceled(t *testing.T) {
+	mockStream := &FakeQUICStream{}
+
+	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
+	receiver := newTrackReader("/test", "video", substr, func() {})
+
+	go substr.readSubscribeResponses()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	var drops []SubscribeDrop
+	for drop := range receiver.Drops(ctx) {
+		drops = append(drops, drop)
+	}
+
+	assert.Empty(t, drops)
+}
+
+func TestTrackReader_Update_NilConfig(t *testing.T) {
+	receiver, _ := newTestTrackReader(t)
+
+	err := receiver.Update(nil)
+	assert.Error(t, err)
+}
+
+func TestTrackReader_SubscribeID(t *testing.T) {
+	mockStream := &FakeQUICStream{}
+
+	substr := newSendSubscribeStream(SubscribeID(42), mockStream, &SubscribeConfig{})
+	receiver := newTrackReader("/test", "video", substr, func() {})
+
+	assert.Equal(t, SubscribeID(42), receiver.SubscribeID())
+}

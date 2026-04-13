@@ -459,6 +459,7 @@ func (sess *Session) processBiStream(stream transport.Stream) {
 	var streamType message.StreamType
 	err := streamType.Decode(stream)
 	if err != nil {
+		sess.logError("failed to decode stream type", err)
 		return
 	}
 
@@ -467,6 +468,7 @@ func (sess *Session) processBiStream(stream transport.Stream) {
 		var apm message.AnnouncePleaseMessage
 		err := apm.Decode(stream)
 		if err != nil {
+			sess.logError("failed to decode ANNOUNCE_PLEASE message", err)
 			cancelStreamWithError(stream, transport.StreamErrorCode(AnnounceErrorCodeInternal))
 			return
 		}
@@ -483,6 +485,7 @@ func (sess *Session) processBiStream(stream transport.Stream) {
 		var sm message.SubscribeMessage
 		err := sm.Decode(stream)
 		if err != nil {
+			sess.logError("failed to decode SUBSCRIBE message", err)
 			cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeInternal))
 			return
 		}
@@ -517,6 +520,7 @@ func (sess *Session) processBiStream(stream transport.Stream) {
 		var fm message.FetchMessage
 		err := fm.Decode(stream)
 		if err != nil {
+			sess.logError("failed to decode FETCH message", err)
 			cancelStreamWithError(stream, transport.StreamErrorCode(FetchErrorCodeInternal))
 			return
 		}
@@ -541,15 +545,18 @@ func (sess *Session) processBiStream(stream transport.Stream) {
 
 		err = safeServeFetch(handler, group, req)
 		if err != nil {
+			sess.logError("fetch handler error", err)
 			cancelStreamWithError(stream, transport.StreamErrorCode(FetchErrorCodeInternal))
 			return
 		}
 	case message.StreamTypeProbe:
 		if err := sess.handleProbeStream(stream); err != nil {
+			sess.logError("probe stream error", err)
 			cancelStreamWithError(stream, transport.StreamErrorCode(ProbeErrorCodeInternal))
 			return
 		}
 	default:
+		sess.logError("unknown stream type", fmt.Errorf("stream type %d", streamType))
 		cancelStreamWithError(stream, transport.StreamErrorCode(InternalSessionErrorCode))
 		return
 	}
@@ -570,6 +577,7 @@ func (sess *Session) processUniStream(stream transport.ReceiveStream) {
 	var streamType message.StreamType
 	err := streamType.Decode(stream)
 	if err != nil {
+		sess.logError("failed to decode uni stream type", err)
 		return
 	}
 
@@ -578,6 +586,7 @@ func (sess *Session) processUniStream(stream transport.ReceiveStream) {
 		var gm message.GroupMessage
 		err := gm.Decode(stream)
 		if err != nil {
+			sess.logError("failed to decode GROUP message", err)
 			return
 		}
 
@@ -591,6 +600,7 @@ func (sess *Session) processUniStream(stream transport.ReceiveStream) {
 		track.enqueueGroup(GroupSequence(gm.GroupSequence), stream)
 	default:
 		// Unknown stream types are stream-local and non-fatal for extension probing.
+		sess.logError("unknown uni stream type", fmt.Errorf("stream type %d", streamType))
 		stream.CancelRead(transport.StreamErrorCode(InternalSessionErrorCode))
 		return
 	}

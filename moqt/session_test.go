@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"io"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -1737,4 +1738,391 @@ func TestSession_Terminate_WithApplicationError(t *testing.T) {
 	assert.Error(t, err)
 	var sessErr *SessionError
 	assert.ErrorAs(t, err, &sessErr)
+}
+
+func TestSession_Fetch(t *testing.T) {
+	conn := &FakeStreamConn{}
+
+	mockStream := &FakeQUICStream{}
+	mockStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
+
+	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+
+	session := newTestSession(conn)
+
+	req := &FetchRequest{
+		BroadcastPath: "/test",
+		TrackName:     "video",
+		Priority:      3,
+		GroupSequence: 42,
+	}
+
+	group, err := session.Fetch(req)
+	require.NoError(t, err)
+	assert.NotNil(t, group)
+	assert.Equal(t, GroupSequence(42), group.GroupSequence())
+
+	_ = session.CloseWithError(NoError, "")
+}
+
+func TestSession_Fetch_ClosedSession(t *testing.T) {
+	session, _ := newTestSessionWithConn(t)
+
+	_ = session.CloseWithError(NoError, "")
+
+	req := &FetchRequest{
+		BroadcastPath: "/test",
+		TrackName:     "video",
+	}
+
+	group, err := session.Fetch(req)
+	assert.Error(t, err)
+	assert.Nil(t, group)
+	assert.Equal(t, ErrClosedSession, err)
+}
+
+func TestSession_Fetch_OpenStreamError(t *testing.T) {
+	conn := &FakeStreamConn{}
+	conn.OpenStreamFunc = func() (transport.Stream, error) {
+		return nil, errors.New("open stream failed")
+	}
+
+	session := newTestSession(conn)
+
+	req := &FetchRequest{
+		BroadcastPath: "/test",
+		TrackName:     "video",
+	}
+
+	group, err := session.Fetch(req)
+	assert.Error(t, err)
+	assert.Nil(t, group)
+
+	_ = session.CloseWithError(NoError, "")
+}
+
+func TestSession_Fetch_OpenStreamApplicationError(t *testing.T) {
+	appErr := &transport.ApplicationError{
+		ErrorCode:    transport.ApplicationErrorCode(InternalSessionErrorCode),
+		ErrorMessage: "application error",
+	}
+
+	conn := &FakeStreamConn{}
+	conn.OpenStreamFunc = func() (transport.Stream, error) { return nil, appErr }
+
+	session := newTestSession(conn)
+
+	req := &FetchRequest{
+		BroadcastPath: "/test",
+		TrackName:     "video",
+	}
+
+	group, err := session.Fetch(req)
+	assert.Error(t, err)
+	assert.Nil(t, group)
+	var sessErr *SessionError
+	assert.ErrorAs(t, err, &sessErr)
+
+	_ = session.CloseWithError(NoError, "")
+}
+
+func TestSession_Fetch_EncodeStreamTypeError(t *testing.T) {
+	mockStream := &FakeQUICStream{}
+	mockStream.WriteFunc = func(p []byte) (int, error) { return 0, errors.New("write error") }
+
+	conn := &FakeStreamConn{}
+	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+
+	session := newTestSession(conn)
+
+	req := &FetchRequest{
+		BroadcastPath: "/test",
+		TrackName:     "video",
+	}
+
+	group, err := session.Fetch(req)
+	assert.Error(t, err)
+	assert.Nil(t, group)
+
+	_ = session.CloseWithError(NoError, "")
+}
+
+func TestSession_Fetch_EncodeStreamTypeRemoteStreamError(t *testing.T) {
+	strErr := &transport.StreamError{
+		ErrorCode: transport.StreamErrorCode(FetchErrorCodeInternal),
+		Remote:    true,
+	}
+	mockStream := &FakeQUICStream{}
+	mockStream.WriteFunc = func(p []byte) (int, error) { return 0, strErr }
+
+	conn := &FakeStreamConn{}
+	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+
+	session := newTestSession(conn)
+
+	req := &FetchRequest{
+		BroadcastPath: "/test",
+		TrackName:     "video",
+	}
+
+	group, err := session.Fetch(req)
+	assert.Error(t, err)
+	assert.Nil(t, group)
+	var fetchErr *FetchError
+	assert.ErrorAs(t, err, &fetchErr)
+
+	_ = session.CloseWithError(NoError, "")
+}
+
+func TestSession_Fetch_EncodeFetchMessageError(t *testing.T) {
+	mockStream := &FakeQUICStream{}
+	writeCallCount := 0
+	mockStream.WriteFunc = func(p []byte) (int, error) {
+		writeCallCount++
+		if writeCallCount == 1 {
+			return len(p), nil // StreamType succeeds
+		}
+		return 0, errors.New("write error") // FetchMessage fails
+	}
+
+	conn := &FakeStreamConn{}
+	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+
+	session := newTestSession(conn)
+
+	req := &FetchRequest{
+		BroadcastPath: "/test",
+		TrackName:     "video",
+	}
+
+	group, err := session.Fetch(req)
+	assert.Error(t, err)
+	assert.Nil(t, group)
+
+	_ = session.CloseWithError(NoError, "")
+}
+
+func TestSession_Fetch_EncodeFetchMessageRemoteStreamError(t *testing.T) {
+	strErr := &transport.StreamError{
+		ErrorCode: transport.StreamErrorCode(FetchErrorCodeTimeout),
+		Remote:    true,
+	}
+	mockStream := &FakeQUICStream{}
+	writeCallCount := 0
+	mockStream.WriteFunc = func(p []byte) (int, error) {
+		writeCallCount++
+		if writeCallCount == 1 {
+			return len(p), nil // StreamType succeeds
+		}
+		return 0, strErr // FetchMessage fails with remote error
+	}
+
+	conn := &FakeStreamConn{}
+	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+
+	session := newTestSession(conn)
+
+	req := &FetchRequest{
+		BroadcastPath: "/test",
+		TrackName:     "video",
+	}
+
+	group, err := session.Fetch(req)
+	assert.Error(t, err)
+	assert.Nil(t, group)
+	var fetchErr *FetchError
+	assert.ErrorAs(t, err, &fetchErr)
+
+	_ = session.CloseWithError(NoError, "")
+}
+
+func TestSession_Probe_ClosedSession(t *testing.T) {
+	session, _ := newTestSessionWithConn(t)
+
+	_ = session.CloseWithError(NoError, "")
+
+	bitrate, err := session.Probe(1000000)
+	assert.Error(t, err)
+	assert.Equal(t, uint64(0), bitrate)
+	assert.Equal(t, ErrClosedSession, err)
+}
+
+func TestSession_Probe_OpenStreamError(t *testing.T) {
+	conn := &FakeStreamConn{}
+	conn.OpenStreamFunc = func() (transport.Stream, error) {
+		return nil, errors.New("open stream failed")
+	}
+
+	session := newTestSession(conn)
+
+	bitrate, err := session.Probe(1000000)
+	assert.Error(t, err)
+	assert.Equal(t, uint64(0), bitrate)
+
+	_ = session.CloseWithError(NoError, "")
+}
+
+func TestSession_Probe_OpenStreamApplicationError(t *testing.T) {
+	appErr := &transport.ApplicationError{
+		ErrorCode:    transport.ApplicationErrorCode(InternalSessionErrorCode),
+		ErrorMessage: "application error",
+	}
+
+	conn := &FakeStreamConn{}
+	conn.OpenStreamFunc = func() (transport.Stream, error) { return nil, appErr }
+
+	session := newTestSession(conn)
+
+	bitrate, err := session.Probe(1000000)
+	assert.Error(t, err)
+	assert.Equal(t, uint64(0), bitrate)
+	var sessErr *SessionError
+	assert.ErrorAs(t, err, &sessErr)
+
+	_ = session.CloseWithError(NoError, "")
+}
+
+func TestSession_Probe_EncodeStreamTypeError(t *testing.T) {
+	mockStream := &FakeQUICStream{}
+	mockStream.WriteFunc = func(p []byte) (int, error) { return 0, errors.New("write error") }
+
+	conn := &FakeStreamConn{}
+	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+
+	session := newTestSession(conn)
+
+	bitrate, err := session.Probe(1000000)
+	assert.Error(t, err)
+	assert.Equal(t, uint64(0), bitrate)
+
+	_ = session.CloseWithError(NoError, "")
+}
+
+func TestSession_Probe_EncodeProbeMessageError(t *testing.T) {
+	mockStream := &FakeQUICStream{}
+	writeCallCount := 0
+	mockStream.WriteFunc = func(p []byte) (int, error) {
+		writeCallCount++
+		if writeCallCount == 1 {
+			return len(p), nil
+		}
+		return 0, errors.New("write error")
+	}
+
+	conn := &FakeStreamConn{}
+	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+
+	session := newTestSession(conn)
+
+	bitrate, err := session.Probe(1000000)
+	assert.Error(t, err)
+	assert.Equal(t, uint64(0), bitrate)
+
+	_ = session.CloseWithError(NoError, "")
+}
+
+func TestSession_Probe_DecodeResponseError(t *testing.T) {
+	mockStream := &FakeQUICStream{}
+	mockStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
+	mockStream.ReadFunc = func(p []byte) (int, error) { return 0, errors.New("read error") }
+
+	conn := &FakeStreamConn{}
+	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+
+	session := newTestSession(conn)
+
+	bitrate, err := session.Probe(1000000)
+	assert.Error(t, err)
+	assert.Equal(t, uint64(0), bitrate)
+
+	_ = session.CloseWithError(NoError, "")
+}
+
+func TestSession_logError(t *testing.T) {
+	t.Run("logs error when logger is set", func(t *testing.T) {
+		var logBuf bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+
+		conn := &FakeStreamConn{}
+		session := newSession(conn, NewTrackMux(), nil, nil, logger)
+
+		session.logError("something failed", errors.New("test error"), "key", "value")
+
+		output := logBuf.String()
+		assert.Contains(t, output, "something failed")
+		assert.Contains(t, output, "test error")
+		assert.Contains(t, output, "key=value")
+
+		_ = session.CloseWithError(NoError, "")
+	})
+
+	t.Run("no panic with nil logger", func(t *testing.T) {
+		session := newTestSession(&FakeStreamConn{})
+		session.logError("msg", errors.New("err"))
+
+		_ = session.CloseWithError(NoError, "")
+	})
+
+	t.Run("no panic with nil error", func(t *testing.T) {
+		var logBuf bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+
+		conn := &FakeStreamConn{}
+		session := newSession(conn, NewTrackMux(), nil, nil, logger)
+
+		session.logError("msg", nil)
+		assert.Empty(t, logBuf.String())
+
+		_ = session.CloseWithError(NoError, "")
+	})
+
+	t.Run("no panic with nil session", func(t *testing.T) {
+		var s *Session
+		s.logError("msg", errors.New("err"))
+	})
+}
+
+func TestSession_processBiStream_logError(t *testing.T) {
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+
+	// Create a stream that returns an immediate read error → logError should fire
+	mockStream := &FakeQUICStream{
+		ReadFunc: func(p []byte) (int, error) {
+			return 0, errors.New("broken stream")
+		},
+	}
+
+	conn := &FakeStreamConn{}
+	session := newSession(conn, NewTrackMux(), nil, nil, logger)
+
+	session.processBiStream(mockStream)
+
+	output := logBuf.String()
+	assert.Contains(t, output, "failed to decode stream type")
+	assert.Contains(t, output, "broken stream")
+
+	_ = session.CloseWithError(NoError, "")
+}
+
+func TestSession_processUniStream_logError(t *testing.T) {
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+
+	mockStream := &FakeQUICReceiveStream{
+		ReadFunc: func(p []byte) (int, error) {
+			return 0, errors.New("broken uni stream")
+		},
+	}
+
+	conn := &FakeStreamConn{}
+	session := newSession(conn, NewTrackMux(), nil, nil, logger)
+
+	session.processUniStream(mockStream)
+
+	output := logBuf.String()
+	assert.Contains(t, output, "failed to decode uni stream type")
+	assert.Contains(t, output, "broken uni stream")
+
+	_ = session.CloseWithError(NoError, "")
 }

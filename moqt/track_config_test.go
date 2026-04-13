@@ -54,3 +54,20 @@ func TestTrackConfig_Comparison(t *testing.T) {
 	assert.Equal(t, config1, config2)
 	assert.NotEqual(t, config1, config3)
 }
+
+func TestSubscribeConfig_String(t *testing.T) {
+	config := SubscribeConfig{
+		Priority:   128,
+		Ordered:    true,
+		MaxLatency: 250,
+		StartGroup: 5,
+		EndGroup:   10,
+	}
+
+	result := config.String()
+	assert.Contains(t, result, "subscriber_priority: 128")
+	assert.Contains(t, result, "ordered: true")
+	assert.Contains(t, result, "max_latency_ms: 250")
+	assert.Contains(t, result, "start_group: 5")
+	assert.Contains(t, result, "end_group: 10")
+}
