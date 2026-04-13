@@ -630,10 +630,7 @@ func cancelStreamWithError(stream transport.Stream, code transport.StreamErrorCo
 }
 
 func (sess *Session) handleProbeStream(stream transport.Stream) error {
-	provider, ok := sess.probeStatsProvider()
-	if !ok {
-		return errors.New("probe unsupported")
-	}
+	provider, _ := sess.probeStatsProvider()
 
 	tracker := &probeMeasurementTracker{}
 	for {
@@ -646,6 +643,9 @@ func (sess *Session) handleProbeStream(stream transport.Stream) error {
 			return err
 		}
 
+		if provider == nil {
+			return &ProbeError{StreamError: &transport.StreamError{ErrorCode: transport.StreamErrorCode(ProbeErrorCodeNotSupported)}}
+		}
 		measured := tracker.measure(provider.ConnectionStats(), pm.Bitrate, time.Now())
 		if err := (message.ProbeMessage{Bitrate: measured}).Encode(stream); err != nil {
 			return err

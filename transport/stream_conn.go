@@ -34,14 +34,8 @@ type StreamConn interface {
 	// OpenStream opens a new bidirectional stream without blocking.
 	OpenStream() (Stream, error)
 
-	// OpenStreamSync opens a new bidirectional stream, blocking until complete.
-	OpenStreamSync(ctx context.Context) (Stream, error)
-
 	// OpenUniStream opens a new unidirectional stream without blocking.
 	OpenUniStream() (SendStream, error)
-
-	// OpenUniStreamSync opens a new unidirectional stream, blocking until complete.
-	OpenUniStreamSync(ctx context.Context) (str SendStream, err error)
 
 	// RemoteAddr returns the remote network address.
 	RemoteAddr() net.Addr
