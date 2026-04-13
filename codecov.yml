@@ -1,21 +1,52 @@
 ignore:
-  # Pure delegation wrappers over quic-go and webtransport-go types.
-  # These files contain zero logic (every function is a one-line delegate),
-  # so measuring their coverage adds no signal.
-  - "moqt/internal/quicgo/connection_wrapper.go"
-  - "moqt/internal/quicgo/listener_wrapper.go"
-  - "moqt/internal/quicgo/stream_wrapper.go"
-  - "moqt/internal/quicgo/dialer.go"
+  # Pure delegation wrappers — zero logic, one-line delegates only.
+  - "moqt/internal/quicgo/"
   - "moqt/internal/webtransportgo/session_wrapper.go"
   - "moqt/internal/webtransportgo/stream_wrapper.go"
+  # CLI / interop binaries and build tooling are not library code.
+  - "cmd/"
+  - "magefiles/"
+  # TS internals and CLI tooling
+  - "moq-web/src/internal/"
+  - "moq-web/cli/"
+
+flag_management:
+  individual_flags: true
+
+flags:
+  go:
+    # Core Go library: moqt session/server/track logic + msf media format helpers.
+    paths:
+      - moqt/
+      - msf/
+    carryforward: false
+  moq-web-deno:
+    # Core TS library: session, track, msf.
+    paths:
+      - moq-web/src/
+    carryforward: false
 
 coverage:
   status:
     project:
-      default:
+      go:
         target: 75%
         threshold: 2%
-    patch:
-      default:
+        flags:
+          - go
+      moq-web-deno:
         target: 70%
         threshold: 5%
+        flags:
+          - moq-web-deno
+    patch:
+      go:
+        target: 70%
+        threshold: 5%
+        flags:
+          - go
+      moq-web-deno:
+        target: 65%
+        threshold: 5%
+        flags:
+          - moq-web-deno
