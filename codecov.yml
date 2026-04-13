@@ -1,8 +1,7 @@
 ignore:
   # Pure delegation wrappers — zero logic, one-line delegates only.
   - "moqt/internal/quicgo/"
-  - "moqt/internal/webtransportgo/session_wrapper.go"
-  - "moqt/internal/webtransportgo/stream_wrapper.go"
+  - "moqt/internal/webtransportgo/"
   # CLI / interop binaries and build tooling are not library code.
   - "cmd/"
   - "magefiles/"
@@ -20,7 +19,7 @@ flags:
       - moqt/
       - msf/
     carryforward: false
-  moq-web-deno:
+  ts:
     # Core TS library: session, track, msf.
     paths:
       - moq-web/src/
