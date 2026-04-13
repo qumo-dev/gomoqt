@@ -3,10 +3,14 @@ import type { MOQOptions } from "./options.ts";
 import { DefaultTrackMux, TrackMux } from "./track_mux.ts";
 import { WebTransportSession } from "./internal/webtransport/mod.ts";
 
+export const ALPN = "moq-lite-03";
+
 const DefaultWebTransportOptions: WebTransportOptions = {
 	allowPooling: false,
 	congestionControl: "low-latency",
 	requireUnreliable: true,
+	// deno-lint-ignore no-explicit-any
+	...(({ protocols: [ALPN] }) as any),
 };
 
 const DefaultMOQOptions: MOQOptions = {
@@ -89,5 +93,3 @@ export class Client {
 		this.#sessions = undefined;
 	}
 }
-
-export const MOQ = Client;

@@ -63,7 +63,7 @@ const OriginalWebTransport = (globalThis as any).WebTransport;
 (globalThis as any).WebTransport = MockWebTransport;
 
 // Import after setting up mocks
-import { Client, MOQ } from "./client.ts";
+import { Client, ALPN } from "./client.ts";
 import { TrackMux } from "./track_mux.ts";
 import type { MOQOptions } from "./options.ts";
 
@@ -245,17 +245,8 @@ Deno.test("Client - dial() rejects after abort", async () => {
 	);
 });
 
-Deno.test("Client - MOQ alias exports", () => {
-	// MOQ should be an alias for Client
-	assertEquals(MOQ, Client);
-});
-
-Deno.test("Client - MOQ alias instantiation", () => {
-	const moqClient = new MOQ();
-
-	// Should be instance of Client
-	assertEquals(moqClient instanceof Client, true);
-	assertExists(moqClient.options);
+Deno.test("Client - ALPN constant is moq-lite-03", () => {
+	assertEquals(ALPN, "moq-lite-03");
 });
 
 // Restore original WebTransport after all tests
