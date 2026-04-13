@@ -1,21 +1,38 @@
 package moqt
 
 import (
+	"fmt"
+	"io"
 	"sync"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
 	"github.com/okdaichi/gomoqt/transport"
 )
 
-func newSendSubscribeStream(id SubscribeID, stream transport.Stream, initConfig *SubscribeConfig, dropHandler func(SubscribeDrop)) *sendSubscribeStream {
+func newSendSubscribeStream(id SubscribeID, stream transport.Stream, initConfig *SubscribeConfig) *sendSubscribeStream {
 	substr := &sendSubscribeStream{
-		id:          id,
-		config:      initConfig,
-		stream:      stream,
-		dropHandler: dropHandler,
+		id:        id,
+		config:    initConfig,
+		stream:    stream,
+		droppedCh: make(chan struct{}, 1),
 	}
 
 	return substr
+}
+
+type sendSubscribeStream struct {
+	stream transport.Stream
+
+	config *SubscribeConfig
+
+	info PublishInfo
+
+	mu sync.Mutex
+
+	droppedCh chan struct{}
+	drops     []SubscribeDrop
+
+	id SubscribeID
 }
 
 func (substr *sendSubscribeStream) readSubscribeResponses() {
@@ -37,7 +54,7 @@ func (substr *sendSubscribeStream) readSubscribeResponses() {
 		}
 
 		if drop != nil {
-			substr.notifyDrop(SubscribeDrop{
+			substr.appendDrop(SubscribeDrop{
 				StartGroup: groupSequenceFromWire(drop.StartGroup),
 				EndGroup:   groupSequenceFromWire(drop.EndGroup),
 				ErrorCode:  SubscribeErrorCode(drop.ErrorCode),
@@ -47,22 +64,35 @@ func (substr *sendSubscribeStream) readSubscribeResponses() {
 	}
 }
 
-type sendSubscribeStream struct {
-	stream transport.Stream
+func readSubscribeResponse(stream io.Reader) (*message.SubscribeOkMessage, *message.SubscribeDropMessage, error) {
+	head := make([]byte, 1)
+	if _, err := io.ReadFull(stream, head); err != nil {
+		return nil, nil, err
+	}
 
-	config *SubscribeConfig
+	msgType, _, err := message.ReadVarint(head)
+	if err != nil {
+		return nil, nil, err
+	}
 
-	info PublishInfo
-
-	mu     sync.Mutex
-	dropMu sync.Mutex
-
-	dropHandler func(SubscribeDrop)
-	drop        SubscribeDrop
-	dropSeen    bool
-	dropSent    bool
-
-	id SubscribeID
+	switch msgType {
+	case 0x0:
+		var msg message.SubscribeOkMessage
+		err := msg.Decode(stream)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &msg, nil, nil
+	case 0x1:
+		var msg message.SubscribeDropMessage
+		err := msg.Decode(stream)
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, &msg, nil
+	default:
+		return nil, nil, fmt.Errorf("unexpected SUBSCRIBE response type: %d", msgType)
+	}
 }
 
 func (substr *sendSubscribeStream) SubscribeID() SubscribeID {
@@ -116,39 +146,27 @@ func (substr *sendSubscribeStream) updateSubscribe(newConfig *SubscribeConfig) e
 	return nil
 }
 
-func (substr *sendSubscribeStream) notifyDrop(drop SubscribeDrop) {
-	substr.dropMu.Lock()
-	if substr.dropSeen {
-		substr.dropMu.Unlock()
-		return
+func (substr *sendSubscribeStream) appendDrop(drop SubscribeDrop) {
+	substr.mu.Lock()
+	substr.drops = append(substr.drops, drop)
+	select {
+	case substr.droppedCh <- struct{}{}:
+	default:
 	}
-	substr.dropSeen = true
-	substr.drop = drop
-	handler := substr.dropHandler
-	shouldDeliver := handler != nil && !substr.dropSent
-	if shouldDeliver {
-		substr.dropSent = true
-	}
-	substr.dropMu.Unlock()
-
-	if shouldDeliver {
-		go handler(drop)
-	}
+	substr.mu.Unlock()
 }
 
-func (substr *sendSubscribeStream) setDropHandler(handler func(SubscribeDrop)) {
-	substr.dropMu.Lock()
-	substr.dropHandler = handler
-	drop := substr.drop
-	shouldDeliver := substr.dropSeen && !substr.dropSent && handler != nil
-	if shouldDeliver {
-		substr.dropSent = true
-	}
-	substr.dropMu.Unlock()
+func (substr *sendSubscribeStream) pendingDrops() []SubscribeDrop {
+	substr.mu.Lock()
+	defer substr.mu.Unlock()
 
-	if shouldDeliver {
-		go handler(drop)
+	if len(substr.drops) == 0 {
+		return nil
 	}
+
+	drops := substr.drops
+	substr.drops = nil
+	return drops
 }
 
 func (substr *sendSubscribeStream) ReadInfo() PublishInfo {

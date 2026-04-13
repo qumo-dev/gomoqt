@@ -228,7 +228,7 @@ func (s *Session) Subscribe(ctx context.Context, req *SubscribeRequest) (*TrackR
 		return nil, fmt.Errorf("failed to encode SUBSCRIBE message: %w", err)
 	}
 
-	substr := newSendSubscribeStream(id, stream, req.Config, req.OnDrop)
+	substr := newSendSubscribeStream(id, stream, req.Config)
 
 	track := newTrackReader(req, substr, func() { s.removeTrackReader(id) })
 	s.addTrackReader(id, track)
@@ -267,37 +267,6 @@ func (s *Session) Subscribe(ctx context.Context, req *SubscribeRequest) (*TrackR
 	go substr.readSubscribeResponses()
 
 	return track, nil
-}
-
-func readSubscribeResponse(stream io.Reader) (*message.SubscribeOkMessage, *message.SubscribeDropMessage, error) {
-	head := make([]byte, 1)
-	if _, err := io.ReadFull(stream, head); err != nil {
-		return nil, nil, err
-	}
-
-	msgType, _, err := message.ReadVarint(head)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	switch msgType {
-	case 0x0:
-		var msg message.SubscribeOkMessage
-		err := msg.Decode(stream)
-		if err != nil {
-			return nil, nil, err
-		}
-		return &msg, nil, nil
-	case 0x1:
-		var msg message.SubscribeDropMessage
-		err := msg.Decode(stream)
-		if err != nil {
-			return nil, nil, err
-		}
-		return nil, &msg, nil
-	default:
-		return nil, nil, fmt.Errorf("unexpected SUBSCRIBE response type: %d", msgType)
-	}
 }
 
 // nextSubscribeID atomically increments and returns the next SubscribeID for new subscriptions.

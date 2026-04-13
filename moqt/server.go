@@ -491,7 +491,7 @@ func goAway(ctx context.Context, conn StreamConn) {
 		// Connection already closed; nothing to do
 	case <-ctx.Done():
 		// Context canceled, close connection with error
-		conn.CloseWithError(transport.ConnErrorCode(GoAwayTimeoutErrorCode), SessionErrorText(GoAwayTimeoutErrorCode))
+		conn.CloseWithError(transport.ConnErrorCode(GoAwayTimeoutErrorCode), GoAwayTimeoutErrorCode.String())
 	}
 }
 

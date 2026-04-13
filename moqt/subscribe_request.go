@@ -17,9 +17,6 @@ type SubscribeRequest struct {
 	// Config holds wire-level subscribe parameters.
 	// If nil, a zero-value config is used.
 	Config *SubscribeConfig
-
-	// OnDrop is invoked when the subscription is dropped by the peer.
-	OnDrop func(SubscribeDrop)
 }
 
 // NewSubscribeRequest returns a subscribe request initialized with the given values.
@@ -58,6 +55,5 @@ func (r *SubscribeRequest) normalized() *SubscribeRequest {
 		BroadcastPath: r.BroadcastPath,
 		TrackName:     r.TrackName,
 		Config:        config,
-		OnDrop:        r.OnDrop,
 	}
 }

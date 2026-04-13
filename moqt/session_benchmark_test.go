@@ -146,7 +146,7 @@ func BenchmarkSession_TrackReaderOperations(b *testing.B) {
 		// Create mock subscribe stream
 		mockSubStream := &FakeQUICStream{}
 
-		substr := newSendSubscribeStream(id, mockSubStream, &SubscribeConfig{}, nil)
+		substr := newSendSubscribeStream(id, mockSubStream, &SubscribeConfig{})
 		req := testSubscribeRequest(b, nil)
 		trackReader := newTrackReader(req, substr, func() {})
 
@@ -212,7 +212,7 @@ func BenchmarkSession_MapLookup(b *testing.B) {
 				id := SubscribeID(i)
 				mockSubStream := &FakeQUICStream{}
 
-				substr := newSendSubscribeStream(id, mockSubStream, &SubscribeConfig{}, nil)
+				substr := newSendSubscribeStream(id, mockSubStream, &SubscribeConfig{})
 				req := testSubscribeRequest(b, nil)
 				trackReader := newTrackReader(req, substr, func() {})
 				session.addTrackReader(id, trackReader)
@@ -258,7 +258,7 @@ func BenchmarkSession_MemoryAllocation(b *testing.B) {
 					id := SubscribeID(j)
 					mockSubStream := &FakeQUICStream{}
 
-					substr := newSendSubscribeStream(id, mockSubStream, &SubscribeConfig{}, nil)
+					substr := newSendSubscribeStream(id, mockSubStream, &SubscribeConfig{})
 					req := testSubscribeRequest(b, nil)
 					trackReader := newTrackReader(req, substr, func() {})
 					session.addTrackReader(id, trackReader)

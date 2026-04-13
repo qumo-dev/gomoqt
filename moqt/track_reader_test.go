@@ -22,7 +22,7 @@ func newTestTrackReader(tb testing.TB) (*TrackReader, *FakeQUICStream) {
 
 func TestNewTrackReader(t *testing.T) {
 	mockStream := &FakeQUICStream{}
-	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{}, nil)
+	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 	receiver := newTrackReader(testSubscribeRequest(t, nil), substr, func() {})
 
 	assert.NotNil(t, receiver, "newTrackReader should not return nil")
@@ -151,7 +151,7 @@ func TestTrackReader_Update(t *testing.T) {
 	assert.Equal(t, &SubscribeConfig{}, receiver.TrackConfig())
 }
 
-func TestTrackReader_HandleDrop(t *testing.T) {
+func TestTrackReader_AcceptDrop(t *testing.T) {
 	var buf bytes.Buffer
 	_, _ = buf.Write([]byte{byte(message.MessageTypeSubscribeDrop)})
 	require.NoError(t, (message.SubscribeDropMessage{
@@ -164,24 +164,21 @@ func TestTrackReader_HandleDrop(t *testing.T) {
 		ReadFunc: buf.Read,
 	}
 
-	substr := newTestSendSubscribeStreamFromStream(mockStream, &SubscribeConfig{})
+	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 	receiver := newTrackReader(testSubscribeRequest(t, nil), substr, func() {})
 
-	done := make(chan SubscribeDrop, 1)
-	receiver.HandleDrop(func(drop SubscribeDrop) {
-		done <- drop
-	})
+	go substr.readSubscribeResponses()
 
-	select {
-	case drop := <-done:
-		assert.Equal(t, SubscribeDrop{
-			StartGroup: 10,
-			EndGroup:   20,
-			ErrorCode:  3,
-		}, drop)
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("expected drop callback to be invoked")
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	drop, err := receiver.acceptDrop(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, SubscribeDrop{
+		StartGroup: 10,
+		EndGroup:   20,
+		ErrorCode:  3,
+	}, drop)
 }
 
 func TestTrackReader_CloseWithError(t *testing.T) {

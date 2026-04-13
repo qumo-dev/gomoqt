@@ -18,7 +18,7 @@ func newTestSendSubscribeStreamFromStream(stream transport.Stream, config *Subsc
 		config = &SubscribeConfig{}
 	}
 
-	substr := newSendSubscribeStream(SubscribeID(1), stream, config, nil)
+	substr := newSendSubscribeStream(SubscribeID(1), stream, config)
 	go substr.readSubscribeResponses()
 	return substr
 }
@@ -31,7 +31,7 @@ func newTestSendSubscribeStream(tb testing.TB, config *SubscribeConfig) *sendSub
 
 	mockStream := &FakeQUICStream{}
 
-	substr := newSendSubscribeStream(SubscribeID(1), mockStream, config, nil)
+	substr := newSendSubscribeStream(SubscribeID(1), mockStream, config)
 	go substr.readSubscribeResponses()
 
 	return substr
@@ -44,7 +44,7 @@ func TestNewSendSubscribeStream(t *testing.T) {
 	}
 	mockStream := &FakeQUICStream{}
 
-	sss := newSendSubscribeStream(id, mockStream, config, func(SubscribeDrop) {})
+	sss := newSendSubscribeStream(id, mockStream, config)
 
 	assert.NotNil(t, sss, "newSendSubscribeStream should not return nil")
 	assert.Equal(t, id, sss.id, "id should be set correctly")
@@ -57,7 +57,7 @@ func TestSendSubscribeStream_SubscribeID(t *testing.T) {
 	config := &SubscribeConfig{}
 	mockStream := &FakeQUICStream{}
 
-	sss := newSendSubscribeStream(id, mockStream, config, func(SubscribeDrop) {})
+	sss := newSendSubscribeStream(id, mockStream, config)
 
 	returnedID := sss.SubscribeID()
 
@@ -65,15 +65,10 @@ func TestSendSubscribeStream_SubscribeID(t *testing.T) {
 }
 
 func TestSendSubscribeStream_ReadInfo(t *testing.T) {
-	id := SubscribeID(999)
-	config := &SubscribeConfig{}
-	mockStream := &FakeQUICStream{}
-
-	info := PublishInfo{}
-	sss := newSendSubscribeStream(id, mockStream, config, func(SubscribeDrop) {})
+	sss := newTestSendSubscribeStream(t, nil)
 
 	ret := sss.ReadInfo()
-	assert.Equal(t, info, ret, "ReadInfo() should return the Info passed to constructor")
+	assert.Equal(t, PublishInfo{}, ret, "ReadInfo() should return the Info passed to constructor")
 }
 
 func TestSendSubscribeStream_TrackConfig(t *testing.T) {
@@ -93,7 +88,7 @@ func TestSendSubscribeStream_UpdateSubscribe(t *testing.T) {
 	}
 	mockStream := &FakeQUICStream{}
 	mockStream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
-	sss := newSendSubscribeStream(SubscribeID(1), mockStream, config, nil)
+	sss := newSendSubscribeStream(SubscribeID(1), mockStream, config)
 
 	// Test valid update
 	newConfig := &SubscribeConfig{
@@ -125,7 +120,7 @@ func TestSendSubscribeStream_UpdateSubscribe_EncodesWireFormat(t *testing.T) {
 	var buf bytes.Buffer
 	mockStream := &FakeQUICStream{}
 	mockStream.WriteFunc = buf.Write
-	sss := newSendSubscribeStream(SubscribeID(1), mockStream, config, nil)
+	sss := newSendSubscribeStream(SubscribeID(1), mockStream, config)
 
 	newConfig := &SubscribeConfig{
 		Priority:   TrackPriority(7),
@@ -149,10 +144,8 @@ func TestSendSubscribeStream_UpdateSubscribe_EncodesWireFormat(t *testing.T) {
 }
 
 func TestSendSubscribeStream_Close(t *testing.T) {
-	config := &SubscribeConfig{}
-	var mockStream *FakeQUICStream
-	mockStream = &FakeQUICStream{}
-	sss := newSendSubscribeStream(SubscribeID(1), mockStream, config, nil)
+	mockStream := &FakeQUICStream{}
+	sss := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
 	err := sss.close()
 	assert.NoError(t, err, "Close() should not return error")
@@ -162,10 +155,8 @@ func TestSendSubscribeStream_Close(t *testing.T) {
 }
 
 func TestSendSubscribeStream_CloseWithError(t *testing.T) {
-	config := &SubscribeConfig{}
-	var mockStream *FakeQUICStream
-	mockStream = &FakeQUICStream{}
-	sss := newSendSubscribeStream(SubscribeID(1), mockStream, config, nil)
+	mockStream := &FakeQUICStream{}
+	sss := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
 	testErrCode := SubscribeErrorCodeInternal
 	sss.closeWithError(testErrCode)
@@ -183,10 +174,8 @@ func TestSendSubscribeStream_CloseWithError(t *testing.T) {
 }
 
 func TestSendSubscribeStream_CloseWithError_NilError(t *testing.T) {
-	config := &SubscribeConfig{}
-	var mockStream *FakeQUICStream
-	mockStream = &FakeQUICStream{}
-	sss := newSendSubscribeStream(SubscribeID(1), mockStream, config, nil)
+	mockStream := &FakeQUICStream{}
+	sss := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
 	testErrCode := SubscribeErrorCode(0) // Using zero error code
 	sss.closeWithError(testErrCode)
@@ -209,7 +198,7 @@ func TestSendSubscribeStream_ConcurrentUpdate(t *testing.T) {
 	}
 	mockStream := &FakeQUICStream{}
 	mockStream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
-	sss := newSendSubscribeStream(SubscribeID(1), mockStream, config, nil)
+	sss := newSendSubscribeStream(SubscribeID(1), mockStream, config)
 
 	// Test concurrent updates
 	var wg sync.WaitGroup
@@ -252,7 +241,7 @@ func TestSendSubscribeStream_UpdateSubscribeWriteError(t *testing.T) {
 	}
 	mockStream := &FakeQUICStream{}
 	mockStream.WriteFunc = func(p []byte) (int, error) { return 0, assert.AnError }
-	sss := newSendSubscribeStream(SubscribeID(1), mockStream, config, nil)
+	sss := newSendSubscribeStream(SubscribeID(1), mockStream, config)
 
 	newConfig := &SubscribeConfig{
 		Priority: TrackPriority(2),
@@ -268,7 +257,7 @@ func TestSendSubscribeStream_UpdateSubscribeClosedStream(t *testing.T) {
 
 	mockStream := &FakeQUICStream{}
 	mockStream.WriteFunc = func(p []byte) (int, error) { return 0, io.EOF }
-	sss := newSendSubscribeStream(SubscribeID(1), mockStream, config, nil)
+	sss := newSendSubscribeStream(SubscribeID(1), mockStream, config)
 
 	// Close the stream first
 	err := sss.close()
@@ -286,7 +275,7 @@ func TestSendSubscribeStream_UpdateSubscribeClosedStream(t *testing.T) {
 
 func TestSendSubscribeStream_CloseAlreadyClosed(t *testing.T) {
 	mockStream := &FakeQUICStream{}
-	sss := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{}, nil)
+	sss := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
 	// Close once
 	err1 := sss.close()
@@ -299,7 +288,7 @@ func TestSendSubscribeStream_CloseAlreadyClosed(t *testing.T) {
 
 func TestSendSubscribeStream_CloseWithError_MultipleClose(t *testing.T) {
 	mockStream := &FakeQUICStream{}
-	sss := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{}, nil)
+	sss := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
 	// Close with error once
 	testErrCode := SubscribeErrorCodeInternal
@@ -334,7 +323,7 @@ func TestSendSubscribeStream_UpdateSubscribeValidRangeTransitions(t *testing.T) 
 			if !tt.expectError {
 				mockStream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
 			}
-			sss := newSendSubscribeStream(SubscribeID(1), mockStream, tt.initialConfig, nil)
+			sss := newSendSubscribeStream(SubscribeID(1), mockStream, tt.initialConfig)
 
 			err := sss.updateSubscribe(tt.newConfig)
 			if tt.expectError {

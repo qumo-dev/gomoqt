@@ -3,6 +3,7 @@ package moqt
 import (
 	"context"
 	"errors"
+	"iter"
 	"sync"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
@@ -86,13 +87,48 @@ func (r *TrackReader) TrackConfig() *SubscribeConfig {
 	return r.sendSubscribeStream.TrackConfig()
 }
 
-// HandleDrop registers a callback that is invoked when the subscription is dropped by the peer.
-// The callback is invoked at most once for the first Drop received.
-func (r *TrackReader) HandleDrop(fn func(SubscribeDrop)) {
-	if r == nil || r.sendSubscribeStream == nil {
-		return
+// acceptDrop blocks until a drop notification is available or context is canceled.
+func (r *TrackReader) acceptDrop(ctx context.Context) (SubscribeDrop, error) {
+	trackCtx := r.Context()
+
+	for {
+		if drops := r.sendSubscribeStream.pendingDrops(); len(drops) > 0 {
+			// Re-append remaining drops
+			for _, d := range drops[1:] {
+				r.sendSubscribeStream.appendDrop(d)
+			}
+			return drops[0], nil
+		}
+
+		if trackCtx.Err() != nil {
+			return SubscribeDrop{}, Cause(trackCtx)
+		}
+
+		select {
+		case <-ctx.Done():
+			return SubscribeDrop{}, ctx.Err()
+		case <-trackCtx.Done():
+			return SubscribeDrop{}, Cause(trackCtx)
+		case <-r.sendSubscribeStream.droppedCh:
+		}
 	}
-	r.sendSubscribeStream.setDropHandler(fn)
+}
+
+// Drops returns an iterator that yields SubscribeDrop values until ctx or
+// the reader's context is canceled.
+func (r *TrackReader) Drops(ctx context.Context) iter.Seq[SubscribeDrop] {
+	return func(yield func(SubscribeDrop) bool) {
+		for {
+			drop, err := r.acceptDrop(ctx)
+			if err != nil {
+				return
+			}
+
+			if !yield(drop) {
+				return
+			}
+		}
+	}
 }
 
 // AcceptGroup blocks until the next group is available or context is
