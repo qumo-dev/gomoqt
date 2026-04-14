@@ -81,7 +81,7 @@ The Announce mechanism clarifies which broadcasts are available, but does not sp
 It is up to the application logic to associate tracks with their respective broadcasts.
 When you access the broadcast's track, you have to know its name in advance or out-of-band.
 
-[Hang protocol](../hang/#protocol) can be helpful as a way to negotiate track names.
+[MSF Catalog](../msf/#catalog) can be helpful as a way to discover and negotiate track names within a broadcast.
 
 ## Handle Track
 

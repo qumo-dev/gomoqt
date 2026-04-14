@@ -23,12 +23,12 @@ To implement your own application using MoQ, you can refer to the following reso
 	{{< card link="moq" title="MoQ" icon="external-link" subtitle="MoQ protocol overview and setup." >}}
 {{< /cards >}}
 
-## Hang
+## MSF (Streaming Format)
 
-To implement conferencing applications over MoQ, Hang protocol implementation is provided:
+MSF defines the standard format for describing and organizing media content over MoQ:
 
 {{< cards >}}
-	{{< card link="hang" title="Hang" icon="external-link" subtitle="Hang protocol overview and setup." >}}
+	{{< card link="msf" title="MSF" icon="external-link" subtitle="MOQT Streaming Format — catalogs, deltas, and timelines." >}}
 {{< /cards >}}
 
 ## Feedback 📋
