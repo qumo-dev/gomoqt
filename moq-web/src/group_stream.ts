@@ -9,7 +9,14 @@ import { GroupSequence } from "./alias.ts";
 import { ByteSink, ByteSinkFunc, ByteSource, Frame } from "./frame.ts";
 import { EOFError } from "@okdaichi/golikejs/io";
 
+/**
+ * Writes frames to a single group within a track.
+ *
+ * Obtained from {@link TrackWriter.openGroup}. Each frame is length-prefixed
+ * on the wire.
+ */
 export class GroupWriter {
+	/** The group sequence number. */
 	readonly sequence: GroupSequence;
 	#stream: SendStream;
 	readonly context: Context;
@@ -25,6 +32,10 @@ export class GroupWriter {
 		});
 	}
 
+	/**
+	 * Write a single frame to the group.
+	 * @param src - Frame data as a {@link ByteSource} or raw `Uint8Array`.
+	 */
 	async writeFrame(src: ByteSource | Uint8Array): Promise<Error | undefined> {
 		// Convert source to bytes
 		const bytes = src instanceof Uint8Array ? src : (() => {
@@ -48,6 +59,7 @@ export class GroupWriter {
 		return undefined;
 	}
 
+	/** Close the group stream normally. */
 	async close(): Promise<void> {
 		if (this.context.err()) {
 			return;
@@ -56,6 +68,10 @@ export class GroupWriter {
 		await this.#stream.close();
 	}
 
+	/**
+	 * Cancel the group stream with an error.
+	 * @param code - The {@link GroupErrorCode} to signal.
+	 */
 	async cancel(code: GroupErrorCode): Promise<void> {
 		if (this.context.err()) {
 			// Do nothing if already cancelled
@@ -70,7 +86,14 @@ export class GroupWriter {
 	}
 }
 
+/**
+ * Reads frames from a single group within a track.
+ *
+ * Obtained from {@link TrackReader.acceptGroup}. Use {@link readFrame} for
+ * manual reads or {@link frames} for a convenient `for await` loop.
+ */
 export class GroupReader {
+	/** The group sequence number. */
 	readonly sequence: GroupSequence;
 	#reader: ReceiveStream;
 	readonly context: Context;
@@ -86,6 +109,11 @@ export class GroupReader {
 		});
 	}
 
+	/**
+	 * Read a single frame into a sink.
+	 * @param sink - A {@link ByteSink}, {@link ByteSinkFunc}, or callback receiving the raw bytes.
+	 * @returns `undefined` on success, {@link EOFError} at end-of-stream, or another Error.
+	 */
 	async readFrame(sink: ByteSink | ByteSinkFunc): Promise<Error | undefined> {
 		// Read length prefix as varint
 		const [len, , err1] = await readVarint(this.#reader);
@@ -119,6 +147,10 @@ export class GroupReader {
 		return undefined;
 	}
 
+	/**
+	 * Cancel the group stream with an error.
+	 * @param code - The {@link GroupErrorCode} to signal.
+	 */
 	async cancel(code: GroupErrorCode): Promise<void> {
 		if (this.context.err()) {
 			// Do nothing if already cancelled
@@ -132,14 +164,20 @@ export class GroupReader {
 		await this.#reader.cancel(code);
 	}
 
-	// frames returns an async generator that yields decoded frames from the
-	// group stream.  It mirrors the Go `GroupReader.Frames` helper, giving
-	// callers a simple `for await` interface and hiding EOF errors.
-	//
-	// The `buf` argument is optional; if provided the same buffer will be
-	// reused for each iteration (this avoids allocations but means the
-	// consumer should copy data out if they need to keep it).  Passing a
-	// buffer is analogous to supplying a scratch frame in the Go helper.
+	/**
+	 * Async generator yielding decoded {@link Frame}s from the group.
+	 *
+	 * Iteration ends normally on EOF and throws on other errors.
+	 *
+	 * @param buf - Optional reusable buffer to avoid allocations.
+	 *
+	 * @example
+	 * ```ts
+	 * for await (const frame of group.frames()) {
+	 *   console.log(frame.bytes);
+	 * }
+	 * ```
+	 */
 	public async *frames(buf?: Frame): AsyncGenerator<Frame> {
 		if (!buf) {
 			buf = new Frame(new ArrayBuffer(0));

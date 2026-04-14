@@ -15,6 +15,12 @@ import { Stream } from "./internal/webtransport/stream.ts";
 
 type suffix = string;
 
+/**
+ * Writes announcements to a remote peer over an announce stream.
+ *
+ * Created on the publisher side to respond to an ANNOUNCE_PLEASE from the subscriber.
+ * Call {@link init} with a set of initial announcements, then {@link send} for updates.
+ */
 export class AnnouncementWriter {
 	#stream: Stream;
 	readonly prefix: TrackPrefix;
@@ -39,6 +45,11 @@ export class AnnouncementWriter {
 		});
 	}
 
+	/**
+	 * Initialize the writer with a batch of announcements.
+	 * Must be called exactly once before {@link send}.
+	 * @param anns - Initial announcements to send.
+	 */
 	async init(anns: Announcement[]): Promise<Error | undefined> {
 		// const onEndFuncs:Map<suffix, () => void> = new Map();
 		for (const announcement of anns) {
@@ -109,6 +120,10 @@ export class AnnouncementWriter {
 		return undefined;
 	}
 
+	/**
+	 * Send a single announcement update after initialization.
+	 * @param announcement - The announcement to add or end.
+	 */
 	async send(announcement: Announcement): Promise<Error | undefined> {
 		await this.#ready; // Wait for initialization to complete
 
@@ -166,6 +181,7 @@ export class AnnouncementWriter {
 		return undefined;
 	}
 
+	/** Gracefully close the announce stream and end all active announcements. */
 	async close(): Promise<void> {
 		if (this.context.err()) {
 			// If already closed, do nothing
@@ -182,6 +198,10 @@ export class AnnouncementWriter {
 		this.#resolveInit = undefined;
 	}
 
+	/**
+	 * Close the announce stream with an error code.
+	 * @param code - The {@link AnnounceErrorCode} to send.
+	 */
 	async closeWithError(code: AnnounceErrorCode): Promise<void> {
 		if (this.context.err()) {
 			// If already closed, do nothing
@@ -201,6 +221,12 @@ export class AnnouncementWriter {
 	}
 }
 
+/**
+ * Reads announcements from a remote peer over an announce stream.
+ *
+ * Created on the subscriber side after sending an ANNOUNCE_PLEASE.
+ * Use {@link receive} in a loop to consume incoming announcements.
+ */
 export class AnnouncementReader {
 	#stream: Stream;
 	readonly prefix: string;
@@ -228,6 +254,11 @@ export class AnnouncementReader {
 		this.#readNext();
 	}
 
+	/**
+	 * Wait for the next active announcement.
+	 * @param signal - A promise that, when resolved, cancels the wait.
+	 * @returns The next {@link Announcement}, or an Error.
+	 */
 	async receive(
 		signal: Promise<void>,
 	): Promise<[Announcement, undefined] | [undefined, Error]> {
@@ -358,8 +389,16 @@ export class AnnouncementReader {
 	}
 }
 
+/**
+ * Represents a single broadcast announcement that is active or ended.
+ *
+ * An announcement carries a {@link BroadcastPath} and transitions from active to ended
+ * when {@link end} is called or the parent signal resolves.
+ */
 export class Announcement {
+	/** The broadcast path this announcement refers to. */
 	readonly broadcastPath: BroadcastPath;
+	/** Number of relay hops this announcement has traversed. */
 	readonly hops: number;
 	#done: Promise<void>;
 	#signalFunc: () => void;
@@ -382,6 +421,7 @@ export class Announcement {
 		}).catch(() => {});
 	}
 
+	/** Mark this announcement as ended. Idempotent. */
 	end(): void {
 		if (!this.#active) {
 			return;
@@ -390,14 +430,21 @@ export class Announcement {
 		this.#signalFunc();
 	}
 
+	/** Returns `true` if the announcement has not yet ended. */
 	isActive(): boolean {
 		return this.#active;
 	}
 
+	/** A promise that resolves when the announcement ends. */
 	ended(): Promise<void> {
 		return this.#done;
 	}
 
+	/**
+	 * Register a callback to run when the announcement ends.
+	 * @param fn - Callback to invoke.
+	 * @returns A stop function; returns `false` if the callback already fired.
+	 */
 	afterFunc(fn: () => void): () => boolean {
 		let executed = false;
 		this.#done.then(() => {

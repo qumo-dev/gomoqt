@@ -2,6 +2,7 @@ import { z } from "zod";
 
 type OpenString = string & Record<PropertyKey, never>;
 
+/** Track packaging format. */
 export type Packaging =
 	| "loc"
 	| "mediatimeline"
@@ -10,6 +11,7 @@ export type Packaging =
 	| "legacy"
 	| OpenString;
 
+/** Track semantic role. */
 export type Role =
 	| "video"
 	| "audio"
@@ -19,6 +21,7 @@ export type Role =
 	| "signlanguage"
 	| OpenString;
 
+/** A single track entry in an MSF catalog. */
 export interface Track {
 	namespace?: string;
 	name?: string;
@@ -50,6 +53,11 @@ export interface Track {
 	extraFields?: Record<string, unknown>;
 }
 
+/**
+ * An MSF catalog describing the available tracks for a broadcast.
+ *
+ * See [draft-ietf-moq-msf](https://datatracker.ietf.org/doc/draft-ietf-moq-msf/) for the wire format.
+ */
 export interface Catalog {
 	defaultNamespace?: string;
 	version: number;
@@ -59,6 +67,7 @@ export interface Catalog {
 	extraFields?: Record<string, unknown>;
 }
 
+/** Error thrown when catalog or track validation fails. */
 export class ValidationError extends Error {
 	readonly problems: string[];
 
@@ -166,6 +175,7 @@ export function decodeText(data: string | Uint8Array): string {
 	return new TextDecoder().decode(data);
 }
 
+/** Clone a {@link Track}, creating independent copies of arrays/objects. */
 export function cloneTrack(track: Track): Track {
 	return {
 		...track,
@@ -174,6 +184,7 @@ export function cloneTrack(track: Track): Track {
 	};
 }
 
+/** Clone a {@link Catalog}, creating independent copies of all tracks. */
 export function cloneCatalog(catalog: Catalog): Catalog {
 	return {
 		...catalog,
@@ -192,6 +203,11 @@ function trackExtraFields(raw: Record<string, unknown>): Record<string, unknown>
 	return extra;
 }
 
+/**
+ * Parse a raw JSON track object into a strongly-typed {@link Track}.
+ * @param value - The parsed JSON value.
+ * @throws Error if the value is not a valid track object.
+ */
 export function parseTrack(value: unknown): Track {
 	const rawRecord = asRecord(value, "msf: track must be a JSON object");
 	const raw = trackSchema.safeParse(rawRecord);
@@ -233,6 +249,11 @@ export function parseTrack(value: unknown): Track {
 	};
 }
 
+/**
+ * Parse a JSON catalog payload into a {@link Catalog}.
+ * @param data - UTF-8 encoded bytes or a JSON string.
+ * @throws Error if the payload is invalid or contains delta fields.
+ */
 export function parseCatalog(data: string | Uint8Array): Catalog {
 	const parsed = catalogSchema.safeParse(JSON.parse(decodeText(data)));
 	if (!parsed.success) {
@@ -272,6 +293,10 @@ export function parseCatalog(data: string | Uint8Array): Catalog {
 	};
 }
 
+/**
+ * Return the effective namespace for a track, falling back to
+ * `defaultNamespace` and then `"\0catalog"`.
+ */
 export function effectiveNamespace(
 	value: { namespace?: string },
 	defaultNamespace?: string,
@@ -285,6 +310,7 @@ export function effectiveNamespace(
 	return "\u0000catalog";
 }
 
+/** Return a composite identifier string for a track (`namespace|name`). */
 export function trackId(
 	value: { namespace?: string; name?: string },
 	defaultNamespace?: string,
@@ -292,6 +318,10 @@ export function trackId(
 	return `${effectiveNamespace(value, defaultNamespace)}|${value.name ?? ""}`;
 }
 
+/**
+ * Validate a single track entry and return a list of problems.
+ * @returns An array of human-readable problem descriptions (empty when valid).
+ */
 export function validateTrack(track: Track, path: string): string[] {
 	const problems: string[] = [];
 	if (!track.name) {
@@ -344,6 +374,10 @@ export function validateTrack(track: Track, path: string): string[] {
 	return problems;
 }
 
+/**
+ * Validate a {@link Catalog} according to MSF rules.
+ * @throws {@link ValidationError} if any problems are found.
+ */
 export function validateCatalog(catalog: Catalog): void {
 	const problems: string[] = [];
 	if (!catalog.version) {
@@ -366,6 +400,9 @@ export function validateCatalog(catalog: Catalog): void {
 	}
 }
 
+/**
+ * Serialize a {@link Catalog} to a JSON string.
+ */
 export function stringifyCatalog(catalog: Catalog): string {
 	const obj: Record<string, unknown> = {
 		...(catalog.extraFields ?? {}),

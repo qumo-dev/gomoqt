@@ -2,6 +2,12 @@ import { SubscribeErrorCode } from "./error.ts";
 import type { TrackHandler } from "./track_mux.ts";
 import type { TrackWriter } from "./track_writer.ts";
 
+/**
+ * Per-track handler aggregation for a single broadcast.
+ *
+ * Registers named {@link TrackHandler}s and dispatches incoming
+ * subscriptions by track name.
+ */
 export class Broadcast implements TrackHandler {
 	#trackHandlers = new Map<string, TrackHandlerEntry>();
 
@@ -55,6 +61,9 @@ export class Broadcast implements TrackHandler {
 	}
 }
 
+/**
+ * Default handler that closes the track with {@link SubscribeErrorCode.TrackNotFound}.
+ */
 export async function NotFound(trackWriter: TrackWriter): Promise<void> {
 	await trackWriter.closeWithError(SubscribeErrorCode.TrackNotFound);
 }
@@ -104,6 +113,7 @@ class TrackHandlerEntry implements TrackHandler {
 	}
 }
 
+/** A {@link TrackHandler} that always responds with "track not found". */
 export const NotFoundTrackHandler: TrackHandler = {
 	serveTrack: NotFound,
 };

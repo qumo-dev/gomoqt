@@ -1,17 +1,23 @@
 import { asRecord, zodSchemaError } from "./catalog.ts";
 import { z } from "zod";
 
+/** A `[groupId, objectId]` location reference within a MOQT track. */
 export interface Location {
 	groupId: number;
 	objectId: number;
 }
 
+/** An entry in a media timeline mapping media time to a MOQT location. */
 export interface MediaTimelineEntry {
 	mediaTime: number;
 	location: Location;
 	wallclock: number;
 }
 
+/**
+ * A record in an event timeline. Exactly one of `t` (timestamp),
+ * `l` (location), or `m` (media time) must be set alongside `data`.
+ */
 export interface EventTimelineRecord {
 	t?: number;
 	l?: Location;
@@ -31,6 +37,7 @@ const eventTimelineRecordSchema = z.object({
 	data: z.unknown().optional(),
 }).catchall(z.unknown());
 
+/** Decode a `[groupId, objectId]` tuple into a {@link Location}. */
 export function decodeLocation(value: unknown): Location {
 	if (!Array.isArray(value) || value.length !== 2) {
 		throw new Error("msf: location must contain exactly 2 items");
@@ -43,10 +50,12 @@ export function decodeLocation(value: unknown): Location {
 	return { groupId, objectId };
 }
 
+/** Encode a {@link Location} into a `[groupId, objectId]` tuple. */
 export function encodeLocation(location: Location): [number, number] {
 	return [location.groupId, location.objectId];
 }
 
+/** Decode a `[mediaTime, [groupId, objectId], wallclock]` tuple into a {@link MediaTimelineEntry}. */
 export function decodeMediaTimelineEntry(value: unknown): MediaTimelineEntry {
 	const parsed = mediaTimelineEntrySchema.safeParse(value);
 	if (!parsed.success) {
@@ -63,12 +72,18 @@ export function decodeMediaTimelineEntry(value: unknown): MediaTimelineEntry {
 	};
 }
 
+/** Encode a {@link MediaTimelineEntry} into a `[mediaTime, [groupId, objectId], wallclock]` tuple. */
 export function encodeMediaTimelineEntry(
 	entry: MediaTimelineEntry,
 ): [number, [number, number], number] {
 	return [entry.mediaTime, encodeLocation(entry.location), entry.wallclock];
 }
 
+/**
+ * Validate that an {@link EventTimelineRecord} contains exactly one timing
+ * field (`t`, `l`, or `m`) and a `data` field.
+ * @throws Error if validation fails.
+ */
 export function validateEventTimelineRecord(record: EventTimelineRecord): void {
 	let count = 0;
 	if (record.t !== undefined) {
@@ -88,6 +103,7 @@ export function validateEventTimelineRecord(record: EventTimelineRecord): void {
 	}
 }
 
+/** Parse a raw JSON value into a validated {@link EventTimelineRecord}. */
 export function parseEventTimelineRecord(value: unknown): EventTimelineRecord {
 	const rawRecord = asRecord(value, "msf: event timeline record must be a JSON object");
 	const parsed = eventTimelineRecordSchema.safeParse(rawRecord);

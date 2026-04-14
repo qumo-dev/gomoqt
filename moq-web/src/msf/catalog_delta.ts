@@ -14,19 +14,26 @@ import {
 } from "./catalog.ts";
 import { z } from "zod";
 
+/** Discriminator for the three delta operations. */
 export type DeltaOperationKind = "addTracks" | "removeTracks" | "cloneTracks";
 
+/** Identifies a track for removal in a delta update. */
 export interface TrackRef {
 	namespace?: string;
 	name?: string;
 	extraFields?: Record<string, unknown>;
 }
 
+/** A track derived from a parent track via field overrides. */
 export interface TrackClone {
 	track: Track;
 	parentName?: string;
 }
 
+/**
+ * An MSF delta update that adds, removes, or clones tracks in an existing
+ * {@link Catalog}.
+ */
 export interface CatalogDelta {
 	defaultNamespace?: string;
 	generatedAt?: number;
@@ -93,6 +100,11 @@ function parseTrackClone(value: unknown): TrackClone {
 	};
 }
 
+/**
+ * Parse a JSON delta-catalog payload into a {@link CatalogDelta}.
+ * @param data - UTF-8 encoded bytes or a JSON string.
+ * @throws Error if the payload is invalid or contains independent catalog fields.
+ */
 export function parseCatalogDelta(data: string | Uint8Array): CatalogDelta {
 	const decoded = JSON.parse(decodeText(data));
 	const rawRoot = asRecord(decoded, "msf: expected JSON object");
@@ -147,6 +159,10 @@ export function parseCatalogDelta(data: string | Uint8Array): CatalogDelta {
 	};
 }
 
+/**
+ * Validate a {@link CatalogDelta} according to MSF rules.
+ * @throws {@link ValidationError} if any problems are found.
+ */
 export function validateCatalogDelta(delta: CatalogDelta): void {
 	const problems: string[] = [];
 	if (
@@ -212,6 +228,12 @@ function hasInheritedNamespaceTracks(catalog: Catalog): boolean {
 	return catalog.tracks.some((track) => !track.namespace);
 }
 
+/**
+ * Apply a validated delta to a base catalog and return the resulting catalog.
+ * @param baseCatalog - The current catalog state.
+ * @param deltaCatalog - The delta to apply.
+ * @throws Error if the delta cannot be safely applied.
+ */
 export function applyCatalogDelta(baseCatalog: Catalog, deltaCatalog: CatalogDelta): Catalog {
 	validateCatalog(baseCatalog);
 	validateCatalogDelta(deltaCatalog);

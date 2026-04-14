@@ -12,8 +12,22 @@ import {
 	validateCatalog,
 } from "./catalog.ts";
 
+/** Default track name used for the catalog in an MSF broadcast. */
 export const DefaultCatalogTrackName = "catalog";
 
+/**
+ * Catalog-aware broadcast that manages an MSF {@link Catalog}
+ * and delegates track serving to registered {@link TrackHandler} instances.
+ *
+ * @example
+ * ```ts
+ * import { Broadcast } from "@okdaichi/moq/msf";
+ * import type { Catalog } from "@okdaichi/moq/msf";
+ *
+ * const catalog: Catalog = { tracks: [{ name: "audio", packaging: "cmaf" }] };
+ * const broadcast = new Broadcast(catalog);
+ * ```
+ */
 export class Broadcast implements TrackHandler {
 	#catalogTrackName: string;
 	#catalog: Catalog;

@@ -17,17 +17,27 @@ import type { Info } from "./info.ts";
 import type { SubscribeID, TrackPriority } from "./alias.ts";
 import { SubscribeErrorCode } from "./error.ts";
 
+/** Subscriber-side configuration sent in a SUBSCRIBE message. */
 export interface TrackConfig {
+	/** Subscriber priority for this track. */
 	priority: TrackPriority;
+	/** Whether the subscriber requires ordered delivery. */
 	ordered: boolean;
+	/** Maximum acceptable latency in milliseconds. */
 	maxLatency: number;
+	/** First group the subscriber wants to receive. */
 	startGroup: number;
+	/** Last group the subscriber wants to receive (0 = unbounded). */
 	endGroup: number;
 }
 
+/** Notification that the publisher dropped a range of groups. */
 export interface SubscribeDrop {
+	/** First dropped group sequence. */
 	startGroup: number;
+	/** Last dropped group sequence. */
 	endGroup: number;
+	/** Reason code for the drop. */
 	errorCode: number;
 }
 
@@ -44,6 +54,12 @@ function groupSequenceToWire(gs: number): number {
 	return gs + 1;
 }
 
+/**
+ * Subscriber-side view of a subscribe stream.
+ *
+ * Sends SUBSCRIBE_UPDATE messages and reads SUBSCRIBE_OK / SUBSCRIBE_DROP
+ * responses from the publisher.
+ */
 export class SendSubscribeStream {
 	#config: TrackConfig;
 	#id: SubscribeID;
@@ -164,6 +180,12 @@ export class SendSubscribeStream {
 	}
 }
 
+/**
+ * Publisher-side view of a subscribe stream.
+ *
+ * Reads SUBSCRIBE / SUBSCRIBE_UPDATE from the subscriber and writes
+ * SUBSCRIBE_OK / SUBSCRIBE_DROP responses.
+ */
 export class ReceiveSubscribeStream {
 	readonly subscribeId: SubscribeID;
 	#trackConfig: TrackConfig;

@@ -4,6 +4,7 @@
 
 import { StreamConnError, WebTransportStreamError } from "./internal/webtransport/error.ts";
 
+/** Error codes for session-level termination as defined in MOQ Lite. */
 export const SessionErrorCode = {
 	/** No error occurred */
 	NoError: 0x0,
@@ -23,8 +24,10 @@ export const SessionErrorCode = {
 	GoAwayTimeout: 0x10,
 } as const;
 
+/** Numeric session error code type. */
 export type SessionErrorCode = number;
 
+/** Error representing a session-level failure. */
 export class SessionError extends StreamConnError {
 	override get code(): SessionErrorCode {
 		return super.code as SessionErrorCode;
@@ -65,6 +68,7 @@ export class SessionError extends StreamConnError {
 // Announce Error Codes
 // =============================================================================
 
+/** Error codes for announce stream failures. */
 export const AnnounceErrorCode = {
 	/** Internal error */
 	InternalError: 0x00,
@@ -80,8 +84,10 @@ export const AnnounceErrorCode = {
 	InvalidPrefix: 0x05,
 } as const;
 
+/** Numeric announce error code type. */
 export type AnnounceErrorCode = number;
 
+/** Error representing an announce stream failure. */
 export class AnnounceError extends WebTransportStreamError {
 	override get code(): AnnounceErrorCode {
 		return super.code as AnnounceErrorCode;
@@ -118,6 +124,7 @@ export class AnnounceError extends WebTransportStreamError {
 // Subscribe Error Codes
 // =============================================================================
 
+/** Error codes for subscribe stream failures. */
 export const SubscribeErrorCode = {
 	/** Internal error */
 	InternalError: 0x00,
@@ -133,8 +140,10 @@ export const SubscribeErrorCode = {
 	SubscribeTimeout: 0x05,
 } as const;
 
+/** Numeric subscribe error code type. */
 export type SubscribeErrorCode = number;
 
+/** Error representing a subscribe stream failure. */
 export class SubscribeError extends WebTransportStreamError {
 	override get code(): SubscribeErrorCode {
 		return super.code as SubscribeErrorCode;
@@ -171,6 +180,7 @@ export class SubscribeError extends WebTransportStreamError {
 // Fetch Error Codes
 // =============================================================================
 
+/** Error codes for fetch stream failures. */
 export const FetchErrorCode = {
 	/** Internal error */
 	InternalError: 0x00,
@@ -178,8 +188,10 @@ export const FetchErrorCode = {
 	Timeout: 0x01,
 } as const;
 
+/** Numeric fetch error code type. */
 export type FetchErrorCode = number;
 
+/** Error representing a fetch stream failure. */
 export class FetchError extends WebTransportStreamError {
 	override get code(): FetchErrorCode {
 		return super.code as FetchErrorCode;
@@ -208,6 +220,7 @@ export class FetchError extends WebTransportStreamError {
 // Group Error Codes
 // =============================================================================
 
+/** Error codes for group stream failures. */
 export const GroupErrorCode = {
 	/** Internal error */
 	InternalError: 0x00,
@@ -225,8 +238,10 @@ export const GroupErrorCode = {
 	InvalidSubscribeID: 0x07,
 } as const;
 
+/** Numeric group error code type. */
 export type GroupErrorCode = number;
 
+/** Error representing a group stream failure. */
 export class GroupError extends WebTransportStreamError {
 	override get code(): GroupErrorCode {
 		return super.code as GroupErrorCode;

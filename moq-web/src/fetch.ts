@@ -2,14 +2,26 @@ import type { BroadcastPath } from "./broadcast_path.ts";
 import type { GroupSequence, TrackName, TrackPriority } from "./alias.ts";
 import type { GroupWriter } from "./group_stream.ts";
 
+/** Options for constructing a {@link FetchRequest}. */
 export interface FetchRequestInit {
+	/** Target broadcast path. */
 	broadcastPath: BroadcastPath;
+	/** Track name within the broadcast. */
 	trackName: TrackName;
+	/** Priority of this fetch request. */
 	priority: TrackPriority;
+	/** Group sequence to fetch. */
 	groupSequence: GroupSequence;
+	/** Optional cancellation signal. */
 	done?: Promise<void>;
 }
 
+/**
+ * Represents a request to fetch a single group from a track.
+ *
+ * Immutable — use {@link withDone} or {@link clone} to derive a new
+ * request with a different cancellation signal.
+ */
 export class FetchRequest {
 	readonly broadcastPath: BroadcastPath;
 	readonly trackName: TrackName;
@@ -50,6 +62,12 @@ export class FetchRequest {
 	}
 }
 
+/** Handler invoked for incoming fetch requests on the publisher side. */
 export interface FetchHandler {
+	/**
+	 * Serve a single-group fetch.
+	 * @param w - The {@link GroupWriter} to write the response group into.
+	 * @param r - The incoming {@link FetchRequest}.
+	 */
 	serveFetch(w: GroupWriter, r: FetchRequest): void | Promise<void>;
 }

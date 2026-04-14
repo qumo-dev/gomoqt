@@ -9,8 +9,16 @@ import type { BroadcastPath } from "./broadcast_path.ts";
 import { Queue } from "./internal/queue.ts";
 import type { SubscribeID } from "./alias.ts";
 
+/**
+ * Subscriber-side handle for reading groups from a subscribed track.
+ *
+ * Obtained from {@link Session.subscribe}. Call {@link acceptGroup} in a loop
+ * to receive incoming {@link GroupReader}s.
+ */
 export class TrackReader {
+	/** The broadcast path this track belongs to. */
 	broadcastPath: BroadcastPath;
+	/** The track name within the broadcast. */
 	trackName: string;
 	#subscribeStream: SendSubscribeStream;
 	#queue: Queue<[ReceiveStream, GroupMessage]>;
@@ -30,6 +38,11 @@ export class TrackReader {
 		this.#onCloseFunc = onCloseFunc;
 	}
 
+	/**
+	 * Wait for the next group from this track.
+	 * @param signal - A promise that, when resolved, cancels the wait.
+	 * @returns A {@link GroupReader} for the new group, or an Error.
+	 */
 	async acceptGroup(
 		signal: Promise<void>,
 	): Promise<[GroupReader, undefined] | [undefined, Error]> {
@@ -69,10 +82,15 @@ export class TrackReader {
 		}
 	}
 
+	/**
+	 * Send a SUBSCRIBE_UPDATE to the publisher with new config.
+	 * @param config - Updated subscriber configuration.
+	 */
 	async update(config: TrackConfig): Promise<Error | undefined> {
 		return this.#subscribeStream.update(config);
 	}
 
+	/** Read the latest publisher {@link Info} for this track. */
 	readInfo(): Info {
 		return this.#subscribeStream.info;
 	}
@@ -98,6 +116,10 @@ export class TrackReader {
 		return this.#subscribeStream.context;
 	}
 
+	/**
+	 * Async generator yielding {@link SubscribeDrop} notifications.
+	 * @param signal - A promise that, when resolved, stops iteration.
+	 */
 	async *drops(signal: Promise<void>): AsyncGenerator<SubscribeDrop> {
 		while (true) {
 			const [drop, err] = await this.#acceptDrop(signal);

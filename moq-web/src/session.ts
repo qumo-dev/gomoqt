@@ -46,15 +46,27 @@ type ProbeStatsCapable = {
 	getStats?: () => Promise<{ estimatedSendRate: number | null }>;
 };
 
+/** Options for constructing a {@link Session}. */
 export interface SessionInit {
+	/** The underlying WebTransport (or compatible) stream connection. */
 	transport: StreamConn;
 
+	/** Track multiplexer used for incoming subscribe and announce handling. */
 	mux?: TrackMux;
 
+	/** Handler invoked for incoming fetch requests. */
 	fetchHandler?: FetchHandler;
 }
 
+/**
+ * A single MOQ session over a WebTransport connection.
+ *
+ * Provides methods for publishing, subscribing, announcing, fetching,
+ * and probing. Created via {@link Client.dial} or directly with a
+ * {@link SessionInit}.
+ */
 export class Session {
+	/** Resolves when the underlying transport is ready. */
 	readonly ready: Promise<void>;
 	#webtransport: StreamConn;
 	#ctx: Context;
@@ -63,6 +75,7 @@ export class Session {
 	#wg: Promise<void>[] = [];
 	#subscribeIDCounter: number = 0;
 
+	/** The {@link TrackMux} used by this session for incoming track dispatch. */
 	readonly mux: TrackMux;
 	#fetchHandler?: FetchHandler;
 
@@ -117,6 +130,11 @@ export class Session {
 		return;
 	}
 
+	/**
+	 * Send a PROBE to estimate available bandwidth.
+	 * @param bitrate - Target bitrate in bits per second.
+	 * @returns The measured bitrate on success, or an Error.
+	 */
 	async probe(bitrate: number): Promise<[number, undefined] | [undefined, Error]> {
 		const [stream, openErr] = await this.#webtransport.openStream();
 		if (openErr) {
@@ -146,6 +164,11 @@ export class Session {
 		return [rsp.bitrate, undefined];
 	}
 
+	/**
+	 * Request announcements matching the given prefix.
+	 * @param prefix - Track prefix to filter announcements (e.g. `"/"`)
+	 * @returns An {@link AnnouncementReader} that yields matching announcements.
+	 */
 	async acceptAnnounce(
 		prefix: TrackPrefix,
 	): Promise<[AnnouncementReader, undefined] | [undefined, Error]> {
@@ -177,6 +200,13 @@ export class Session {
 		return [new AnnouncementReader(this.#ctx, stream, req), undefined];
 	}
 
+	/**
+	 * Subscribe to a track and receive its groups.
+	 * @param path - Broadcast path (e.g. `"/broadcast"`).
+	 * @param name - Track name within the broadcast.
+	 * @param config - Optional subscriber-side configuration.
+	 * @returns A {@link TrackReader} for consuming groups.
+	 */
 	async subscribe(
 		path: BroadcastPath,
 		name: TrackName,
@@ -563,6 +593,7 @@ export class Session {
 		}
 	}
 
+	/** Gracefully close the session. */
 	async close(): Promise<void> {
 		if (this.#ctx.err()) {
 			return;
@@ -588,6 +619,11 @@ export class Session {
 		this.#wg = [];
 	}
 
+	/**
+	 * Close the session with an application-level error.
+	 * @param code - Error code sent to the peer.
+	 * @param message - Human-readable reason.
+	 */
 	async closeWithError(code: number, message: string): Promise<void> {
 		if (this.#ctx.err()) {
 			return;

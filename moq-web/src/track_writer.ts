@@ -9,8 +9,16 @@ import type { BroadcastPath } from "./broadcast_path.ts";
 import type { SubscribeErrorCode } from "./error.ts";
 import { GroupErrorCode } from "./error.ts";
 
+/**
+ * Publisher-side handle for writing groups to a subscribed track.
+ *
+ * Created by the {@link TrackMux} when an incoming subscription is matched.
+ * Use {@link openGroup} to start writing frames.
+ */
 export class TrackWriter {
+	/** The broadcast path this track belongs to. */
 	broadcastPath: BroadcastPath;
+	/** The track name within the broadcast. */
 	trackName: string;
 	#subscribeStream: ReceiveSubscribeStream;
 	#openUniStreamFunc: () => Promise<
@@ -45,11 +53,19 @@ export class TrackWriter {
 		return this.#subscribeStream.trackConfig;
 	}
 
+	/**
+	 * Open a new group with an auto-incremented sequence number.
+	 * @returns A {@link GroupWriter} for writing frames.
+	 */
 	async openGroup(): Promise<[GroupWriter, undefined] | [undefined, Error]> {
 		this.#groupCount++;
 		return this.#openGroupWithSequence(this.#groupCount);
 	}
 
+	/**
+	 * Open a new group at a specific sequence number.
+	 * @param seq - The group sequence number.
+	 */
 	async openGroupAt(seq: number): Promise<[GroupWriter, undefined] | [undefined, Error]> {
 		if (seq > this.#groupCount) {
 			this.#groupCount = seq;
@@ -57,10 +73,15 @@ export class TrackWriter {
 		return this.#openGroupWithSequence(seq);
 	}
 
+	/** Advance the group counter by `n` without opening groups. */
 	skipGroups(n: number): void {
 		this.#groupCount += n;
 	}
 
+	/**
+	 * Notify the subscriber that groups in the given range were dropped.
+	 * @param drop - Range and error code of dropped groups.
+	 */
 	async dropGroups(drop: SubscribeDrop): Promise<Error | undefined> {
 		if (drop.startGroup === 0 || drop.endGroup === 0) {
 			return new Error(`invalid drop range: start=${drop.startGroup} end=${drop.endGroup}`);
@@ -126,6 +147,10 @@ export class TrackWriter {
 		return [group, undefined];
 	}
 
+	/**
+	 * Write publisher {@link Info} to the subscriber.
+	 * @param info - Track information to send.
+	 */
 	async writeInfo(info: Info): Promise<Error | undefined> {
 		const err = await this.#subscribeStream.writeInfo(info);
 		if (err) {

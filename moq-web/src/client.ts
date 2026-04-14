@@ -3,6 +3,7 @@ import type { MOQOptions } from "./options.ts";
 import { DefaultTrackMux, TrackMux } from "./track_mux.ts";
 import { WebTransportSession } from "./internal/webtransport/mod.ts";
 
+/** ALPN protocol identifier for MOQ Lite draft-03. */
 export const ALPN = "moq-lite-03";
 
 const DefaultWebTransportOptions: WebTransportOptions = {
@@ -18,6 +19,15 @@ const DefaultMOQOptions: MOQOptions = {
 	transportOptions: DefaultWebTransportOptions,
 };
 
+/**
+ * High-level MOQ client that creates {@link Session}s over WebTransport.
+ *
+ * @example
+ * ```ts
+ * const client = new Client();
+ * const session = await client.dial("https://localhost:4443/moq");
+ * ```
+ */
 export class Client {
 	#sessions?: Set<Session> = new Set();
 	readonly options: MOQOptions;
@@ -37,6 +47,12 @@ export class Client {
 		};
 	}
 
+	/**
+	 * Open a new MOQ session to the given URL.
+	 * @param url - WebTransport endpoint URL.
+	 * @param mux - Optional {@link TrackMux} for incoming track routing. Defaults to {@link DefaultTrackMux}.
+	 * @returns A ready-to-use {@link Session}.
+	 */
 	async dial(
 		url: string | URL,
 		mux: TrackMux = DefaultTrackMux,
@@ -65,6 +81,7 @@ export class Client {
 		}
 	}
 
+	/** Gracefully close all active sessions. */
 	async close(): Promise<void> {
 		if (this.#sessions === undefined) {
 			return Promise.resolve();
@@ -77,6 +94,7 @@ export class Client {
 		this.#sessions = undefined;
 	}
 
+	/** Abort all active sessions immediately with an error code. */
 	async abort(): Promise<void> {
 		if (this.#sessions === undefined) {
 			return;

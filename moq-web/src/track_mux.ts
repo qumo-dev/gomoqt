@@ -11,12 +11,23 @@ type AnnouncedTrackHandler = {
 	handler: TrackHandler;
 };
 
+/**
+ * Multiplexes incoming subscribe and announce requests to registered {@link TrackHandler}s.
+ *
+ * Tracks are registered via {@link announce} (or the convenience helpers {@link publish}
+ * and {@link publishFunc}), then automatically dispatched when a subscriber requests them.
+ */
 export class TrackMux {
 	#handlers: Map<BroadcastPath, AnnouncedTrackHandler> = new Map();
 	#announcers: Map<TrackPrefix, Set<AnnouncementWriter>> = new Map();
 
 	constructor() {}
 
+	/**
+	 * Register a track announcement with its handler.
+	 * @param announcement - The {@link Announcement} describing the broadcast path.
+	 * @param handler - The {@link TrackHandler} invoked when a subscriber requests this track.
+	 */
 	async announce(
 		announcement: Announcement,
 		handler: TrackHandler,
@@ -88,6 +99,12 @@ export class TrackMux {
 		}).catch(() => {});
 	}
 
+	/**
+	 * Convenience wrapper: create an {@link Announcement} and register it with a handler.
+	 * @param ctx - Promise whose resolution ends the announcement.
+	 * @param path - Broadcast path.
+	 * @param handler - Track handler.
+	 */
 	async publish(
 		ctx: Promise<void>,
 		path: BroadcastPath,
@@ -96,6 +113,9 @@ export class TrackMux {
 		await this.announce(new Announcement(path, ctx), handler);
 	}
 
+	/**
+	 * Like {@link publish}, but accepts a plain function instead of a {@link TrackHandler} object.
+	 */
 	async publishFunc(
 		ctx: Promise<void>,
 		path: BroadcastPath,
@@ -104,6 +124,10 @@ export class TrackMux {
 		await this.publish(ctx, path, { serveTrack: handler });
 	}
 
+	/**
+	 * Dispatch an incoming subscription to the matching handler.
+	 * If no handler is found, responds with {@link NotFoundTrackHandler}.
+	 */
 	async serveTrack(track: TrackWriter): Promise<void> {
 		const path = track.broadcastPath;
 		const announced = this.#handlers.get(path);
@@ -123,6 +147,11 @@ export class TrackMux {
 		stop();
 	}
 
+	/**
+	 * Begin serving announcements to a remote announce writer.
+	 * Sends existing matching announcements as the initial batch, then
+	 * blocks until the writer's context ends.
+	 */
 	async serveAnnouncement(
 		writer: AnnouncementWriter,
 		prefix: TrackPrefix,
@@ -157,6 +186,7 @@ export class TrackMux {
 		}
 	}
 
+	/** Close all announcers and clear all registered handlers. */
 	async close(): Promise<void> {
 		const closePromises: Promise<void>[] = [];
 		for (const announcers of this.#announcers.values()) {
@@ -170,8 +200,18 @@ export class TrackMux {
 	}
 }
 
+/** Shared default {@link TrackMux} instance used when none is provided. */
 export const DefaultTrackMux: TrackMux = new TrackMux();
 
+/**
+ * Interface for handling incoming track subscriptions.
+ *
+ * Implement `serveTrack` to write groups into the provided {@link TrackWriter}.
+ */
 export interface TrackHandler {
+	/**
+	 * Called when a subscriber requests a track.
+	 * @param trackWriter - Writer for sending groups to the subscriber.
+	 */
 	serveTrack(trackWriter: TrackWriter): void | Promise<void>;
 }
