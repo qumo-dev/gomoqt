@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [v0.12.1] - 2026-04-14
+
+### Added
+
+- **docs/msf:** added new MSF (MOQT Streaming Format) documentation section covering Catalog, Catalog Delta, Timeline, and Broadcast.
+- **docs/moq:** added new pages for Dialer, Fetch, and Probe.
+- **moq-web:** added comprehensive JSDoc documentation (with `@module` tags, `@param`, `@returns`, `@example`, `{@link}` cross-references) to all exported symbols across both the root module and the `msf` subpath export, following JSR documentation conventions.
+
+### Changed
+
+- **docs/moq:** restructured and updated existing documentation pages (Server, Session, Subscribe, Errors, Track/Group/Frame, Announce/Discover, Consume Track, Produce Track, Relay) to reflect current API.
+- **README:** added MSF package references to all translated README files (ja, de, ru, ko, zh-cn).
+- **README:** removed outdated references to QUIC wrapper and WebTransport server.
+
+### Removed
+
+- **docs/hang:** removed Hang protocol documentation section (`_index.md`, `catalog.md`, `room_participants.md`).
+- **docs/moq:** removed legacy `client.md` (replaced by `dialer.md`).
+
 ## [v0.12.0] - 2026-04-14
 
 ### Added
