@@ -43,7 +43,7 @@ func ExampleClient() {
 	}
 
 	// Create a track multiplexer for routing
-	mux := moqt.NewTrackMux()
+	mux := moqt.NewTrackMux(0)
 
 	// Connect to the server (use "https://" for WebTransport or "moqt://" for QUIC)
 	session, err := client.Dial(context.Background(), "https://localhost:4433", mux)
@@ -58,7 +58,7 @@ func ExampleClient() {
 // ExampleTrackMux demonstrates how to use the track multiplexer for publishing tracks.
 func ExampleTrackMux() {
 	// Create a new multiplexer
-	mux := moqt.NewTrackMux()
+	mux := moqt.NewTrackMux(0)
 
 	// Publish a track with a handler
 	ctx := context.Background()

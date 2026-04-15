@@ -44,7 +44,7 @@
 //			defer sess.Close()
 //			// handle native QUIC session
 //		}),
-//		TrackMux: moqt.NewTrackMux(),
+//		TrackMux: moqt.NewTrackMux(0),
 //	}
 //	if err := server.ListenAndServe(); err != nil {
 //		log.Fatal(err)
@@ -53,7 +53,7 @@
 // WebTransport server example:
 //
 //	handler := &moqt.WebTransportHandler{
-//		TrackMux: moqt.NewTrackMux(),
+//		TrackMux: moqt.NewTrackMux(0),
 //		Handler: moqt.HandleFunc(func(sess *moqt.Session) {
 //			defer sess.Close()
 //			// handle WebTransport session

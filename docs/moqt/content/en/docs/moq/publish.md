@@ -25,14 +25,14 @@ When the other side (client or server) subscribes to a broadcast path, the regis
 **Registering a TrackHandler with `Publish`**:
 
 ```go
-mux := moqt.NewTrackMux()
+mux := moqt.NewTrackMux(0)
 var trackHandler moqt.TrackHandler
 mux.Publish(ctx, "/broadcast_path", trackHandler)
 ```
 
 **Using `PublishFunc`**:
 ```go
-    mux := moqt.NewTrackMux()
+    mux := moqt.NewTrackMux(0)
     mux.PublishFunc(ctx, "/broadcast_path", func(tw *moqt.TrackWriter) {
         defer tw.Close() // Always close when done
 

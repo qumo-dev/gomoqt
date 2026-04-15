@@ -7,7 +7,7 @@ Subscribing is the mechanism for receiving media tracks from a broadcast, either
 
 ## Subscribe to a Track
 
-To subscribe to a track, you need to call the `(moqt.Session).Subscribe` method.
+To subscribe to a track, you need to call the `Session.Subscribe` method.
 
 
 ```go
@@ -33,11 +33,11 @@ To subscribe to a track, you need to call the `(moqt.Session).Subscribe` method.
   The subscribe config is used to specify additional options for the track subscription, such as priority, ordering, latency, or group range. If nil, a zero-value config is used.
 
 
-By specifying options in the `moqt.SubscribeConfig` when calling `(moqt.Session).Subscribe`, you can configure the initial subscription parameters.
+By specifying options in the `moqt.SubscribeConfig` when calling `Session.Subscribe`, you can configure the initial subscription parameters.
 
 ### Control Subscription
 
-You can adjust the subscription parameters at any time by calling the `(moqt.TrackReader).Update` method. This allows you to change options such as the priority.
+You can adjust the subscription parameters at any time by calling the `TrackReader.Update` method. This allows you to change options such as the priority.
 
 ```go
     var tr *moqt.TrackReader
@@ -59,7 +59,7 @@ To do this, peers can specify the prefix for the broadcast path they are interes
     {{< card link="../announce_discover/#discover-broadcasts" title="Discover Broadcasts" icon="external-link">}}
 {{</cards>}}
 
-After receiving an `moqt.Announcement`, broadcast path can be obtained using the `(moqt.Announcement).BroadcastPath` method.
+After receiving an `moqt.Announcement`, broadcast path can be obtained using the `Announcement.BroadcastPath` method.
 
 ```go
     var ann *moqt.Announcement
@@ -89,9 +89,9 @@ The `Subscribe` method returns a `TrackReader`. The `TrackReader` represents a s
 
 ### Managing the Track
 
-`(moqt.TrackReader).Update` can be used to change the subscription parameters (e.g., priority) during the session.
-When no longer needed, make sure to call `(moqt.TrackReader).Close` to unsubscribe from the track.
-If you specify some reason for closing, `(moqt.TrackReader).CloseWithError` which notifies the reason to the sender can be used.
+`TrackReader.Update` can be used to change the subscription parameters (e.g., priority) during the session.
+When no longer needed, make sure to call `TrackReader.Close` to unsubscribe from the track.
+If you specify some reason for closing, `TrackReader.CloseWithError` which notifies the reason to the sender can be used.
 
 ### Consuming a Track
 

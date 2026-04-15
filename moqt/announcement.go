@@ -61,7 +61,7 @@ type Announcement struct {
 	active atomic.Bool
 	once   sync.Once
 
-	hops int
+	hopIDs []uint64
 }
 
 // String returns a string representation of the announcement for debugging.
@@ -89,9 +89,10 @@ func (a *Announcement) BroadcastPath() BroadcastPath {
 	return a.path
 }
 
-// Hops returns the number of hops the announcement has taken, which is incremented by each broker it passes through. For local announcements, Hops returns 0.
-func (a *Announcement) Hops() int {
-	return a.hops
+// HopIDs returns the list of hop IDs the announcement has traversed.
+// Each relay appends its own hop ID when forwarding. For local announcements, HopIDs returns nil.
+func (a *Announcement) HopIDs() []uint64 {
+	return a.hopIDs
 }
 
 // Done returns a channel that is closed once when the announcement ends.

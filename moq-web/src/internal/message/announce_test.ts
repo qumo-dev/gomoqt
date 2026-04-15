@@ -8,18 +8,22 @@ Deno.test("AnnounceMessage - encode/decode roundtrip - multiple scenarios", asyn
 		"normal case with active true": {
 			suffix: "test",
 			active: true,
+			hopIDs: [1, 2, 3],
 		},
 		"normal case with active false": {
 			suffix: "test",
 			active: false,
+			hopIDs: [],
 		},
 		"empty suffix": {
 			suffix: "",
 			active: true,
+			hopIDs: [42],
 		},
 		"long suffix": {
 			suffix: "very/long/path/to/broadcast/suffix",
 			active: true,
+			hopIDs: [],
 		},
 	};
 
@@ -46,6 +50,11 @@ Deno.test("AnnounceMessage - encode/decode roundtrip - multiple scenarios", asyn
 				decodedMessage.active,
 				input.active,
 				`active mismatch for ${caseName}`,
+			);
+			assertEquals(
+				decodedMessage.hopIDs,
+				input.hopIDs,
+				`hopIDs mismatch for ${caseName}`,
 			);
 		});
 	}

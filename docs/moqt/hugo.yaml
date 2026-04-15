@@ -62,9 +62,9 @@ menu:
       url: https://pkg.go.dev/github.com/okdaichi/gomoqt
       weight: 2
     - identifier: moq-lite-spec
-      name: "MoQ-Lite Spec (draft-03)"
+      name: "MoQ-Lite Spec (draft-04)"
       weight: 3
-      url: https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html
+      url: https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html
     - identifier: quic-video
       name: "moq.dev (MoQ Prototype)"
       weight: 4

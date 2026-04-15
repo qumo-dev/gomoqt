@@ -23,8 +23,8 @@ The following error types are defined to represent specific protocol error scena
 | `moqt.SubscribeError`| Error during subscribe negotiation or operation                  | `moqt.TrackWriter`, `moqt.TrackReader`           |
 | `moqt.AnnounceError` | Error during announcement phase (e.g., broadcast path issues)    | `moqt.AnnouncementWriter`, `moqt.AnnouncementReader` |
 | `moqt.GroupError`    | Error in group operations (e.g., out of range, expired group)    | `moqt.GroupWriter`, `moqt.GroupReader`           |
-| `moqt.FetchError`    | Error during fetch operations                                    | `moqt.Session.Fetch`                             |
-| `moqt.ProbeError`    | Error during probe operations                                    | `moqt.Session.Probe`                             |
+| `moqt.FetchError`    | Error during fetch operations                                    | `Session.Fetch`                             |
+| `moqt.ProbeError`    | Error during probe operations                                    | `Session.Probe`                             |
 
 ### Relationship with QUIC errors
 

@@ -15,13 +15,16 @@ func TestProbeMessage_EncodeDecode(t *testing.T) {
 		wantErr bool
 	}{
 		"valid_message": {
-			input: message.ProbeMessage{Bitrate: 1000000},
+			input: message.ProbeMessage{Bitrate: 1000000, RTT: 50},
 		},
 		"zero_bitrate": {
-			input: message.ProbeMessage{Bitrate: 0},
+			input: message.ProbeMessage{Bitrate: 0, RTT: 0},
 		},
 		"large_bitrate": {
-			input: message.ProbeMessage{Bitrate: 1 << 48},
+			input: message.ProbeMessage{Bitrate: 1 << 48, RTT: 100},
+		},
+		"zero_rtt": {
+			input: message.ProbeMessage{Bitrate: 5000, RTT: 0},
 		},
 	}
 

@@ -55,6 +55,7 @@ func newAnnouncementReader(stream transport.Stream, prefix prefix, initSuffixes 
 						old, ok := ar.actives[suffix]
 						if !ok || !old.IsActive() {
 							ann, _ := NewAnnouncement(ar.ctx, BroadcastPath(ar.prefix+suffix))
+							ann.hopIDs = am.HopIDs
 							ar.actives[suffix] = ann
 							ar.pendings = append(ar.pendings, ann)
 							select {

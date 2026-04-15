@@ -8,6 +8,8 @@ export const BiStreamTypes = {
 	FetchStreamType: 0x03,
 	/** Probe stream for bandwidth estimation. */
 	ProbeStreamType: 0x04,
+	/** Goaway stream for session migration. */
+	GoawayStreamType: 0x05,
 } as const;
 
 /** Stream type identifiers for unidirectional streams as defined in MOQ Lite. */

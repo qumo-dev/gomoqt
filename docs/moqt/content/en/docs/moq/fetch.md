@@ -7,7 +7,7 @@ Fetch is a mechanism for requesting a specific group from a track without mainta
 
 ## Fetch a Group
 
-To fetch a specific group, use the `(moqt.Session).Fetch` method with a `FetchRequest`:
+To fetch a specific group, use the `Session.Fetch` method with a `moqt.FetchRequest`:
 
 ```go
     req := &moqt.FetchRequest{

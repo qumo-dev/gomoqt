@@ -13,29 +13,31 @@ import {
 export interface AnnounceMessageInit {
 	suffix?: string;
 	active?: boolean;
-	hops?: number;
+	hopIDs?: number[];
 }
 
 export class AnnounceMessage {
 	suffix: string;
 	active: boolean;
-	hops: number;
+	hopIDs: number[];
 
 	constructor(init: AnnounceMessageInit = {}) {
 		this.suffix = init.suffix ?? "";
 		this.active = init.active ?? false;
-		this.hops = init.hops ?? 0;
+		this.hopIDs = init.hopIDs ?? [];
 	}
 
 	/**
 	 * Returns the length of the message body (excluding the length prefix).
 	 */
 	get len(): number {
-		return (
-			varintLen(this.active ? 1 : 0) +
+		let l = varintLen(this.active ? 1 : 0) +
 			stringLen(this.suffix) +
-			varintLen(this.hops)
-		);
+			varintLen(this.hopIDs.length);
+		for (const id of this.hopIDs) {
+			l += varintLen(id);
+		}
+		return l;
 	}
 
 	/**
@@ -55,8 +57,13 @@ export class AnnounceMessage {
 		[, err] = await writeString(w, this.suffix);
 		if (err) return err;
 
-		[, err] = await writeVarint(w, this.hops);
+		[, err] = await writeVarint(w, this.hopIDs.length);
 		if (err) return err;
+
+		for (const id of this.hopIDs) {
+			[, err] = await writeVarint(w, id);
+			if (err) return err;
+		}
 
 		return undefined;
 	}
@@ -87,10 +94,15 @@ export class AnnounceMessage {
 			return [val, offset + n];
 		})();
 
-		[this.hops] = (() => {
-			const [val, n] = parseVarint(buf, offset);
-			return [val, offset + n];
-		})();
+		const [hopCount, n2] = parseVarint(buf, offset);
+		offset += n2;
+
+		this.hopIDs = [];
+		for (let i = 0; i < hopCount; i++) {
+			const [id, n] = parseVarint(buf, offset);
+			this.hopIDs.push(id);
+			offset += n;
+		}
 
 		return undefined;
 	}

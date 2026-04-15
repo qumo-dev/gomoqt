@@ -141,7 +141,7 @@ func BenchmarkTrackMux_FindTrackHandler(b *testing.B) {
 
 	for _, size := range sizes {
 		b.Run(formatInt(size), func(b *testing.B) {
-			mux := NewTrackMux()
+			mux := NewTrackMux(0)
 			ctx := context.Background()
 			handler := TrackHandlerFunc(func(tw *TrackWriter) {})
 
@@ -173,7 +173,7 @@ func BenchmarkTrackMux_RegisterHandler(b *testing.B) {
 
 	for b.Loop() {
 		b.StopTimer()
-		mux := NewTrackMux()
+		mux := NewTrackMux(0)
 		ann, _ := NewAnnouncement(ctx, BroadcastPath("/test/path"))
 		b.StartTimer()
 
@@ -189,7 +189,7 @@ func BenchmarkTrackMux_RemoveHandler(b *testing.B) {
 
 	for b.Loop() {
 		b.StopTimer()
-		mux := NewTrackMux()
+		mux := NewTrackMux(0)
 		ctx := context.Background()
 		ann, _ := NewAnnouncement(ctx, BroadcastPath("/test/path"))
 		announced := mux.registerHandler(ann, handler)
@@ -205,7 +205,7 @@ func BenchmarkTrackMux_PathTraversal(b *testing.B) {
 
 	for _, depth := range depths {
 		b.Run("depth-"+formatInt(depth), func(b *testing.B) {
-			mux := NewTrackMux()
+			mux := NewTrackMux(0)
 			ctx := context.Background()
 			handler := TrackHandlerFunc(func(tw *TrackWriter) {})
 

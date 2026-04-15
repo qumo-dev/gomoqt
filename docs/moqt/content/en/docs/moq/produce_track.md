@@ -11,7 +11,7 @@ Producing a track involves writing media data to a `moqt.TrackWriter`, which man
 {{% details title="Overview" closed="true" %}}
 
 ```go
-    mux := moqt.NewTrackMux()
+    mux := moqt.NewTrackMux(0)
 
     // Set the mux to a session
     // This differs from if it is client-side or server-side
@@ -82,9 +82,9 @@ When the other side (client or server) subscribes to a broadcast path, the regis
 
 ## Create a Group
 
-To start a new group within a track, use `(moqt.TrackWriter).OpenGroup` method. This creates a new group with an automatically incremented sequence number and returns a `moqt.GroupWriter` for writing frames to that group.
+To start a new group within a track, use `TrackWriter.OpenGroup` method. This creates a new group with an automatically incremented sequence number and returns a `moqt.GroupWriter` for writing frames to that group.
 
-For explicit sequence control, use `(moqt.TrackWriter).OpenGroupAt` method with a specific `GroupSequence`.
+For explicit sequence control, use `TrackWriter.OpenGroupAt` method with a specific `moqt.GroupSequence`.
 
 
 ```go
@@ -117,7 +117,7 @@ For explicit sequence control, use `(moqt.TrackWriter).OpenGroupAt` method with 
 
 ## Write Frames
 
-To add media data to a group, use `(moqt.GroupWriter).WriteFrame` method. Each frame represents a chunk of media data (audio, video, etc.) to be sent as part of the group.
+To add media data to a group, use `GroupWriter.WriteFrame` method. Each frame represents a chunk of media data (audio, video, etc.) to be sent as part of the group.
 
 ```go
     var gw *moqt.GroupWriter
@@ -152,7 +152,7 @@ Frames are reused for efficiency; clone with `frame.Clone()` when you need to re
 
 ## Finalize a Group
 
-To finalize a group and indicate that no more frames will be sent, call `(moqt.GroupWriter).Close` method.
+To finalize a group and indicate that no more frames will be sent, call `GroupWriter.Close` method.
 
 ```go
     var gw *moqt.GroupWriter
@@ -161,7 +161,7 @@ To finalize a group and indicate that no more frames will be sent, call `(moqt.G
 
 ## Cancel Group Writing
 
-To cancel a group and stop sending frames, call `(moqt.GroupWriter).CancelWrite` method with an error code.
+To cancel a group and stop sending frames, call `GroupWriter.CancelWrite` method with an error code.
 
 ```go
     var group *moqt.GroupWriter
@@ -171,14 +171,14 @@ To cancel a group and stop sending frames, call `(moqt.GroupWriter).CancelWrite`
 
 ## Stop a Track
 
-To stop a track and indicate that no more groups will exist, call `(moqt.TrackWriter).Close` method.
+To stop a track and indicate that no more groups will exist, call `TrackWriter.Close` method.
 
 ```go
     var tw *moqt.TrackWriter
     tw.Close()
 ```
 
-To abort a track and indicate that no more groups will exist due to an error, call `(moqt.TrackWriter).CloseWithError` method with an error code.
+To abort a track and indicate that no more groups will exist due to an error, call `TrackWriter.CloseWithError` method with an error code.
 
 ```go
     var tw *moqt.TrackWriter

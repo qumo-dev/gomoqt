@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	moqtVersion = "moq-lite-03"
+	moqtVersion = "moq-lite-04"
 )
 
 // Session represents an active MOQ session over a QUIC connection.
@@ -41,6 +41,7 @@ type Session struct {
 	trackWriterMapLocker sync.RWMutex
 
 	fetchHandler FetchHandler
+	onGoaway     func(newSessionURI string)
 	logger       *slog.Logger
 
 	isTerminating atomic.Bool
@@ -54,6 +55,7 @@ func newSession(
 	mux *TrackMux,
 	manager *connManager,
 	fetchHandler FetchHandler,
+	onGoaway func(newSessionURI string),
 	logger *slog.Logger,
 ) *Session {
 	if mux == nil {
@@ -66,6 +68,7 @@ func newSession(
 		conn:         conn,
 		mux:          mux,
 		fetchHandler: fetchHandler,
+		onGoaway:     onGoaway,
 		logger:       logger,
 		trackReaders: make(map[SubscribeID]*TrackReader),
 		trackWriters: make(map[SubscribeID]*TrackWriter),
@@ -367,8 +370,9 @@ func (sess *Session) AcceptAnnounce(prefix string) (*AnnouncementReader, error) 
 		return nil, fmt.Errorf("failed to encode stream type message: %w", err)
 	}
 
-	err = message.AnnouncePleaseMessage{
-		TrackPrefix: prefix,
+	err = message.AnnounceInterestMessage{
+		BroadcastPathPrefix: prefix,
+		ExcludeHop:          sess.mux.hopID,
 	}.Encode(stream)
 	if err != nil {
 		if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
@@ -380,28 +384,36 @@ func (sess *Session) AcceptAnnounce(prefix string) (*AnnouncementReader, error) 
 
 		cancelStreamWithError(stream, transport.StreamErrorCode(AnnounceErrorCodeInternal))
 
-		return nil, fmt.Errorf("failed to send ANNOUNCE_PLEASE message: %w", err)
+		return nil, fmt.Errorf("failed to send ANNOUNCE_INTEREST message: %w", err)
 	}
 
 	return newAnnouncementReader(stream, prefix, nil), nil
 }
 
+// ProbeResult holds the result of a Probe request.
+type ProbeResult struct {
+	// Bitrate is the measured bitrate in bits per second. A value of 0 means unknown.
+	Bitrate uint64
+	// RTT is the smoothed round-trip time in milliseconds. A value of 0 means unknown.
+	RTT uint64
+}
+
 // Probe sends a bitrate probe request to the remote peer and returns the
-// bitrate reported by the response.
-func (sess *Session) Probe(bitrate uint64) (uint64, error) {
+// measured bitrate and RTT reported by the response.
+func (sess *Session) Probe(bitrate uint64) (*ProbeResult, error) {
 	if sess.terminating() {
-		return 0, ErrClosedSession
+		return nil, ErrClosedSession
 	}
 
 	stream, err := sess.conn.OpenStream()
 	if err != nil {
 		if appErr, ok := errors.AsType[*transport.ApplicationError](err); ok {
-			return 0, &SessionError{
+			return nil, &SessionError{
 				ApplicationError: appErr,
 			}
 		}
 
-		return 0, fmt.Errorf("failed to open stream for probe: %w", err)
+		return nil, fmt.Errorf("failed to open stream for probe: %w", err)
 	}
 	defer stream.Close()
 
@@ -409,33 +421,33 @@ func (sess *Session) Probe(bitrate uint64) (uint64, error) {
 	if err != nil {
 		if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
 			stream.CancelRead(strErr.ErrorCode)
-			return 0, err
+			return nil, err
 		}
 
 		cancelStreamWithError(stream, transport.StreamErrorCode(ProbeErrorCodeInternal))
 
-		return 0, fmt.Errorf("failed to encode stream type message: %w", err)
+		return nil, fmt.Errorf("failed to encode stream type message: %w", err)
 	}
 
-	err = message.ProbeMessage{Bitrate: bitrate}.Encode(stream)
+	err = message.ProbeMessage{Bitrate: bitrate, RTT: 0}.Encode(stream)
 	if err != nil {
 		if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
 			stream.CancelRead(strErr.ErrorCode)
-			return 0, err
+			return nil, err
 		}
 
 		cancelStreamWithError(stream, transport.StreamErrorCode(ProbeErrorCodeInternal))
 
-		return 0, fmt.Errorf("failed to send PROBE message: %w", err)
+		return nil, fmt.Errorf("failed to send PROBE message: %w", err)
 	}
 
 	var resp message.ProbeMessage
 	err = resp.Decode(stream)
 	if err != nil {
-		return 0, fmt.Errorf("failed to read PROBE response: %w", err)
+		return nil, fmt.Errorf("failed to read PROBE response: %w", err)
 	}
 
-	return resp.Bitrate, nil
+	return &ProbeResult{Bitrate: resp.Bitrate, RTT: resp.RTT}, nil
 }
 
 // listenBiStreams accepts bidirectional streams and handles them based on their type.
@@ -465,17 +477,17 @@ func (sess *Session) processBiStream(stream transport.Stream) {
 
 	switch streamType {
 	case message.StreamTypeAnnounce:
-		var apm message.AnnouncePleaseMessage
-		err := apm.Decode(stream)
+		var aim message.AnnounceInterestMessage
+		err := aim.Decode(stream)
 		if err != nil {
-			sess.logError("failed to decode ANNOUNCE_PLEASE message", err)
+			sess.logError("failed to decode ANNOUNCE_INTEREST message", err)
 			cancelStreamWithError(stream, transport.StreamErrorCode(AnnounceErrorCodeInternal))
 			return
 		}
 
-		prefix := apm.TrackPrefix
+		prefix := aim.BroadcastPathPrefix
 
-		annstr := newAnnouncementWriter(stream, prefix, sess.logger)
+		annstr := newAnnouncementWriter(stream, prefix, sess.mux.hopID, aim.ExcludeHop, sess.logger)
 
 		sess.mux.serveAnnouncements(annstr)
 
@@ -553,6 +565,12 @@ func (sess *Session) processBiStream(stream transport.Stream) {
 		if err := sess.handleProbeStream(stream); err != nil {
 			sess.logError("probe stream error", err)
 			cancelStreamWithError(stream, transport.StreamErrorCode(ProbeErrorCodeInternal))
+			return
+		}
+	case message.StreamTypeGoaway:
+		if err := sess.handleGoawayStream(stream); err != nil {
+			sess.logError("goaway stream error", err)
+			cancelStreamWithError(stream, transport.StreamErrorCode(InternalSessionErrorCode))
 			return
 		}
 	default:
@@ -656,8 +674,10 @@ func (sess *Session) handleProbeStream(stream transport.Stream) error {
 		if provider == nil {
 			return &ProbeError{StreamError: &transport.StreamError{ErrorCode: transport.StreamErrorCode(ProbeErrorCodeNotSupported)}}
 		}
-		measured := tracker.measure(provider.ConnectionStats(), pm.Bitrate, time.Now())
-		if err := (message.ProbeMessage{Bitrate: measured}).Encode(stream); err != nil {
+		stats := provider.ConnectionStats()
+		measured := tracker.measure(stats, pm.Bitrate, time.Now())
+		rtt := tracker.smoothedRTT(stats)
+		if err := (message.ProbeMessage{Bitrate: measured, RTT: rtt}).Encode(stream); err != nil {
 			return err
 		}
 	}
@@ -707,4 +727,32 @@ func (t *probeMeasurementTracker) measure(stats quic.ConnectionStats, fallback u
 	t.bytesSent = bytesSent
 	t.sampleTime = now
 	return uint64((float64(bytesDelta) * 8) / elapsed.Seconds())
+}
+
+func (t *probeMeasurementTracker) smoothedRTT(stats quic.ConnectionStats) uint64 {
+	rtt := stats.SmoothedRTT
+	if rtt <= 0 {
+		return 0
+	}
+	return uint64(rtt.Milliseconds())
+}
+
+func (sess *Session) handleGoawayStream(stream transport.Stream) error {
+	var gm message.GoawayMessage
+	err := gm.Decode(stream)
+	if err != nil {
+		return err
+	}
+
+	sess.isTerminating.Store(true)
+
+	if sess.onGoaway != nil {
+		sess.onGoaway(gm.NewSessionURI)
+	}
+
+	// Wait for the sender to FIN (close the send direction) indicating
+	// the sender is ready to terminate the session.
+	_, _ = io.Copy(io.Discard, stream)
+
+	return nil
 }

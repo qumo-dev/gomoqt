@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"sync"
 
 	"github.com/okdaichi/gomoqt/moqt/internal/message"
@@ -11,18 +12,20 @@ import (
 )
 
 // newAnnouncementWriter creates a new AnnouncementWriter for the given stream and prefix.
-func newAnnouncementWriter(stream transport.Stream, prefix prefix, logger *slog.Logger) *AnnouncementWriter {
+func newAnnouncementWriter(stream transport.Stream, prefix prefix, localHopID uint64, excludeHop uint64, logger *slog.Logger) *AnnouncementWriter {
 	if !isValidPrefix(prefix) {
 		panic("invalid prefix for AnnouncementWriter")
 	}
 
 	sas := &AnnouncementWriter{
-		prefix:   prefix,
-		stream:   stream,
-		ctx:      context.WithValue(stream.Context(), biStreamTypeCtxKey, message.StreamTypeAnnounce),
-		actives:  make(map[suffix]*activeAnnouncement),
-		initDone: make(chan struct{}),
-		logger:   logger,
+		prefix:     prefix,
+		stream:     stream,
+		ctx:        context.WithValue(stream.Context(), biStreamTypeCtxKey, message.StreamTypeAnnounce),
+		actives:    make(map[suffix]*activeAnnouncement),
+		initDone:   make(chan struct{}),
+		logger:     logger,
+		localHopID: localHopID,
+		excludeHop: excludeHop,
 	}
 
 	return sas
@@ -31,10 +34,12 @@ func newAnnouncementWriter(stream transport.Stream, prefix prefix, logger *slog.
 // AnnouncementWriter manages the sending of announcements for a specified prefix.
 // It handles initialization, sending active announcements, and cleanup.
 type AnnouncementWriter struct {
-	prefix prefix
-	stream transport.Stream
-	ctx    context.Context
-	logger *slog.Logger
+	prefix     prefix
+	stream     transport.Stream
+	ctx        context.Context
+	logger     *slog.Logger
+	localHopID uint64 // this node's Hop ID to append when forwarding
+	excludeHop uint64 // skip announcements whose HopIDs contain this value
 
 	mu      sync.RWMutex
 	actives map[suffix]*activeAnnouncement
@@ -51,6 +56,28 @@ func (aw *AnnouncementWriter) logError(msg string, err error, args ...any) {
 	if aw.logger != nil {
 		aw.logger.Error(msg, append(args, "error", err)...)
 	}
+}
+
+// shouldExclude returns true if the announcement should be skipped because
+// its HopIDs contain the excludeHop value.
+func (aw *AnnouncementWriter) shouldExclude(ann *Announcement) bool {
+	if aw.excludeHop == 0 {
+		return false
+	}
+	return slices.Contains(ann.HopIDs(), aw.excludeHop)
+}
+
+// buildHopIDs returns the HopIDs to encode in the outgoing ANNOUNCE message.
+// If localHopID is non-zero, it is appended to the announcement's existing HopIDs.
+func (aw *AnnouncementWriter) buildHopIDs(ann *Announcement) []uint64 {
+	ids := ann.HopIDs()
+	if aw.localHopID == 0 {
+		return ids
+	}
+	result := make([]uint64, len(ids)+1)
+	copy(result, ids)
+	result[len(ids)] = aw.localHopID
+	return result
 }
 
 // init snapshots the currently active announcements, sends an ACTIVE AnnounceMessage
@@ -78,6 +105,9 @@ func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) err
 			if !ok {
 				continue
 			}
+			if aw.shouldExclude(ann) {
+				continue
+			}
 			// Always replace with the latest active announcement for the suffix.
 			actives[sfx] = &activeAnnouncement{announcement: ann}
 		}
@@ -90,7 +120,7 @@ func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) err
 			err = message.AnnounceMessage{
 				AnnounceStatus:      message.ACTIVE,
 				BroadcastPathSuffix: sfx,
-				Hops:                uint64(active.announcement.Hops() + 1),
+				HopIDs:              aw.buildHopIDs(active.announcement),
 			}.Encode(aw.stream)
 			if err != nil {
 				if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
@@ -174,6 +204,10 @@ func (aw *AnnouncementWriter) SendAnnouncement(announcement *Announcement) error
 		return nil // No need to send inactive announcements
 	}
 
+	if aw.shouldExclude(announcement) {
+		return nil
+	}
+
 	// Get suffix for this announcement
 	suffix, ok := announcement.BroadcastPath().GetSuffix(aw.prefix)
 	if !ok {
@@ -207,7 +241,7 @@ func (aw *AnnouncementWriter) SendAnnouncement(announcement *Announcement) error
 	err := message.AnnounceMessage{
 		AnnounceStatus:      message.ACTIVE,
 		BroadcastPathSuffix: suffix,
-		Hops:                uint64(announcement.Hops() + 1),
+		HopIDs:              aw.buildHopIDs(announcement),
 	}.Encode(aw.stream)
 	if err != nil {
 		if strErr, ok := errors.AsType[*transport.StreamError](err); ok {

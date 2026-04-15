@@ -1,5 +1,5 @@
 export * from "./message.ts";
-export * from "./announce_please.ts";
+export * from "./announce_interest.ts";
 export * from "./announce.ts";
 export * from "./probe.ts";
 export * from "./subscribe.ts";
@@ -8,3 +8,4 @@ export * from "./subscribe_update.ts";
 export * from "./subscribe_drop.ts";
 export * from "./fetch.ts";
 export * from "./group.ts";
+export * from "./goaway.ts";

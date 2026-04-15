@@ -1,5 +1,5 @@
 import { EOFError } from "@okdaichi/golikejs/io";
-import type { AnnouncePleaseMessage } from "./internal/message/mod.ts";
+import type { AnnounceInterestMessage } from "./internal/message/mod.ts";
 import { AnnounceMessage } from "./internal/message/mod.ts";
 import { ContextCancelledError, watchPromise, withCancelCause } from "@okdaichi/golikejs/context";
 import type { CancelCauseFunc, Context } from "@okdaichi/golikejs/context";
@@ -18,7 +18,7 @@ type suffix = string;
 /**
  * Writes announcements to a remote peer over an announce stream.
  *
- * Created on the publisher side to respond to an ANNOUNCE_PLEASE from the subscriber.
+ * Created on the publisher side to respond to an ANNOUNCE_INTEREST from the subscriber.
  * Call {@link init} with a set of initial announcements, then {@link send} for updates.
  */
 export class AnnouncementWriter {
@@ -33,7 +33,7 @@ export class AnnouncementWriter {
 	constructor(
 		sessCtx: Context,
 		stream: Stream,
-		req: AnnouncePleaseMessage,
+		req: AnnounceInterestMessage,
 	) {
 		this.#stream = stream;
 		this.prefix = validateTrackPrefix(req.prefix);
@@ -105,7 +105,7 @@ export class AnnouncementWriter {
 			const msg = new AnnounceMessage({
 				suffix: sfx,
 				active: true,
-				hops: announcement.hops + 1,
+				hopIDs: [...announcement.hopIDs],
 			});
 			const err = await msg.encode(this.#stream.writable);
 			if (err) {
@@ -224,7 +224,7 @@ export class AnnouncementWriter {
 /**
  * Reads announcements from a remote peer over an announce stream.
  *
- * Created on the subscriber side after sending an ANNOUNCE_PLEASE.
+ * Created on the subscriber side after sending an ANNOUNCE_INTEREST.
  * Use {@link receive} in a loop to consume incoming announcements.
  */
 export class AnnouncementReader {
@@ -240,10 +240,10 @@ export class AnnouncementReader {
 	constructor(
 		sessCtx: Context,
 		stream: Stream,
-		announcePlease: AnnouncePleaseMessage,
+		announceInterest: AnnounceInterestMessage,
 	) {
 		this.#stream = stream;
-		const prefix = announcePlease.prefix;
+		const prefix = announceInterest.prefix;
 		if (!isValidPrefix(prefix)) {
 			throw new Error(`[AnnouncementReader] invalid prefix: ${prefix}.`);
 		}
@@ -333,7 +333,7 @@ export class AnnouncementReader {
 				const announcement = new Announcement(
 					validateBroadcastPath(fullPath),
 					this.context.done(),
-					msg.hops,
+					msg.hopIDs,
 				);
 				this.#announcements.set(msg.suffix, announcement);
 				this.#queue.enqueue(announcement);
@@ -398,15 +398,15 @@ export class AnnouncementReader {
 export class Announcement {
 	/** The broadcast path this announcement refers to. */
 	readonly broadcastPath: BroadcastPath;
-	/** Number of relay hops this announcement has traversed. */
-	readonly hops: number;
+	/** Hop IDs this announcement has traversed. */
+	readonly hopIDs: number[];
 	#done: Promise<void>;
 	#signalFunc: () => void;
 	#active: boolean = true;
 
-	constructor(path: string, signal: Promise<void>, hops: number = 0) {
+	constructor(path: string, signal: Promise<void>, hopIDs: number[] = []) {
 		this.broadcastPath = validateBroadcastPath(path);
-		this.hops = hops;
+		this.hopIDs = hopIDs;
 
 		let resolveFunc: () => void;
 		this.#done = new Promise<void>((resolve) => {

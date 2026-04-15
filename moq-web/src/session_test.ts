@@ -2,7 +2,7 @@ import { assertEquals, assertExists, assertInstanceOf } from "@std/assert";
 import { spy } from "@std/testing/mock";
 import { Session } from "./session.ts";
 import {
-	AnnouncePleaseMessage,
+	AnnounceInterestMessage,
 	FetchMessage,
 	GroupMessage,
 	ProbeMessage,
@@ -492,7 +492,7 @@ Deno.test({
 					},
 				} as TrackMux;
 
-				const req = new AnnouncePleaseMessage({ prefix: "/test/" });
+				const req = new AnnounceInterestMessage({ prefix: "/test/" });
 				const buf = await encodeMessageToUint8Array(async (w) => {
 					await writeVarint(w, BiStreamTypes.AnnounceStreamType);
 					return await req.encode(w);

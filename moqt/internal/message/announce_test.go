@@ -18,21 +18,28 @@ func TestAnnounceMessage_EncodeDecode(t *testing.T) {
 			input: message.AnnounceMessage{
 				AnnounceStatus:      message.AnnounceStatus(1),
 				BroadcastPathSuffix: "path/to/track",
-				Hops:                0,
+				HopIDs:              []uint64{},
 			},
 		},
 		"empty wildcard parameters": {
 			input: message.AnnounceMessage{
 				AnnounceStatus:      message.AnnounceStatus(1),
 				BroadcastPathSuffix: "",
-				Hops:                0,
+				HopIDs:              []uint64{},
 			},
 		},
 		"max values": {
 			input: message.AnnounceMessage{
 				AnnounceStatus:      message.AnnounceStatus(^byte(0)),
 				BroadcastPathSuffix: "very/long/path",
-				Hops:                1024,
+				HopIDs:              []uint64{1, 2, 3},
+			},
+		},
+		"with hop ids": {
+			input: message.AnnounceMessage{
+				AnnounceStatus:      message.ACTIVE,
+				BroadcastPathSuffix: "test",
+				HopIDs:              []uint64{100, 200},
 			},
 		},
 	}

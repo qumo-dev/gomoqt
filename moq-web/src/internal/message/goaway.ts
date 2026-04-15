@@ -8,27 +8,21 @@ import {
 	writeVarint,
 } from "./message.ts";
 
-export interface AnnouncePleaseMessageInit {
-	prefix?: string;
+export interface GoawayMessageInit {
+	newSessionURI?: string;
 }
 
-export class AnnouncePleaseMessage {
-	prefix: string;
+export class GoawayMessage {
+	newSessionURI: string;
 
-	constructor(init: AnnouncePleaseMessageInit = {}) {
-		this.prefix = init.prefix ?? "";
+	constructor(init: GoawayMessageInit = {}) {
+		this.newSessionURI = init.newSessionURI ?? "";
 	}
 
-	/**
-	 * Returns the length of the message body (excluding the length prefix).
-	 */
 	get len(): number {
-		return stringLen(this.prefix);
+		return stringLen(this.newSessionURI);
 	}
 
-	/**
-	 * Encodes the message to the writer.
-	 */
 	async encode(w: Writer): Promise<Error | undefined> {
 		const msgLen = this.len;
 		let err: Error | undefined;
@@ -36,15 +30,12 @@ export class AnnouncePleaseMessage {
 		[, err] = await writeVarint(w, msgLen);
 		if (err) return err;
 
-		[, err] = await writeString(w, this.prefix);
+		[, err] = await writeString(w, this.newSessionURI);
 		if (err) return err;
 
 		return undefined;
 	}
 
-	/**
-	 * Decodes the message from the reader.
-	 */
 	async decode(r: Reader): Promise<Error | undefined> {
 		const [msgLen, , err1] = await readVarint(r);
 		if (err1) return err1;
@@ -53,7 +44,7 @@ export class AnnouncePleaseMessage {
 		const [, err2] = await readFull(r, buf);
 		if (err2) return err2;
 
-		[this.prefix] = parseString(buf, 0);
+		[this.newSessionURI] = parseString(buf, 0);
 
 		return undefined;
 	}

@@ -210,7 +210,7 @@ func TestServer_addRemoveSession_ShutdownCompletesWhenLastSessionLeaves(t *testi
 
 	conn := &FakeStreamConn{}
 
-	sess := newSession(conn, nil, nil, nil, nil)
+	sess := newSession(conn, nil, nil, nil, nil, nil)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 	s.connManager.addConn(conn)
@@ -257,7 +257,7 @@ func TestWebTransportHandler_upgradeWebTransport_UsesCustomUpgradeFunc(t *testin
 	s.init()
 
 	u := &WebTransportHandler{
-		TrackMux: NewTrackMux(),
+		TrackMux: NewTrackMux(0),
 		UpgradeFunc: func(w http.ResponseWriter, r *http.Request) (WebTransportSession, error) {
 			conn := &FakeWebTransportSession{}
 			conn.RemoteAddrFunc = func() net.Addr { return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443} }

@@ -29,7 +29,7 @@ func main() {
 	}
 
 	serverDone := make(chan struct{}, 1)
-	mux := moqt.NewTrackMux()
+	mux := moqt.NewTrackMux(0)
 
 	// Print startup message directly
 	fmt.Printf("[OK] Started on %s\n", *addr)
@@ -51,7 +51,8 @@ func main() {
 			Allow0RTT:       true,
 			EnableDatagrams: true,
 		},
-		FetchHandler: fetchHandler,
+		NextSessionURI: "https://next.example.com",
+		FetchHandler:   fetchHandler,
 		Handler: moqt.HandleFunc(func(sess *moqt.Session) {
 			runInteropSession(sess, mux, serverDone)
 		}),
@@ -59,7 +60,13 @@ func main() {
 
 	go func() {
 		<-serverDone
-		_ = server.Close()
+		fmt.Println("Shutting down with GOAWAY...")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "Shutdown error: %v\n", err)
+		}
+		fmt.Println("Shutdown complete")
 	}()
 	defer func() {
 		select {
@@ -90,13 +97,6 @@ func main() {
 }
 
 func runInteropSession(sess *moqt.Session, mux *moqt.TrackMux, serverDone chan struct{}) {
-	defer func() {
-		_ = sess.CloseWithError(moqt.NoError, "no error")
-		select {
-		case serverDone <- struct{}{}:
-		default:
-		}
-	}()
 
 	path := moqt.BroadcastPath("/interop/server")
 	doneCh := make(chan struct{}, 1)
@@ -180,10 +180,18 @@ func runInteropSession(sess *moqt.Session, mux *moqt.TrackMux, serverDone chan s
 	}
 	fmt.Printf("ok (payload: %s)\n", string(frame.Body()))
 
-	// Wait for client to close the session (e.g. after Probe completes) or timeout.
+	// Signal the server to start graceful shutdown (sends GOAWAY to all sessions).
+	select {
+	case serverDone <- struct{}{}:
+	default:
+	}
+
+	// Wait for the session to close (client disconnects after receiving GOAWAY).
 	select {
 	case <-sess.Context().Done():
-	case <-time.After(5 * time.Second):
+		fmt.Println("Session closed after GOAWAY")
+	case <-time.After(10 * time.Second):
+		fmt.Println("Timed out waiting for session close after GOAWAY")
 	}
 }
 

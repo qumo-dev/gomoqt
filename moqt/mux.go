@@ -2,6 +2,8 @@ package moqt
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"sync"
 )
 
@@ -10,12 +12,34 @@ import (
 // implementations.
 var DefaultMux *TrackMux = defaultMux
 
-var defaultMux = NewTrackMux()
+var defaultMux = NewTrackMux(0)
 
-// NewTrackMux creates a new trackMux for handling track and announcement routing.
-// It initializes the routing and announcement trees with empty root nodes.
-func NewTrackMux() *TrackMux {
+// HopID returns the hop identifier configured for this TrackMux.
+func (mux *TrackMux) HopID() uint64 {
+	return mux.hopID
+}
+
+// NewHopID generates a cryptographically random non-zero hop identifier.
+// Relay nodes SHOULD call this to obtain a unique ID for NewTrackMux.
+func NewHopID() uint64 {
+	var b [8]byte
+	for {
+		if _, err := rand.Read(b[:]); err != nil {
+			panic("moqt: crypto/rand unavailable: " + err.Error())
+		}
+		if id := binary.BigEndian.Uint64(b[:]); id != 0 {
+			return id
+		}
+	}
+}
+
+// NewTrackMux creates a new TrackMux with the given hop identifier.
+// Pass id = 0 for edge nodes (origin publishers or pure subscribers);
+// per the moq-lite spec, 0 indicates an unknown or bridged hop.
+// Relay nodes MUST pass a unique non-zero id — use NewHopID() to generate one.
+func NewTrackMux(id uint64) *TrackMux {
 	return &TrackMux{
+		hopID: id,
 		announcementTree: announcingNode{
 			children:      make(map[prefixSegment]*announcingNode),
 			subscriptions: make(map[*AnnouncementWriter](chan *Announcement)),
@@ -50,6 +74,11 @@ func Announce(announcement *Announcement, handler TrackHandler) {
 // It keeps an index of broadcast paths to handlers and an announcement tree that
 // notifies listeners matching a broadcast-path prefix.
 type TrackMux struct {
+	// hopID is a unique identifier for this node in the relay path.
+	// Each relay MUST set a non-zero hopID. A value of 0 means this node
+	// does not participate in hop tracking (e.g. an endpoint, not a relay).
+	hopID uint64
+
 	mu                sync.RWMutex
 	trackHandlerIndex map[BroadcastPath]*announcedTrackHandler
 

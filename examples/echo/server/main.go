@@ -31,7 +31,7 @@ func main() {
 	// Serve moq over webtransport
 	upgrader := &moqt.WebTransportHandler{
 		Handler: moqt.HandleFunc(func(sess *moqt.Session) {
-			mux := moqt.NewTrackMux()
+			mux := moqt.NewTrackMux(0)
 
 			anns, err := sess.AcceptAnnounce("/")
 			if err != nil {

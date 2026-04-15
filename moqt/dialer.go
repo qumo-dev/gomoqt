@@ -41,6 +41,10 @@ type Dialer struct {
 	// If nil, fetch requests on WebTransport sessions are not handled.
 	FetchHandler FetchHandler
 
+	// OnGoaway is called when a GOAWAY message is received from the server.
+	// The newSessionURI parameter contains the redirect URI, which may be empty.
+	OnGoaway func(newSessionURI string)
+
 	// Logger is used for logging connection and session events. If nil, logging is disabled.
 	Logger *slog.Logger
 }
@@ -105,7 +109,7 @@ func (d *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *T
 	)
 	connLogger.Info("connection established")
 
-	return newSession(conn, mux, nil, d.FetchHandler, d.Logger), nil
+	return newSession(conn, mux, nil, d.FetchHandler, d.OnGoaway, d.Logger), nil
 }
 
 // DialQUIC establishes a new session over native QUIC by dialing the provided
@@ -137,5 +141,5 @@ func (d *Dialer) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux)
 		return nil, err
 	}
 
-	return newSession(conn, mux, nil, d.FetchHandler, d.Logger), nil
+	return newSession(conn, mux, nil, d.FetchHandler, d.OnGoaway, d.Logger), nil
 }

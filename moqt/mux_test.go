@@ -19,7 +19,7 @@ import (
 
 // Test NewTrackMux function
 func TestNewTrackMux(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	assert.NotNil(t, mux, "NewTrackMux should return non-nil mux")
 	assert.NotNil(t, &mux.trackHandlerIndex, "mux trackHandlerIndex should be initialized")
 	assert.NotNil(t, &mux.announcementTree, "mux announcementTree should be initialized")
@@ -27,7 +27,7 @@ func TestNewTrackMux(t *testing.T) {
 
 // Test Mux.Publish method
 func TestMux_Publish(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	path := BroadcastPath("/test")
 
@@ -48,7 +48,7 @@ func TestMux_Publish(t *testing.T) {
 
 // Test Mux.PublishFunc method
 func TestMux_PublishFunc(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	path := BroadcastPath("/test")
 
@@ -67,7 +67,7 @@ func TestMux_PublishFunc(t *testing.T) {
 
 // Test path validation
 func TestMux_Publish_InvalidPath(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	handler := TrackHandlerFunc(func(tw *TrackWriter) {})
 
@@ -91,7 +91,7 @@ func TestMux_Publish_InvalidPath(t *testing.T) {
 
 // Publish with nil context should panic
 func TestMux_Publish_NilContext_Panic(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	path := BroadcastPath("/test/nilctx")
 	var handler TrackHandler = TrackHandlerFunc(func(tw *TrackWriter) {})
 	assert.Panics(t, func() {
@@ -102,7 +102,7 @@ func TestMux_Publish_NilContext_Panic(t *testing.T) {
 
 // PublishFunc with nil context should panic
 func TestMux_PublishFunc_NilContext_Panic(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	path := BroadcastPath("/test/nilctxfunc")
 	assert.Panics(t, func() {
 		var nilCtx context.Context
@@ -112,7 +112,7 @@ func TestMux_PublishFunc_NilContext_Panic(t *testing.T) {
 
 // Announce with nil handler: TrackHandler should be NotFound and serveTrack should close with TrackNotFoundErrorCode
 func TestMux_Announce_WithNilHandler_ClosesTrack(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	path := BroadcastPath("/announce/nilhandler")
 
@@ -147,7 +147,7 @@ func TestMux_Announce_WithNilHandler_ClosesTrack(t *testing.T) {
 
 // serveTrack not found should close the stream with TrackNotFoundErrorCode
 func TestMux_ServeTrack_NotFound_ClosesWithError(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	path := BroadcastPath("/not/found/close")
 
 	mockStream := &FakeQUICStream{}
@@ -169,7 +169,7 @@ func TestMux_ServeTrack_NotFound_ClosesWithError(t *testing.T) {
 
 // Typed-nil handler should be treated as NotFound by TrackHandler
 func TestMux_TrackHandler_TypedNilHandler_TreatedAsNotFound(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	path := BroadcastPath("/typed/nil/handler")
 
@@ -183,13 +183,13 @@ func TestMux_TrackHandler_TypedNilHandler_TreatedAsNotFound(t *testing.T) {
 
 // serveAnnouncements(nil) should not panic
 func TestMux_ServeAnnouncements_NilAnnouncementWriter_NoPanic(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	assert.NotPanics(t, func() { mux.serveAnnouncements(nil) })
 }
 
 // Test ServeTrack with registered handler
 func TestMux_ServeTrack(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	path := BroadcastPath("/test/path")
 
@@ -218,7 +218,7 @@ func TestMux_ServeTrack(t *testing.T) {
 
 // Test ServeTrack with NotFoundHandler (no registered handler)
 func TestMux_ServeTrack_NotFound(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 
 	tw := &TrackWriter{
 		BroadcastPath: BroadcastPath("/nonexistent"),
@@ -233,7 +233,7 @@ func TestMux_ServeTrack_NotFound(t *testing.T) {
 
 // Test ServeTrack with nil TrackWriter
 func TestMux_ServeTrack_NilTrackWriter(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 
 	assert.NotPanics(t, func() {
 		mux.serveTrack(nil)
@@ -242,7 +242,7 @@ func TestMux_ServeTrack_NilTrackWriter(t *testing.T) {
 
 // Test Publishr method
 func TestMux_Publishr(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	path := BroadcastPath("/test")
 
@@ -264,7 +264,7 @@ func TestMux_Publishr(t *testing.T) {
 
 // Test nested paths
 func TestMux_NestedPaths(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 
 	paths := []BroadcastPath{
@@ -303,7 +303,7 @@ func TestMux_NestedPaths(t *testing.T) {
 
 // Test concurrent access
 func TestMux_ConcurrentAccess(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	const numGoroutines = 50
 	const pathsPerGoroutine = 10
@@ -391,7 +391,7 @@ func TestIsValidPrefix(t *testing.T) {
 // Test default mux functions
 func TestDefaultMux(t *testing.T) {
 	// Clean up any previous state
-	DefaultMux = NewTrackMux()
+	DefaultMux = NewTrackMux(0)
 	ctx := context.Background()
 
 	path := BroadcastPath("/default/test")
@@ -409,7 +409,7 @@ func TestDefaultMux(t *testing.T) {
 
 func TestDefaultMux_PublishFunc(t *testing.T) {
 	// Clean up any previous state
-	DefaultMux = NewTrackMux()
+	DefaultMux = NewTrackMux(0)
 	ctx := context.Background()
 
 	path := BroadcastPath("/default/test2")
@@ -429,7 +429,7 @@ func TestDefaultMux_PublishFunc(t *testing.T) {
 
 // Test edge cases
 func TestMux_EdgeCases(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 
 	// Test with special characters in path
@@ -450,7 +450,7 @@ func TestMux_EdgeCases(t *testing.T) {
 
 // Test overwriting handlers
 func TestMux_OverwriteHandler(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	path := BroadcastPath("/test")
 
@@ -483,7 +483,7 @@ func TestMux_OverwriteHandler(t *testing.T) {
 
 // Test Mux.Announce method
 func TestMux_Announce(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	path := BroadcastPath("/test")
 
@@ -504,7 +504,7 @@ func TestMux_Announce(t *testing.T) {
 
 // Test with inactive announcement
 func TestMux_Announce_Inactive(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	path := BroadcastPath("/test")
 
@@ -526,7 +526,7 @@ func TestMux_Announce_Inactive(t *testing.T) {
 
 // Publish should remove the handler when the context is cancelled
 func TestMux_Publish_CleanupOnContextCancel(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx, cancel := context.WithCancel(context.Background())
 	path := BroadcastPath("/publish/cleanup")
 
@@ -561,7 +561,7 @@ func TestMux_Publish_CleanupOnContextCancel(t *testing.T) {
 
 // PublishFunc should remove the handler when the context is cancelled
 func TestMux_PublishFunc_CleanupOnContextCancel(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx, cancel := context.WithCancel(context.Background())
 	path := BroadcastPath("/publishfunc/cleanup")
 
@@ -596,7 +596,7 @@ func TestMux_PublishFunc_CleanupOnContextCancel(t *testing.T) {
 
 // Announce twice on same path should overwrite the previous handler and end it
 func TestMux_Announce_OverwriteHandler(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	path := BroadcastPath("/announce/overwrite")
 
@@ -637,7 +637,7 @@ func TestMux_Announce_OverwriteHandler(t *testing.T) {
 
 // PublishFunc with nil function should be treated as NotFound handler
 func TestMux_PublishFunc_NilHandler_TreatedAsNotFound(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	path := BroadcastPath("/publishfunc/nilhandler")
 
@@ -651,7 +651,7 @@ func TestMux_PublishFunc_NilHandler_TreatedAsNotFound(t *testing.T) {
 
 // TrackHandler with invalid path should return NotFound
 func TestMux_TrackHandler_InvalidPath_ReturnsNotFound(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	a, h := mux.TrackHandler(BroadcastPath("invalid/no/leading/slash"))
 	assert.Nil(t, a)
 	assert.Equal(t, reflect.ValueOf(NotFoundTrackHandler).Pointer(), reflect.ValueOf(h).Pointer())
@@ -774,7 +774,7 @@ func TestTrackHandlerFuncServeTrack(t *testing.T) {
 
 // Additional robust tests for TrackMux
 func TestMux_AnnouncementDeliveryToMultipleListeners(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	path := BroadcastPath("/multi")
 
@@ -811,7 +811,7 @@ func TestMux_AnnouncementDeliveryToMultipleListeners(t *testing.T) {
 }
 
 func TestMux_AnnouncementTreeCleanup(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	path := BroadcastPath("/cleanup")
 
@@ -831,7 +831,7 @@ func TestMux_AnnouncementTreeCleanup(t *testing.T) {
 }
 
 func TestMux_AnnouncementDeliveryErrorPropagation(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	path := BroadcastPath("/errorprop")
 
@@ -852,7 +852,7 @@ func TestMux_AnnouncementDeliveryErrorPropagation(t *testing.T) {
 }
 
 func TestMux_AnnounceWithNilAnnouncementOrHandler(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	// Announce with nil Announcement should panic deliberately
 	assert.Panics(t, func() {
 		mux.Announce(nil, nil)
@@ -860,7 +860,7 @@ func TestMux_AnnounceWithNilAnnouncementOrHandler(t *testing.T) {
 }
 
 func TestMux_SimultaneousAnnounceAndPublish(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	path := BroadcastPath("/race")
 
@@ -898,7 +898,7 @@ func TestMux_ServeAnnouncements_InitSendsExistingAnnouncements(t *testing.T) {
 
 	for name, tc := range tests {
 		synctest.Test(t, func(t *testing.T) {
-			mux := NewTrackMux()
+			mux := NewTrackMux(0)
 			ctx := context.Background()
 
 			// Create an announcement and register it
@@ -922,7 +922,7 @@ func TestMux_ServeAnnouncements_InitSendsExistingAnnouncements(t *testing.T) {
 				},
 			}
 
-			aw := newAnnouncementWriter(mockStream, tc.writerPrefix, nil)
+			aw := newAnnouncementWriter(mockStream, tc.writerPrefix, 0, 0, nil)
 
 			var wg sync.WaitGroup
 			wg.Go(func() {
@@ -958,7 +958,7 @@ func TestMux_ServeAnnouncements_InitSendsExistingAnnouncements(t *testing.T) {
 // both an ancestor (root) and descendant writer receive initialization.
 func TestMux_ServeAnnouncements_AncestorAndDescendantReceive_AnnounceBefore(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		mux := NewTrackMux()
+		mux := NewTrackMux(0)
 		ctx := context.Background()
 
 		// Prepare announcement for /share/stream
@@ -980,7 +980,7 @@ func TestMux_ServeAnnouncements_AncestorAndDescendantReceive_AnnounceBefore(t *t
 			}
 			return 0, nil
 		}
-		rootAW := newAnnouncementWriter(rootStream, "/", nil)
+		rootAW := newAnnouncementWriter(rootStream, "/", 0, 0, nil)
 
 		// Descendant writer (prefix /share/)
 		shareStream := &FakeQUICStream{}
@@ -995,7 +995,7 @@ func TestMux_ServeAnnouncements_AncestorAndDescendantReceive_AnnounceBefore(t *t
 			}
 			return 0, nil
 		}
-		shareAW := newAnnouncementWriter(shareStream, "/share/", nil)
+		shareAW := newAnnouncementWriter(shareStream, "/share/", 0, 0, nil)
 
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -1041,11 +1041,11 @@ func TestMux_ServeAnnouncements_AncestorAndDescendantReceive_AnnounceBefore(t *t
 // Test serveAnnouncements: invalid prefix causes CloseWithError -> CancelWrite/CancelRead
 func TestMux_ServeAnnouncements_InvalidPrefix_ClosesWithError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		mux := NewTrackMux()
+		mux := NewTrackMux(0)
 
 		mockStream := &FakeQUICStream{}
 
-		aw := newAnnouncementWriter(mockStream, "/test/", nil)
+		aw := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil)
 		// Force invalid prefix for this test case (no trailing slash)
 		aw.prefix = "/test"
 
@@ -1095,7 +1095,7 @@ func TestMux_ServeAnnouncements_InvalidPrefix_ClosesWithError(t *testing.T) {
 // Test serveAnnouncements: init returns a StreamError and serveAnnouncements should close with InternalAnnounceErrorCode
 func TestMux_ServeAnnouncements_InitWriteError_ClosesWithInternalError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		mux := NewTrackMux()
+		mux := NewTrackMux(0)
 		ctx := context.Background()
 
 		// Create an announcement so that aw.init will attempt to write
@@ -1114,7 +1114,7 @@ func TestMux_ServeAnnouncements_InitWriteError_ClosesWithInternalError(t *testin
 			},
 		}
 
-		aw := newAnnouncementWriter(mockStream, "/test/", nil)
+		aw := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil)
 
 		var wg sync.WaitGroup
 		wg.Go(func() {
@@ -1161,7 +1161,7 @@ func TestMux_ServeAnnouncements_InitWriteError_ClosesWithInternalError(t *testin
 // Test serveAnnouncements: SendAnnouncement (after init) returns write error and serveAnnouncements should close with InternalAnnounceErrorCode
 func TestMux_ServeAnnouncements_SendAnnouncementWriteError_ClosesWithInternalError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		mux := NewTrackMux()
+		mux := NewTrackMux(0)
 		ctx := context.Background()
 
 		// Prepare a new announcement to be announced later
@@ -1181,7 +1181,7 @@ func TestMux_ServeAnnouncements_SendAnnouncementWriteError_ClosesWithInternalErr
 			},
 		}
 
-		aw := newAnnouncementWriter(mockStream, "/test/", nil)
+		aw := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil)
 
 		var wg sync.WaitGroup
 		wg.Go(func() {
@@ -1237,7 +1237,7 @@ func TestMux_ServeAnnouncements_SendAnnouncementWriteError_ClosesWithInternalErr
 // Test serveAnnouncements: cancelling the writer context stops the loop
 func TestMux_ServeAnnouncements_ContextCancel_StopsLoop(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		mux := NewTrackMux()
+		mux := NewTrackMux(0)
 
 		streamCtx, cancel := context.WithCancel(context.Background())
 		// allow Write if init happens
@@ -1253,7 +1253,7 @@ func TestMux_ServeAnnouncements_ContextCancel_StopsLoop(t *testing.T) {
 			},
 		}
 
-		aw := newAnnouncementWriter(mockStream, "/test/", nil)
+		aw := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil)
 
 		var wg sync.WaitGroup
 		wg.Go(func() {
@@ -1299,7 +1299,7 @@ func TestMux_ServeAnnouncements_ContextCancel_StopsLoop(t *testing.T) {
 // send attempts are bounded (messages may be dropped but serveAnnouncements should continue).
 func TestMux_ServeAnnouncements_SlowSubscriber_NoDeadlock(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		mux := NewTrackMux()
+		mux := NewTrackMux(0)
 		ctx := context.Background()
 
 		// Prepare a mock stream that simulates slow writes (sleep)
@@ -1316,7 +1316,7 @@ func TestMux_ServeAnnouncements_SlowSubscriber_NoDeadlock(t *testing.T) {
 			},
 		}
 
-		aw := newAnnouncementWriter(mockStream, "/slow/", nil)
+		aw := newAnnouncementWriter(mockStream, "/slow/", 0, 0, nil)
 
 		var wg sync.WaitGroup
 		wg.Go(func() {
@@ -1357,7 +1357,7 @@ func TestMux_ServeAnnouncements_SlowSubscriber_NoDeadlock(t *testing.T) {
 // Test serveAnnouncements: two listeners for same prefix both receive announcements
 func TestMux_ServeAnnouncements_MultipleListeners_ReceiveAnnouncement(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		mux := NewTrackMux()
+		mux := NewTrackMux(0)
 		ctx := context.Background()
 
 		// Prepare announcement to broadcast
@@ -1377,7 +1377,7 @@ func TestMux_ServeAnnouncements_MultipleListeners_ReceiveAnnouncement(t *testing
 				return 0, nil
 			},
 		}
-		aw1 := newAnnouncementWriter(mock1, "/multi/", nil)
+		aw1 := newAnnouncementWriter(mock1, "/multi/", 0, 0, nil)
 
 		// Second mock stream
 		ctx2, cancel2 := context.WithCancel(context.Background())
@@ -1392,7 +1392,7 @@ func TestMux_ServeAnnouncements_MultipleListeners_ReceiveAnnouncement(t *testing
 				return 0, nil
 			},
 		}
-		aw2 := newAnnouncementWriter(mock2, "/multi/", nil)
+		aw2 := newAnnouncementWriter(mock2, "/multi/", 0, 0, nil)
 
 		// Start two serveAnnouncements goroutines
 		var wg sync.WaitGroup
@@ -1460,7 +1460,7 @@ func TestMux_ServeAnnouncements_MultipleListeners_ReceiveAnnouncement(t *testing
 
 func TestMux_Announce_ClosesBusySubscriber(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		mux := NewTrackMux()
+		mux := NewTrackMux(0)
 
 		// Prepare a real AnnouncementWriter and serveAnnouncements
 		mockStream := &FakeQUICStream{
@@ -1470,7 +1470,7 @@ func TestMux_Announce_ClosesBusySubscriber(t *testing.T) {
 			},
 		}
 
-		aw := newAnnouncementWriter(mockStream, "/busy/", nil)
+		aw := newAnnouncementWriter(mockStream, "/busy/", 0, 0, nil)
 
 		var wg sync.WaitGroup
 		wg.Go(func() {
@@ -1505,7 +1505,7 @@ func TestMux_Announce_ClosesBusySubscriber(t *testing.T) {
 
 // Test serveAnnouncements with Publish before listener registers: init should send existing announcement
 func TestMux_Publish_InitSendsExistingAnnouncements(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 
 	// Register a handler using Publish (this creates an active Announcement)
@@ -1527,7 +1527,7 @@ func TestMux_Publish_InitSendsExistingAnnouncements(t *testing.T) {
 		},
 	}
 
-	aw := newAnnouncementWriter(mockStream, "/pubinit/", nil)
+	aw := newAnnouncementWriter(mockStream, "/pubinit/", 0, 0, nil)
 
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -1559,7 +1559,7 @@ func TestMux_Publish_InitSendsExistingAnnouncements(t *testing.T) {
 
 // Test serveAnnouncements where Publish occurs after listener registers: the Write should be triggered
 func TestMux_Publish_AfterServeAnnouncements_SendsAnnouncement(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 
 	path := BroadcastPath("/pubafter/stream")
@@ -1579,7 +1579,7 @@ func TestMux_Publish_AfterServeAnnouncements_SendsAnnouncement(t *testing.T) {
 		},
 	}
 
-	aw := newAnnouncementWriter(mockStream, "/pubafter/", nil)
+	aw := newAnnouncementWriter(mockStream, "/pubafter/", 0, 0, nil)
 
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -1620,7 +1620,7 @@ func TestMux_Publish_AfterServeAnnouncements_SendsAnnouncement(t *testing.T) {
 
 // Test serveAnnouncements with PublishFunc before listener registers: init should send existing announcement
 func TestMux_PublishFunc_InitSendsExistingAnnouncements(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 
 	// Register a handler using PublishFunc (this creates an active Announcement)
@@ -1642,7 +1642,7 @@ func TestMux_PublishFunc_InitSendsExistingAnnouncements(t *testing.T) {
 		},
 	}
 
-	aw := newAnnouncementWriter(mockStream, "/pubfuncinit/", nil)
+	aw := newAnnouncementWriter(mockStream, "/pubfuncinit/", 0, 0, nil)
 
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -1674,7 +1674,7 @@ func TestMux_PublishFunc_InitSendsExistingAnnouncements(t *testing.T) {
 
 // Test serveAnnouncements where PublishFunc occurs after listener registers: the Write should be triggered
 func TestMux_PublishFunc_AfterServeAnnouncements_SendsAnnouncement(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 
 	path := BroadcastPath("/pubfuncafter/stream")
@@ -1694,7 +1694,7 @@ func TestMux_PublishFunc_AfterServeAnnouncements_SendsAnnouncement(t *testing.T)
 		},
 	}
 
-	aw := newAnnouncementWriter(mockStream, "/pubfuncafter/", nil)
+	aw := newAnnouncementWriter(mockStream, "/pubfuncafter/", 0, 0, nil)
 
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -1736,7 +1736,7 @@ func TestMux_PublishFunc_AfterServeAnnouncements_SendsAnnouncement(t *testing.T)
 // Stress test: multiple serveAnnouncements listeners and concurrent Announce calls should not deadlock or panic
 func TestMux_ServeAnnouncements_ConcurrentAnnounce_NoDeadlock(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		mux := NewTrackMux()
+		mux := NewTrackMux(0)
 		ctx := context.Background()
 
 		// Start several listeners (AnnouncementWriters)
@@ -1760,7 +1760,7 @@ func TestMux_ServeAnnouncements_ConcurrentAnnounce_NoDeadlock(t *testing.T) {
 				return 0, nil
 			}
 			mocks = append(mocks, ms)
-			aw := newAnnouncementWriter(ms, "/race/", nil)
+			aw := newAnnouncementWriter(ms, "/race/", 0, 0, nil)
 			aws = append(aws, aw)
 			readyChans = append(readyChans, ready)
 		}
@@ -1872,7 +1872,7 @@ func TestAnnouncement_Done_ClosesOnEnd(t *testing.T) {
 
 // serveTrack should close the track when the announcement ends (via AfterFunc)
 func TestMux_ServeTrack_ClosesWhenAnnouncementEnds(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	path := BroadcastPath("/serve/close/when/announce/ends")
 
@@ -2075,7 +2075,7 @@ func TestAnnouncement_End_Idempotent_WithMultipleAfterFuncs(t *testing.T) {
 // Test that announcing a single path will create nodes in the announcement tree
 // and that ending the announcement prunes those nodes from the tree
 func TestMux_Announce_RemoveAnnouncement_PrunesTree(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	path := BroadcastPath("/prune/a/b/c")
 
@@ -2203,7 +2203,7 @@ func TestPathAndPrefixSegments_EdgeCases(t *testing.T) {
 
 // Publish with nil handler should be treated like Announce with nil handler and close stream
 func TestMux_Publish_WithNilHandler_ClosesTrack(t *testing.T) {
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 	ctx := context.Background()
 	path := BroadcastPath("/publish/nilhandler")
 
@@ -2231,7 +2231,7 @@ func TestMux_Publish_WithNilHandler_ClosesTrack(t *testing.T) {
 // An ancestor and descendant AnnouncementWriter should both receive the same announcement
 func TestMux_ServeAnnouncements_AncestorAndDescendantReceive(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		mux := NewTrackMux()
+		mux := NewTrackMux(0)
 		ctx := context.Background()
 
 		// Prepare announcement for /share/stream
@@ -2251,7 +2251,7 @@ func TestMux_ServeAnnouncements_AncestorAndDescendantReceive(t *testing.T) {
 			}
 			return 0, nil
 		}
-		rootAW := newAnnouncementWriter(rootStream, "/", nil)
+		rootAW := newAnnouncementWriter(rootStream, "/", 0, 0, nil)
 
 		// Descendant writer (prefix /share/)
 		shareStream := &FakeQUICStream{}
@@ -2266,7 +2266,7 @@ func TestMux_ServeAnnouncements_AncestorAndDescendantReceive(t *testing.T) {
 			}
 			return 0, nil
 		}
-		shareAW := newAnnouncementWriter(shareStream, "/share/", nil)
+		shareAW := newAnnouncementWriter(shareStream, "/share/", 0, 0, nil)
 
 		var wg sync.WaitGroup
 		wg.Add(2)

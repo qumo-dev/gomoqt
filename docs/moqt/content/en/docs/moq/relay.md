@@ -26,7 +26,7 @@ To forward media data, a server subscribes to a source track as a subscriber to 
 
             writers := make([]*moqt.GroupWriter, 0, len(dests))
             for _, dest := range dests {
-                gw, err := dest.OpenGroup(seq)
+                gw, err := dest.OpenGroupAt(seq)
                 if err != nil {
                     break
                 }
@@ -73,6 +73,31 @@ To forward media data, a server subscribes to a source track as a subscriber to 
 
 > [!NOTE] Note: Relay Implementation
 > `gomoqt` does not provide built-in implementation for relaying broadcasts and tracks because there are many scenarios on relaying and many different implementations. The relay implementation is left to the user.
+
+## Hop ID and Loop Avoidance
+
+Relay nodes MUST use a unique non-zero hop ID to enable loop avoidance. When creating a `TrackMux` for a relay, use `moqt.NewHopID()` to generate a unique identifier:
+
+```go
+    mux := moqt.NewTrackMux(moqt.NewHopID())
+    fmt.Printf("Relay HopID: %d\n", mux.HopID())
+```
+
+When the mux accepts an announce interest (`AcceptAnnounce`), it automatically sends an `ExcludeHop` with the mux's hop ID to prevent announcement loops. Each `Announcement` carries a list of hop IDs it has traversed, accessible via `Announcement.HopIDs`.
+
+```go
+    ann, err := ar.ReceiveAnnouncement(ctx)
+    if err != nil {
+        // Handle error
+    }
+    fmt.Printf("Announcement traversed hops: %v\n", ann.HopIDs())
+```
+
+For edge nodes (origin publishers or pure subscribers), pass `0` as the hop ID:
+
+```go
+    mux := moqt.NewTrackMux(0) // Edge node, no hop tracking
+```
 
 ## Caching
 

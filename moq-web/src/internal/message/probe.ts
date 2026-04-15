@@ -3,17 +3,20 @@ import { parseVarint, readFull, readVarint, varintLen, writeVarint } from "./mes
 
 export interface ProbeMessageInit {
 	bitrate?: number;
+	rtt?: number;
 }
 
 export class ProbeMessage {
 	bitrate: number;
+	rtt: number;
 
 	constructor(init: ProbeMessageInit = {}) {
 		this.bitrate = init.bitrate ?? 0;
+		this.rtt = init.rtt ?? 0;
 	}
 
 	get len(): number {
-		return varintLen(this.bitrate);
+		return varintLen(this.bitrate) + varintLen(this.rtt);
 	}
 
 	async encode(w: Writer): Promise<Error | undefined> {
@@ -24,6 +27,9 @@ export class ProbeMessage {
 		if (err) return err;
 
 		[, err] = await writeVarint(w, this.bitrate);
+		if (err) return err;
+
+		[, err] = await writeVarint(w, this.rtt);
 		if (err) return err;
 
 		return undefined;
@@ -37,10 +43,17 @@ export class ProbeMessage {
 		const [, err2] = await readFull(r, buf);
 		if (err2) return err2;
 
-		const [bitrate, n1] = parseVarint(buf, 0);
-		this.bitrate = bitrate;
+		let offset = 0;
 
-		if (n1 !== buf.length) {
+		const [bitrate, n1] = parseVarint(buf, offset);
+		this.bitrate = bitrate;
+		offset += n1;
+
+		const [rtt, n2] = parseVarint(buf, offset);
+		this.rtt = rtt;
+		offset += n2;
+
+		if (offset !== buf.length) {
 			return new Error("ProbeMessage: unexpected trailing bytes");
 		}
 

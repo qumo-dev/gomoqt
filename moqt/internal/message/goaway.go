@@ -5,31 +5,32 @@ import (
 )
 
 /*
- *	ANNOUNCE_PLEASE Message {
- *	  Track Prefix (string),
+ *	GOAWAY Message {
+ *	  Message Length (i)
+ *	  New Session URI (s)
  *	}
  */
-type AnnouncePleaseMessage struct {
-	TrackPrefix string
+type GoawayMessage struct {
+	NewSessionURI string
 }
 
-func (aim AnnouncePleaseMessage) Len() int {
-	return StringLen(aim.TrackPrefix)
+func (gm GoawayMessage) Len() int {
+	return StringLen(gm.NewSessionURI)
 }
 
-func (aim AnnouncePleaseMessage) Encode(w io.Writer) error {
-	msgLen := aim.Len()
+func (gm GoawayMessage) Encode(w io.Writer) error {
+	msgLen := gm.Len()
 	b := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
 
 	b, _ = WriteMessageLength(b, uint64(msgLen))
-	b, _ = WriteString(b, aim.TrackPrefix)
+	b, _ = WriteString(b, gm.NewSessionURI)
 
 	_, err := w.Write(b)
 
 	return err
 }
 
-func (aim *AnnouncePleaseMessage) Decode(src io.Reader) error {
+func (gm *GoawayMessage) Decode(src io.Reader) error {
 	num, err := ReadMessageLength(src)
 	if err != nil {
 		return err
@@ -46,7 +47,7 @@ func (aim *AnnouncePleaseMessage) Decode(src io.Reader) error {
 	if err != nil {
 		return err
 	}
-	aim.TrackPrefix = str
+	gm.NewSessionURI = str
 	b = b[n:]
 
 	if len(b) != 0 {

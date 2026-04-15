@@ -1,6 +1,7 @@
 import {
-	AnnouncePleaseMessage,
+	AnnounceInterestMessage,
 	FetchMessage,
+	GoawayMessage,
 	GroupMessage,
 	ProbeMessage,
 	readVarint,
@@ -56,6 +57,9 @@ export interface SessionInit {
 
 	/** Handler invoked for incoming fetch requests. */
 	fetchHandler?: FetchHandler;
+
+	/** Called when the server requests session migration via GOAWAY. */
+	onGoaway?: (newSessionURI: string) => void;
 }
 
 /**
@@ -78,6 +82,7 @@ export class Session {
 	/** The {@link TrackMux} used by this session for incoming track dispatch. */
 	readonly mux: TrackMux;
 	#fetchHandler?: FetchHandler;
+	#onGoaway?: (newSessionURI: string) => void;
 
 	#queues: Map<
 		SubscribeID,
@@ -88,6 +93,7 @@ export class Session {
 		this.#webtransport = options.transport;
 		this.mux = options.mux ?? DefaultTrackMux;
 		this.#fetchHandler = options.fetchHandler;
+		this.#onGoaway = options.onGoaway;
 		const [ctx, cancel] = withCancelCause(background());
 		this.#ctx = ctx;
 		this.#cancelFunc = cancel;
@@ -187,11 +193,11 @@ export class Session {
 			return [undefined, err];
 		}
 
-		// Send AnnouncePleaseMessage
-		const req = new AnnouncePleaseMessage({ prefix });
+		// Send ANNOUNCE_INTEREST message
+		const req = new AnnounceInterestMessage({ prefix });
 		err = await req.encode(stream.writable);
 		if (err) {
-			console.error("moq: failed to send ANNOUNCE_PLEASE message:", err);
+			console.error("moq: failed to send ANNOUNCE_INTEREST message:", err);
 			return [undefined, err];
 		}
 
@@ -394,10 +400,10 @@ export class Session {
 	}
 
 	async #handleAnnounceStream(stream: Stream): Promise<void> {
-		const req = new AnnouncePleaseMessage({});
+		const req = new AnnounceInterestMessage({});
 		const err = await req.decode(stream.readable);
 		if (err) {
-			console.error("Failed to decode AnnouncePleaseMessage:", err);
+			console.error("Failed to decode AnnounceInterestMessage:", err);
 			return;
 		}
 
@@ -432,7 +438,7 @@ export class Session {
 					continue;
 				}
 
-				const rsp = new ProbeMessage({ bitrate });
+				const rsp = new ProbeMessage({ bitrate, rtt: req.rtt });
 				const encErr = await rsp.encode(stream.writable);
 				if (encErr) {
 					throw encErr;
@@ -485,6 +491,19 @@ export class Session {
 		}
 	}
 
+	async #handleGoawayStream(stream: Stream): Promise<void> {
+		const gm = new GoawayMessage({});
+		const err = await gm.decode(stream.readable);
+		if (err) {
+			console.error("Failed to decode GoawayMessage:", err);
+			return;
+		}
+
+		if (this.#onGoaway) {
+			this.#onGoaway(gm.newSessionURI);
+		}
+	}
+
 	async #listenBiStreams(): Promise<void> {
 		const pendingHandles: Promise<void>[] = [];
 		try {
@@ -521,6 +540,9 @@ export class Session {
 						break;
 					case BiStreamTypes.ProbeStreamType:
 						pendingHandles.push(this.#handleProbeStream(stream));
+						break;
+					case BiStreamTypes.GoawayStreamType:
+						pendingHandles.push(this.#handleGoawayStream(stream));
 						break;
 					default:
 						cancelStreamWithError(stream, SessionErrorCode.InternalError);

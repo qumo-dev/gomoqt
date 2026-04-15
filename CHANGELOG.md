@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **moqt:** added graceful session migration per draft-04. `Server.NextSessionURI` specifies the redirect URI sent during `Shutdown()`. `Dialer.OnGoaway` callback delivers the received redirect URI to the client application.
+
+- **moqt:** added `ProbeResult` struct; `Session.Probe()` now returns both `Bitrate` and `RTT`.
+- **moqt:** added `NewHopID()` for generating cryptographically random non-zero hop identifiers for relay nodes.
+- **moqt/internal/message:** added `GoawayMessage` with `NewSessionURI` field and `StreamTypeGoaway = 0x5`.
+- **moqt/internal/message:** added `AnnounceInterestMessage` with `ExcludeHop` field (replacing the removed `AnnouncePleaseMessage`).
+
+### Changed
+
+- **moqt:** upgraded protocol version from `moq-lite-03` to `moq-lite-04` (ALPN `moq-lite-04`).
+- **moqt:** `NewTrackMux()` now requires a hop ID parameter: `NewTrackMux(id uint64)`. Pass `0` for edge nodes; relay nodes should use `NewHopID()`.
+- **moqt:** `Session.Probe()` returns `(*ProbeResult, error)` instead of `(uint64, error)`.
+- **moqt:** `Announcement.Hops() int` replaced with `Announcement.HopIDs() []uint64` — explicit hop ID list per draft-04.
+- **moqt:** `AnnouncementWriter` now supports `ExcludeHop` filtering and appends the local hop ID when forwarding announcements.
+- **moqt:** `Server.goAway()` now sends a GOAWAY message with `NewSessionURI` on a bidirectional stream before waiting for shutdown.
+- **moqt/internal/message:** `AnnounceMessage.Hops uint64` replaced with `AnnounceMessage.HopIDs []uint64` (hop count + hop ID list encoding).
+- **moqt/internal/message:** `ProbeMessage` now includes `RTT uint64` field alongside `Bitrate`.
+- **SPECIFICATION.md:** updated to reference moq-lite draft-04 (removed draft-03 differences note).
+
+### Removed
+
+- **moqt/internal/message:** removed `AnnouncePleaseMessage` (superseded by `AnnounceInterestMessage`).
+
+### Tests
+
+- Added `GoawayMessage` and `AnnounceInterestMessage` encode/decode tests.
+- Updated `ProbeMessage` tests for the new `RTT` field.
+- Updated `AnnounceMessage` tests for `HopIDs` list encoding.
+- Updated `TrackMux` tests for `NewTrackMux(id)` constructor.
+
 ## [v0.12.1] - 2026-04-14
 
 ### Added

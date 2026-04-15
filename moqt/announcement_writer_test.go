@@ -25,14 +25,14 @@ func newTestAnnouncementWriter(t *testing.T, opts ...func(*FakeQUICStream)) *Ann
 			f(mockStream)
 		}
 	}
-	return newAnnouncementWriter(mockStream, "/test/", nil)
+	return newAnnouncementWriter(mockStream, "/test/", 0, 0, nil)
 }
 
 func TestNewAnnouncementWriter(t *testing.T) {
 	mockStream := &FakeQUICStream{}
 	prefix := "/test/"
 	logger := &slog.Logger{}
-	aw := newAnnouncementWriter(mockStream, prefix, logger)
+	aw := newAnnouncementWriter(mockStream, prefix, 0, 0, logger)
 
 	require.NotNil(t, aw)
 	assert.Equal(t, "/test/", aw.prefix)
@@ -366,7 +366,7 @@ func TestAnnouncementWriter_SendAnnouncement_EncodesHops(t *testing.T) {
 	require.NoError(t, decoded.Decode(&buf))
 	assert.Equal(t, message.ACTIVE, decoded.AnnounceStatus)
 	assert.Equal(t, "stream1", decoded.BroadcastPathSuffix)
-	assert.Equal(t, uint64(1), decoded.Hops)
+	assert.Empty(t, decoded.HopIDs)
 
 }
 
@@ -654,7 +654,7 @@ func TestAnnouncementWriter_BoundaryValues(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			mockStream := &FakeQUICStream{}
-			aw := newAnnouncementWriter(mockStream, tt.prefix, nil)
+			aw := newAnnouncementWriter(mockStream, tt.prefix, 0, 0, nil)
 			ann, _ := NewAnnouncement(context.Background(), BroadcastPath(tt.broadcastPath))
 
 			// Initialize the AnnouncementWriter first

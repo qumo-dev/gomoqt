@@ -10,6 +10,7 @@ const (
 	StreamTypeSubscribe StreamType = 0x2
 	StreamTypeFetch     StreamType = 0x3
 	StreamTypeProbe     StreamType = 0x4
+	StreamTypeGoaway    StreamType = 0x5
 
 	// Uni-directional Stream Types
 	StreamTypeGroup StreamType = 0x0

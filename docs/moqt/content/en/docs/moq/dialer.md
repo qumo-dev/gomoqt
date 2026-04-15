@@ -51,6 +51,7 @@ The following table describes the public fields of the `moqt.Dialer` struct:
 | `DialQUICFunc`         | `func(ctx, addr, tlsConfig, quicConfig) (StreamConn, error)` | Custom QUIC dial function. If nil, the default dialer is used. |
 | `DialWebTransportFunc` | `func(ctx, addr, header, tlsConfig) (*http.Response, WebTransportSession, error)` | Custom WebTransport dial function. If nil, the default dialer is used. |
 | `FetchHandler`         | [`moqt.FetchHandler`](https://pkg.go.dev/github.com/okdaichi/gomoqt/moqt#FetchHandler) | Handles incoming fetch requests on WebTransport sessions. If nil, fetch requests are not handled. |
+| `OnGoaway`             | `func(newSessionURI string)` | Called when the server requests session migration. The `newSessionURI` parameter contains the redirect URI, which may be empty. |
 | `Logger`               | [`*slog.Logger`](https://pkg.go.dev/log/slog#Logger)              | Logger for connection and session events. If nil, logging is disabled.         |
 
 {{< tabs items="Using Default QUIC, Using Custom QUIC" >}}
@@ -63,7 +64,7 @@ The following table describes the public fields of the `moqt.Dialer` struct:
 {{< /tab >}}
 {{< tab >}}
 
-To use a custom QUIC implementation, you need to provide your own dial function. When `(moqt.Dialer).DialQUICFunc` is set, it is used to dial QUIC connections instead of the default implementation.
+To use a custom QUIC implementation, you need to provide your own dial function. When `Dialer.DialQUICFunc` is set, it is used to dial QUIC connections instead of the default implementation.
 
 ```go {filename="gomoqt/moqt/dialer.go",base_url="https://github.com/okdaichi/gomoqt/tree/main/moqt/dialer.go"}
 type Dialer struct {
@@ -86,7 +87,7 @@ type Dialer struct {
 {{< /tab >}}
 {{< tab >}}
 
-To use a custom WebTransport implementation, you need to provide your own dial function. When `(moqt.Dialer).DialWebTransportFunc` is set, it is used to dial WebTransport connections instead of the default implementation.
+To use a custom WebTransport implementation, you need to provide your own dial function. When `Dialer.DialWebTransportFunc` is set, it is used to dial WebTransport connections instead of the default implementation.
 
 ```go {filename="gomoqt/moqt/dialer.go",base_url="https://github.com/okdaichi/gomoqt/tree/main/moqt/dialer.go"}
 type Dialer struct {
@@ -131,4 +132,4 @@ You can also use transport-specific methods directly:
 > Ensure that the `mux` is properly configured for your use case to avoid unexpected behavior.
 
 > [!NOTE] Note: ALPN Negotiation
-> For native QUIC connections, the dialer automatically sets the ALPN token to `moq-lite-03` (`moqt.NextProtoMOQ`) if `TLSConfig.NextProtos` is not configured.
+> For native QUIC connections, the dialer automatically sets the ALPN token to `moq-lite-04` (`moqt.NextProtoMOQ`) if `TLSConfig.NextProtos` is not configured.

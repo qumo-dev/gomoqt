@@ -18,7 +18,7 @@ import (
 )
 
 func newTestSession(conn StreamConn) *Session {
-	return newSession(conn, NewTrackMux(), nil, nil, nil)
+	return newSession(conn, NewTrackMux(0), nil, nil, nil, nil)
 }
 
 func newTestSessionWithConn(tb testing.TB, opts ...func(*FakeStreamConn)) (*Session, *FakeStreamConn) {
@@ -40,7 +40,7 @@ func TestNewSession(t *testing.T) {
 		expectOK bool
 	}{
 		"new session with mux": {
-			mux:      NewTrackMux(),
+			mux:      NewTrackMux(0),
 			expectOK: true,
 		},
 	}
@@ -52,7 +52,7 @@ func TestNewSession(t *testing.T) {
 			conn.OpenStreamFunc = func() (transport.Stream, error) { return nil, io.EOF }
 			conn.OpenStreamFunc = func() (transport.Stream, error) { return nil, io.EOF }
 
-			session := newSession(conn, tt.mux, nil, nil, nil)
+			session := newSession(conn, tt.mux, nil, nil, nil, nil)
 
 			if tt.expectOK {
 				assert.NotNil(t, session, "newSession should not return nil")
@@ -95,7 +95,7 @@ func TestNewSessionWithNilMux(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			conn := &FakeStreamConn{}
 
-			session := newSession(conn, tt.mux, nil, nil, nil)
+			session := newSession(conn, tt.mux, nil, nil, nil, nil)
 
 			if tt.expectDefault {
 				assert.Equal(t, DefaultMux, session.mux, "should use DefaultMux when nil mux is provided")
@@ -660,9 +660,9 @@ func TestSession_ContextCancellation(t *testing.T) {
 func TestSession_WithRealMux(t *testing.T) {
 	conn := &FakeStreamConn{}
 
-	mux := NewTrackMux()
+	mux := NewTrackMux(0)
 
-	session := newSession(conn, mux, nil, nil, nil)
+	session := newSession(conn, mux, nil, nil, nil, nil)
 
 	assert.Equal(t, mux, session.mux, "Mux should be set correctly in the session")
 
@@ -823,11 +823,11 @@ func TestSession_ProcessBiStream_Announce(t *testing.T) {
 	// Expect write/close operations for announcement writer init and close
 	mockStream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
 
-	// Prepare StreamType + AnnouncePleaseMessage
+	// Prepare StreamType + AnnounceInterestMessage
 	var buf bytes.Buffer
 	err := message.StreamTypeAnnounce.Encode(&buf)
 	assert.NoError(t, err)
-	apm := message.AnnouncePleaseMessage{TrackPrefix: "/test/prefix/"}
+	apm := message.AnnounceInterestMessage{BroadcastPathPrefix: "/test/prefix/"}
 	err = apm.Encode(&buf)
 	assert.NoError(t, err)
 
@@ -1265,7 +1265,7 @@ func TestSession_Probe(t *testing.T) {
 
 	got, err := session.Probe(1000000)
 	require.NoError(t, err)
-	assert.Equal(t, uint64(250000), got)
+	assert.Equal(t, uint64(250000), got.Bitrate)
 
 	var streamType message.StreamType
 	require.NoError(t, streamType.Decode(bytes.NewReader(written.Bytes()[:1])))
@@ -1638,7 +1638,7 @@ func TestSession_AcceptAnnounce_EncodePleaseMessageStreamError(t *testing.T) {
 			// First write succeeds (StreamType)
 			return len(p), nil
 		}
-		// Second write fails (AnnouncePleaseMessage)
+		// Second write fails (AnnounceInterestMessage)
 		return 0, strErr
 	}
 
@@ -1941,9 +1941,9 @@ func TestSession_Probe_ClosedSession(t *testing.T) {
 
 	_ = session.CloseWithError(NoError, "")
 
-	bitrate, err := session.Probe(1000000)
+	result, err := session.Probe(1000000)
 	assert.Error(t, err)
-	assert.Equal(t, uint64(0), bitrate)
+	assert.Nil(t, result)
 	assert.Equal(t, ErrClosedSession, err)
 }
 
@@ -1955,9 +1955,9 @@ func TestSession_Probe_OpenStreamError(t *testing.T) {
 
 	session := newTestSession(conn)
 
-	bitrate, err := session.Probe(1000000)
+	result, err := session.Probe(1000000)
 	assert.Error(t, err)
-	assert.Equal(t, uint64(0), bitrate)
+	assert.Nil(t, result)
 
 	_ = session.CloseWithError(NoError, "")
 }
@@ -1973,9 +1973,9 @@ func TestSession_Probe_OpenStreamApplicationError(t *testing.T) {
 
 	session := newTestSession(conn)
 
-	bitrate, err := session.Probe(1000000)
+	result, err := session.Probe(1000000)
 	assert.Error(t, err)
-	assert.Equal(t, uint64(0), bitrate)
+	assert.Nil(t, result)
 	var sessErr *SessionError
 	assert.ErrorAs(t, err, &sessErr)
 
@@ -1991,9 +1991,9 @@ func TestSession_Probe_EncodeStreamTypeError(t *testing.T) {
 
 	session := newTestSession(conn)
 
-	bitrate, err := session.Probe(1000000)
+	result, err := session.Probe(1000000)
 	assert.Error(t, err)
-	assert.Equal(t, uint64(0), bitrate)
+	assert.Nil(t, result)
 
 	_ = session.CloseWithError(NoError, "")
 }
@@ -2014,9 +2014,9 @@ func TestSession_Probe_EncodeProbeMessageError(t *testing.T) {
 
 	session := newTestSession(conn)
 
-	bitrate, err := session.Probe(1000000)
+	result, err := session.Probe(1000000)
 	assert.Error(t, err)
-	assert.Equal(t, uint64(0), bitrate)
+	assert.Nil(t, result)
 
 	_ = session.CloseWithError(NoError, "")
 }
@@ -2031,9 +2031,9 @@ func TestSession_Probe_DecodeResponseError(t *testing.T) {
 
 	session := newTestSession(conn)
 
-	bitrate, err := session.Probe(1000000)
+	result, err := session.Probe(1000000)
 	assert.Error(t, err)
-	assert.Equal(t, uint64(0), bitrate)
+	assert.Nil(t, result)
 
 	_ = session.CloseWithError(NoError, "")
 }
@@ -2044,7 +2044,7 @@ func TestSession_logError(t *testing.T) {
 		logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
 		conn := &FakeStreamConn{}
-		session := newSession(conn, NewTrackMux(), nil, nil, logger)
+		session := newSession(conn, NewTrackMux(0), nil, nil, nil, logger)
 
 		session.logError("something failed", errors.New("test error"), "key", "value")
 
@@ -2068,7 +2068,7 @@ func TestSession_logError(t *testing.T) {
 		logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
 		conn := &FakeStreamConn{}
-		session := newSession(conn, NewTrackMux(), nil, nil, logger)
+		session := newSession(conn, NewTrackMux(0), nil, nil, nil, logger)
 
 		session.logError("msg", nil)
 		assert.Empty(t, logBuf.String())
@@ -2094,7 +2094,7 @@ func TestSession_processBiStream_logError(t *testing.T) {
 	}
 
 	conn := &FakeStreamConn{}
-	session := newSession(conn, NewTrackMux(), nil, nil, logger)
+	session := newSession(conn, NewTrackMux(0), nil, nil, nil, logger)
 
 	session.processBiStream(mockStream)
 
@@ -2116,7 +2116,7 @@ func TestSession_processUniStream_logError(t *testing.T) {
 	}
 
 	conn := &FakeStreamConn{}
-	session := newSession(conn, NewTrackMux(), nil, nil, logger)
+	session := newSession(conn, NewTrackMux(0), nil, nil, nil, logger)
 
 	session.processUniStream(mockStream)
 

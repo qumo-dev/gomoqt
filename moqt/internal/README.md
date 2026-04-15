@@ -28,12 +28,14 @@ Implements low-level wire helpers and message types used by the higher-level
   `StreamTypeSubscribe`, `StreamTypeGroup`)
 - Message structs and encode/decode logic, including:
   - `AnnounceMessage`
-  - `AnnounceInitMessage`
-  - `AnnouncePleaseMessage`
+  - `AnnounceInterestMessage`
   - `SubscribeMessage`
   - `SubscribeOkMessage`
   - `SubscribeUpdateMessage`
-  - `SessionUpdateMessage`
+  - `SubscribeDropMessage`
+  - `FetchMessage`
+  - `ProbeMessage`
+  - `GoawayMessage`
   - `GroupMessage`
 
 ### `quicgo`
