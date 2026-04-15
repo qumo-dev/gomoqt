@@ -1,113 +1,87 @@
 import { Session } from "./session.ts";
-import type { MOQOptions } from "./options.ts";
-import { DefaultTrackMux, TrackMux } from "./track_mux.ts";
+import type { ConnectInit } from "./options.ts";
+import { DefaultTrackMux } from "./track_mux.ts";
 import { WebTransportSession } from "./internal/webtransport/mod.ts";
 
-/** ALPN protocol identifier for MOQ Lite draft-03. */
-export const ALPN = "moq-lite-03";
+/** ALPN protocol identifier for MOQ Lite draft-04. */
+export const ALPN = "moq-lite-04";
 
 const DefaultWebTransportOptions: WebTransportOptions = {
 	allowPooling: false,
 	congestionControl: "low-latency",
 	requireUnreliable: true,
 	// deno-lint-ignore no-explicit-any
-	...(({ protocols: [ALPN] }) as any),
-};
-
-const DefaultMOQOptions: MOQOptions = {
-	reconnect: false, // TODO: Implement reconnect logic
-	transportOptions: DefaultWebTransportOptions,
+	...(({ protocols: [ALPN] }) as any),
 };
 
 /**
- * High-level MOQ client that creates {@link Session}s over WebTransport.
+ * Open a new MOQ session to the given URL.
  *
  * @example
  * ```ts
- * const client = new Client();
- * const session = await client.dial("https://localhost:4443/moq");
+ * const session = await connect("https://localhost:4443/moq");
+ * // ... use session ...
+ * await session.closeWithError(0, "done");
  * ```
+ *
+ * @example With options
+ * ```ts
+ * const session = await connect(url, {
+ *   mux,
+ *   onGoaway: (uri) => console.log("migrate to", uri),
+ * });
+ * ```
+ *
+ * @example Custom transport (e.g. for testing)
+ * ```ts
+ * const session = await connect(url, {
+ *   transportFactory: (u) => new MyWebSocketTransport(u),
+ * });
+ * ```
+ *
+ * @param url - MOQ server endpoint URL.
+ * @param init - Connection init object (mux, onGoaway, transportOptions, transportFactory).
+ * @returns A ready-to-use {@link Session}.
  */
+export async function connect(
+	url: string | URL,
+	init?: ConnectInit,
+): Promise<Session> {
+	const mux = init?.mux ?? DefaultTrackMux;
+	const transportOptions: WebTransportOptions = {
+		...DefaultWebTransportOptions,
+		...(init?.transportOptions ?? {}),
+	};
+
+	const factory = init?.transportFactory
+		?? ((u: string | URL, o?: WebTransportOptions) => new WebTransport(u, o));
+
+	try {
+		const transport = new WebTransportSession(factory(url, transportOptions));
+		const session = new Session({
+			transport,
+			mux,
+			onGoaway: init?.onGoaway,
+		});
+		await session.ready;
+		return session;
+	} catch (err) {
+		throw new Error(`failed to connect: ${err}`);
+	}
+}
+
+// Back-compat shim — kept so existing code compiled against the old Client
+// class still works. Deprecated: call {@link connect} directly.
+/** @deprecated Use {@link connect} instead. */
 export class Client {
-	#sessions?: Set<Session> = new Set();
-	readonly options: MOQOptions;
+	#init: ConnectInit;
 
-	/**
-	 * Create a new Client.
-	 * The provided options are shallow-merged with safe defaults so the
-	 * shared default objects aren't accidentally mutated.
-	 */
-	constructor(options?: MOQOptions) {
-		this.options = {
-			reconnect: options?.reconnect ?? DefaultMOQOptions.reconnect,
-			transportOptions: {
-				...DefaultWebTransportOptions,
-				...(options?.transportOptions ?? {}),
-			},
-		};
+	constructor(init?: ConnectInit) {
+		this.#init = { ...init };
 	}
 
-	/**
-	 * Open a new MOQ session to the given URL.
-	 * @param url - WebTransport endpoint URL.
-	 * @param mux - Optional {@link TrackMux} for incoming track routing. Defaults to {@link DefaultTrackMux}.
-	 * @returns A ready-to-use {@link Session}.
-	 */
-	async dial(
-		url: string | URL,
-		mux: TrackMux = DefaultTrackMux,
-	): Promise<Session> {
-		if (this.#sessions === undefined) {
-			return Promise.reject(new Error("Client is closed"));
-		}
-
-		// Normalize URL to string (WebTransport accepts a USVString).
-		// const endpoint = typeof url === "string" ? url : String(url);
-
-		try {
-			const webtransport = new WebTransportSession(
-				url,
-				this.options.transportOptions,
-			);
-			const session = new Session({
-				transport: webtransport,
-				mux,
-			});
-			await session.ready;
-			this.#sessions.add(session);
-			return session;
-		} catch (err) {
-			return Promise.reject(new Error(`failed to create WebTransport: ${err}`));
-		}
-	}
-
-	/** Gracefully close all active sessions. */
-	async close(): Promise<void> {
-		if (this.#sessions === undefined) {
-			return Promise.resolve();
-		}
-
-		await Promise.allSettled(
-			Array.from(this.#sessions).map((session) => session.close()),
-		);
-		// Mark client as closed so future dials fail fast.
-		this.#sessions = undefined;
-	}
-
-	/** Abort all active sessions immediately with an error code. */
-	async abort(): Promise<void> {
-		if (this.#sessions === undefined) {
-			return;
-		}
-
-		// Try to close sessions with an error to indicate abort semantics.
-		await Promise.allSettled(
-			Array.from(this.#sessions).map((session) =>
-				session.closeWithError(1, "client aborted")
-			),
-		);
-
-		// Mark closed
-		this.#sessions = undefined;
+	/** @deprecated Use {@link connect} instead. */
+	dial(url: string | URL): Promise<Session> {
+		return connect(url, this.#init);
 	}
 }

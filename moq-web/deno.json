@@ -1,7 +1,7 @@
 {
 	"$schema": "https://deno.land/x/deno/cli/schemas/config-file.v1.json",
 	"name": "@okdaichi/moq",
-	"version": "0.12.1",
+	"version": "0.12.2",
 	"exports": {
 		".": "./src/mod.ts",
 		"./msf": "./src/msf/mod.ts"
