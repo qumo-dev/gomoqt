@@ -1,4 +1,4 @@
-import { Client, FetchRequest, Frame, TrackMux, TrackWriter } from "@okdaichi/moq";
+import { connect, FetchRequest, Frame, TrackMux, TrackWriter } from "@okdaichi/moq";
 import { background } from "@okdaichi/golikejs/context";
 
 // shared client logic exported as function
@@ -7,8 +7,11 @@ export async function runClient(
 	transportOptions: WebTransportOptions,
 	debugEnabled: boolean,
 ): Promise<void> {
-	const client = new Client({ transportOptions });
-	const mux = new TrackMux();
+	// GOAWAY handling
+	let goawayResolve: ((uri: string) => void) | undefined;
+	const goawayPromise = new Promise<string>((resolve) => {
+		goawayResolve = resolve;
+	});
 
 	// basic prefixed log functions
 	function info(msg: string, ...args: any[]) {
@@ -44,6 +47,8 @@ export async function runClient(
 	const doneCh: Array<() => void> = [];
 	let done = false;
 
+	const mux = new TrackMux();
+
 	mux.publishFunc(
 		background().done(),
 		"/interop/client",
@@ -70,7 +75,16 @@ export async function runClient(
 
 	debug("Registering /interop/client handler");
 
-	const session = await step("Connecting to server", () => client.dial(addr, mux));
+	const session = await step("Connecting to server", () =>
+		connect(addr, {
+			mux,
+			transportOptions,
+			onGoaway: (newSessionURI: string) => {
+				console.log(`Received GOAWAY (newSessionURI: ${newSessionURI})`);
+				if (goawayResolve) goawayResolve(newSessionURI);
+			},
+		})
+	);
 
 	const announced = await step("Accepting server announcements", async () => {
 		const [a, err] = await session.acceptAnnounce("/");
@@ -145,7 +159,16 @@ export async function runClient(
 		]);
 	}
 
-	await new Promise((resolve) => setTimeout(resolve, 2000));
+	// Wait for GOAWAY from server
+	await step("Waiting for GOAWAY", async () => {
+		const uri = await Promise.race([
+			goawayPromise,
+			new Promise<string>((_, reject) =>
+				setTimeout(() => reject(new Error("timed out")), 10000)
+			),
+		]);
+		info(`newSessionURI: ${uri}`);
+	});
 
 	await step("Closing session", () => session.closeWithError(0, "no error"));
 }

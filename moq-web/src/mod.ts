@@ -1,7 +1,7 @@
 /**
  * TypeScript client library for Media over QUIC Transport (MOQ Lite).
  *
- * Provides a {@link Client} to connect to MOQ servers over WebTransport,
+ * Provides {@link connect} to open MOQ sessions over WebTransport,
  * a pub/sub model for tracks ({@link TrackWriter} / {@link TrackReader}),
  * announcement discovery ({@link AnnouncementReader} / {@link AnnouncementWriter}),
  * frame-level I/O ({@link GroupWriter} / {@link GroupReader}),
@@ -9,11 +9,9 @@
  *
  * @example
  * ```ts
- * import { Client } from "@okdaichi/moq";
+ * import { connect } from "@okdaichi/moq";
  *
- * const client = new Client();
- * const session = await client.dial("https://localhost:4443/moq");
- *
+ * const session = await connect("https://localhost:4443/moq");
  * const [reader] = await session.subscribe("/broadcast", "video");
  * ```
  *
@@ -30,11 +28,3 @@ export * from "./client.ts";
 export * from "./announce_stream.ts";
 export * from "./group_stream.ts";
 export * from "./stream_type.ts";
-export * from "./subscribe_stream.ts";
-export * from "./track_writer.ts";
-export * from "./track_reader.ts";
-export * from "./track_mux.ts";
-export * from "./broadcast.ts";
-export * from "./error.ts";
-export * from "./fetch.ts";
-export * from "./frame.ts";

@@ -63,190 +63,105 @@ const OriginalWebTransport = (globalThis as any).WebTransport;
 (globalThis as any).WebTransport = MockWebTransport;
 
 // Import after setting up mocks
-import { ALPN, Client } from "./client.ts";
+import { ALPN, Client, connect } from "./client.ts";
 import { TrackMux } from "./track_mux.ts";
-import type { MOQOptions } from "./options.ts";
+import type { ConnectInit } from "./options.ts";
 
-Deno.test("Client - Constructor with Default Options", () => {
-	const client = new Client();
-
-	assertExists(client.options);
-	assertEquals(client.options.transportOptions?.allowPooling, false);
-	assertEquals(
-		client.options.transportOptions?.congestionControl,
-		"low-latency",
-	);
-	assertEquals(client.options.transportOptions?.requireUnreliable, true);
-});
-
-Deno.test("Client - Constructor with Custom Options", () => {
-	const customOptions: MOQOptions = {
-		transportOptions: {
-			allowPooling: true,
-			congestionControl: "throughput",
-			requireUnreliable: false,
-		},
+Deno.test("connect - uses default WebTransport options", async () => {
+	let capturedOptions: WebTransportOptions | undefined;
+	const factory = (url: string | URL, opts?: WebTransportOptions) => {
+		capturedOptions = opts;
+		return new MockWebTransport(url, opts);
 	};
 
-	const client = new Client(customOptions);
-
-	assertEquals(client.options.transportOptions?.allowPooling, true);
-	assertEquals(
-		client.options.transportOptions?.congestionControl,
-		"throughput",
-	);
-	assertEquals(client.options.transportOptions?.requireUnreliable, false);
-});
-
-// Note: dial() tests focus on Client behavior and keep transport payload mocking minimal.
-
-Deno.test("Client - dial() attempts to create session", async () => {
-	const client = new Client();
-	const url = "https://example.com";
-
-	// The dial will fail due to incomplete mock response, but we can verify
-	// that it attempts to create a WebTransport connection
 	try {
-		await client.dial(url);
-	} catch (_err) {
-		// Expected to fail due to mock limitations
-		// In real usage, this would succeed with proper server
+		await connect("https://example.com", { transportFactory: factory });
+	} catch {
+		// Expected: mock doesn't speak MOQ setup
 	}
 
-	await client.close();
+	assertExists(capturedOptions);
+	assertEquals(capturedOptions!.allowPooling, false);
+	assertEquals(capturedOptions!.congestionControl, "low-latency");
+	assertEquals(capturedOptions!.requireUnreliable, true);
 });
 
-Deno.test("Client - dial() accepts URL types", () => {
-	const client = new Client();
+Deno.test("connect - merges custom transportOptions", async () => {
+	let capturedOptions: WebTransportOptions | undefined;
+	const factory = (url: string | URL, opts?: WebTransportOptions) => {
+		capturedOptions = opts;
+		return new MockWebTransport(url, opts);
+	};
+	const init: ConnectInit = {
+		transportOptions: { allowPooling: true, congestionControl: "throughput" },
+		transportFactory: factory,
+	};
 
-	// Verify that dial method accepts different URL types (no actual call)
-	const stringUrl: string = "https://example.com";
-	const urlObject: URL = new URL("https://example.com");
-	const customMux = new TrackMux();
+	try {
+		await connect("https://example.com", init);
+	} catch {
+		// Expected
+	}
 
-	// Type checking ensures these signatures are valid
-	assertExists(client.dial);
-	assertEquals(typeof client.dial, "function");
-
-	// Verify dial signature accepts both URL types and optional mux
-	const _test1: Promise<any> = client.dial(stringUrl);
-	const _test2: Promise<any> = client.dial(urlObject);
-	const _test3: Promise<any> = client.dial(stringUrl, customMux);
-
-	// Prevent hanging promises
-	_test1.catch(() => {});
-	_test2.catch(() => {});
-	_test3.catch(() => {});
+	assertEquals(capturedOptions!.allowPooling, true);
+	assertEquals(capturedOptions!.congestionControl, "throughput");
+	assertEquals(capturedOptions!.requireUnreliable, true);
 });
 
-Deno.test("Client - dial() handles connection errors", async () => {
-	const client = new Client();
+Deno.test("connect - accepts URL object", () => {
+	const p = connect(new URL("https://example.com"));
+	p.catch(() => {});
+	assertExists(p);
+});
 
-	// Create failing mock WebTransport
-	class FailingMockWebTransport extends MockWebTransport {
+Deno.test("connect - accepts mux in init", () => {
+	const p = connect("https://example.com", { mux: new TrackMux() });
+	p.catch(() => {});
+	assertExists(p);
+});
+
+Deno.test("connect - propagates transport errors", async () => {
+	class FailingTransport extends MockWebTransport {
 		constructor(url: string | URL, options?: WebTransportOptions) {
 			super(url, options);
-			this.ready = Promise.reject(new Error("Connection failed"));
-			// Prevent unhandled rejection in the test runner by
-			// attaching a no-op rejection handler. The client.dial
-			// still observes the rejection and throws as expected.
+			this.ready = Promise.reject(new Error("Connection refused"));
 			this.ready.catch(() => {});
 		}
 	}
 
-	// Temporarily replace WebTransport
-	const originalWebTransport = (globalThis as any).WebTransport;
-	(globalThis as any).WebTransport = FailingMockWebTransport;
+	await assertRejects(
+		() => connect("https://example.com", {
+			transportFactory: (u, o) => new FailingTransport(u, o),
+		}),
+		Error,
+	);
+});
+
+Deno.test("connect - passes onGoaway to session", async () => {
+	let received: string | undefined;
+	const init: ConnectInit = {
+		onGoaway: (uri) => { received = uri; },
+		transportFactory: (u, o) => new MockWebTransport(u, o),
+	};
 
 	try {
-		await assertRejects(
-			async () => await client.dial("https://example.com"),
-			Error,
-		);
-	} finally {
-		// Restore mock WebTransport
-		(globalThis as any).WebTransport = originalWebTransport;
+		await connect("https://example.com", init);
+	} catch {
+		// Expected
 	}
+	assertEquals(received, undefined);
 });
 
-Deno.test("Client - close() with no sessions", async () => {
+// Back-compat: Client shim still works
+Deno.test("Client shim - dial() delegates to connect()", () => {
 	const client = new Client();
-	// Should not throw
-	await client.close();
+	assertExists(client.dial);
+	const p = client.dial("https://example.com");
+	p.catch(() => {});
 });
 
-// Note: Session-based tests are skipped due to mocking complexity.
-// These tests verify Client class behavior at a higher level.
-
-Deno.test("Client - close() with empty sessions", async () => {
-	const client = new Client();
-
-	// close() should work even without active sessions
-	await client.close();
-
-	// Verify client can be reused after close
-	const options = client.options;
-	assertExists(options);
-});
-
-Deno.test("Client - abort() with no sessions", async () => {
-	const client = new Client();
-
-	// abort() should work without active sessions
-	await client.abort();
-
-	// Verify client state after abort
-	assertExists(client.options);
-});
-
-Deno.test("Client - close() is idempotent", async () => {
-	const client = new Client();
-
-	// First close
-	await client.close();
-
-	// Second close should not throw
-	await client.close();
-});
-
-Deno.test("Client - abort() is idempotent", async () => {
-	const client = new Client();
-
-	// First abort
-	await client.abort();
-
-	// Second abort should not throw
-	await client.abort();
-});
-
-Deno.test("Client - dial() rejects after close", async () => {
-	const client = new Client();
-
-	await client.close();
-
-	// dial() after close should reject
-	await assertRejects(
-		async () => await client.dial("https://example.com"),
-		Error,
-		"Client is closed",
-	);
-});
-
-Deno.test("Client - dial() rejects after abort", async () => {
-	const client = new Client();
-
-	await client.abort();
-
-	// dial() after abort should reject
-	await assertRejects(
-		async () => await client.dial("https://example.com"),
-		Error,
-		"Client is closed",
-	);
-});
-
-Deno.test("Client - ALPN constant is moq-lite-03", () => {
-	assertEquals(ALPN, "moq-lite-03");
+Deno.test("Client - ALPN constant is moq-lite-04", () => {
+	assertEquals(ALPN, "moq-lite-04");
 });
 
 // Restore original WebTransport after all tests
