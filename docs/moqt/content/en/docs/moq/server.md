@@ -85,7 +85,7 @@ The following table describes the public fields of the `Server` struct:
 {{< /tab >}}
 {{< tab >}}
 
-To use a custom QUIC implementation, you need to provide your own `ListenFunc`. When `(moqt.Server).ListenFunc` is set, it is used to listen for incoming QUIC connections instead of the default implementation.
+To use a custom QUIC implementation, you need to provide your own `ListenFunc`. When `Server.ListenFunc` is set, it is used to listen for incoming QUIC connections instead of the default implementation.
 
 ```go {filename="gomoqt/moqt/server.go",base_url="https://github.com/okdaichi/gomoqt/tree/main/moqt/server.go"}
 type Server struct {
@@ -181,7 +181,7 @@ For WebTransport connections, use `moqt.WebTransportHandler` to handle HTTP upgr
 
 ## Run the Server
 
-`(moqt.Server).ListenAndServe()` starts the server listening for incoming connections.
+`Server.ListenAndServe` starts the server listening for incoming connections.
 
 ```go
     server.ListenAndServe()
@@ -198,7 +198,7 @@ Servers also support immediate and graceful shutdowns.
 
 ### Immediate Shutdown
 
-`(moqt.Server).Close` method terminates all sessions and closes listeners forcefully.
+`Server.Close` method terminates all sessions and closes listeners forcefully.
 
 ```go
     server.Close() // Immediate shutdown
@@ -206,7 +206,7 @@ Servers also support immediate and graceful shutdowns.
 
 ### Graceful Shutdown
 
-`(moqt.Server).Shutdown` method notifies all active sessions with `NextSessionURI` as the redirect and waits for them to close gracefully before forcing termination.
+`Server.Shutdown` method notifies all active sessions with `NextSessionURI` as the redirect and waits for them to close gracefully before forcing termination.
 
 ```go
     server := moqt.Server{

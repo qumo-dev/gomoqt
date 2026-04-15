@@ -83,7 +83,7 @@ Relay nodes MUST use a unique non-zero hop ID to enable loop avoidance. When cre
     fmt.Printf("Relay HopID: %d\n", mux.HopID())
 ```
 
-When the mux accepts an announce interest (`AcceptAnnounce`), it automatically sends an `ExcludeHop` with the mux's hop ID to prevent announcement loops. Each `Announcement` carries a list of hop IDs it has traversed, accessible via `(moqt.Announcement).HopIDs()`.
+When the mux accepts an announce interest (`AcceptAnnounce`), it automatically sends an `ExcludeHop` with the mux's hop ID to prevent announcement loops. Each `Announcement` carries a list of hop IDs it has traversed, accessible via `Announcement.HopIDs`.
 
 ```go
     ann, err := ar.ReceiveAnnouncement(ctx)

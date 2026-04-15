@@ -86,7 +86,7 @@ Incoming requests, such as track subscriptions and discovery broadcasts, are han
 
 ## Terminating a Session
 
-To explicitly close a session due to protocol violations, errors, or other reasons, use the `(moqt.Session).CloseWithError` method. This closes all associated streams.
+To explicitly close a session due to protocol violations, errors, or other reasons, use the `Session.CloseWithError` method. This closes all associated streams.
 
 ```go
 func (s *Session) CloseWithError(code SessionErrorCode, msg string) error

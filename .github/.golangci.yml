@@ -10,8 +10,13 @@ linters:
   default: none
   enable:
     - govet
+    - gosec
     - staticcheck
     - revive
+  settings:
+    gosec:
+      excludes:
+        - G115 # integer overflow conversions — too noisy for wire-protocol code
 # Note: keep any revive custom rules in a separate file if needed.
 # For simplicity we rely on revive's defaults here; add settings later
 # if you want stricter exported/package comment checks.

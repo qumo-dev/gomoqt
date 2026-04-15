@@ -64,7 +64,7 @@ The following table describes the public fields of the `moqt.Dialer` struct:
 {{< /tab >}}
 {{< tab >}}
 
-To use a custom QUIC implementation, you need to provide your own dial function. When `(moqt.Dialer).DialQUICFunc` is set, it is used to dial QUIC connections instead of the default implementation.
+To use a custom QUIC implementation, you need to provide your own dial function. When `Dialer.DialQUICFunc` is set, it is used to dial QUIC connections instead of the default implementation.
 
 ```go {filename="gomoqt/moqt/dialer.go",base_url="https://github.com/okdaichi/gomoqt/tree/main/moqt/dialer.go"}
 type Dialer struct {
@@ -87,7 +87,7 @@ type Dialer struct {
 {{< /tab >}}
 {{< tab >}}
 
-To use a custom WebTransport implementation, you need to provide your own dial function. When `(moqt.Dialer).DialWebTransportFunc` is set, it is used to dial WebTransport connections instead of the default implementation.
+To use a custom WebTransport implementation, you need to provide your own dial function. When `Dialer.DialWebTransportFunc` is set, it is used to dial WebTransport connections instead of the default implementation.
 
 ```go {filename="gomoqt/moqt/dialer.go",base_url="https://github.com/okdaichi/gomoqt/tree/main/moqt/dialer.go"}
 type Dialer struct {

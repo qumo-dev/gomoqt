@@ -7,7 +7,7 @@ Probe is a mechanism for measuring the available bitrate and round-trip time (RT
 
 ## Probe Bitrate
 
-To probe the remote peer's bitrate and RTT, use the `(moqt.Session).Probe` method:
+To probe the remote peer's bitrate and RTT, use the `Session.Probe` method:
 
 ```go
     localBitrate := uint64(5_000_000) // 5 Mbps

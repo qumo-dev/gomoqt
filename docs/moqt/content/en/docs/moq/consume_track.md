@@ -4,7 +4,7 @@ weight: 6
 ---
 
 Consuming a track involves reading media data from a `moqt.TrackReader`, which provides access to groups and frames as they are received. This is typically done by the subscriber or receiver.
-`moqt.TrackReader` is created when calling `(moqt.Session).Subscribe` method.
+`moqt.TrackReader` is created when calling `Session.Subscribe` method.
 
 {{% details title="Overview" closed="true" %}}
 
@@ -55,7 +55,7 @@ By subscribing to a track, a `moqt.TrackReader` is created, allowing the receive
 {{</cards>}}
 
 ## Accept a Group
-To receive the next available group from a track, use `(moqt.TrackReader).AcceptGroup` method. This returns a `moqt.GroupReader` for reading frames from the group.
+To receive the next available group from a track, use `TrackReader.AcceptGroup` method. This returns a `moqt.GroupReader` for reading frames from the group.
 
 ```go
     var tr *moqt.TrackReader
@@ -70,7 +70,7 @@ To receive the next available group from a track, use `(moqt.TrackReader).Accept
 
 ## Read Frames
 
-To read frames from a group, use `(moqt.GroupReader).ReadFrame` method. Each call decodes the next frame in the group into the internal `moqt.Frame` object. The frame is reused for each call. To cache the frame data, you have to clone it via `(moqt.Frame).Clone` before reading the next frame.
+To read frames from a group, use `GroupReader.ReadFrame` method. Each call decodes the next frame in the group into the internal `moqt.Frame` object. The frame is reused for each call. To cache the frame data, you have to clone it via `Frame.Clone` before reading the next frame.
 
 ```go
     var group *moqt.GroupReader
@@ -88,7 +88,7 @@ To read frames from a group, use `(moqt.GroupReader).ReadFrame` method. Each cal
 
 ### Iterate Frames
 
-Instead of a loop with `ReadFrame`, you can use `(moqt.GroupReader).Frames` to get a lazy iterator. Reuse a buffer to minimize allocations; the iterator populates it on each yield.
+Instead of a loop with `ReadFrame`, you can use `GroupReader.Frames` to get a lazy iterator. Reuse a buffer to minimize allocations; the iterator populates it on each yield.
 
 ```go
     frame := moqt.NewFrame(0)
@@ -99,7 +99,7 @@ Instead of a loop with `ReadFrame`, you can use `(moqt.GroupReader).Frames` to g
 
 ### Clone Frame
 
-To clone a frame, use `(moqt.Frame).Clone` method. This creates a deep copy of the frame, including its data, allowing you to retain the frame data even after reading the next frame.
+To clone a frame, use `Frame.Clone` method. This creates a deep copy of the frame, including its data, allowing you to retain the frame data even after reading the next frame.
 
 ```go
     frame := moqt.NewFrame(0)
@@ -109,7 +109,7 @@ To clone a frame, use `(moqt.Frame).Clone` method. This creates a deep copy of t
 
 ### Copy and Cache Frame Data
 
-To copy the frame data into a provided buffer, use `(moqt.Frame).WriteTo` method, implementing the `io.WriterTo` interface. It is useful for efficiently caching the frame data.
+To copy the frame data into a provided buffer, use `Frame.WriteTo` method, implementing the `io.WriterTo` interface. It is useful for efficiently caching the frame data.
 
 ```go
     frame := moqt.NewFrame(0)
@@ -120,7 +120,7 @@ To copy the frame data into a provided buffer, use `(moqt.Frame).WriteTo` method
 
 ## Cancel Group Reading
 
-To cancel a group and stop receiving frames, call `(moqt.GroupReader).CancelRead` method with an error code.
+To cancel a group and stop receiving frames, call `GroupReader.CancelRead` method with an error code.
 
 ```go
     var group *moqt.GroupReader
@@ -133,14 +133,14 @@ To cancel a group and stop receiving frames, call `(moqt.GroupReader).CancelRead
 
 ## Unsubscribe from a Track
 
-To unsubscribe from a track and stop receiving any further groups or frames with no errors, call `(moqt.TrackReader).Close` method.
+To unsubscribe from a track and stop receiving any further groups or frames with no errors, call `TrackReader.Close` method.
 
 ```go
     var tr *moqt.TrackReader
     tr.Close()
 ```
 
-To stop receiving any further groups or frames due to an error, call `(moqt.TrackReader).CloseWithError` method with an error code.
+To stop receiving any further groups or frames due to an error, call `TrackReader.CloseWithError` method with an error code.
 
 ```go
     var tr *moqt.TrackReader
