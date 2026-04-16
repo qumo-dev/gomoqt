@@ -27,7 +27,7 @@ QUIC을 통한 효율적인 미디어 스트리밍을 위해 MOQ Lite 사양을 
 - [감사의 글](#감사의-글)
 
 ## 개요
-본 구현체는 [MOQ Lite 사양](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html)을 따르며, QUIC 전송을 사용하는 실시간 미디어 스트리밍 애플리케이션의 통신 인프라를 구축할 수 있습니다.
+본 구현체는 [MOQ Lite 사양](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html)을 따르며, QUIC 전송을 사용하는 실시간 미디어 스트리밍 애플리케이션의 통신 인프라를 구축할 수 있습니다.
 
 ## 빠른 시작
 ```bash
@@ -76,7 +76,7 @@ mage interop:go
 
 ## 문서
 - [GoDoc](https://pkg.go.dev/github.com/OkutaniDaichi0106/gomoqt)
-- [MOQ Lite 사양](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html)
+- [MOQ Lite 사양](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html)
 - [MSF 패키지 README](msf/README.md)
 - [구현 현황](moqt/README.md) — 상세한 구현 진행 상황
 
@@ -139,4 +139,4 @@ mage help
 ## 감사의 글
 - [quic-go](https://github.com/quic-go/quic-go) — Go의 QUIC 구현
 - [webtransport-go](https://github.com/okdaichi/webtransport-go) — Go의 WebTransport 구현
-- [MOQ Lite 사양](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html) — 본 구현이 따르는 사양
+- [MOQ Lite 사양](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html) — 본 구현이 따르는 사양

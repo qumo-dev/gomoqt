@@ -6,7 +6,7 @@ Package moqt implements the core MOQ Lite protocol handling for Media over QUIC 
 
 ### Specification
 
-This implementation is based on [Media over QUIC - Lite Draft 03](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html). For detailed specification compliance status and implementation differences, see [SPECIFICATION.md](../SPECIFICATION.md) in the root directory.
+This implementation is based on [Media over QUIC - Lite Draft 04](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html). For detailed specification compliance status and implementation differences, see [SPECIFICATION.md](../SPECIFICATION.md) in the root directory.
 
 ## Installation
 
@@ -56,7 +56,7 @@ the MOQ Lite specification sections:
 
 ## References
 
-- [MOQ Lite Specification](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html)
+- [MOQ Lite Specification](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html)
 - [QUIC Transport Protocol](https://tools.ietf.org/html/rfc9000)
 - [WebTransport Protocol](https://tools.ietf.org/html/draft-ietf-webtrans-http3/)
 - [CanIUse WebTransport](https://caniuse.com/webtransport)

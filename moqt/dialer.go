@@ -87,7 +87,9 @@ func (d *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *T
 	if d.DialWebTransportFunc != nil {
 		dialer = d.DialWebTransportFunc
 	} else {
-		dialer = webtransportgo.Dial
+		dialer = func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config) (*http.Response, WebTransportSession, error) {
+			return webtransportgo.Dial(ctx, addr, header, tlsConfig, []string{NextProtoMOQ})
+		}
 	}
 	target := host
 	if !strings.Contains(target, "://") {

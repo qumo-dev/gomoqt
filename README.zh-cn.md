@@ -27,7 +27,7 @@
 - [致谢](#致谢)
 
 ## 概述
-本实现遵循 [MOQ Lite 规范](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html),可以利用 QUIC 构建实时媒体流应用的通信基础。
+本实现遵循 [MOQ Lite 规范](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html),可以利用 QUIC 构建实时媒体流应用的通信基础。
 
 ## 快速开始
 ```bash
@@ -76,7 +76,7 @@ mage interop:go
 
 ## 文档
 - [GoDoc](https://pkg.go.dev/github.com/OkutaniDaichi0106/gomoqt)
-- [MOQ Lite 规范](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html)
+- [MOQ Lite 规范](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html)
 - [MSF 包 README](msf/README.md)
 - [实现状态](moqt/README.md) — 详细的实现进度
 
@@ -139,4 +139,4 @@ mage help
 ## 致谢
 - [quic-go](https://github.com/quic-go/quic-go) — Go 的 QUIC 实现
 - [webtransport-go](https://github.com/okdaichi/webtransport-go) — Go 的 WebTransport 实现
-- [MOQ Lite 规范](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html) — 本实现遵循的规范
+- [MOQ Lite 规范](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html) — 本实现遵循的规范

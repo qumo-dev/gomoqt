@@ -9,7 +9,7 @@ import (
 )
 
 func TestDial_InvalidAddress(t *testing.T) {
-	rsp, conn, err := Dial(context.Background(), "://bad-url", nil, nil)
+	rsp, conn, err := Dial(context.Background(), "://bad-url", nil, nil, nil)
 
 	require.Error(t, err)
 	assert.Nil(t, rsp)

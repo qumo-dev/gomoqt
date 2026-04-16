@@ -1,5 +1,5 @@
 // Package moqt provides MOQ Lite client and server primitives for Media over QUIC.
-// It follows the MOQ Lite specification (draft-lcurley-moq-lite-03) and supports both
+// It follows the MOQ Lite specification (draft-lcurley-moq-lite-04) and supports both
 // native QUIC and WebTransport transports.
 //
 // # Clients

@@ -27,7 +27,7 @@ A Go implementation of Media over QUIC Transport (MOQT), specifically implementi
 - [Acknowledgments](#acknowledgments)
 
 ## Overview
-This implementation follows the [MOQ Lite specification](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html), providing a foundation for building real-time media streaming applications using QUIC transport.
+This implementation follows the [MOQ Lite specification](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html), providing a foundation for building real-time media streaming applications using QUIC transport.
 
 ## Quick Start
 ```bash
@@ -75,7 +75,7 @@ The [examples](examples) directory includes sample applications demonstrating ho
 
 ## Documentation
 - [GoDoc](https://pkg.go.dev/github.com/OkutaniDaichi0106/gomoqt)
-- [MOQ Lite Specification](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html)
+- [MOQ Lite Specification](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html)
 - [MSF package README](msf/README.md)
 - [Implementation Status](moqt/README.md) — Detailed implementation progress
 
@@ -138,4 +138,4 @@ This project is licensed under the MIT License; see [LICENSE](LICENSE) for detai
 ## Acknowledgments
 - [quic-go](https://github.com/quic-go/quic-go) — QUIC implementation in Go
 - [webtransport-go](https://github.com/okdaichi/webtransport-go) — WebTransport implementation in Go
-- [MOQ Lite Specification](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html) — The specification this implementation follows
+- [MOQ Lite Specification](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html) — The specification this implementation follows

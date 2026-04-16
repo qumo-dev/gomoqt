@@ -27,7 +27,7 @@ Media over QUIC (MOQ) の Go 実装で、MOQ Lite 仕様に基づき QUIC 上で
 - [付録](#付録)
 
 ## 概要
-本実装は [MOQ Lite 仕様](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html) に準拠し、QUIC を用いたリアルタイム・メディアストリーミングアプリケーションの通信基盤を構築することができます。
+本実装は [MOQ Lite 仕様](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html) に準拠し、QUIC を用いたリアルタイム・メディアストリーミングアプリケーションの通信基盤を構築することができます。
 
 ## クイックスタート
 ```bash
@@ -76,7 +76,7 @@ mage interop:go
 
 ## ドキュメント
 - [GoDoc](https://pkg.go.dev/github.com/OkutaniDaichi0106/gomoqt)
-- [MOQ Lite 仕様](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html)
+- [MOQ Lite 仕様](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html)
 - [MSF パッケージ README](msf/README.md)
 - [実装状況](moqt/README.md) — 実装進捗の詳細
 
@@ -139,4 +139,4 @@ mage help
 ## 謝辞
 - [quic-go](https://github.com/quic-go/quic-go) — Go による QUIC 実装
 - [webtransport-go](https://github.com/okdaichi/webtransport-go) — Go による WebTransport 実装
-- [MOQ Lite 仕様](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html) — 本実装が準拠する仕様
+- [MOQ Lite 仕様](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html) — 本実装が準拠する仕様

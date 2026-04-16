@@ -9,10 +9,10 @@ import (
 	quicgo_webtransportgo "github.com/okdaichi/webtransport-go"
 )
 
-func Dial(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config) (*http.Response, transport.WebTransportSession, error) {
+func Dial(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config, appProtocols []string) (*http.Response, transport.WebTransportSession, error) {
 	dialer := quicgo_webtransportgo.Dialer{
 		TLSClientConfig:      tlsConfig,
-		ApplicationProtocols: []string{"moq-lite-03"},
+		ApplicationProtocols: appProtocols,
 	}
 	rsp, wtsess, err := dialer.Dial(ctx, addr, header)
 

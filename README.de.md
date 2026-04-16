@@ -27,7 +27,7 @@ Eine Go-Implementierung von Media over QUIC Transport (MOQT), die speziell die M
 - [Danksagungen](#danksagungen)
 
 ## Übersicht
-Diese Implementierung folgt der [MOQ Lite-Spezifikation](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html) und ermöglicht den Aufbau einer Kommunikationsinfrastruktur für Echtzeit-Medien-Streaming-Anwendungen über QUIC.
+Diese Implementierung folgt der [MOQ Lite-Spezifikation](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html) und ermöglicht den Aufbau einer Kommunikationsinfrastruktur für Echtzeit-Medien-Streaming-Anwendungen über QUIC.
 
 ## Schnellstart
 ```bash
@@ -75,7 +75,7 @@ Das Verzeichnis [examples](examples) enthält Beispielanwendungen zur Nutzung vo
 
 ## Dokumentation
 - [GoDoc](https://pkg.go.dev/github.com/OkutaniDaichi0106/gomoqt)
-- [MOQ Lite-Spezifikation](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html)
+- [MOQ Lite-Spezifikation](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html)
 - [MSF-Paket README](msf/README.md)
 - [Implementierungsstatus](moqt/README.md) — Detaillierter Fortschritt der Umsetzung
 
@@ -138,4 +138,4 @@ Dieses Projekt steht unter der MIT-Lizenz; siehe [LICENSE](LICENSE) für Details
 ## Danksagungen
 - [quic-go](https://github.com/quic-go/quic-go) — QUIC-Implementierung in Go
 - [webtransport-go](https://github.com/okdaichi/webtransport-go) — WebTransport-Implementierung in Go
-- [MOQ Lite-Spezifikation](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html) — Spezifikation, der diese Implementierung folgt
+- [MOQ Lite-Spezifikation](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html) — Spezifikation, der diese Implementierung folgt

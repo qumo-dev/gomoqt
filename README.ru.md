@@ -29,7 +29,7 @@
 
 ## Обзор
 
-Эта реализация следует [спецификации MOQ Lite](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html) и позволяет создавать коммуникационную инфраструктуру для приложений потоковой передачи мультимедиа в реальном времени с использованием транспорта QUIC.
+Эта реализация следует [спецификации MOQ Lite](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html) и позволяет создавать коммуникационную инфраструктуру для приложений потоковой передачи мультимедиа в реальном времени с использованием транспорта QUIC.
 
 ## Быстрый старт
 ```bash
@@ -78,7 +78,7 @@ mage interop:go
 
 ## Документация
 - [GoDoc](https://pkg.go.dev/github.com/OkutaniDaichi0106/gomoqt)
-- [Спецификация MOQ Lite](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html)
+- [Спецификация MOQ Lite](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html)
 - [README пакета MSF](msf/README.md)
 - [Статус реализации](moqt/README.md) — подробное отслеживание прогресса
 
@@ -141,4 +141,4 @@ mage help
 ## Благодарности
 - [quic-go](https://github.com/quic-go/quic-go) — реализация QUIC на Go
 - [webtransport-go](https://github.com/okdaichi/webtransport-go) — реализация WebTransport на Go
-- [Спецификация MOQ Lite](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-03.html) — спецификация, которой следует данная реализация
+- [Спецификация MOQ Lite](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-04.html) — спецификация, которой следует данная реализация
