@@ -169,16 +169,18 @@ export async function runClient(
 		]);
 	}
 
-	// Wait for GOAWAY from server
-	await step("Waiting for GOAWAY", async () => {
-		const uri = await Promise.race([
-			goawayPromise,
-			new Promise<string>((_, reject) =>
-				setTimeout(() => reject(new Error("timed out")), 10000)
-			),
-		]);
-		info(`newSessionURI: ${uri}`);
-	});
+	// Wait for GOAWAY from server (non-fatal timeout, matching Go client behavior)
+	await write("Waiting for GOAWAY...");
+	const goawayURI = await Promise.race([
+		goawayPromise,
+		new Promise<string>((resolve) => setTimeout(() => resolve(""), 10000)),
+	]);
+	if (goawayURI) {
+		console.log(" ok");
+		info(`newSessionURI: ${goawayURI}`);
+	} else {
+		console.log(" failed: timed out");
+	}
 
 	await step("Closing session", () => session.closeWithError(0, "no error"));
 }
