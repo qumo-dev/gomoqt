@@ -6,10 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [v0.13.0] - 2026-04-16
+
 ### Added
 
 - **moqt:** added graceful session migration per draft-04. `Server.NextSessionURI` specifies the redirect URI sent during `Shutdown()`. `Dialer.OnGoaway` callback delivers the received redirect URI to the client application.
-
 - **moqt:** added `ProbeResult` struct; `Session.Probe()` now returns both `Bitrate` and `RTT`.
 - **moqt:** added `NewHopID()` for generating cryptographically random non-zero hop identifiers for relay nodes.
 - **moqt/internal/message:** added `GoawayMessage` with `NewSessionURI` field and `StreamTypeGoaway = 0x5`.
@@ -37,6 +38,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Updated `ProbeMessage` tests for the new `RTT` field.
 - Updated `AnnounceMessage` tests for `HopIDs` list encoding.
 - Updated `TrackMux` tests for `NewTrackMux(id)` constructor.
+
+## [v0.12.2] - 2026-04-16
+
+### Added
+
+- **moq-web:** introduced `connect(url, init?)` as the primary API for opening MOQ sessions, following the browser `fetch(url, init?)` pattern.
+- **moq-web:** introduced `ConnectInit` interface — an init bag replacing the positional `mux` argument, with fields: `mux?`, `transportOptions?`, `onGoaway?`, `transportFactory?`.
+- **moq-web:** `TransportFactory` type now returns `WebTransport` (the browser interface); the returned object is automatically wrapped in `WebTransportSession` inside `connect()`.
+- **moq-web:** added GOAWAY verification step to TypeScript interop client; waits for server GOAWAY before closing session.
+
+### Changed
+
+- **moq-web:** `Client` class is now `@deprecated`; use `connect()` directly. The class is kept as a back-compat shim and its `dial()` method delegates to `connect()`.
+- **moq-web:** `ConnectOptions` and `MOQOptions` are now `@deprecated` aliases for `ConnectInit`.
 
 ## [v0.12.1] - 2026-04-14
 
