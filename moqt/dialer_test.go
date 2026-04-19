@@ -131,7 +131,7 @@ func TestDialer_DialQUIC_DefaultTLSConfig(t *testing.T) {
 		},
 	}
 
-	sess, err := dialer.DialQUIC(context.Background(), "example.com:9000", "/session", nil)
+	sess, err := dialer.DialQUIC(context.Background(), "example.com:9000", nil)
 	require.NoError(t, err)
 	require.NotNil(t, sess)
 	require.NotNil(t, recordedTLS)

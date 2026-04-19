@@ -63,7 +63,7 @@ func (d *Dialer) Dial(ctx context.Context, urlStr string, mux *TrackMux) (*Sessi
 	case "https":
 		return d.DialWebTransport(ctx, parsedURL.Host, parsedURL.Path, mux)
 	case "moqt":
-		return d.DialQUIC(ctx, parsedURL.Host, parsedURL.Path, mux)
+		return d.DialQUIC(ctx, parsedURL.Host, mux)
 	default:
 		return nil, ErrInvalidScheme
 	}
@@ -117,7 +117,7 @@ func (d *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *T
 // DialQUIC establishes a new session over native QUIC by dialing the provided
 // address and negotiating the transport protocol. This uses the QUIC dial
 // function configured on the Dialer (DialQUICFunc) if present.
-func (d *Dialer) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux) (*Session, error) {
+func (d *Dialer) DialQUIC(ctx context.Context, addr string, mux *TrackMux) (*Session, error) {
 	dialTimeout := d.Config.setupTimeout()
 	dialCtx, cancelDial := context.WithTimeout(ctx, dialTimeout)
 	defer cancelDial()

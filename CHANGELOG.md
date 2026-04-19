@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [v0.13.3] - 2026-04-20
+
+### Changed
+
+- **moqt:** removed the unused `path` argument from `Dialer.DialQUIC()`. The native QUIC dialer now accepts only `addr` and `mux`.
+
+### Docs
+
+- **moqt:** updated `DialQUIC` usage examples and tests to match the new signature.
+
 ## [v0.13.2] - 2026-04-19
 
 ### Added
