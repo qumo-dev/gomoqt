@@ -27,7 +27,9 @@ func NewHopID() uint64 {
 		if _, err := rand.Read(b[:]); err != nil {
 			panic("moqt: crypto/rand unavailable: " + err.Error())
 		}
-		if id := binary.BigEndian.Uint64(b[:]); id != 0 {
+		// Mask to 62 bits to avoid overuint62
+		id := binary.BigEndian.Uint64(b[:]) & 0x3FFFFFFFFFFFFFFF
+		if id != 0 {
 			return id
 		}
 	}

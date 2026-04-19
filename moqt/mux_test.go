@@ -25,6 +25,16 @@ func TestNewTrackMux(t *testing.T) {
 	assert.NotNil(t, &mux.announcementTree, "mux announcementTree should be initialized")
 }
 
+func TestNewHopID_Fits62BitVarint(t *testing.T) {
+	const maxHopID uint64 = 0x3FFFFFFFFFFFFFFF
+
+	for i := 0; i < 1000; i++ {
+		id := NewHopID()
+		assert.NotZero(t, id, "NewHopID should never return zero")
+		assert.LessOrEqual(t, id, maxHopID, "NewHopID should fit within 62-bit varint range")
+	}
+}
+
 // Test Mux.Publish method
 func TestMux_Publish(t *testing.T) {
 	mux := NewTrackMux(0)
