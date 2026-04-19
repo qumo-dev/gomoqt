@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [v0.13.4] - 2026-04-20
+
+### Fixed
+
+- **moqt:** republished the unchanged `v0.13.3` code as `v0.13.4` so Go module consumers can resolve the correct immutable version after the previously moved `v0.13.3` tag.
+
 ## [v0.13.3] - 2026-04-20
 
 ### Changed
