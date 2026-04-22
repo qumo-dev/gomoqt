@@ -122,21 +122,12 @@ func main() {
 
 	// Step 4: Probe the server bitrate
 	fmt.Print("Probing server bitrate...")
-	probeCh, err := sess.Probe(1_000_000)
+	probeResult, err := sess.Probe(1_000_000)
 	if err != nil {
 		fmt.Printf("failed\n  Error: %v\n", err)
 		return
 	}
-	probeResult, ok := <-probeCh
-	if !ok {
-		fmt.Printf("failed\n  Error: probe stream closed without result\n")
-		return
-	}
-	if probeResult.Err != nil {
-		fmt.Printf("failed\n  Error: %v\n", probeResult.Err)
-		return
-	}
-	fmt.Printf("ok (measured: %d bps)\n", probeResult.Bitrate)
+	fmt.Printf("ok (measured: %d bps, rtt: %d ms)\n", probeResult.Bitrate, probeResult.RTT)
 
 	// Channel to signal that the publish handler has completed
 	doneCh := make(chan struct{}, 1)

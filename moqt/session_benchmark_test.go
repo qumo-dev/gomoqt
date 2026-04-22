@@ -45,7 +45,8 @@ func BenchmarkSession_Subscribe(b *testing.B) {
 				return mockBiStream, nil
 			}
 
-			session := newTestSession(conn)
+			mux := NewTrackMux(0)
+			session := newSession(conn, mux, nil, nil, nil, nil)
 
 			// Pre-generate paths
 			paths := make([]BroadcastPath, size)
@@ -100,7 +101,8 @@ func BenchmarkSession_ConcurrentSubscribe(b *testing.B) {
 				return mockBiStream, nil
 			}
 
-			session := newTestSession(conn)
+			mux := NewTrackMux(0)
+			session := newSession(conn, mux, nil, nil, nil, nil)
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -125,7 +127,8 @@ func BenchmarkSession_ConcurrentSubscribe(b *testing.B) {
 func BenchmarkSession_TrackReaderOperations(b *testing.B) {
 	conn := &FakeStreamConn{}
 
-	session := newTestSession(conn)
+	mux := NewTrackMux(0)
+	session := newSession(conn, mux, nil, nil, nil, nil)
 
 	b.ReportAllocs()
 
@@ -153,7 +156,8 @@ func BenchmarkSession_TrackReaderOperations(b *testing.B) {
 func BenchmarkSession_TrackWriterOperations(b *testing.B) {
 	conn := &FakeStreamConn{}
 
-	session := newTestSession(conn)
+	mux := NewTrackMux(0)
+	session := newSession(conn, mux, nil, nil, nil, nil)
 
 	b.ReportAllocs()
 
@@ -191,7 +195,8 @@ func BenchmarkSession_MapLookup(b *testing.B) {
 		b.Run(fmt.Sprintf("size-%d", size), func(b *testing.B) {
 			conn := &FakeStreamConn{}
 
-			session := newTestSession(conn)
+			mux := NewTrackMux(0)
+			session := newSession(conn, mux, nil, nil, nil, nil)
 
 			// Pre-populate with track readers
 			for i := range size {
@@ -235,7 +240,8 @@ func BenchmarkSession_MemoryAllocation(b *testing.B) {
 			for range b.N {
 				conn := &FakeStreamConn{}
 
-				session := newTestSession(conn)
+				mux := NewTrackMux(0)
+				session := newSession(conn, mux, nil, nil, nil, nil)
 
 				// Create many track readers
 				for j := range size {
@@ -263,7 +269,8 @@ func BenchmarkSession_ContextCancellation(b *testing.B) {
 		conn := &FakeStreamConn{}
 		conn.ParentCtx = ctx
 
-		session := newTestSession(conn)
+		mux := NewTrackMux(0)
+		session := newSession(conn, mux, nil, nil, nil, nil)
 
 		// Cancel context
 		cancel()

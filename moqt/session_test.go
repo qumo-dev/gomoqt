@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"sync"
 	"testing"
 	"time"
 
@@ -19,7 +18,7 @@ import (
 )
 
 func newTestSession(conn StreamConn) *Session {
-	return newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil)
+	return newSession(conn, NewTrackMux(0), nil, nil, nil, nil)
 }
 
 func newTestSessionWithConn(tb testing.TB, opts ...func(*FakeStreamConn)) (*Session, *FakeStreamConn) {
@@ -53,7 +52,7 @@ func TestNewSession(t *testing.T) {
 			conn.OpenStreamFunc = func() (transport.Stream, error) { return nil, io.EOF }
 			conn.OpenStreamFunc = func() (transport.Stream, error) { return nil, io.EOF }
 
-			session := newSession(conn, tt.mux, nil, nil, nil, nil, nil)
+			session := newSession(conn, tt.mux, nil, nil, nil, nil)
 
 			if tt.expectOK {
 				assert.NotNil(t, session, "newSession should not return nil")
@@ -96,7 +95,7 @@ func TestNewSessionWithNilMux(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			conn := &FakeStreamConn{}
 
-			session := newSession(conn, tt.mux, nil, nil, nil, nil, nil)
+			session := newSession(conn, tt.mux, nil, nil, nil, nil)
 
 			if tt.expectDefault {
 				assert.Equal(t, DefaultMux, session.mux, "should use DefaultMux when nil mux is provided")
@@ -112,20 +111,6 @@ func TestNewSession_WithNilLogger(t *testing.T) {
 	session, _ := newTestSessionWithConn(t)
 
 	assert.NotNil(t, session, "session should be created with nil logger")
-}
-
-func TestNewSession_ConfigIsCloned(t *testing.T) {
-	conn := &FakeStreamConn{}
-	cfg := &Config{ProbeInterval: 50 * time.Millisecond}
-
-	session := newSession(conn, nil, nil, cfg, nil, nil, nil)
-	defer session.CloseWithError(InternalSessionErrorCode, "terminate reason")
-
-	// mutate the original after newSession
-	cfg.ProbeInterval = 999 * time.Second
-
-	assert.Equal(t, 50*time.Millisecond, session.config.ProbeInterval,
-		"session.config should not be affected by mutations to the original Config")
 }
 
 func TestNewSession_ClosureOnContextCancel(t *testing.T) {
@@ -677,8 +662,7 @@ func TestSession_WithRealMux(t *testing.T) {
 
 	mux := NewTrackMux(0)
 
-	session := newTestSession(conn)
-	session.mux = mux
+	session := newSession(conn, mux, nil, nil, nil, nil)
 
 	assert.Equal(t, mux, session.mux, "Mux should be set correctly in the session")
 
@@ -1263,38 +1247,32 @@ func TestSession_ProcessBiStream_FetchHandlerPanic(t *testing.T) {
 func TestSession_Probe(t *testing.T) {
 	conn := &FakeStreamConn{}
 
-	probeStream := &FakeQUICStream{}
+	requestStream := &FakeQUICStream{}
 
 	var written bytes.Buffer
-	probeStream.WriteFunc = func(p []byte) (int, error) {
+	requestStream.WriteFunc = func(p []byte) (int, error) {
 		return written.Write(p)
 	}
 
-	// Publisher sends one ProbeMessage then EOF.
 	var response bytes.Buffer
-	require.NoError(t, message.ProbeMessage{Bitrate: 250000}.Encode(&response))
-	probeStream.ReadFunc = response.Read
+	respMsg := message.ProbeMessage{Bitrate: 250000}
+	require.NoError(t, respMsg.Encode(&response))
+	requestStream.ReadFunc = response.Read
 
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return probeStream, nil }
+	conn.OpenStreamFunc = func() (transport.Stream, error) { return requestStream, nil }
 
 	session := newTestSession(conn)
 
-	ch, err := session.Probe(1000000)
+	got, err := session.Probe(1000000)
 	require.NoError(t, err)
-
-	// Channel should receive the publisher's ProbeMessage.
-	got := <-ch
-	assert.NoError(t, got.Err)
-	assert.Equal(t, uint64(250000), got.Bitrate)
 	assert.Equal(t, uint64(250000), got.Bitrate)
 
-	// Verify subscriber wrote StreamTypeProbe + ProbeMessage{Bitrate:1000000}.
-	r := bytes.NewReader(written.Bytes())
 	var streamType message.StreamType
-	require.NoError(t, streamType.Decode(r))
+	require.NoError(t, streamType.Decode(bytes.NewReader(written.Bytes()[:1])))
 	assert.Equal(t, message.StreamTypeProbe, streamType)
+
 	var sent message.ProbeMessage
-	require.NoError(t, sent.Decode(r))
+	require.NoError(t, sent.Decode(bytes.NewReader(written.Bytes()[1:])))
 	assert.Equal(t, uint64(1000000), sent.Bitrate)
 
 	_ = session.CloseWithError(NoError, "")
@@ -1302,61 +1280,37 @@ func TestSession_Probe(t *testing.T) {
 
 func TestSession_ProcessBiStream_Probe(t *testing.T) {
 	conn := &FakeStreamConn{}
-	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
-		return quic.ConnectionStats{}
-	}
 
 	session := newTestSession(conn)
-	session.config = &Config{ProbeInterval: 5 * time.Millisecond}
 
 	probeStream := &FakeQUICStream{}
 
-	received := make(chan message.ProbeMessage, 10)
+	var written bytes.Buffer
 	probeStream.WriteFunc = func(p []byte) (int, error) {
-		var pm message.ProbeMessage
-		if err := pm.Decode(bytes.NewReader(p)); err == nil {
-			select {
-			case received <- pm:
-			default:
-			}
-		}
-		return len(p), nil
+		return written.Write(p)
 	}
 
-	// Subscriber sends StreamTypeProbe + ProbeMessage{Bitrate: targetBitrate}.
 	var incoming bytes.Buffer
 	require.NoError(t, message.StreamTypeProbe.Encode(&incoming))
-	require.NoError(t, message.ProbeMessage{Bitrate: 1000000}.Encode(&incoming))
+	require.NoError(t, message.ProbeMessage{Bitrate: 123456}.Encode(&incoming))
 	data := incoming.Bytes()
 	probeStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) > 0 {
-			n := copy(p, data)
-			data = data[n:]
-			return n, nil
+		if len(data) == 0 {
+			return 0, io.EOF
 		}
-		return 0, io.EOF
+		n := copy(p, data)
+		data = data[n:]
+		return n, nil
 	}
 
-	done := make(chan struct{})
-	go func() {
-		session.processBiStream(probeStream)
-		close(done)
-	}()
+	session.processBiStream(probeStream)
 
-	// Wait for at least one ProbeMessage from the publisher.
-	select {
-	case <-received:
-		// Successfully received a probe response from publisher.
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("no probe message received")
-	}
+	var resp message.ProbeMessage
+	require.NoError(t, resp.Decode(bytes.NewReader(written.Bytes())))
+	assert.Equal(t, uint64(123456), resp.Bitrate)
+	assert.False(t, session.terminating(), "Session should not terminate after probe handling")
 
 	_ = session.CloseWithError(NoError, "")
-	select {
-	case <-done:
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("processBiStream did not complete")
-	}
 }
 
 func TestSession_ProcessBiStream_ProbeMultipleMessages(t *testing.T) {
@@ -1366,411 +1320,37 @@ func TestSession_ProcessBiStream_ProbeMultipleMessages(t *testing.T) {
 	}
 
 	session := newTestSession(conn)
-	session.config = &Config{ProbeInterval: 5 * time.Millisecond, ProbeMaxAge: 15 * time.Millisecond}
 
 	probeStream := &FakeQUICStream{}
-
-	received := make(chan message.ProbeMessage, 20)
-	probeStream.WriteFunc = func(p []byte) (int, error) {
-		var pm message.ProbeMessage
-		if err := pm.Decode(bytes.NewReader(p)); err == nil {
-			select {
-			case received <- pm:
-			default:
-			}
-		}
-		return len(p), nil
-	}
-
-	var incoming bytes.Buffer
-	require.NoError(t, message.StreamTypeProbe.Encode(&incoming))
-	require.NoError(t, message.ProbeMessage{Bitrate: 500000}.Encode(&incoming))
-	data := incoming.Bytes()
-	probeStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) > 0 {
-			n := copy(p, data)
-			data = data[n:]
-			return n, nil
-		}
-		return 0, io.EOF
-	}
-
-	done := make(chan struct{})
-	go func() {
-		session.processBiStream(probeStream)
-		close(done)
-	}()
-
-	// Let multiple max-age-triggered sends accumulate.
-	time.Sleep(100 * time.Millisecond)
-
-	_ = session.CloseWithError(NoError, "")
-	<-done
-
-	assert.Greater(t, len(received), 1, "should have received multiple probe messages")
-}
-
-func TestSession_ProcessBiStream_ProbeTargets(t *testing.T) {
-	conn := &FakeStreamConn{}
-	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
-		return quic.ConnectionStats{}
-	}
-
-	session := newTestSession(conn)
-
-	probeStream := &FakeQUICStream{}
-	probeStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
-
-	// Subscriber sends: StreamTypeProbe + initial target + one updated target.
-	var incoming bytes.Buffer
-	require.NoError(t, message.StreamTypeProbe.Encode(&incoming))
-	require.NoError(t, message.ProbeMessage{Bitrate: 500000}.Encode(&incoming))
-	require.NoError(t, message.ProbeMessage{Bitrate: 1000000}.Encode(&incoming))
-	data := incoming.Bytes()
-
-	readCalled := make(chan struct{}, 1)
-	probeStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) > 0 {
-			n := copy(p, data)
-			data = data[n:]
-			return n, nil
-		}
-		// Signal that all data has been consumed.
-		select {
-		case readCalled <- struct{}{}:
-		default:
-		}
-		return 0, io.EOF
-	}
-
-	done := make(chan struct{})
-	go func() {
-		session.processBiStream(probeStream)
-		close(done)
-	}()
-
-	// Wait until the stream has been fully consumed.
-	select {
-	case <-readCalled:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("stream was not consumed")
-	}
-
-	// The updated target (1000000) should be available on ProbeTargets().
-	select {
-	case got := <-session.ProbeTargets():
-		assert.Equal(t, uint64(1000000), got.Bitrate)
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("no target received on ProbeTargets()")
-	}
-
-	_ = session.CloseWithError(NoError, "")
-	select {
-	case <-done:
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("processBiStream did not complete")
-	}
-}
-
-func TestSession_Probe_SecondCallReusesStream(t *testing.T) {
-	conn := &FakeStreamConn{}
 
 	var written bytes.Buffer
-	probeStream := &FakeQUICStream{}
-	probeStream.WriteFunc = func(p []byte) (int, error) { return written.Write(p) }
-	// Block reads so the stream stays open throughout the test.
-	probeStream.ReadFunc = func(p []byte) (int, error) {
-		<-probeStream.Context().Done()
-		return 0, io.EOF
+	probeStream.WriteFunc = func(p []byte) (int, error) {
+		return written.Write(p)
 	}
 
-	openCount := 0
-	conn.OpenStreamFunc = func() (transport.Stream, error) {
-		openCount++
-		return probeStream, nil
-	}
-
-	session := newTestSession(conn)
-
-	ch1, err := session.Probe(1000000)
-	require.NoError(t, err)
-
-	ch2, err := session.Probe(2000000)
-	require.NoError(t, err)
-
-	// The same channel must be returned on the second call.
-	assert.Equal(t, ch1, ch2, "second Probe call should return the same channel")
-
-	// OpenStream must have been called exactly once.
-	assert.Equal(t, 1, openCount, "second Probe call must not open a new stream")
-
-	// Both ProbeMessages must have been written (after the StreamType header).
-	r := bytes.NewReader(written.Bytes())
-	var streamType message.StreamType
-	require.NoError(t, streamType.Decode(r))
-	assert.Equal(t, message.StreamTypeProbe, streamType)
-
-	var msg1 message.ProbeMessage
-	require.NoError(t, msg1.Decode(r))
-	assert.Equal(t, uint64(1000000), msg1.Bitrate)
-
-	var msg2 message.ProbeMessage
-	require.NoError(t, msg2.Decode(r))
-	assert.Equal(t, uint64(2000000), msg2.Bitrate)
-
-	_ = session.CloseWithError(NoError, "")
-}
-
-func TestSession_Probe_ChannelClosedOnSessionClose(t *testing.T) {
-	conn := &FakeStreamConn{}
-
-	// Make the probe stream's context a child of the connection context so that
-	// closing the connection cancels the stream, unblocking the read goroutine.
-	probeStream := &FakeQUICStream{
-		ParentCtx: conn.Context(),
-	}
-	probeStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
-	// Block until the stream context is cancelled (which happens when the
-	// connection is closed and conn.Context() is cancelled).
-	probeStream.ReadFunc = func(p []byte) (int, error) {
-		<-probeStream.Context().Done()
-		return 0, context.Cause(probeStream.Context())
-	}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return probeStream, nil }
-
-	session := newTestSession(conn)
-
-	ch, err := session.Probe(1000000)
-	require.NoError(t, err)
-
-	// Close the session: cancels conn.Context() → probeStream.Context() → ReadFunc returns.
-	_ = session.CloseWithError(NoError, "")
-
-	// The channel must be closed (range or two-value receive must see ok=false).
-	for range ch {
-	}
-}
-
-func TestSession_ProcessBiStream_ProbeReplacesExisting(t *testing.T) {
-	conn := &FakeStreamConn{}
-	conn.ConnectionStatsFunc = func() quic.ConnectionStats { return quic.ConnectionStats{} }
-
-	session := newTestSession(conn)
-
-	// stream1: sends StreamTypeProbe + initial ProbeMessage, then blocks until cancelled.
-	var stream1Buf bytes.Buffer
-	require.NoError(t, message.StreamTypeProbe.Encode(&stream1Buf))
-	require.NoError(t, message.ProbeMessage{Bitrate: 500000}.Encode(&stream1Buf))
-	stream1Data := stream1Buf.Bytes()
-
-	stream1Active := make(chan struct{})
-	stream1 := &FakeQUICStream{}
-	stream1.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
-	stream1.ReadFunc = func(p []byte) (int, error) {
-		if len(stream1Data) > 0 {
-			n := copy(p, stream1Data)
-			stream1Data = stream1Data[n:]
-			if len(stream1Data) == 0 {
-				select {
-				case stream1Active <- struct{}{}:
-				default:
-				}
-			}
-			return n, nil
-		}
-		// Block until cancelled by stream2 arrival.
-		<-stream1.Context().Done()
-		return 0, context.Cause(stream1.Context())
-	}
-
-	stream1Done := make(chan struct{})
-	go func() {
-		session.processBiStream(stream1)
-		close(stream1Done)
-	}()
-
-	// Wait until stream1 is fully consumed (registered as incomingProbeStream).
-	select {
-	case <-stream1Active:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("stream1 initial data was not consumed")
-	}
-
-	// stream2: sends StreamTypeProbe + initial ProbeMessage, then EOF.
-	var stream2Buf bytes.Buffer
-	require.NoError(t, message.StreamTypeProbe.Encode(&stream2Buf))
-	require.NoError(t, message.ProbeMessage{Bitrate: 1000000}.Encode(&stream2Buf))
-	stream2Data := stream2Buf.Bytes()
-
-	stream2 := &FakeQUICStream{}
-	stream2.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
-	stream2.ReadFunc = func(p []byte) (int, error) {
-		if len(stream2Data) > 0 {
-			n := copy(p, stream2Data)
-			stream2Data = stream2Data[n:]
-			return n, nil
-		}
-		return 0, io.EOF
-	}
-
-	stream2Done := make(chan struct{})
-	go func() {
-		session.processBiStream(stream2)
-		close(stream2Done)
-	}()
-
-	// stream1 must be cancelled when stream2 takes over.
-	select {
-	case <-stream1Done:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("stream1 was not cancelled when stream2 arrived")
-	}
-
-	// Close the session so stream2's handleProbeStream ticker loop exits.
-	_ = session.CloseWithError(NoError, "")
-
-	// stream2 must process normally and finish after session close.
-	select {
-	case <-stream2Done:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("stream2 did not complete")
-	}
-}
-
-func TestSession_ProcessBiStream_ProbeDecodeError(t *testing.T) {
-	conn := &FakeStreamConn{}
-	conn.ConnectionStatsFunc = func() quic.ConnectionStats { return quic.ConnectionStats{} }
-
-	session := newTestSession(conn)
-
-	// Stream sends only StreamTypeProbe; subsequent reads for ProbeMessage.Decode return
-	// a non-EOF error, causing handleProbeStream to return an error.
 	var incoming bytes.Buffer
 	require.NoError(t, message.StreamTypeProbe.Encode(&incoming))
-
+	require.NoError(t, message.ProbeMessage{Bitrate: 111000}.Encode(&incoming))
+	require.NoError(t, message.ProbeMessage{Bitrate: 222000}.Encode(&incoming))
 	data := incoming.Bytes()
-	cancelReadCalled := make(chan transport.StreamErrorCode, 1)
-	cancelWriteCalled := make(chan transport.StreamErrorCode, 1)
-
-	probeStream := &FakeQUICStream{}
-	probeStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
 	probeStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) > 0 {
-			n := copy(p, data)
-			data = data[n:]
-			return n, nil
+		if len(data) == 0 {
+			return 0, io.EOF
 		}
-		return 0, errors.New("simulated read error")
-	}
-	probeStream.CancelReadFunc = func(code transport.StreamErrorCode) {
-		select {
-		case cancelReadCalled <- code:
-		default:
-		}
-	}
-	probeStream.CancelWriteFunc = func(code transport.StreamErrorCode) {
-		select {
-		case cancelWriteCalled <- code:
-		default:
-		}
+		n := copy(p, data)
+		data = data[n:]
+		return n, nil
 	}
 
-	done := make(chan struct{})
-	go func() {
-		session.processBiStream(probeStream)
-		close(done)
-	}()
+	session.processBiStream(probeStream)
 
-	select {
-	case <-done:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("processBiStream did not complete after decode error")
-	}
-
-	// The stream must have been cancelled with ProbeErrorCodeInternal.
-	select {
-	case code := <-cancelReadCalled:
-		assert.Equal(t, transport.StreamErrorCode(ProbeErrorCodeInternal), code)
-	default:
-		t.Error("CancelRead was not called")
-	}
-	select {
-	case code := <-cancelWriteCalled:
-		assert.Equal(t, transport.StreamErrorCode(ProbeErrorCodeInternal), code)
-	default:
-		t.Error("CancelWrite was not called")
-	}
-
-	_ = session.CloseWithError(NoError, "")
-}
-
-func TestSession_ProbeTargets_LatestValueSemantics(t *testing.T) {
-	conn := &FakeStreamConn{}
-	conn.ConnectionStatsFunc = func() quic.ConnectionStats { return quic.ConnectionStats{} }
-
-	session := newTestSession(conn)
-
-	// Subscriber sends: StreamTypeProbe + initial target + two rapid updates.
-	// The background goroutine must discard the first update (800000) when the
-	// second update (1200000) arrives before the publisher has consumed it.
-	var incoming bytes.Buffer
-	require.NoError(t, message.StreamTypeProbe.Encode(&incoming))
-	require.NoError(t, message.ProbeMessage{Bitrate: 500000}.Encode(&incoming))
-	require.NoError(t, message.ProbeMessage{Bitrate: 800000}.Encode(&incoming))
-	require.NoError(t, message.ProbeMessage{Bitrate: 1200000}.Encode(&incoming))
-
-	data := incoming.Bytes()
-	// bgDone fires when the background goroutine has consumed all update messages
-	// and hits EOF on the next read.
-	var bgOnce sync.Once
-	bgDone := make(chan struct{})
-	probeStream := &FakeQUICStream{}
-	probeStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
-	probeStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) > 0 {
-			n := copy(p, data)
-			data = data[n:]
-			return n, nil
-		}
-		bgOnce.Do(func() { close(bgDone) })
-		return 0, io.EOF
-	}
-
-	done := make(chan struct{})
-	go func() {
-		session.processBiStream(probeStream)
-		close(done)
-	}()
-
-	// Wait until the background goroutine has finished processing all updates.
-	select {
-	case <-bgDone:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("background goroutine did not consume all updates")
-	}
-
-	// Cancel the stream's write side so handleProbeStream's ticker loop exits.
-	probeStream.CancelWrite(transport.StreamErrorCode(0))
-
-	select {
-	case <-done:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("processBiStream did not complete")
-	}
-
-	// The channel must hold only the latest target (1200000).
-	select {
-	case got := <-session.ProbeTargets():
-		assert.Equal(t, uint64(1200000), got.Bitrate)
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("no target on ProbeTargets()")
-	}
-
-	// No stale value must remain in the channel.
-	select {
-	case extra := <-session.ProbeTargets():
-		t.Errorf("unexpected stale target %d still in channel", extra.Bitrate)
-	default:
+	got := written.Bytes()
+	require.NotEmpty(t, got)
+	reader := bytes.NewReader(got)
+	for _, want := range []uint64{111000, 222000} {
+		var resp message.ProbeMessage
+		require.NoError(t, resp.Decode(reader))
+		assert.Equal(t, want, resp.Bitrate)
 	}
 
 	_ = session.CloseWithError(NoError, "")
@@ -2361,8 +1941,9 @@ func TestSession_Probe_ClosedSession(t *testing.T) {
 
 	_ = session.CloseWithError(NoError, "")
 
-	_, err := session.Probe(1000000)
+	result, err := session.Probe(1000000)
 	assert.Error(t, err)
+	assert.Nil(t, result)
 	assert.Equal(t, ErrClosedSession, err)
 }
 
@@ -2374,8 +1955,9 @@ func TestSession_Probe_OpenStreamError(t *testing.T) {
 
 	session := newTestSession(conn)
 
-	_, err := session.Probe(1000000)
+	result, err := session.Probe(1000000)
 	assert.Error(t, err)
+	assert.Nil(t, result)
 
 	_ = session.CloseWithError(NoError, "")
 }
@@ -2391,8 +1973,9 @@ func TestSession_Probe_OpenStreamApplicationError(t *testing.T) {
 
 	session := newTestSession(conn)
 
-	_, err := session.Probe(1000000)
+	result, err := session.Probe(1000000)
 	assert.Error(t, err)
+	assert.Nil(t, result)
 	var sessErr *SessionError
 	assert.ErrorAs(t, err, &sessErr)
 
@@ -2408,8 +1991,9 @@ func TestSession_Probe_EncodeStreamTypeError(t *testing.T) {
 
 	session := newTestSession(conn)
 
-	_, err := session.Probe(1000000)
+	result, err := session.Probe(1000000)
 	assert.Error(t, err)
+	assert.Nil(t, result)
 
 	_ = session.CloseWithError(NoError, "")
 }
@@ -2420,9 +2004,9 @@ func TestSession_Probe_EncodeProbeMessageError(t *testing.T) {
 	mockStream.WriteFunc = func(p []byte) (int, error) {
 		writeCallCount++
 		if writeCallCount == 1 {
-			return len(p), nil // StreamType succeeds
+			return len(p), nil
 		}
-		return 0, errors.New("write error") // ProbeMessage fails
+		return 0, errors.New("write error")
 	}
 
 	conn := &FakeStreamConn{}
@@ -2430,13 +2014,14 @@ func TestSession_Probe_EncodeProbeMessageError(t *testing.T) {
 
 	session := newTestSession(conn)
 
-	_, err := session.Probe(1000000)
+	result, err := session.Probe(1000000)
 	assert.Error(t, err)
+	assert.Nil(t, result)
 
 	_ = session.CloseWithError(NoError, "")
 }
 
-func TestSession_Probe_DecodeProbeMessageError(t *testing.T) {
+func TestSession_Probe_DecodeResponseError(t *testing.T) {
 	mockStream := &FakeQUICStream{}
 	mockStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
 	mockStream.ReadFunc = func(p []byte) (int, error) { return 0, errors.New("read error") }
@@ -2446,12 +2031,9 @@ func TestSession_Probe_DecodeProbeMessageError(t *testing.T) {
 
 	session := newTestSession(conn)
 
-	ch, err := session.Probe(1000000)
-	require.NoError(t, err)
-
-	// The error from the reader goroutine is delivered via the channel.
-	got := <-ch
-	assert.Error(t, got.Err)
+	result, err := session.Probe(1000000)
+	assert.Error(t, err)
+	assert.Nil(t, result)
 
 	_ = session.CloseWithError(NoError, "")
 }
@@ -2462,8 +2044,7 @@ func TestSession_logError(t *testing.T) {
 		logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
 		conn := &FakeStreamConn{}
-		session := newTestSession(conn)
-		session.logger = logger
+		session := newSession(conn, NewTrackMux(0), nil, nil, nil, logger)
 
 		session.logError("something failed", errors.New("test error"), "key", "value")
 
@@ -2487,8 +2068,7 @@ func TestSession_logError(t *testing.T) {
 		logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
 		conn := &FakeStreamConn{}
-		session := newTestSession(conn)
-		session.logger = logger
+		session := newSession(conn, NewTrackMux(0), nil, nil, nil, logger)
 
 		session.logError("msg", nil)
 		assert.Empty(t, logBuf.String())
@@ -2514,8 +2094,7 @@ func TestSession_processBiStream_logError(t *testing.T) {
 	}
 
 	conn := &FakeStreamConn{}
-	session := newTestSession(conn)
-	session.logger = logger
+	session := newSession(conn, NewTrackMux(0), nil, nil, nil, logger)
 
 	session.processBiStream(mockStream)
 
@@ -2537,8 +2116,7 @@ func TestSession_processUniStream_logError(t *testing.T) {
 	}
 
 	conn := &FakeStreamConn{}
-	session := newTestSession(conn)
-	session.logger = logger
+	session := newSession(conn, NewTrackMux(0), nil, nil, nil, logger)
 
 	session.processUniStream(mockStream)
 

@@ -111,7 +111,7 @@ func (d *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *T
 	)
 	connLogger.Info("connection established")
 
-	return newSession(conn, mux, nil, d.Config, d.FetchHandler, d.OnGoaway, d.Logger), nil
+	return newSession(conn, mux, nil, d.FetchHandler, d.OnGoaway, d.Logger), nil
 }
 
 // DialQUIC establishes a new session over native QUIC by dialing the provided
@@ -143,5 +143,5 @@ func (d *Dialer) DialQUIC(ctx context.Context, addr string, mux *TrackMux) (*Ses
 		return nil, err
 	}
 
-	return newSession(conn, mux, nil, d.Config, d.FetchHandler, d.OnGoaway, d.Logger), nil
+	return newSession(conn, mux, nil, d.FetchHandler, d.OnGoaway, d.Logger), nil
 }

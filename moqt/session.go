@@ -24,8 +24,7 @@ const (
 // It manages bidirectional and unidirectional streams, subscriptions, and
 // announcements for a single peer connection.
 type Session struct {
-	ctx    context.Context // Context for the session
-	config *Config
+	ctx context.Context // Context for the session
 
 	wg sync.WaitGroup // WaitGroup for session cleanup
 
@@ -49,23 +48,12 @@ type Session struct {
 	// sessErr       error
 
 	connManager *connManager
-
-	// probe stream state (subscriber side, lazily initialized)
-	outgoingProbeMu     sync.Mutex
-	outgoingProbeStream transport.Stream
-	outgoingProbeCh     chan ProbeResult
-
-	// incoming probe stream state (publisher side)
-	incomingProbeMu      sync.Mutex
-	incomingProbeStream  transport.Stream
-	incomingProbeTargets chan ProbeResult
 }
 
 func newSession(
 	conn StreamConn,
 	mux *TrackMux,
 	manager *connManager,
-	config *Config,
 	fetchHandler FetchHandler,
 	onGoaway func(newSessionURI string),
 	logger *slog.Logger,
@@ -76,17 +64,15 @@ func newSession(
 
 	connCtx := conn.Context()
 	sess := &Session{
-		ctx:                  connCtx,
-		config:               config.Clone(),
-		conn:                 conn,
-		mux:                  mux,
-		fetchHandler:         fetchHandler,
-		onGoaway:             onGoaway,
-		logger:               logger,
-		trackReaders:         make(map[SubscribeID]*TrackReader),
-		trackWriters:         make(map[SubscribeID]*TrackWriter),
-		connManager:          manager,
-		incomingProbeTargets: make(chan ProbeResult, 1),
+		ctx:          connCtx,
+		conn:         conn,
+		mux:          mux,
+		fetchHandler: fetchHandler,
+		onGoaway:     onGoaway,
+		logger:       logger,
+		trackReaders: make(map[SubscribeID]*TrackReader),
+		trackWriters: make(map[SubscribeID]*TrackWriter),
+		connManager:  manager,
 	}
 
 	if manager != nil {
@@ -412,108 +398,60 @@ func (sess *Session) AcceptAnnounce(prefix string) (*AnnouncementReader, error) 
 type ProbeResult struct {
 	// Bitrate is the measured bitrate in bits per second. A value of 0 means unknown.
 	Bitrate uint64
-	// Err is non-nil when the probe stream was closed with an error.
-	Err error
+	// RTT is the smoothed round-trip time in milliseconds. A value of 0 means unknown.
+	RTT uint64
 }
 
-// Probe sends a target bitrate hint to the publisher and returns a channel
-// that receives the measured bitrate reported by the publisher.
-// Calling Probe again on the same session updates the target bitrate.
-// The channel is closed when the probe stream ends or the session terminates.
-func (sess *Session) Probe(targetBitrate uint64) (<-chan ProbeResult, error) {
+// Probe sends a bitrate probe request to the remote peer and returns the
+// measured bitrate and RTT reported by the response.
+func (sess *Session) Probe(bitrate uint64) (*ProbeResult, error) {
 	if sess.terminating() {
 		return nil, ErrClosedSession
 	}
 
-	sess.outgoingProbeMu.Lock()
-	defer sess.outgoingProbeMu.Unlock()
-
-	// Lazily open the probe stream.
-	if sess.outgoingProbeStream == nil {
-		stream, err := sess.conn.OpenStream()
-		if err != nil {
-			if appErr, ok := errors.AsType[*transport.ApplicationError](err); ok {
-				return nil, &SessionError{ApplicationError: appErr}
+	stream, err := sess.conn.OpenStream()
+	if err != nil {
+		if appErr, ok := errors.AsType[*transport.ApplicationError](err); ok {
+			return nil, &SessionError{
+				ApplicationError: appErr,
 			}
-			return nil, fmt.Errorf("failed to open stream for probe: %w", err)
 		}
 
-		if err := message.StreamTypeProbe.Encode(stream); err != nil {
-			if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
-				stream.CancelRead(strErr.ErrorCode)
-				return nil, err
-			}
-			cancelStreamWithError(stream, transport.StreamErrorCode(ProbeErrorCodeInternal))
-			return nil, fmt.Errorf("failed to encode stream type message: %w", err)
-		}
-
-		ch := make(chan ProbeResult)
-		sess.outgoingProbeStream = stream
-		sess.outgoingProbeCh = ch
-		go sess.readProbeResults(stream, ch)
+		return nil, fmt.Errorf("failed to open stream for probe: %w", err)
 	}
+	defer stream.Close()
 
-	// Send PROBE with the new target bitrate. Per draft4 the subscriber MAY send
-	// additional PROBE messages on the same stream to update the target.
-	err := message.ProbeMessage{
-		Bitrate: targetBitrate,
-		RTT:     0,
-	}.Encode(sess.outgoingProbeStream)
+	err = message.StreamTypeProbe.Encode(stream)
 	if err != nil {
 		if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
-			sess.outgoingProbeStream.CancelRead(strErr.ErrorCode)
+			stream.CancelRead(strErr.ErrorCode)
 			return nil, err
 		}
-		cancelStreamWithError(sess.outgoingProbeStream, transport.StreamErrorCode(ProbeErrorCodeInternal))
-		sess.outgoingProbeStream = nil
-		// probeCh will be closed by runProbeReader when it detects the stream error.
-		return nil, fmt.Errorf("failed to send probe message: %w", err)
+
+		cancelStreamWithError(stream, transport.StreamErrorCode(ProbeErrorCodeInternal))
+
+		return nil, fmt.Errorf("failed to encode stream type message: %w", err)
 	}
 
-	return sess.outgoingProbeCh, nil
-}
+	err = message.ProbeMessage{Bitrate: bitrate, RTT: 0}.Encode(stream)
+	if err != nil {
+		if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
+			stream.CancelRead(strErr.ErrorCode)
+			return nil, err
+		}
 
-// readProbeResults reads publisher PROBE messages from stream and forwards them to
-// ch. It is the sole writer to ch and the sole entity that closes it.
-func (sess *Session) readProbeResults(stream transport.Stream, ch chan ProbeResult) {
-	defer func() {
-		sess.outgoingProbeMu.Lock()
-		if sess.outgoingProbeStream == stream {
-			sess.outgoingProbeStream = nil
-			sess.outgoingProbeCh = nil
-		}
-		sess.outgoingProbeMu.Unlock()
-		close(ch)
-	}()
+		cancelStreamWithError(stream, transport.StreamErrorCode(ProbeErrorCodeInternal))
 
-	for {
-		var pm message.ProbeMessage
-		if err := pm.Decode(stream); err != nil {
-			if errors.Is(err, io.EOF) {
-				return
-			}
-			select {
-			case ch <- ProbeResult{Err: err}:
-			case <-sess.ctx.Done():
-			}
-			return
-		}
-		select {
-		case ch <- ProbeResult{Bitrate: pm.Bitrate}:
-		case <-sess.ctx.Done():
-			return
-		}
+		return nil, fmt.Errorf("failed to send PROBE message: %w", err)
 	}
-}
 
-// ProbeTargets returns a channel that receives the latest target bitrate (bits
-// per second) sent by the subscriber via PROBE messages. The channel has a
-// buffer of 1 and uses latest-value semantics: if the previous value has not
-// been consumed, it is replaced by the newer one.
-//
-// This is the publisher-side counterpart of [Session.Probe].
-func (sess *Session) ProbeTargets() <-chan ProbeResult {
-	return sess.incomingProbeTargets
+	var resp message.ProbeMessage
+	err = resp.Decode(stream)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read PROBE response: %w", err)
+	}
+
+	return &ProbeResult{Bitrate: resp.Bitrate, RTT: resp.RTT}, nil
 }
 
 // listenBiStreams accepts bidirectional streams and handles them based on their type.
@@ -628,23 +566,7 @@ func (sess *Session) processBiStream(stream transport.Stream) {
 			return
 		}
 	case message.StreamTypeProbe:
-		// Enforce a single active incoming probe stream: cancel the previous one if any.
-		sess.incomingProbeMu.Lock()
-		if old := sess.incomingProbeStream; old != nil {
-			cancelStreamWithError(old, transport.StreamErrorCode(ProbeErrorCodeInternal))
-		}
-		sess.incomingProbeStream = stream
-		sess.incomingProbeMu.Unlock()
-
-		err := sess.handleProbeStream(stream)
-
-		sess.incomingProbeMu.Lock()
-		if sess.incomingProbeStream == stream {
-			sess.incomingProbeStream = nil
-		}
-		sess.incomingProbeMu.Unlock()
-
-		if err != nil {
+		if err := sess.handleProbeStream(stream); err != nil {
 			sess.logError("probe stream error", err)
 			cancelStreamWithError(stream, transport.StreamErrorCode(ProbeErrorCodeInternal))
 			return
@@ -740,66 +662,27 @@ func cancelStreamWithError(stream transport.Stream, code transport.StreamErrorCo
 }
 
 func (sess *Session) handleProbeStream(stream transport.Stream) error {
-	provider, ok := sess.conn.(probeStatsProvider)
-	if !ok {
-		return &ProbeError{StreamError: &transport.StreamError{ErrorCode: transport.StreamErrorCode(ProbeErrorCodeNotSupported)}}
-	}
+	provider, _ := sess.probeStatsProvider()
 
-	// Decode the initial PROBE message from the subscriber.
-	var req message.ProbeMessage
-	if err := req.Decode(stream); err != nil {
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		return err
-	}
-
-	// Background goroutine: read additional PROBE messages from subscriber and
-	// forward the latest target bitrate to incomingProbeTargets.
-	// Per draft4 §5.1.4 the subscriber MAY send additional PROBE messages on
-	// the same stream; latest-value semantics: only the most recent target is kept.
-	go func() {
-		for {
-			var update message.ProbeMessage
-			if err := update.Decode(stream); err != nil {
-				return
-			}
-			// Discard stale value if the reader hasn't consumed it yet.
-			select {
-			case <-sess.incomingProbeTargets:
-			default:
-			}
-			select {
-			case sess.incomingProbeTargets <- ProbeResult{Bitrate: update.Bitrate}:
-			default:
-			}
-		}
-	}()
-
-	ticker := time.NewTicker(sess.config.probeInterval())
-	defer ticker.Stop()
-
-	maxAge := sess.config.probeMaxAge()
-	maxDelta := sess.config.probeMaxDelta()
 	tracker := &probeMeasurementTracker{}
 	for {
-		select {
-		case now := <-ticker.C:
-			stats := provider.ConnectionStats()
-			msg, ok := tracker.next(stats, now, maxAge, maxDelta)
-			if !ok {
-				continue
+		var pm message.ProbeMessage
+		err := pm.Decode(stream)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
 			}
-			if err := msg.Encode(stream); err != nil {
-				if errors.Is(err, io.EOF) {
-					return nil
-				}
-				return err
-			}
-		case <-stream.Context().Done():
-			return nil
-		case <-sess.ctx.Done():
-			return nil
+			return err
+		}
+
+		if provider == nil {
+			return &ProbeError{StreamError: &transport.StreamError{ErrorCode: transport.StreamErrorCode(ProbeErrorCodeNotSupported)}}
+		}
+		stats := provider.ConnectionStats()
+		measured := tracker.measure(stats, pm.Bitrate, time.Now())
+		rtt := tracker.smoothedRTT(stats)
+		if err := (message.ProbeMessage{Bitrate: measured, RTT: rtt}).Encode(stream); err != nil {
+			return err
 		}
 	}
 }
@@ -809,77 +692,53 @@ type probeStatsProvider interface {
 }
 
 type probeMeasurementTracker struct {
-	// bitrate measurement state
 	initialized bool
 	bytesSent   uint64
 	sampleTime  time.Time
-
-	// throttle state
-	lastBitrate uint64
-	lastSentAt  time.Time
 }
 
-func (t *probeMeasurementTracker) next(stats quic.ConnectionStats, now time.Time, maxAge time.Duration, maxDelta float64) (message.ProbeMessage, bool) {
-	bitrate := t.measureBitrate(stats, now)
-
-	if t.lastSentAt.IsZero() {
-		t.record(bitrate, now)
-		return message.ProbeMessage{Bitrate: bitrate}, true
-	}
-
-	if now.Sub(t.lastSentAt) >= maxAge ||
-		hasDelta(t.lastBitrate, bitrate, maxDelta) {
-		t.record(bitrate, now)
-		return message.ProbeMessage{Bitrate: bitrate}, true
-	}
-
-	return message.ProbeMessage{}, false
+func (sess *Session) probeStatsProvider() (probeStatsProvider, bool) {
+	provider, ok := sess.conn.(probeStatsProvider)
+	return provider, ok
 }
 
-func (t *probeMeasurementTracker) record(bitrate uint64, now time.Time) {
-	t.lastBitrate = bitrate
-	t.lastSentAt = now
-}
-
-func (t *probeMeasurementTracker) measureBitrate(stats quic.ConnectionStats, now time.Time) uint64 {
+func (t *probeMeasurementTracker) measure(stats quic.ConnectionStats, fallback uint64, now time.Time) uint64 {
 	if !t.initialized {
 		t.initialized = true
 		t.bytesSent = stats.BytesSent
 		t.sampleTime = now
-		return 0
+		return fallback
 	}
 
 	elapsed := now.Sub(t.sampleTime)
 	if elapsed <= 0 {
-		return t.lastBitrate
+		return fallback
 	}
 
 	bytesSent := stats.BytesSent
-	var bytesDelta uint64
-	if bytesSent >= t.bytesSent {
-		bytesDelta = bytesSent - t.bytesSent
+	bytesDelta := bytesSent
+	if bytesDelta >= t.bytesSent {
+		bytesDelta -= t.bytesSent
+	} else {
+		bytesDelta = 0
 	}
+	if bytesDelta == 0 {
+		t.bytesSent = bytesSent
+		t.sampleTime = now
+		return fallback
+	}
+
 	t.bytesSent = bytesSent
 	t.sampleTime = now
-
-	if bytesDelta == 0 {
-		return 0
-	}
-
-	return uint64(float64(bytesDelta) * 8 / elapsed.Seconds())
+	return uint64((float64(bytesDelta) * 8) / elapsed.Seconds())
 }
 
-func hasDelta(oldVal, newVal uint64, maxDelta float64) bool {
-	if oldVal == 0 {
-		return newVal != 0
+func (t *probeMeasurementTracker) smoothedRTT(stats quic.ConnectionStats) uint64 {
+	rtt := stats.SmoothedRTT
+	if rtt <= 0 {
+		return 0
 	}
-	var diff float64
-	if newVal >= oldVal {
-		diff = float64(newVal - oldVal)
-	} else {
-		diff = float64(oldVal - newVal)
-	}
-	return diff/float64(oldVal) >= maxDelta
+	return uint64(rtt.Milliseconds())
 }
 
 func (sess *Session) handleGoawayStream(stream transport.Stream) error {

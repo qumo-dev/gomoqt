@@ -6,16 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### Added
-
-- **moqt:** `Session.ProbeTargets() <-chan ProbeResult` — publisher-side channel for the latest subscriber target bitrate (buffered 1, latest-value semantics).
-
 ### Changed
 
 - Repository owner changed from `okdaichi` to `qumo-dev`.
-- **moqt:** `Session.Probe(targetBitrate uint64) (<-chan ProbeResult, error)` — reuses the same stream on repeated calls; channel is closed when the stream or session ends.
-- **moqt:** `ProbeResult.RTT` removed; RTT is available via the underlying transport API.
-- **moqt:** Publisher enforces a single active incoming probe stream; a new stream cancels the previous one.
+- **moqt:** WebTransport sessions no longer expose transport connection stats through the public `WebTransportSession` API. Connection stats are now treated as an optional raw transport capability and are accessed via type assertions on the underlying connection implementation.
 
 ## [v0.13.4] - 2026-04-20
 

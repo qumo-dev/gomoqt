@@ -290,7 +290,7 @@ func (u *WebTransportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		manager = v.(*connManager)
 	}
 
-	sess := newSession(conn, u.TrackMux, manager, u.Config, u.FetchHandler, nil, u.Logger)
+	sess := newSession(conn, u.TrackMux, manager, u.FetchHandler, nil, u.Logger)
 
 	u.Handler.ServeMOQ(sess)
 }
@@ -315,7 +315,7 @@ func (f HandleFunc) ServeMOQ(sess *Session) {
 
 func (s *Server) handleNativeQUIC(conn StreamConn) error {
 	if s.Handler != nil {
-		sess := newSession(conn, s.TrackMux, s.connManager, s.Config, s.FetchHandler, nil, s.Logger)
+		sess := newSession(conn, s.TrackMux, s.connManager, s.FetchHandler, nil, s.Logger)
 		s.Handler.ServeMOQ(sess)
 	}
 	return fmt.Errorf("no native QUIC handler configured")
