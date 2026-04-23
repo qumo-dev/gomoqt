@@ -488,8 +488,10 @@ func (sess *Session) readProbeResults(stream transport.Stream) {
 	for {
 		var pm message.ProbeMessage
 		if err := pm.Decode(stream); err != nil {
-			sess.logError("failed to decode PROBE message", err)
-			cancelStreamWithError(stream, transport.StreamErrorCode(ProbeErrorCodeInternal))
+			if !errors.Is(err, io.EOF) {
+				sess.logError("failed to decode PROBE message", err)
+				cancelStreamWithError(stream, transport.StreamErrorCode(ProbeErrorCodeInternal))
+			}
 			return
 		}
 		select {

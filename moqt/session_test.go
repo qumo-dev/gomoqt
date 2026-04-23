@@ -2544,6 +2544,115 @@ func TestSession_Probe_EncodeProbeMessageError(t *testing.T) {
 	_ = session.CloseWithError(NoError, "")
 }
 
+// TestSession_Probe_EOFFromPublisher_NoStreamCancel verifies that when the publisher
+// closes the probe stream cleanly (EOF), readProbeResults exits without calling
+// CancelRead or CancelWrite. The probeResponseCh stays open until CloseWithError.
+func TestSession_Probe_EOFFromPublisher_NoStreamCancel(t *testing.T) {
+	conn := &FakeStreamConn{}
+
+	cancelReadCalled := make(chan transport.StreamErrorCode, 1)
+	cancelWriteCalled := make(chan transport.StreamErrorCode, 1)
+
+	var response bytes.Buffer
+	require.NoError(t, message.ProbeMessage{Bitrate: 500000}.Encode(&response))
+
+	probeStream := &FakeQUICStream{ParentCtx: conn.Context()}
+	probeStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
+	probeStream.ReadFunc = response.Read // returns io.EOF after data is exhausted
+	probeStream.CancelReadFunc = func(code transport.StreamErrorCode) {
+		select {
+		case cancelReadCalled <- code:
+		default:
+		}
+	}
+	probeStream.CancelWriteFunc = func(code transport.StreamErrorCode) {
+		select {
+		case cancelWriteCalled <- code:
+		default:
+		}
+	}
+	conn.OpenStreamFunc = func() (transport.Stream, error) { return probeStream, nil }
+
+	session := newTestSession(conn)
+
+	ch, err := session.Probe(1000000)
+	require.NoError(t, err)
+
+	// Receive the result delivered before EOF.
+	got := <-ch
+	assert.Equal(t, uint64(500000), got.Bitrate)
+
+	// Session close waits for readProbeResults (wg) then closes the channel.
+	_ = session.CloseWithError(NoError, "")
+	for range ch {
+	}
+
+	// EOF is a normal close — CancelRead/CancelWrite must NOT be called.
+	select {
+	case code := <-cancelReadCalled:
+		t.Errorf("CancelRead must not be called on EOF (code %d)", code)
+	default:
+	}
+	select {
+	case code := <-cancelWriteCalled:
+		t.Errorf("CancelWrite must not be called on EOF (code %d)", code)
+	default:
+	}
+}
+
+// TestSession_Probe_ResponseDecodeError verifies that a non-EOF decode error in
+// readProbeResults causes the stream to be cancelled with ProbeErrorCodeInternal,
+// and that the channel is closed when the session closes afterward.
+func TestSession_Probe_ResponseDecodeError(t *testing.T) {
+	conn := &FakeStreamConn{}
+
+	cancelReadCalled := make(chan transport.StreamErrorCode, 1)
+	cancelWriteCalled := make(chan transport.StreamErrorCode, 1)
+
+	probeStream := &FakeQUICStream{ParentCtx: conn.Context()}
+	probeStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
+	probeStream.ReadFunc = func(p []byte) (int, error) {
+		return 0, errors.New("simulated decode error")
+	}
+	probeStream.CancelReadFunc = func(code transport.StreamErrorCode) {
+		select {
+		case cancelReadCalled <- code:
+		default:
+		}
+	}
+	probeStream.CancelWriteFunc = func(code transport.StreamErrorCode) {
+		select {
+		case cancelWriteCalled <- code:
+		default:
+		}
+	}
+	conn.OpenStreamFunc = func() (transport.Stream, error) { return probeStream, nil }
+
+	session := newTestSession(conn)
+
+	ch, err := session.Probe(1000000)
+	require.NoError(t, err)
+
+	// A non-EOF decode error must cancel the stream with ProbeErrorCodeInternal.
+	select {
+	case code := <-cancelReadCalled:
+		assert.Equal(t, transport.StreamErrorCode(ProbeErrorCodeInternal), code)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("CancelRead was not called after decode error")
+	}
+	select {
+	case code := <-cancelWriteCalled:
+		assert.Equal(t, transport.StreamErrorCode(ProbeErrorCodeInternal), code)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("CancelWrite was not called after decode error")
+	}
+
+	// Session close must close the channel.
+	_ = session.CloseWithError(NoError, "")
+	for range ch {
+	}
+}
+
 func TestSession_logError(t *testing.T) {
 	t.Run("logs error when logger is set", func(t *testing.T) {
 		var logBuf bytes.Buffer
