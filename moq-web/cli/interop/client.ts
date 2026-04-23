@@ -27,14 +27,18 @@ export async function runClient(
 		await Deno.stdout.write(encoder.encode(s));
 	}
 
-	async function step<T>(msg: string, fn: () => Promise<T>): Promise<T> {
+	async function step<T>(msg: string, fn: () => Promise<T>, detail?: (res: T) => string): Promise<T> {
 		await write(`${msg}...`);
 		try {
 			const res = await fn();
-			console.log(" ok");
+			if (detail) {
+				console.log(` ok (${detail(res)})`);
+			} else {
+				console.log(" ok");
+			}
 			return res;
 		} catch (err: any) {
-			console.log(" failed:", err instanceof Error ? err.message : err);
+			console.log(` failed: ${err instanceof Error ? err.message : err}`);
 			throw err;
 		}
 	}
@@ -88,7 +92,6 @@ export async function runClient(
 			mux,
 			transportOptions,
 			onGoaway: (newSessionURI: string) => {
-				console.log(`ok (newSessionURI: ${newSessionURI})`);
 				if (goawayResolve) goawayResolve(newSessionURI);
 			},
 		}));
@@ -126,9 +129,8 @@ export async function runClient(
 		const frame = new Frame(new Uint8Array(1024));
 		const err = await group.readFrame(frame);
 		if (err) throw err;
-		info("Frame data length:", frame.bytes.byteLength);
-		info("Received data from server:", new TextDecoder().decode(frame.bytes));
-	});
+		return new TextDecoder().decode(frame.bytes);
+	}, (payload) => `payload: ${payload}`);
 
 	// Step 3: Probe the server bitrate (before Fetch to ensure connection is still up)
 	await step("Probing server bitrate", async () => {
@@ -138,8 +140,8 @@ export async function runClient(
 		if (result.done || result.value === undefined) {
 			throw new Error("probe stream ended without result");
 		}
-		info(`Probe result: ${result.value.bitrate} bps`);
-	});
+		return result.value.bitrate;
+	}, (bitrate) => `measured: ${bitrate} bps`);
 
 	// Step 4: Fetch a single group from the server
 	const fetchGroup = await step("Fetching group from server", async () => {
@@ -158,8 +160,8 @@ export async function runClient(
 		const frame = new Frame(new Uint8Array(1024));
 		const err = await fetchGroup.readFrame(frame);
 		if (err) throw err;
-		info("Fetch payload:", new TextDecoder().decode(frame.bytes));
-	});
+		return new TextDecoder().decode(frame.bytes);
+	}, (payload) => `payload: ${payload}`);
 
 	// All probe/fetch steps done — signal publishFunc to proceed
 	readyToPublish();
@@ -187,7 +189,7 @@ export async function runClient(
 	const goawayURI = await Promise.race([goawayPromise, goawayTimeout]);
 	clearTimeout(goawayTimerId!);
 	if (goawayURI) {
-		console.log(" ok");
+		console.log(` ok (newSessionURI: ${goawayURI})`);
 	} else {
 		console.log(" failed: timed out");
 	}

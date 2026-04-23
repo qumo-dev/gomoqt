@@ -807,11 +807,7 @@ export class Session {
 		this.#probeTargetsQueue.close();
 
 		try {
-			console.log(
-				`Session.close: waiting for ${this.#wg.length} background tasks`,
-			);
 			await Promise.allSettled(this.#wg);
-			console.log(`Session.close: background tasks settled`);
 		} catch (_e) {
 			// ignore
 		}
@@ -847,11 +843,7 @@ export class Session {
 		this.#probeTargetsQueue.close();
 
 		try {
-			console.log(
-				`Session.closeWithError: waiting for ${this.#wg.length} background tasks`,
-			);
 			await Promise.allSettled(this.#wg);
-			console.log(`Session.closeWithError: background tasks settled`);
 		} catch (_e) {
 			// ignore
 		}

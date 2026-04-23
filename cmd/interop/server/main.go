@@ -102,7 +102,7 @@ func runInteropSession(sess *moqt.Session, mux *moqt.TrackMux, serverDone chan s
 	doneCh := make(chan struct{}, 1)
 
 	mux.PublishFunc(context.Background(), path, func(tw *moqt.TrackWriter) {
-		fmt.Printf("Serving a track: %s,%s\n", string(path), string(tw.TrackName))
+		fmt.Printf("Serving a track: %s\n", string(path))
 
 		group, err := tw.OpenGroup()
 		if err != nil {
@@ -136,38 +136,38 @@ func runInteropSession(sess *moqt.Session, mux *moqt.TrackMux, serverDone chan s
 	fmt.Print("Accepting client announcements...")
 	anns, err := sess.AcceptAnnounce("/")
 	if err != nil {
-		fmt.Printf("failed\n  Error: %v\n", err)
+		fmt.Printf(" failed: %v\n", err)
 		return
 	}
 	defer anns.Close()
-	fmt.Println("ok")
+	fmt.Println(" ok")
 
 	fmt.Print("Receiving announcement...")
 	ann, err := anns.ReceiveAnnouncement(context.Background())
 	if err != nil {
-		fmt.Printf("failed\n  Error: %v\n", err)
+		fmt.Printf(" failed: %v\n", err)
 		return
 	}
-	fmt.Println("ok")
+	fmt.Println(" ok")
 
 	fmt.Printf("Discovered broadcast: %s\n", string(ann.BroadcastPath()))
 
 	fmt.Print("Subscribing to broadcast...")
 	track, err := sess.Subscribe(context.Background(), ann.BroadcastPath(), "", nil)
 	if err != nil {
-		fmt.Printf("failed\n  Error: %v\n", err)
+		fmt.Printf(" failed: %v\n", err)
 		return
 	}
 	defer track.Close()
-	fmt.Println("ok")
+	fmt.Println(" ok")
 
 	fmt.Print("Accepting group...")
 	group, err := track.AcceptGroup(context.Background())
 	if err != nil {
-		fmt.Printf("failed\n  Error: %v\n", err)
+		fmt.Printf(" failed: %v\n", err)
 		return
 	}
-	fmt.Println("ok")
+	fmt.Println(" ok")
 
 	fmt.Print("Reading the first frame from client...")
 	frame := moqt.NewFrame(1024)
@@ -175,24 +175,24 @@ func runInteropSession(sess *moqt.Session, mux *moqt.TrackMux, serverDone chan s
 		if err == io.EOF {
 			return
 		}
-		fmt.Printf("failed\n  Error: %v\n", err)
+		fmt.Printf(" failed: %v\n", err)
 		return
 	}
-	fmt.Printf("ok (payload: %s)\n", string(frame.Body()))
+	fmt.Printf(" ok (payload: %s)\n", string(frame.Body()))
 
 	// Probe client bitrate (server → client direction)
 	fmt.Print("Probing client bitrate...")
 	probeCh, err := sess.Probe(1_000_000)
 	if err != nil {
-		fmt.Printf("failed\n  Error: %v\n", err)
+		fmt.Printf(" failed: %v\n", err)
 		return
 	}
 	probeResult, ok := <-probeCh
 	if !ok {
-		fmt.Printf("failed\n  Error: probe stream closed without result\n")
+		fmt.Printf(" failed: probe stream closed without result\n")
 		return
 	}
-	fmt.Printf("ok (measured: %d bps)\n", probeResult.Bitrate)
+	fmt.Printf(" ok (measured: %d bps)\n", probeResult.Bitrate)
 
 	// Signal the server to start graceful shutdown (sends GOAWAY to all sessions).
 	select {
