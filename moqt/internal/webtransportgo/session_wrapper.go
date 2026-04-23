@@ -6,6 +6,7 @@ import (
 	"net"
 
 	quicgo_webtransportgo "github.com/okdaichi/webtransport-go"
+	"github.com/quic-go/quic-go"
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
@@ -72,4 +73,8 @@ func (conn *sessionWrapper) RemoteAddr() net.Addr {
 
 func (conn *sessionWrapper) Subprotocol() string {
 	return conn.sess.SessionState().ApplicationProtocol
+}
+
+func (conn *sessionWrapper) ConnectionStats() quic.ConnectionStats {
+	return conn.sess.ConnectionStats()
 }
