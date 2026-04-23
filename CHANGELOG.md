@@ -17,6 +17,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **moqt:** `ProbeResult.RTT` removed; RTT is available via the underlying transport API.
 - **moqt:** Publisher enforces a single active incoming probe stream; a new stream cancels the previous one.
 
+### Fixed
+
+- **moqt:** fixed probe subscriber cleanup so `readProbeResults` exits on `stream.Context().Done()` and `CloseWithError` closes the probe response channel only after all probe goroutines complete.
+- **moqt:** fixed `FakeStreamConn.CloseWithError` test helper so custom `CloseWithErrorFunc` still performs standard connection context cancellation, preventing probe cleanup deadlocks.
+
 ## [v0.13.4] - 2026-04-20
 
 ### Fixed
