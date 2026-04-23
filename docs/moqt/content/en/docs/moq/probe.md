@@ -15,24 +15,21 @@ Both `Session.Probe` and `Session.ProbeTargets` deliver results via `ProbeResult
 ```go
 type ProbeResult struct {
     Bitrate uint64
-    Err     error
 }
 ```
 
 | Field     | Type     | Description                                                    |
 |-----------|----------|----------------------------------------------------------------|
 | `Bitrate` | `uint64` | The measured bitrate in bits per second. 0 means unknown.      |
-| `Err`     | `error`  | Non-nil when the probe stream was closed with an error.        |
 
 > **Note:** RTT is not included in `ProbeResult`. Use the underlying
-> transport API (e.g. `quic.Connection.ConnectionStats()`) to obtain RTT.
+> transport API (e.g. `(*quic.Conn).ConnectionStats()`) to obtain RTT.
 
 ## Notify Target Bitrate
 
 Use `Session.Probe` to send a target bitrate hint to the publisher.
 The call can be repeated to update the target; the same underlying stream is
-reused. The returned channel is closed when the probe stream ends or the
-session terminates.
+reused. The returned channel is closed when the session terminates.
 
 ```go
 func (s *Session) Probe(targetBitrate uint64) (<-chan ProbeResult, error)
@@ -48,10 +45,6 @@ func (s *Session) Probe(targetBitrate uint64) (<-chan ProbeResult, error)
     result, ok := <-probeCh
     if !ok {
         // Stream closed without a result.
-        return
-    }
-    if result.Err != nil {
-        fmt.Printf("probe error: %v\n", result.Err)
         return
     }
     fmt.Printf("Measured bitrate: %d bps\n", result.Bitrate)
