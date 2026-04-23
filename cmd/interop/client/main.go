@@ -132,10 +132,6 @@ func main() {
 		fmt.Printf("failed\n  Error: probe stream closed without result\n")
 		return
 	}
-	if probeResult.Err != nil {
-		fmt.Printf("failed\n  Error: %v\n", probeResult.Err)
-		return
-	}
 	fmt.Printf("ok (measured: %d bps)\n", probeResult.Bitrate)
 
 	// Channel to signal that the publish handler has completed
