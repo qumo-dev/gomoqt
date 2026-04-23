@@ -34,9 +34,10 @@ import { Queue } from "./internal/queue.ts";
 import type { SubscribeID, TrackName } from "./alias.ts";
 import { FetchRequest } from "./fetch.ts";
 import type { FetchHandler } from "./fetch.ts";
-import { FetchErrorCode, GroupErrorCode, SessionErrorCode } from "./error.ts";
-
-const PROBE_STREAM_ERROR_CODE = 0x1;
+import { FetchErrorCode, GroupErrorCode, ProbeErrorCode, SessionErrorCode } from "./error.ts";
+import type { MoqOptions } from "./options.ts";
+import { defaultProbeIntervalMs, defaultProbeMaxAgeMs, defaultProbeMaxDelta } from "./options.ts";
+import { ProbeResult } from "./probe.ts";
 
 function cancelStreamWithError(stream: Stream, code: number): void {
 	stream.readable.cancel(code).catch(() => {});
@@ -52,7 +53,7 @@ export interface SessionInit {
 	/** The underlying WebTransport (or compatible) stream connection. */
 	transport: StreamConn;
 
-	/** Track multiplexer used for incoming subscribe and announce handling. */
+	/** {@link TrackMux} for incoming track routing. Defaults to {@link DefaultTrackMux}. */
 	mux?: TrackMux;
 
 	/** Handler invoked for incoming fetch requests. */
@@ -60,6 +61,9 @@ export interface SessionInit {
 
 	/** Called when the server requests session migration via GOAWAY. */
 	onGoaway?: (newSessionURI: string) => void;
+
+	/** MOQ tuning options (probe intervals, thresholds, etc.). */
+	options?: MoqOptions;
 }
 
 /**
@@ -89,11 +93,27 @@ export class Session {
 		Queue<[ReceiveStream, GroupMessage]>
 	> = new Map();
 
+	#probeStream?: Stream;
+	#probeResponseQueue: Queue<ProbeResult> = new Queue();
+	#probeResponseGen?: AsyncGenerator<ProbeResult>;
+	#probeStreamClosed: boolean = false;
+
+	#incomingProbeStream?: Stream;
+	#probeTargetsQueue: Queue<ProbeResult> = new Queue();
+	#probeTargetsGen?: AsyncGenerator<ProbeResult>;
+
+	#probeIntervalMs: number;
+	#probeMaxAgeMs: number;
+	#probeMaxDelta: number;
+
 	constructor(options: SessionInit) {
 		this.#webtransport = options.transport;
 		this.mux = options.mux ?? DefaultTrackMux;
 		this.#fetchHandler = options.fetchHandler;
 		this.#onGoaway = options.onGoaway;
+		this.#probeIntervalMs = options.options?.probeIntervalMs ?? defaultProbeIntervalMs;
+		this.#probeMaxAgeMs = options.options?.probeMaxAgeMs ?? defaultProbeMaxAgeMs;
+		this.#probeMaxDelta = options.options?.probeMaxDelta ?? defaultProbeMaxDelta;
 		const [ctx, cancel] = withCancelCause(background());
 		this.#ctx = ctx;
 		this.#cancelFunc = cancel;
@@ -137,37 +157,124 @@ export class Session {
 	}
 
 	/**
-	 * Send a PROBE to estimate available bandwidth.
-	 * @param bitrate - Target bitrate in bits per second.
-	 * @returns The measured bitrate on success, or an Error.
+	 * Send a target bitrate hint to the publisher and return a channel that
+	 * receives measured bitrates reported by the publisher.
+	 * Calling `probe` again on the same session updates the target bitrate;
+	 * the same {@link AsyncGenerator} is returned on subsequent calls.
+	 * The generator ends when the session terminates.
+	 *
+	 * Mirrors Go's `Session.Probe(targetBitrate uint64) (<-chan ProbeResult, error)`.
+	 *
+	 * @param targetBitrate - Target bitrate hint in bits per second.
+	 * @returns The shared result channel, or an Error if the stream cannot be opened.
 	 */
-	async probe(bitrate: number): Promise<[number, undefined] | [undefined, Error]> {
+	async probe(
+		targetBitrate: number,
+	): Promise<[AsyncGenerator<ProbeResult>, undefined] | [undefined, Error]> {
+		if (this.#ctx.err()) {
+			return [undefined, new Error("session is closing")];
+		}
+
+		if (!this.#probeStream || this.#probeStreamClosed) {
+			const openErr = await this.#openProbeStream();
+			if (openErr) {
+				return [undefined, openErr];
+			}
+		}
+
+		const stream = this.#probeStream!;
+		const req = new ProbeMessage({ bitrate: targetBitrate });
+		const err = await req.encode(stream.writable);
+		if (err) {
+			console.error("moq: failed to send PROBE message:", err);
+			cancelStreamWithError(stream, ProbeErrorCode.Internal);
+			return [undefined, err];
+		}
+
+		if (!this.#probeResponseGen) {
+			this.#probeResponseGen = this.#makeProbeResponseGen();
+		}
+		return [this.#probeResponseGen, undefined];
+	}
+
+	async *#makeProbeResponseGen(): AsyncGenerator<ProbeResult> {
+		while (true) {
+			const result = await this.#probeResponseQueue.dequeue();
+			if (result === undefined) return;
+			yield result;
+		}
+	}
+
+	/**
+	 * Returns a channel that yields the latest target bitrate hints sent by
+	 * the subscriber via PROBE messages.
+	 * The same {@link AsyncGenerator} is returned on every call.
+	 * The generator ends when the session terminates.
+	 *
+	 * Mirrors Go's `Session.ProbeTargets() <-chan ProbeResult`.
+	 */
+	probeTargets(): AsyncGenerator<ProbeResult> {
+		if (!this.#probeTargetsGen) {
+			this.#probeTargetsGen = this.#makeProbeTargetsGen();
+		}
+		return this.#probeTargetsGen;
+	}
+
+	async *#makeProbeTargetsGen(): AsyncGenerator<ProbeResult> {
+		while (true) {
+			const result = await this.#probeTargetsQueue.dequeue();
+			if (result === undefined) return;
+			yield result;
+		}
+	}
+
+	async #openProbeStream(): Promise<Error | undefined> {
 		const [stream, openErr] = await this.#webtransport.openStream();
 		if (openErr) {
 			console.error("moq: failed to open probe stream:", openErr);
-			return [undefined, openErr];
+			return openErr;
 		}
 
-		let [, err] = await writeVarint(stream.writable, BiStreamTypes.ProbeStreamType);
+		const [, err] = await writeVarint(stream.writable, BiStreamTypes.ProbeStreamType);
 		if (err) {
 			console.error("moq: failed to open probe stream:", err);
-			return [undefined, err];
+			cancelStreamWithError(stream, ProbeErrorCode.Internal);
+			return err;
 		}
 
-		err = await new ProbeMessage({ bitrate }).encode(stream.writable);
-		if (err) {
-			console.error("moq: failed to send PROBE message:", err);
-			return [undefined, err];
-		}
+		this.#probeStream = stream;
+		this.#probeStreamClosed = false;
+		this.#readProbeResponses(stream).catch((err) => {
+			console.warn("moq: probe stream reader failed:", err);
+		});
+		return undefined;
+	}
 
-		const rsp = new ProbeMessage({});
-		err = await rsp.decode(stream.readable);
-		if (err) {
-			console.error("moq: failed to receive PROBE response:", err);
-			return [undefined, err];
-		}
+	async #readProbeResponses(stream: Stream): Promise<void> {
+		try {
+			for (;;) {
+				const rsp = new ProbeMessage({});
+				const err = await rsp.decode(stream.readable);
+				if (err) {
+					if (err instanceof EOFError) {
+						return;
+					}
+					throw err;
+				}
 
-		return [rsp.bitrate, undefined];
+				await this.#probeResponseQueue.enqueue({ bitrate: rsp.bitrate });
+			}
+		} catch (err) {
+			if (!this.#ctx.err()) {
+				console.warn(`moq: probe stream error: ${err}`);
+				cancelStreamWithError(stream, ProbeErrorCode.Internal);
+			}
+		} finally {
+			this.#probeStreamClosed = true;
+			if (this.#probeStream === stream) {
+				this.#probeStream = undefined;
+			}
+		}
 	}
 
 	/**
@@ -416,9 +523,12 @@ export class Session {
 
 	async #handleProbeStream(stream: Stream): Promise<void> {
 		const quic = this.#webtransport as unknown as ProbeStatsCapable;
-		if (!quic.getStats) {
-			cancelStreamWithError(stream, PROBE_STREAM_ERROR_CODE);
-			return;
+
+		this.#setIncomingProbeStream(stream);
+		if (quic.getStats) {
+			this.#detectProbeStats(stream, quic).catch((err) => {
+				console.warn(`moq: probe detection failed: ${err}`);
+			});
 		}
 
 		try {
@@ -432,10 +542,13 @@ export class Session {
 					throw err;
 				}
 
-				const stats = await quic.getStats();
-				const bitrate = stats.estimatedSendRate;
-				if (bitrate == null) {
-					continue;
+				// Notify publisher-side consumers of the new target bitrate.
+				this.#probeTargetsQueue.enqueue({ bitrate: req.bitrate }).catch(() => {});
+
+				let bitrate = 0;
+				if (quic.getStats) {
+					const stats = await quic.getStats();
+					bitrate = stats.estimatedSendRate ?? 0;
 				}
 
 				const rsp = new ProbeMessage({ bitrate, rtt: req.rtt });
@@ -445,8 +558,62 @@ export class Session {
 				}
 			}
 		} catch (err) {
-			console.warn(`moq: probe stream error: ${err}`);
-			cancelStreamWithError(stream, PROBE_STREAM_ERROR_CODE);
+			if (!this.#ctx.err()) {
+				console.warn(`moq: probe stream error: ${err}`);
+				cancelStreamWithError(stream, ProbeErrorCode.Internal);
+			}
+		} finally {
+			this.#clearIncomingProbeStream(stream);
+		}
+	}
+
+	#setIncomingProbeStream(stream: Stream): void {
+		if (this.#incomingProbeStream && this.#incomingProbeStream !== stream) {
+			cancelStreamWithError(this.#incomingProbeStream, ProbeErrorCode.Internal);
+		}
+		this.#incomingProbeStream = stream;
+	}
+
+	#clearIncomingProbeStream(stream: Stream): void {
+		if (this.#incomingProbeStream === stream) {
+			this.#incomingProbeStream = undefined;
+		}
+	}
+
+	async #detectProbeStats(stream: Stream, quic: ProbeStatsCapable): Promise<void> {
+		let lastBitrate = 0;
+		let lastSentAt = 0;
+		let firstSent = false;
+
+		while (true) {
+			if (this.#ctx.err()) {
+				return;
+			}
+
+			const stats = await quic.getStats!();
+			const bitrate = stats.estimatedSendRate;
+			const now = Date.now();
+			if (bitrate != null) {
+				const shouldSend = !firstSent ||
+					now - lastSentAt >= this.#probeMaxAgeMs ||
+					(lastBitrate === 0
+						? bitrate !== 0
+						: Math.abs(bitrate - lastBitrate) / lastBitrate >= this.#probeMaxDelta);
+				if (shouldSend) {
+					const rsp = new ProbeMessage({ bitrate, rtt: 0 });
+					const err = await rsp.encode(stream.writable);
+					if (err) {
+						cancelStreamWithError(stream, ProbeErrorCode.Internal);
+						return;
+					}
+
+					firstSent = true;
+					lastBitrate = bitrate;
+					lastSentAt = now;
+				}
+			}
+
+			await new Promise((resolve) => setTimeout(resolve, this.#probeIntervalMs));
 		}
 	}
 
@@ -629,6 +796,16 @@ export class Session {
 			reason: "No Error",
 		});
 
+		if (this.#incomingProbeStream) {
+			cancelStreamWithError(this.#incomingProbeStream, ProbeErrorCode.Internal);
+		}
+		if (this.#probeStream) {
+			cancelStreamWithError(this.#probeStream, ProbeErrorCode.Internal);
+		}
+
+		this.#probeResponseQueue.close();
+		this.#probeTargetsQueue.close();
+
 		try {
 			console.log(
 				`Session.close: waiting for ${this.#wg.length} background tasks`,
@@ -658,6 +835,16 @@ export class Session {
 			closeCode: code,
 			reason: message,
 		});
+
+		if (this.#incomingProbeStream) {
+			cancelStreamWithError(this.#incomingProbeStream, ProbeErrorCode.Internal);
+		}
+		if (this.#probeStream) {
+			cancelStreamWithError(this.#probeStream, ProbeErrorCode.Internal);
+		}
+
+		this.#probeResponseQueue.close();
+		this.#probeTargetsQueue.close();
 
 		try {
 			console.log(

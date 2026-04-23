@@ -1,6 +1,5 @@
 import { Session } from "./session.ts";
 import type { ConnectInit } from "./options.ts";
-import { DefaultTrackMux } from "./track_mux.ts";
 import { WebTransportSession } from "./internal/webtransport/mod.ts";
 
 /** ALPN protocol identifier for MOQ Lite draft-04. */
@@ -47,7 +46,6 @@ export async function connect(
 	url: string | URL,
 	init?: ConnectInit,
 ): Promise<Session> {
-	const mux = init?.mux ?? DefaultTrackMux;
 	const transportOptions: WebTransportOptions = {
 		...DefaultWebTransportOptions,
 		...(init?.transportOptions ?? {}),
@@ -60,8 +58,10 @@ export async function connect(
 		const transport = new WebTransportSession(factory(url, transportOptions));
 		const session = new Session({
 			transport,
-			mux,
+			mux: init?.mux,
+			fetchHandler: init?.fetchHandler,
 			onGoaway: init?.onGoaway,
+			options: init?.options,
 		});
 		await session.ready;
 		return session;

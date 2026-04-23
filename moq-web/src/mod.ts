@@ -36,3 +36,4 @@ export * from "./broadcast.ts";
 export * from "./error.ts";
 export * from "./fetch.ts";
 export * from "./frame.ts";
+export * from "./probe.ts";

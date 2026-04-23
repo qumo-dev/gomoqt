@@ -275,3 +275,47 @@ export class GroupError extends WebTransportStreamError {
 		Object.setPrototypeOf(this, GroupError.prototype);
 	}
 }
+
+// =============================================================================
+// Probe Error Codes
+// =============================================================================
+
+/** Error codes for probe stream failures. Mirrors Go's `moqt.ProbeErrorCode`. */
+export const ProbeErrorCode = {
+	/** Internal error */
+	Internal: 0x00,
+	/** Timeout */
+	Timeout: 0x01,
+	/** Not supported */
+	NotSupported: 0x02,
+} as const;
+
+/** Numeric probe error code type. */
+export type ProbeErrorCode = number;
+
+/** Error representing a probe stream failure. */
+export class ProbeError extends WebTransportStreamError {
+	override get code(): ProbeErrorCode {
+		return super.code as ProbeErrorCode;
+	}
+
+	static textOf(code: ProbeErrorCode): string {
+		switch (code) {
+			case ProbeErrorCode.Internal:
+				return "internal error";
+			case ProbeErrorCode.Timeout:
+				return "timeout";
+			case ProbeErrorCode.NotSupported:
+				return "not supported";
+			default:
+				return `unknown probe error (${code})`;
+		}
+	}
+
+	constructor(code: ProbeErrorCode, remote: boolean) {
+		super({ source: "stream", streamErrorCode: code }, remote);
+		this.message = ProbeError.textOf(code);
+		this.name = "ProbeError";
+		Object.setPrototypeOf(this, ProbeError.prototype);
+	}
+}

@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
-import type { ConnectInit, MOQOptions } from "./options.ts";
+import type { ConnectInit, MoqOptions } from "./options.ts";
+import { defaultProbeIntervalMs, defaultProbeMaxAgeMs, defaultProbeMaxDelta } from "./options.ts";
 
 // Test configuration to ignore resource leaks from background operations
 const testOptions = {
@@ -7,26 +8,35 @@ const testOptions = {
 	sanitizeOps: false,
 };
 
-Deno.test("MOQOptions", testOptions, async (t) => {
+Deno.test("MoqOptions", testOptions, async (t) => {
 	await t.step("should allow empty options", () => {
 		// All options should be optional
-		const emptyOptions: MOQOptions = {};
-		assertEquals(emptyOptions.transportOptions, undefined);
+		const emptyOptions: MoqOptions = {};
+		assertEquals(emptyOptions.probeIntervalMs, undefined);
+		assertEquals(emptyOptions.probeMaxAgeMs, undefined);
+		assertEquals(emptyOptions.probeMaxDelta, undefined);
 	});
 
-	await t.step("should support transportOptions", () => {
-		const transportOptions: WebTransportOptions = {
-			allowPooling: true,
-			congestionControl: "throughput",
+	await t.step("should use defaults when fields are absent", () => {
+		const options: MoqOptions = {};
+		const intervalMs = options.probeIntervalMs ?? defaultProbeIntervalMs;
+		const maxAgeMs = options.probeMaxAgeMs ?? defaultProbeMaxAgeMs;
+		const maxDelta = options.probeMaxDelta ?? defaultProbeMaxDelta;
+		assertEquals(intervalMs, defaultProbeIntervalMs);
+		assertEquals(maxAgeMs, defaultProbeMaxAgeMs);
+		assertEquals(maxDelta, defaultProbeMaxDelta);
+	});
+
+	await t.step("should support custom probe options", () => {
+		const options: MoqOptions = {
+			probeIntervalMs: 50,
+			probeMaxAgeMs: 5_000,
+			probeMaxDelta: 0.05,
 		};
 
-		const options: MOQOptions = {
-			transportOptions: transportOptions,
-		};
-
-		assertEquals(options.transportOptions, transportOptions);
-		assertEquals(options.transportOptions?.allowPooling, true);
-		assertEquals(options.transportOptions?.congestionControl, "throughput");
+		assertEquals(options.probeIntervalMs, 50);
+		assertEquals(options.probeMaxAgeMs, 5_000);
+		assertEquals(options.probeMaxDelta, 0.05);
 	});
 });
 

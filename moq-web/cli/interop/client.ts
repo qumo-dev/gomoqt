@@ -88,7 +88,7 @@ export async function runClient(
 			mux,
 			transportOptions,
 			onGoaway: (newSessionURI: string) => {
-				console.log(`Received GOAWAY (newSessionURI: ${newSessionURI})`);
+				console.log(`ok (newSessionURI: ${newSessionURI})`);
 				if (goawayResolve) goawayResolve(newSessionURI);
 			},
 		}));
@@ -132,9 +132,13 @@ export async function runClient(
 
 	// Step 3: Probe the server bitrate (before Fetch to ensure connection is still up)
 	await step("Probing server bitrate", async () => {
-		const [measuredBitrate, err] = await session.probe(1_000_000);
+		const [resultGen, err] = await session.probe(1_000_000);
 		if (err) throw err;
-		info(`Probe result: ${measuredBitrate} bps`);
+		const result = await resultGen!.next();
+		if (result.done || result.value === undefined) {
+			throw new Error("probe stream ended without result");
+		}
+		info(`Probe result: ${result.value.bitrate} bps`);
 	});
 
 	// Step 4: Fetch a single group from the server
@@ -163,21 +167,27 @@ export async function runClient(
 	debug("Operations completed");
 
 	if (!done) {
+		let doneTimerId: ReturnType<typeof setTimeout>;
+		const doneTimeout = new Promise<void>((resolve) => {
+			doneTimerId = setTimeout(() => resolve(), 5000);
+		});
 		await Promise.race([
 			new Promise<void>((resolve) => doneCh.push(resolve)),
-			new Promise<void>((resolve) => setTimeout(() => resolve(), 5000)),
+			doneTimeout,
 		]);
+		clearTimeout(doneTimerId!);
 	}
 
 	// Wait for GOAWAY from server (non-fatal timeout, matching Go client behavior)
 	await write("Waiting for GOAWAY...");
-	const goawayURI = await Promise.race([
-		goawayPromise,
-		new Promise<string>((resolve) => setTimeout(() => resolve(""), 10000)),
-	]);
+	let goawayTimerId: ReturnType<typeof setTimeout>;
+	const goawayTimeout = new Promise<string>((resolve) => {
+		goawayTimerId = setTimeout(() => resolve(""), 5000);
+	});
+	const goawayURI = await Promise.race([goawayPromise, goawayTimeout]);
+	clearTimeout(goawayTimerId!);
 	if (goawayURI) {
 		console.log(" ok");
-		info(`newSessionURI: ${goawayURI}`);
 	} else {
 		console.log(" failed: timed out");
 	}

@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 
 - **moqt:** `Session.ProbeTargets() <-chan ProbeResult` — publisher-side channel for the latest subscriber target bitrate (buffered 1, latest-value semantics).
+- **moq-web:** added TypeScript `Session.probe()` support with `ProbeResult` handling for interop client bitrate measurement.
 
 ### Changed
 

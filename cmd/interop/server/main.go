@@ -180,6 +180,20 @@ func runInteropSession(sess *moqt.Session, mux *moqt.TrackMux, serverDone chan s
 	}
 	fmt.Printf("ok (payload: %s)\n", string(frame.Body()))
 
+	// Probe client bitrate (server → client direction)
+	fmt.Print("Probing client bitrate...")
+	probeCh, err := sess.Probe(1_000_000)
+	if err != nil {
+		fmt.Printf("failed\n  Error: %v\n", err)
+		return
+	}
+	probeResult, ok := <-probeCh
+	if !ok {
+		fmt.Printf("failed\n  Error: probe stream closed without result\n")
+		return
+	}
+	fmt.Printf("ok (measured: %d bps)\n", probeResult.Bitrate)
+
 	// Signal the server to start graceful shutdown (sends GOAWAY to all sessions).
 	select {
 	case serverDone <- struct{}{}:

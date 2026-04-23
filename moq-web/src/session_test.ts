@@ -405,7 +405,11 @@ Deno.test({
 				const actualResponse = new Uint8Array(
 					written.flatMap((chunk) => Array.from(chunk)),
 				);
-				assertEquals(actualResponse, expectedResponse);
+				assertEquals(
+					actualResponse.subarray(0, expectedResponse.length),
+					expectedResponse,
+				);
+				assertEquals(actualResponse.length >= expectedResponse.length, true);
 
 				await session.close();
 			},
@@ -424,9 +428,11 @@ Deno.test({
 				const session = new Session({ transport: mock });
 				await session.ready;
 
-				const [got, err] = await session.probe(1234);
+				const [gen, err] = await session.probe(1234);
 				assertEquals(err, undefined);
-				assertEquals(got, 4321);
+				const result = await gen!.next();
+				assertEquals(result.done, false);
+				assertEquals(result.value?.bitrate, 4321);
 
 				const written = mock.openStreamWrittenData[0] ?? [];
 				const actualRequest = new Uint8Array(written.flatMap((chunk) => Array.from(chunk)));
@@ -435,6 +441,71 @@ Deno.test({
 					return await new ProbeMessage({ bitrate: 1234 }).encode(w);
 				});
 				assertEquals(actualRequest, expectedRequest);
+
+				await session.close();
+			},
+		);
+
+		await t.step(
+			"incoming probe stream sends initial bitrate and updates on change",
+			async () => {
+				const stats = { estimatedSendRate: 4321 };
+				const req = new ProbeMessage({ bitrate: 1234, rtt: 10 });
+				const reqBytes = await encodeMessageToUint8Array(async (w) => {
+					await writeVarint(w, BiStreamTypes.ProbeStreamType);
+					return await req.encode(w);
+				});
+				const mock = new MockWebTransportSession({
+					acceptStreamData: [{ type: BiStreamTypes.ProbeStreamType, data: reqBytes }],
+					stats,
+				});
+
+				const session = new Session({ transport: mock });
+				await session.ready;
+
+				await new Promise((resolve) => setTimeout(resolve, 200));
+				const initialWrites = mock.acceptStreamWrittenData[0]?.length ?? 0;
+				assertEquals(initialWrites >= 1, true);
+
+				stats.estimatedSendRate = 9876;
+				await new Promise((resolve) => setTimeout(resolve, 500));
+
+				const laterWrites = mock.acceptStreamWrittenData[0]?.length ?? 0;
+				console.log("probe update writes", { initialWrites, laterWrites });
+				assertEquals(laterWrites > initialWrites, true);
+
+				await session.close();
+			},
+		);
+
+		await t.step(
+			"probe reuses the same stream and supports queued responses",
+			async () => {
+				const rsp1 = new ProbeMessage({ bitrate: 4321 });
+				const rsp2 = new ProbeMessage({ bitrate: 9876 });
+				const rspBytes1 = await encodeMessageToUint8Array(async (w) => rsp1.encode(w));
+				const rspBytes2 = await encodeMessageToUint8Array(async (w) => rsp2.encode(w));
+				const mock = new MockWebTransportSession({
+					openStreamResponses: [new Uint8Array([...rspBytes1, ...rspBytes2])],
+				});
+
+				const session = new Session({ transport: mock });
+				await session.ready;
+
+				const [gen1, err1] = await session.probe(1234);
+				assertEquals(err1, undefined);
+				const r1 = await gen1!.next();
+				assertEquals(r1.done, false);
+				assertEquals(r1.value?.bitrate, 4321);
+
+				const [gen2, err2] = await session.probe(5678);
+				assertEquals(err2, undefined);
+				assertEquals(gen2, gen1); // same generator returned
+				const r2 = await gen2!.next();
+				assertEquals(r2.done, false);
+				assertEquals(r2.value?.bitrate, 9876);
+
+				assertEquals(mock.openStreamWrittenData.length, 1);
 
 				await session.close();
 			},
