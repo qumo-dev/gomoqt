@@ -1042,47 +1042,53 @@ Deno.test({
 			await session.close();
 		});
 
-		await t.step("getStats populates rtt, bytesSent, bytesReceived from transport getStats", async () => {
-			const mock = new MockWebTransportSession({
-				stats: {
-					smoothedRtt: 42,
-					bytesSent: 1000,
-					bytesReceived: 2000,
-				},
-			});
+		await t.step(
+			"getStats populates rtt, bytesSent, bytesReceived from transport getStats",
+			async () => {
+				const mock = new MockWebTransportSession({
+					stats: {
+						smoothedRtt: 42,
+						bytesSent: 1000,
+						bytesReceived: 2000,
+					},
+				});
 
-			const session = new Session({ transport: mock });
-			await session.ready;
+				const session = new Session({ transport: mock });
+				await session.ready;
 
-			const stats: SessionStats = await session.getStats();
-			assertEquals(stats.rtt, 42);
-			assertEquals(stats.bytesSent, 1000);
-			assertEquals(stats.bytesReceived, 2000);
-			assertEquals(stats.estimatedBitrate, 0);
+				const stats: SessionStats = await session.getStats();
+				assertEquals(stats.rtt, 42);
+				assertEquals(stats.bytesSent, 1000);
+				assertEquals(stats.bytesReceived, 2000);
+				assertEquals(stats.estimatedBitrate, 0);
 
-			await session.close();
-		});
+				await session.close();
+			},
+		);
 
-		await t.step("getStats reflects estimatedBitrate after probe response received", async () => {
-			const rsp = new ProbeMessage({ bitrate: 5000 });
-			const rspBytes = await encodeMessageToUint8Array(async (w) => rsp.encode(w));
+		await t.step(
+			"getStats reflects estimatedBitrate after probe response received",
+			async () => {
+				const rsp = new ProbeMessage({ bitrate: 5000 });
+				const rspBytes = await encodeMessageToUint8Array(async (w) => rsp.encode(w));
 
-			const mock = new MockWebTransportSession({
-				openStreamResponses: [rspBytes],
-			});
+				const mock = new MockWebTransportSession({
+					openStreamResponses: [rspBytes],
+				});
 
-			const session = new Session({ transport: mock });
-			await session.ready;
+				const session = new Session({ transport: mock });
+				await session.ready;
 
-			const [gen, err] = await session.probe(1234);
-			assertEquals(err, undefined);
-			await gen!.next();
+				const [gen, err] = await session.probe(1234);
+				assertEquals(err, undefined);
+				await gen!.next();
 
-			const stats: SessionStats = await session.getStats();
-			assertEquals(stats.estimatedBitrate, 5000);
+				const stats: SessionStats = await session.getStats();
+				assertEquals(stats.estimatedBitrate, 5000);
 
-			await session.close();
-		});
+				await session.close();
+			},
+		);
 
 		await t.step("getStats reflects estimatedBitrate set by detectProbeStats", async () => {
 			const req = new ProbeMessage({ bitrate: 1234 });
