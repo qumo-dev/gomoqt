@@ -9,19 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **moqt:** `Session.ProbeTargets() <-chan ProbeResult` — publisher-side channel for the latest subscriber target bitrate (buffered 1, latest-value semantics).
-- **moq-web:** `Session.probe()` support with `ProbeResult` handling for bitrate measurement.
-
-### Changed
-
-- Repository owner changed from `okdaichi` to `qumo-dev`.
-- **moqt:** `Session.Probe()` reuses the same stream on repeated calls; the channel is closed when the stream or session ends.
-- **moqt:** `ProbeResult.RTT` removed; RTT is available via the underlying transport API.
-- **moqt:** Publisher now enforces a single active incoming probe stream; a new stream cancels the previous one.
-
-### Fixed
-
-- **moqt:** Fixed probe stream cleanup on session or stream close.
+- **moqt:** `Session.Stats()` returns `SessionStats` with estimated bitrate, transport RTT, bytes sent, and bytes received.
 
 ## [v0.14.0] - 2026-04-23
 

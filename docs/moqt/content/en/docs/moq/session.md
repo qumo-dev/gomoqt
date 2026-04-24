@@ -19,6 +19,7 @@ func (s *Session) AcceptAnnounce(prefix string) (*AnnouncementReader, error)
 func (s *Session) Fetch(req *FetchRequest) (*GroupReader, error)
 func (s *Session) Probe(targetBitrate uint64) (<-chan ProbeResult, error)
 func (s *Session) ProbeTargets() <-chan ProbeResult
+func (s *Session) Stats() SessionStats
 func (s *Session) CloseWithError(code SessionErrorCode, msg string) error
 func (s *Session) Context() context.Context
 func (s *Session) ConnectionState() ConnectionState
@@ -44,6 +45,29 @@ The `ConnectionState` struct contains:
 |-----------|---------------------------|---------------------------------------------|
 | `Version` | `string`                  | The negotiated MOQ protocol version (e.g., `"moq-lite-04"`) |
 | `TLS`     | `*tls.ConnectionState`     | TLS connection state when available          |
+
+## Connection Statistics
+
+Use `Session.Stats()` to fetch a point-in-time snapshot of the session's observable metrics.
+
+```go
+stats := sess.Stats()
+fmt.Printf("estimated bitrate=%d bps\n", stats.EstimatedBitrate)
+fmt.Printf("rtt=%s\n", stats.RTT)
+fmt.Printf("bytes sent=%d\n", stats.BytesSent)
+fmt.Printf("bytes received=%d\n", stats.BytesReceived)
+```
+
+`SessionStats` includes:
+
+| Field             | Type           | Description |
+|------------------|----------------|-------------|
+| `EstimatedBitrate` | `uint64`       | Latest measured outbound bitrate from the probe mechanism. Zero until a measurement is available. |
+| `RTT`            | `time.Duration`| Smoothed round-trip time from the underlying transport. Zero when unavailable. |
+| `BytesSent`      | `uint64`       | Total bytes sent on the underlying connection. Zero when unavailable. |
+| `BytesReceived`  | `uint64`       | Total bytes received on the underlying connection. Zero when unavailable. |
+
+The values are zero when the current transport does not expose the corresponding metrics, such as some WebTransport browser sessions.
 
 ## Subscribe to a Track
 

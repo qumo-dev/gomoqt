@@ -22,8 +22,8 @@ type ProbeResult struct {
 |-----------|----------|----------------------------------------------------------------|
 | `Bitrate` | `uint64` | The measured bitrate in bits per second. 0 means unknown.      |
 
-> **Note:** RTT is not included in `ProbeResult`. Use the underlying
-> transport API (e.g. `(*quic.Conn).ConnectionStats()`) to obtain RTT.
+> **Note:** RTT is not included in `ProbeResult`.
+> Use `Session.Stats()` or the underlying transport API (e.g. `(*quic.Conn).ConnectionStats()`) to obtain RTT, bytes sent, and bytes received.
 
 ## Notify Target Bitrate
 
