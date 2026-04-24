@@ -44,9 +44,31 @@ function cancelStreamWithError(stream: Stream, code: number): void {
 	stream.writable.cancel(code).catch(() => {});
 }
 
-type ProbeStatsCapable = {
-	getStats?: () => Promise<{ estimatedSendRate: number | null }>;
+type TransportStats = {
+	estimatedSendRate?: number | null;
+	smoothedRtt?: number;
+	bytesSent?: number;
+	bytesReceived?: number;
 };
+
+type TransportStatsCapable = {
+	getStats?: () => Promise<TransportStats>;
+};
+
+/**
+ * A snapshot of statistics for a {@link Session}.
+ * Fields are 0 when not yet measured or not available.
+ */
+export interface SessionStats {
+	/** Estimated outbound bitrate in bits per second (0 until measured via probe). */
+	estimatedBitrate: number;
+	/** Smoothed round-trip time in milliseconds (0 when not available). */
+	rtt: number;
+	/** Total bytes sent on the underlying connection (0 when not available). */
+	bytesSent: number;
+	/** Total bytes received on the underlying connection (0 when not available). */
+	bytesReceived: number;
+}
 
 /** Options for constructing a {@link Session}. */
 export interface SessionInit {
@@ -105,6 +127,8 @@ export class Session {
 	#probeIntervalMs: number;
 	#probeMaxAgeMs: number;
 	#probeMaxDelta: number;
+
+	#estimatedBitrate: number = 0;
 
 	constructor(options: SessionInit) {
 		this.#webtransport = options.transport;
@@ -262,6 +286,7 @@ export class Session {
 					throw err;
 				}
 
+				this.#estimatedBitrate = rsp.bitrate;
 				await this.#probeResponseQueue.enqueue({ bitrate: rsp.bitrate });
 			}
 		} catch (err) {
@@ -522,7 +547,7 @@ export class Session {
 	}
 
 	async #handleProbeStream(stream: Stream): Promise<void> {
-		const quic = this.#webtransport as unknown as ProbeStatsCapable;
+		const quic = this.#webtransport as unknown as TransportStatsCapable;
 
 		this.#setIncomingProbeStream(stream);
 		if (quic.getStats) {
@@ -580,7 +605,7 @@ export class Session {
 		}
 	}
 
-	async #detectProbeStats(stream: Stream, quic: ProbeStatsCapable): Promise<void> {
+	async #detectProbeStats(stream: Stream, quic: TransportStatsCapable): Promise<void> {
 		let lastBitrate = 0;
 		let lastSentAt = 0;
 		let firstSent = false;
@@ -610,6 +635,7 @@ export class Session {
 					firstSent = true;
 					lastBitrate = bitrate;
 					lastSentAt = now;
+					this.#estimatedBitrate = bitrate;
 				}
 			}
 
@@ -780,6 +806,35 @@ export class Session {
 				await Promise.allSettled(pendingHandles);
 			}
 		}
+	}
+
+	/**
+	 * Returns a snapshot of current session statistics.
+	 *
+	 * Mirrors Go's `Session.Stats() SessionStats`.
+	 * RTT, bytes sent/received are populated from the underlying transport's
+	 * `getStats()` when available (standard WebTransport API); all fields
+	 * default to `0` when not yet measured or not supported.
+	 *
+	 * @returns A {@link SessionStats} snapshot.
+	 */
+	async getStats(): Promise<SessionStats> {
+		const stats: SessionStats = {
+			estimatedBitrate: this.#estimatedBitrate,
+			rtt: 0,
+			bytesSent: 0,
+			bytesReceived: 0,
+		};
+
+		const transport = this.#webtransport as unknown as TransportStatsCapable;
+		if (transport.getStats) {
+			const wtStats = await transport.getStats();
+			stats.rtt = wtStats.smoothedRtt ?? 0;
+			stats.bytesSent = wtStats.bytesSent ?? 0;
+			stats.bytesReceived = wtStats.bytesReceived ?? 0;
+		}
+
+		return stats;
 	}
 
 	/** Gracefully close the session. */

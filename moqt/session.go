@@ -59,6 +59,10 @@ type Session struct {
 	incomingProbeMu     sync.Mutex
 	incomingProbeStream transport.Stream
 	probeTargetsCh      chan ProbeResult
+
+	// estimatedBitrate is the most recently measured outbound bitrate in bps.
+	// Updated by detectBitrateChanges; zero until the first measurement.
+	estimatedBitrate atomic.Uint64
 }
 
 func newSession(
@@ -155,6 +159,24 @@ func (s *Session) RemoteAddr() net.Addr {
 		return nil
 	}
 	return s.conn.RemoteAddr()
+}
+
+// Stats returns a point-in-time snapshot of the session's operational metrics.
+// It never returns an error; fields that cannot be measured on the current
+// transport (e.g. RTT on a WebTransport/Browser session) are zero.
+func (s *Session) Stats() SessionStats {
+	stats := SessionStats{
+		EstimatedBitrate: s.estimatedBitrate.Load(),
+	}
+
+	if provider, ok := s.conn.(probeStatsProvider); ok {
+		cs := provider.ConnectionStats()
+		stats.RTT = cs.SmoothedRTT
+		stats.BytesSent = cs.BytesSent
+		stats.BytesReceived = cs.BytesReceived
+	}
+
+	return stats
 }
 
 // CloseWithError closes the session with an error code and message.
@@ -418,6 +440,31 @@ func (sess *Session) AcceptAnnounce(prefix string) (*AnnouncementReader, error) 
 	return newAnnouncementReader(stream, prefix, nil), nil
 }
 
+// SessionStats is a point-in-time snapshot of a Session's operational metrics.
+// It is safe to copy by value and never returns an error.
+//
+// The design follows the NATS [nats.Statistics] pattern: a single flat struct
+// containing all observable values, with zero as the canonical "not available"
+// sentinel (e.g. RTT and byte counters are zero on WebTransport/Browser sessions
+// where the underlying transport does not expose them).
+type SessionStats struct {
+	// EstimatedBitrate is the most recently measured outbound bitrate in bits
+	// per second, derived from the Probe mechanism. Zero until the first
+	// measurement is available.
+	EstimatedBitrate uint64
+
+	// RTT is the smoothed round-trip time as reported by the QUIC congestion
+	// controller (RFC 9002 §5.3). Zero when the underlying transport does not
+	// expose RTT (e.g. WebTransport browser sessions).
+	RTT time.Duration
+	// BytesSent is the cumulative number of bytes sent on the underlying
+	// connection, excluding UDP framing. Zero when unavailable.
+	BytesSent uint64
+	// BytesReceived is the cumulative number of bytes received on the
+	// underlying connection, excluding UDP framing. Zero when unavailable.
+	BytesReceived uint64
+}
+
 // ProbeResult holds the result of a Probe request.
 type ProbeResult struct {
 	// Bitrate is the measured bitrate in bits per second. A value of 0 means unknown.
@@ -456,9 +503,29 @@ func (sess *Session) Probe(targetBitrate uint64) (<-chan ProbeResult, error) {
 			return nil, fmt.Errorf("failed to encode stream type message: %w", err)
 		}
 
-		probeStream = stream
+		sess.wg.Go(func() {
+			// Read PROBE responses until the stream is closed or an error occurs.
+			streamCtx := stream.Context()
+			for {
+				var pm message.ProbeMessage
+				if err := pm.Decode(stream); err != nil {
+					if !errors.Is(err, io.EOF) {
+						sess.logError("failed to decode PROBE message", err)
+						cancelStreamWithError(stream, transport.StreamErrorCode(ProbeErrorCodeInternal))
+					}
+					return
+				}
+				select {
+				case sess.probeResponseCh <- ProbeResult{
+					Bitrate: pm.Bitrate,
+				}:
+				case <-streamCtx.Done():
+					return
+				}
+			}
+		})
 
-		sess.wg.Go(func() { sess.readProbeResults(stream) })
+		probeStream = stream
 	}
 
 	// Send PROBE with the new target bitrate. Per draft4 the subscriber MAY send
@@ -480,26 +547,6 @@ func (sess *Session) Probe(targetBitrate uint64) (<-chan ProbeResult, error) {
 	sess.outgoingProbeStream = probeStream
 
 	return sess.probeResponseCh, nil
-}
-
-// readProbeResults reads publisher PROBE messages from stream and forwards them to
-// probeResponseCh. The channel is closed by CloseWithError after all wg goroutines finish.
-func (sess *Session) readProbeResults(stream transport.Stream) {
-	for {
-		var pm message.ProbeMessage
-		if err := pm.Decode(stream); err != nil {
-			if !errors.Is(err, io.EOF) {
-				sess.logError("failed to decode PROBE message", err)
-				cancelStreamWithError(stream, transport.StreamErrorCode(ProbeErrorCodeInternal))
-			}
-			return
-		}
-		select {
-		case sess.probeResponseCh <- ProbeResult{Bitrate: pm.Bitrate}:
-		case <-stream.Context().Done():
-			return
-		}
-	}
 }
 
 // ProbeTargets returns a channel that receives the latest target bitrate (bits
@@ -774,6 +821,8 @@ func (sess *Session) detectBitrateChanges(provider probeStatsProvider) {
 			if !ok {
 				continue
 			}
+
+			sess.estimatedBitrate.Store(bitrate)
 
 			sess.incomingProbeMu.Lock()
 			stream := sess.incomingProbeStream

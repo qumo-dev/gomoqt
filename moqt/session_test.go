@@ -10,6 +10,7 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	quic "github.com/quic-go/quic-go"
@@ -65,7 +66,6 @@ func TestNewSession(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			conn := &FakeStreamConn{}
 			conn.TLSFunc = func() *tls.ConnectionState { return &tls.ConnectionState{NegotiatedProtocol: NextProtoMOQ} }
-			conn.OpenStreamFunc = func() (transport.Stream, error) { return nil, io.EOF }
 			conn.OpenStreamFunc = func() (transport.Stream, error) { return nil, io.EOF }
 
 			session := newSession(conn, tt.mux, nil, nil, nil, nil, nil)
@@ -605,17 +605,31 @@ func TestSession_HandleBiStreams_AcceptError(t *testing.T) {
 
 func TestSession_HandleUniStreamsAcceptError(t *testing.T) {
 	conn := &FakeStreamConn{}
-	conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) { return nil, errors.New("accept uni stream failed") }
+	acceptStreamCh := make(chan struct{}, 1)
+	conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) {
+		select {
+		case acceptStreamCh <- struct{}{}:
+		default:
+		}
+		return nil, errors.New("accept uni stream failed")
+	}
 	conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) {
+		select {
+		case acceptStreamCh <- struct{}{}:
+		default:
+		}
 		return nil, errors.New("accept uni stream failed")
 	}
 
 	session := newTestSession(conn)
 
-	// Wait a bit for the background goroutine to try accepting
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-acceptStreamCh:
+		// ok
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("AcceptStream/AcceptUniStream not called by background goroutine")
+	}
 
-	// The session should handle the error gracefully
 	assert.NotNil(t, session)
 
 	// Cleanup
@@ -623,49 +637,35 @@ func TestSession_HandleUniStreamsAcceptError(t *testing.T) {
 }
 
 func TestSession_ConcurrentAccess(t *testing.T) {
-	mockStream := &FakeQUICStream{}
-	mockStream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
-	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
-	conn.OpenUniStreamFunc = func() (transport.SendStream, error) { return &FakeQUICSendStream{}, nil }
+	synctest.Test(t, func(t *testing.T) {
+		mockStream := &FakeQUICStream{}
+		mockStream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
+		conn := &FakeStreamConn{}
+		conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+		conn.OpenUniStreamFunc = func() (transport.SendStream, error) { return &FakeQUICSendStream{}, nil }
 
-	session := newTestSession(conn)
+		session := newTestSession(conn)
+		defer func() { _ = session.CloseWithError(NoError, "") }()
 
-	// Test concurrent access
-	done := make(chan struct{})
-	var operations int
+		var wg sync.WaitGroup
+		wg.Add(2)
 
-	// Concurrent nextSubscribeID calls
-	go func() {
-		for range 5 {
-			session.nextSubscribeID()
-		}
-		operations++
-		if operations == 2 {
-			close(done)
-		}
-	}()
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 5; i++ {
+				session.nextSubscribeID()
+			}
+		}()
 
-	// Concurrent Context calls
-	go func() {
-		for range 5 {
-			session.Context()
-		}
-		operations++
-		if operations == 2 {
-			close(done)
-		}
-	}()
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 5; i++ {
+				_ = session.Context()
+			}
+		}()
 
-	select {
-	case <-done:
-		// Success
-	case <-time.After(time.Second):
-		t.Error("Concurrent operations timed out")
-	}
-
-	// Cleanup
-	_ = session.CloseWithError(NoError, "")
+		wg.Wait()
+	})
 }
 
 func TestSession_ContextCancellation(t *testing.T) {
@@ -820,6 +820,83 @@ func TestCancelStreamWithError(t *testing.T) {
 	var cancelReadErr *transport.StreamError
 	require.ErrorAs(t, readErr, &cancelReadErr)
 	assert.Equal(t, transport.StreamErrorCode(1), cancelReadErr.ErrorCode)
+}
+
+func TestSession_Stats_NoTransport(t *testing.T) {
+	// noStatsConn does not implement probeStatsProvider.
+	// Transport-derived fields must be zero values.
+	conn := noStatsConn{}
+	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil)
+	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
+
+	stats := sess.Stats()
+
+	assert.Equal(t, time.Duration(0), stats.RTT)
+	assert.Equal(t, uint64(0), stats.BytesSent)
+	assert.Equal(t, uint64(0), stats.BytesReceived)
+}
+
+func TestSession_Stats_WithTransport(t *testing.T) {
+	sess, _ := newTestSessionWithConn(t, func(c *FakeStreamConn) {
+		c.ConnectionStatsFunc = func() quic.ConnectionStats {
+			return quic.ConnectionStats{
+				SmoothedRTT:   50 * time.Millisecond,
+				BytesSent:     1_000,
+				BytesReceived: 2_000,
+			}
+		}
+	})
+
+	stats := sess.Stats()
+
+	assert.Equal(t, 50*time.Millisecond, stats.RTT)
+	assert.Equal(t, uint64(1_000), stats.BytesSent)
+	assert.Equal(t, uint64(2_000), stats.BytesReceived)
+}
+
+func TestSession_Stats_EstimatedBitrateZeroBeforeProbe(t *testing.T) {
+	sess, _ := newTestSessionWithConn(t)
+
+	stats := sess.Stats()
+	assert.Equal(t, uint64(0), stats.EstimatedBitrate)
+}
+
+func TestSession_Stats_EstimatedBitrateUpdatedByDetectBitrateChanges(t *testing.T) {
+	var mu sync.Mutex
+	var bytesSent uint64
+	conn := &FakeStreamConn{}
+	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
+		// Simulate ongoing traffic: each call advances BytesSent by 100 kB
+		// so that probeMeasurementTracker sees a non-zero byte delta.
+		mu.Lock()
+		bytesSent += 100_000
+		n := bytesSent
+		mu.Unlock()
+		return quic.ConnectionStats{BytesSent: n}
+	}
+	// Pass config at creation time so the Ticker in detectBitrateChanges
+	// picks up the short interval (it is captured at goroutine start).
+	cfg := &Config{ProbeInterval: 5 * time.Millisecond, ProbeMaxAge: 10 * time.Millisecond}
+	sess := newSession(conn, NewTrackMux(0), nil, cfg, nil, nil, nil)
+	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
+
+	// Allow detectBitrateChanges at least two ticks: first initializes, second measures.
+	assert.Eventually(t, func() bool {
+		return sess.Stats().EstimatedBitrate > 0
+	}, 200*time.Millisecond, 10*time.Millisecond)
+}
+
+func TestSession_Stats_ReflectsRemovals(t *testing.T) {
+	sess, _ := newTestSessionWithConn(t)
+
+	sess.addTrackReader(SubscribeID(1), &TrackReader{})
+	sess.addTrackReader(SubscribeID(2), &TrackReader{})
+	sess.removeTrackReader(SubscribeID(1))
+
+	stats := sess.Stats()
+	assert.Equal(t, time.Duration(0), stats.RTT)
+	assert.Equal(t, uint64(0), stats.BytesSent)
+	assert.Equal(t, uint64(0), stats.BytesReceived)
 }
 
 func TestSession_AddTrackReader(t *testing.T) {
