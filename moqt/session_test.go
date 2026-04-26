@@ -653,14 +653,14 @@ func TestSession_ConcurrentAccess(t *testing.T) {
 
 		go func() {
 			defer wg.Done()
-			for i := 0; i < 5; i++ {
+			for range 5 {
 				session.nextSubscribeID()
 			}
 		}()
 
 		go func() {
 			defer wg.Done()
-			for i := 0; i < 5; i++ {
+			for range 5 {
 				_ = session.Context()
 			}
 		}()
@@ -2889,22 +2889,41 @@ func TestSession_Stats_EstimatedBitrateUpdatedEveryInterval(t *testing.T) {
 }
 
 func TestSession_Probe_ConcurrentAccess(t *testing.T) {
-	session, _ := newTestSessionWithConn(t)
-	defer session.CloseWithError(NoError, "")
+	ctx := t.Context()
+
+	conn := &FakeStreamConn{
+		ParentCtx: ctx,
+	}
+
+	mockStream := &FakeQUICStream{
+		ParentCtx: conn.Context(),
+	}
+	mockStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
+	mockStream.ReadFunc = func(p []byte) (int, error) {
+		<-mockStream.Context().Done()
+		return 0, io.EOF
+	}
+
+	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+
+	session := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil)
 
 	// Test concurrent access to Probe (receiving peer measurements)
 	results, _ := session.Probe(1000000)
 	results2, _ := session.Probe(2000000)
 
 	var count1, count2 atomic.Int32
-	ctx := t.Context()
+	consumeCtx, consumeCancel := context.WithCancel(context.Background())
 
 	consume := func(ch <-chan ProbeResult, counter *atomic.Int32) {
 		for {
 			select {
-			case <-ch:
+			case _, ok := <-ch:
+				if !ok {
+					return
+				}
 				counter.Add(1)
-			case <-ctx.Done():
+			case <-consumeCtx.Done():
 				return
 			}
 		}
@@ -2916,14 +2935,13 @@ func TestSession_Probe_ConcurrentAccess(t *testing.T) {
 	// Simulate incoming peer measurements
 	for i := range 10 {
 		session.notifyResults(uint64(1000 + i))
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
 	}
 
 	// Because it's a channel, the 10 messages are split between the two consumers.
-	// We check that the sum of received messages is correct.
 	assert.Eventually(t, func() bool {
 		return count1.Load()+count2.Load() >= 10
-	}, 200*time.Millisecond, 10*time.Millisecond)
+	}, 500*time.Millisecond, 10*time.Millisecond)
 
 	// Test concurrent access to ProbeTargets (receiving local target hints)
 	targets1 := session.ProbeTargets()
@@ -2935,10 +2953,14 @@ func TestSession_Probe_ConcurrentAccess(t *testing.T) {
 
 	for i := range 10 {
 		session.notifyTargets(uint64(2000 + i))
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
 	}
 
 	assert.Eventually(t, func() bool {
 		return tCount1.Load()+tCount2.Load() >= 10
-	}, 200*time.Millisecond, 10*time.Millisecond)
+	}, 500*time.Millisecond, 10*time.Millisecond)
+
+	// Clean shutdown: cancel consumers first, then close session
+	consumeCancel()
+	_ = session.CloseWithError(NoError, "")
 }

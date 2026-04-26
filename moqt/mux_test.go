@@ -28,7 +28,7 @@ func TestNewTrackMux(t *testing.T) {
 func TestNewHopID_Fits62BitVarint(t *testing.T) {
 	const maxHopID uint64 = 0x3FFFFFFFFFFFFFFF
 
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		id := NewHopID()
 		assert.NotZero(t, id, "NewHopID should never return zero")
 		assert.LessOrEqual(t, id, maxHopID, "NewHopID should fit within 62-bit varint range")
