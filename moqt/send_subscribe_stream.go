@@ -6,15 +6,17 @@ import (
 	"sync"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
+	"github.com/qumo-dev/gomoqt/moqttrace"
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
-func newSendSubscribeStream(id SubscribeID, stream transport.Stream, initConfig *SubscribeConfig) *sendSubscribeStream {
+func newSendSubscribeStream(id SubscribeID, stream transport.Stream, config *SubscribeConfig, trace *moqttrace.SessionTrace) *sendSubscribeStream {
 	substr := &sendSubscribeStream{
 		id:        id,
-		config:    initConfig,
+		config:    config,
 		stream:    stream,
 		droppedCh: make(chan struct{}, 1),
+		trace:     trace,
 	}
 
 	return substr
@@ -33,16 +35,34 @@ type sendSubscribeStream struct {
 	drops     []SubscribeDrop
 
 	id SubscribeID
+
+	trace *moqttrace.SessionTrace
 }
 
 func (substr *sendSubscribeStream) readSubscribeResponses() {
 	for {
 		ok, drop, err := readSubscribeResponse(substr.stream)
 		if err != nil {
+			if substr.trace != nil && substr.trace.SubscribeAcceptedError != nil {
+				substr.trace.SubscribeAcceptedError(moqttrace.SubscribeInfo{
+					SubscribeID: uint64(substr.id),
+				}, err)
+			}
 			return
 		}
 
 		if ok != nil {
+			info := moqttrace.SubscribeInfo{
+				SubscribeID: uint64(substr.id),
+				Priority:    ok.PublisherPriority,
+				Ordered:     boolFromWireFlag(ok.PublisherOrdered),
+				MaxLatency:  ok.PublisherMaxLatency,
+				StartGroup:  ok.StartGroup,
+				EndGroup:    ok.EndGroup,
+			}
+			if substr.trace != nil && substr.trace.SubscribeAccepted != nil {
+				substr.trace.SubscribeAccepted(info)
+			}
 			substr.updateInfo(PublishInfo{
 				Priority:   TrackPriority(ok.PublisherPriority),
 				Ordered:    boolFromWireFlag(ok.PublisherOrdered),
@@ -54,6 +74,14 @@ func (substr *sendSubscribeStream) readSubscribeResponses() {
 		}
 
 		if drop != nil {
+			if substr.trace != nil && substr.trace.SubscribeDrop != nil {
+				substr.trace.SubscribeDrop(moqttrace.SubscribeDropInfo{
+					SubscribeID: uint64(substr.id),
+					StartGroup:  drop.StartGroup,
+					EndGroup:    drop.EndGroup,
+					ErrorCode:   drop.ErrorCode,
+				})
+			}
 			substr.appendDrop(SubscribeDrop{
 				StartGroup: groupSequenceFromWire(drop.StartGroup),
 				EndGroup:   groupSequenceFromWire(drop.EndGroup),

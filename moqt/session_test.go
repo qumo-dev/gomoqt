@@ -1971,7 +1971,7 @@ func TestSession_ProcessUniStream_Group(t *testing.T) {
 	mockTrackStream := &FakeQUICStream{}
 	mockTrackStream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
 
-	substr := newTestSendSubscribeStreamFromStream(mockTrackStream, &SubscribeConfig{})
+	substr := newTestSendSubscribeStream(mockTrackStream)
 	trackReader := newTrackReader("/test", "video", substr, func() {})
 	session.addTrackReader(1, trackReader)
 
