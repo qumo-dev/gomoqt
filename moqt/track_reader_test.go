@@ -13,7 +13,8 @@ import (
 
 func newTestTrackReader(tb testing.TB) *TrackReader {
 	tb.Helper()
-	substr := newTestSendSubscribeStream(&FakeQUICStream{})
+	stream := &FakeQUICStream{}
+	substr := newTestSendSubscribeStream(stream)
 	receiver := newTrackReader("/test", "video", substr, func() {})
 	return receiver
 }

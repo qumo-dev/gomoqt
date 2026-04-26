@@ -137,13 +137,6 @@ func (s *Session) logError(msg string, err error, args ...any) {
 	}
 }
 
-func (s *Session) getTrace(ctx context.Context) *moqttrace.SessionTrace {
-	if trace := moqttrace.SessionTraceFromContext(ctx); trace != nil {
-		return trace
-	}
-	return s.trace
-}
-
 // Context returns the session's context which is canceled when the session
 // terminates. Use it to observe session lifecycle and cancellation.
 func (s *Session) Context() context.Context {
@@ -198,13 +191,6 @@ func (s *Session) CloseWithError(code SessionErrorCode, msg string) error {
 	}
 	s.isTerminating.Store(true)
 
-	if s.trace != nil && s.trace.SessionClosed != nil {
-		s.trace.SessionClosed(moqttrace.SessionCloseInfo{
-			ErrorCode:    uint64(code),
-			ErrorMessage: msg,
-		})
-	}
-
 	err := s.conn.CloseWithError(transport.ConnErrorCode(code), msg)
 	if err != nil {
 		if appErr, ok := errors.AsType[*transport.ApplicationError](err); ok {
@@ -254,34 +240,8 @@ func (s *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackN
 
 	id := s.nextSubscribeID()
 
-	trace := s.getTrace(ctx)
-	if trace != nil && trace.SubscribeSent != nil {
-		trace.SubscribeSent(moqttrace.SubscribeRequestInfo{
-			SubscribeID: uint64(id),
-			Path:        string(path),
-			Name:        string(name),
-			Priority:    uint8(config.Priority),
-			Ordered:     config.Ordered,
-			MaxLatency:  config.MaxLatency,
-			StartGroup:  groupSequenceToWire(config.StartGroup),
-			EndGroup:    groupSequenceToWire(config.EndGroup),
-		})
-	}
-
 	stream, err := s.conn.OpenStream()
 	if err != nil {
-		if trace != nil && trace.SubscribeSentError != nil {
-			trace.SubscribeSentError(moqttrace.SubscribeRequestInfo{
-				SubscribeID: uint64(id),
-				Path:        string(path),
-				Name:        string(name),
-				Priority:    uint8(config.Priority),
-				Ordered:     config.Ordered,
-				MaxLatency:  config.MaxLatency,
-				StartGroup:  groupSequenceToWire(config.StartGroup),
-				EndGroup:    groupSequenceToWire(config.EndGroup),
-			}, err)
-		}
 		if appErr, ok := errors.AsType[*transport.ApplicationError](err); ok {
 			return nil, &SessionError{
 				ApplicationError: appErr,
@@ -325,7 +285,7 @@ func (s *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackN
 		return nil, fmt.Errorf("failed to encode SUBSCRIBE message: %w", err)
 	}
 
-	substr := newSendSubscribeStream(id, stream, config, trace)
+	substr := newSendSubscribeStream(id, stream, config, s.trace)
 
 	track := newTrackReader(path, name, substr, func() { s.removeTrackReader(id) })
 	s.addTrackReader(id, track)
@@ -342,11 +302,6 @@ func (s *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackN
 			cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeTimeout))
 			return nil, fmt.Errorf("subscription timed out: %w", ctx.Err())
 		}
-		if trace != nil && trace.SubscribeAcceptedError != nil {
-			trace.SubscribeAcceptedError(moqttrace.SubscribeInfo{
-				SubscribeID: uint64(id),
-			}, err)
-		}
 		if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
 			return nil, &SubscribeError{StreamError: strErr}
 		}
@@ -354,30 +309,14 @@ func (s *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackN
 		return nil, fmt.Errorf("failed to read SUBSCRIBE response: %w", err)
 	}
 
-	if okMsg != nil {
-		if trace != nil && trace.SubscribeAccepted != nil {
-			trace.SubscribeAccepted(moqttrace.SubscribeInfo{
-				SubscribeID: uint64(id),
-				Priority:    okMsg.PublisherPriority,
-				Ordered:     boolFromWireFlag(okMsg.PublisherOrdered),
-				MaxLatency:  okMsg.PublisherMaxLatency,
-				StartGroup:  okMsg.StartGroup,
-				EndGroup:    okMsg.EndGroup,
-			})
-		}
-	}
-
 	if dropMsg != nil {
-		if trace != nil && trace.SubscribeDrop != nil {
-			trace.SubscribeDrop(moqttrace.SubscribeDropInfo{
-				SubscribeID: uint64(id),
-				StartGroup:  dropMsg.StartGroup,
-				EndGroup:    dropMsg.EndGroup,
-				ErrorCode:   dropMsg.ErrorCode,
-			})
-		}
 		cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeInternal))
 		return nil, fmt.Errorf("moqt: unexpected SUBSCRIBE_DROP message received")
+	}
+
+	if okMsg == nil {
+		cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeInternal))
+		return nil, fmt.Errorf("moqt: expected SUBSCRIBE_OK message but got none")
 	}
 
 	substr.updateInfo(PublishInfo{
@@ -407,26 +346,8 @@ func (s *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
 		return nil, ErrClosedSession
 	}
 
-	trace := s.getTrace(req.Context())
-	if trace != nil && trace.FetchSent != nil {
-		trace.FetchSent(moqttrace.FetchRequestInfo{
-			Path:          string(req.BroadcastPath),
-			Name:          string(req.TrackName),
-			Priority:      uint8(req.Priority),
-			GroupSequence: uint64(req.GroupSequence),
-		})
-	}
-
 	stream, err := s.conn.OpenStream()
 	if err != nil {
-		if trace != nil && trace.FetchSentError != nil {
-			trace.FetchSentError(moqttrace.FetchRequestInfo{
-				Path:          string(req.BroadcastPath),
-				Name:          string(req.TrackName),
-				Priority:      uint8(req.Priority),
-				GroupSequence: uint64(req.GroupSequence),
-			}, err)
-		}
 		if appErr, ok := errors.AsType[*transport.ApplicationError](err); ok {
 			return nil, &SessionError{
 				ApplicationError: appErr,
@@ -606,12 +527,6 @@ func (sess *Session) Probe(targetBitrate uint64) (<-chan ProbeResult, error) {
 				}
 				sess.bitrateTracker.record(pm.Bitrate, time.Now())
 
-				if sess.trace != nil && sess.trace.ProbeResult != nil {
-					sess.trace.ProbeResult(moqttrace.ProbeResultInfo{
-						Bitrate: pm.Bitrate,
-					})
-				}
-
 				// Update the latest probe result, dropping it if the channel buffer is full (i.e. the previous value has not been consumed).
 				select {
 				case <-sess.probeResponseCh:
@@ -687,6 +602,10 @@ func (sess *Session) processBiStream(stream transport.Stream) {
 	if err != nil {
 		sess.logError("failed to decode stream type", err)
 		return
+	}
+
+	if t := sess.trace; t != nil && t.IncomingBiStreamStart != nil {
+		t.IncomingBiStreamStart(uint8(streamType))
 	}
 
 	switch streamType {
@@ -814,6 +733,10 @@ func (sess *Session) processUniStream(stream transport.ReceiveStream) {
 		return
 	}
 
+	if t := sess.trace; t != nil && t.IncomingUniStreamStart != nil {
+		t.IncomingUniStreamStart(uint8(streamType))
+	}
+
 	switch streamType {
 	case message.StreamTypeGroup:
 		var gm message.GroupMessage
@@ -906,12 +829,6 @@ func (sess *Session) handleProbeStream(stream transport.Stream) error {
 		case sess.probeTargetsCh <- ProbeResult{Bitrate: pm.Bitrate}:
 		default:
 		}
-
-		if sess.trace != nil && sess.trace.ProbeResult != nil {
-			sess.trace.ProbeResult(moqttrace.ProbeResultInfo{
-				Bitrate: pm.Bitrate,
-			})
-		}
 	}
 }
 
@@ -924,12 +841,6 @@ func (sess *Session) notifyResults(bitrate uint64) {
 	case sess.probeResponseCh <- ProbeResult{Bitrate: bitrate}:
 	default:
 	}
-
-	if sess.trace != nil && sess.trace.ProbeResult != nil {
-		sess.trace.ProbeResult(moqttrace.ProbeResultInfo{
-			Bitrate: bitrate,
-		})
-	}
 }
 
 func (sess *Session) notifyTargets(bitrate uint64) {
@@ -940,12 +851,6 @@ func (sess *Session) notifyTargets(bitrate uint64) {
 	select {
 	case sess.probeTargetsCh <- ProbeResult{Bitrate: bitrate}:
 	default:
-	}
-
-	if sess.trace != nil && sess.trace.ProbeResult != nil {
-		sess.trace.ProbeResult(moqttrace.ProbeResultInfo{
-			Bitrate: bitrate,
-		})
 	}
 }
 
@@ -1087,10 +992,6 @@ func (sess *Session) handleGoawayStream(stream transport.Stream) error {
 	}
 
 	sess.isTerminating.Store(true)
-
-	if sess.trace != nil && sess.trace.GoawayReceived != nil {
-		sess.trace.GoawayReceived(gm.NewSessionURI)
-	}
 
 	if sess.onGoaway != nil {
 		sess.onGoaway(gm.NewSessionURI)
