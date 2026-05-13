@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/okdaichi/webtransport-go v0.10.2-okdaichi.1
-	github.com/quic-go/quic-go v0.59.0
+	github.com/quic-go/quic-go v0.59.1
 	github.com/stretchr/testify v1.11.1
 )
 
