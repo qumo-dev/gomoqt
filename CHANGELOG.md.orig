@@ -7,9 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-- **moqt:** Optimized `WriteStringArray` using `slices.Grow` to prevent memory reallocations, improving performance for large string arrays.
-
 ## [v0.15.0] - 2026-04-26
 
 ### Added
