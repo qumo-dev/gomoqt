@@ -2,6 +2,7 @@ package message
 
 import (
 	"fmt"
+	"slices"
 )
 
 func WriteVarint(b []byte, i uint64) ([]byte, int) {
@@ -52,6 +53,7 @@ func WriteString(dest []byte, s string) ([]byte, int) {
 }
 
 func WriteStringArray(dest []byte, arr []string) ([]byte, int) {
+	dest = slices.Grow(dest, StringArrayLen(arr))
 	dest, n := WriteVarint(dest, uint64(len(arr)))
 	var m int
 	for _, str := range arr {
