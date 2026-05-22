@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **moqt:** Fixed panic vulnerabilities in `moqt/internal/message/message_reader.go` caused by excessively large varints in byte slices and string array parsing, replacing panics with proper errors to mitigate DoS threats.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added
