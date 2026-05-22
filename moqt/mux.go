@@ -7,6 +7,8 @@ import (
 	"sync"
 )
 
+const defaultAnnouncementBufferSize = 8
+
 // DefaultMux is the package-level TrackMux used by convenience top-level functions such as
 // Publish and Announce. It provides a global multiplexer suitable for simple server
 // implementations.
@@ -310,7 +312,7 @@ func (mux *TrackMux) serveAnnouncements(aw *AnnouncementWriter) {
 	}
 
 	// Channel to receive announcements
-	ch := make(chan *Announcement, 8) // TODO: configurable buffer size
+	ch := make(chan *Announcement, defaultAnnouncementBufferSize)
 	if leafNode.subscriptions == nil {
 		leafNode.subscriptions = make(map[*AnnouncementWriter](chan *Announcement))
 	}
