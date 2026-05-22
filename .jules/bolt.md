@@ -1,0 +1,2 @@
+- Moved  statements from function level to global package level in . Recompiling regexes on every function call was an anti-pattern. Measured performance improvement: ~9798 ns/op to ~3214 ns/op. Allocations dropped from 45 to 6.
+- Moved `regexp.MustCompile` statements from function level to global package level in `magefiles/magefile.go`. Recompiling regexes on every function call was an anti-pattern. Measured performance improvement: ~9798 ns/op to ~3214 ns/op. Allocations dropped from 45 to 6.
