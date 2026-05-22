@@ -15,6 +15,8 @@ import (
 	"github.com/magefile/mage/sh"
 )
 
+var goVersionRe = regexp.MustCompile(`go version go([0-9]+)\.([0-9]+)`)
+
 // ======================================
 // SETUP
 // ======================================
@@ -87,8 +89,7 @@ func goVersion() error {
 		minor: 22,
 	}
 
-	re := regexp.MustCompile(`go version go([0-9]+)\.([0-9]+)`)
-	matches := re.FindStringSubmatch(version)
+	matches := goVersionRe.FindStringSubmatch(version)
 	if len(matches) > 2 {
 		major, _ := strconv.Atoi(matches[1])
 		minor, _ := strconv.Atoi(matches[2])
