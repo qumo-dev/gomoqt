@@ -1,0 +1,23 @@
+--- moqt/announcement.go
++++ moqt/announcement.go
+@@ -32,15 +32,11 @@
+	} else {
+		ann.active.Store(true)
+	}
+
+-	var stop func() bool
+-	endFunc := func() {
+-		if stop != nil {
+-			stop()
+-		}
+-		ann.end()
+-	}
+-	stop = context.AfterFunc(ctx, endFunc)
++	stop := context.AfterFunc(ctx, func() { ann.end() })
++	endFunc := func() {
++		stop()
++		ann.end()
++	}
+
+	return ann, endFunc
+ }

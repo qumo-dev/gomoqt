@@ -32,7 +32,6 @@ func TestNewTrackReader(t *testing.T) {
 	assert.Equal(t, PublishInfo{}, substr.ReadInfo(), "sendSubscribeStream should return the Info passed at construction")
 	assert.NotNil(t, receiver.queueing, "queue should be initialized")
 	assert.NotNil(t, receiver.queuedCh, "queuedCh should be initialized")
-	assert.NotNil(t, receiver.dequeued, "dequeued should be initialized")
 }
 
 func TestTrackReader_AcceptGroup(t *testing.T) {

@@ -47,7 +47,6 @@ func newTrackReader(path BroadcastPath, name TrackName, subscribeStream *sendSub
 			sequence GroupSequence
 			stream   transport.ReceiveStream
 		}, 0, 1<<3),
-		dequeued:     make(map[*GroupReader]struct{}),
 		groupManager: newGroupReaderManager(),
 		onCloseFunc:  onCloseFunc,
 		ctx:          context.WithValue(subscribeStream.stream.Context(), biStreamTypeCtxKey, message.StreamTypeSubscribe),
@@ -76,9 +75,6 @@ type TrackReader struct {
 	}
 	queuedCh chan struct{}
 	trackMu  sync.Mutex
-
-	dequeued map[*GroupReader]struct{}
-
 	groupManager *groupReaderManager
 	onCloseFunc  func()
 
@@ -150,6 +146,7 @@ func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 			r.queueing = r.queueing[1:]
 
 			group := newGroupReader(next.sequence, next.stream, r.groupManager)
+			// dequeued was removed
 
 			r.trackMu.Unlock()
 			return group, nil
@@ -187,11 +184,16 @@ func (r *TrackReader) Close() error {
 	}
 	r.queueing = nil
 
-	// Cancel all dequeued groups
-	for stream := range r.dequeued {
+	// Cancel all active groups
+	r.groupManager.mu.Lock()
+	r.groupManager.closed = true
+	activeGroups := r.groupManager.activeGroups
+	r.groupManager.activeGroups = nil
+	r.groupManager.mu.Unlock()
+
+	for stream := range activeGroups {
 		stream.CancelRead(SubscribeCanceledErrorCode)
 	}
-	r.dequeued = nil
 
 	if r.queuedCh != nil {
 		close(r.queuedCh)
@@ -215,11 +217,16 @@ func (r *TrackReader) CloseWithError(code SubscribeErrorCode) {
 	}
 	r.queueing = nil
 
-	// Cancel all dequeued groups
-	for stream := range r.dequeued {
+	// Cancel all active groups
+	r.groupManager.mu.Lock()
+	r.groupManager.closed = true
+	activeGroups := r.groupManager.activeGroups
+	r.groupManager.activeGroups = nil
+	r.groupManager.mu.Unlock()
+
+	for stream := range activeGroups {
 		stream.CancelRead(SubscribeCanceledErrorCode)
 	}
-	r.dequeued = nil
 
 	if r.queuedCh != nil {
 		close(r.queuedCh)

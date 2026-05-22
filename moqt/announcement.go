@@ -32,9 +32,12 @@ func NewAnnouncement(ctx context.Context, path BroadcastPath) (*Announcement, En
 	} else {
 		ann.active.Store(true)
 	}
-	endFunc := func() { ann.end() }
 
-	context.AfterFunc(ctx, endFunc)
+	stop := context.AfterFunc(ctx, func() { ann.end() })
+	endFunc := func() {
+		stop()
+		ann.end()
+	}
 
 	return ann, endFunc
 }
