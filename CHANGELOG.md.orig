@@ -7,10 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- **moqt:** 🛡️ Sentinel: [HIGH] Fixed DoS and memory exhaustion vulnerabilities in `moqt/internal/message` parsers by removing `panic()` calls on untrusted byte payloads and validating array counts before allocating them.
-
 ## [v0.15.0] - 2026-04-26
 
 ### Added
