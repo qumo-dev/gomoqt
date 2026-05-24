@@ -1,0 +1,12 @@
+--- CHANGELOG.md	2024-05-24 10:25:00.000000000 +0000
++++ CHANGELOG.md	2024-05-24 10:35:00.000000000 +0000
+@@ -7,6 +7,9 @@
+
+ ## [Unreleased]
+
++### Performance
++- **moqt:** Optimize `ReadMessageLength` for zero memory allocations when using buffered streams.
++
+ ## [v0.15.0] - 2026-04-26
+
+ ### Added
