@@ -1,0 +1,3 @@
+## 2024-05-24 - Zero-Allocation Message Length Parsing
+**Learning:** `ReadMessageLength` in `moqt/internal/message/message_reader.go` was dynamically allocating multiple slices (`make([]byte, 1)` and `make([]byte, l)`) for reading varints, which are constantly read from streams. Because io.Reader doesn't implement ByteReader natively without wrapping, reading using dynamic allocation creates significant GC pressure.
+**Action:** Use a stack-allocated buffer `var buf [8]byte` for parsing QUIC varints. Additionally, fast-path the first byte by checking if `r` implements `io.ByteReader`, further reducing allocations and execution time.
