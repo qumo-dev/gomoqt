@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **moqt:** Replaced panics in `message_reader` with error returns and added slice allocation bounds checking to prevent Denial of Service (DoS) and Out-Of-Memory (OOM) vulnerabilities on malformed data.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added
