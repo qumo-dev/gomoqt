@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- **moqt:** `ReadMessageLength` avoids allocations by using a stack buffer, an `io.ByteReader` fast path, and inline bitwise parsing.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added
