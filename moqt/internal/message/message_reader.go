@@ -1,6 +1,7 @@
 package message
 
 import (
+	"errors"
 	"io"
 	"math"
 )
@@ -66,7 +67,7 @@ func ReadBytes(b []byte) ([]byte, int, error) {
 	}
 	b = b[n:]
 	if num > math.MaxInt {
-		panic("byte slice too large")
+		return nil, 0, errors.New("byte slice too large")
 	}
 
 	if uint64(len(b)) < num {
@@ -91,7 +92,10 @@ func ReadStringArray(b []byte) ([]string, int, error) {
 	}
 
 	if count > math.MaxInt {
-		panic("string array too large")
+		return nil, 0, errors.New("string array too large")
+	}
+	if count > uint64(len(b)) {
+		return nil, 0, io.EOF
 	}
 
 	b = b[total:]

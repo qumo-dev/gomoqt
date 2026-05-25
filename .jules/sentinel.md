@@ -1,0 +1,4 @@
+## 2025-05-25 - [Panic on Malformed Message Size]
+**Vulnerability:** Denial of Service (DoS) vulnerability via runtime panic (`panic("byte slice too large")` and `panic("string array too large")`) in `moqt/internal/message/message_reader.go` and slice allocation exhaustion vulnerabilities.
+**Learning:** Go applications should not `panic()` when encountering malformed data from untrusted network connections. The message reader was not checking lengths appropriately against `math.MaxInt` or checking slice allocations against the total available buffer length.
+**Prevention:** Always return standard errors (e.g. `errors.New`, `io.EOF`) to safely handle failure states from untrusted data. Validate slice allocations size fields (`count`) against the available remaining length of the payload (`len(b)`) before allocating slices (`make()`).
