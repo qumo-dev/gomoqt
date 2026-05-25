@@ -28,36 +28,52 @@ func ReadVarint(b []byte) (uint64, int, error) {
 	return i, l, nil
 }
 
-// ReadVarintFromReader reads a QUIC varint from an io.Reader
+// ReadMessageLength reads a QUIC varint from an io.Reader.
+// It uses a stack-allocated buffer and a fast path for io.ByteReader
+// to avoid heap allocations and improve decoding performance.
 func ReadMessageLength(r io.Reader) (uint64, error) {
-	// Read first byte to determine length
-	firstByte := make([]byte, 1)
-	_, err := io.ReadFull(r, firstByte)
-	if err != nil {
-		return 0, err
-	}
+	var buf [8]byte
 
-	// Determine the length from the first two bits
-	l := 1 << ((firstByte[0] & 0xc0) >> 6)
-
-	// Read remaining bytes if needed
-	buf := make([]byte, l)
-	buf[0] = firstByte[0]
-	if l > 1 {
-		_, err = io.ReadFull(r, buf[1:])
+	// Fast path: use ReadByte if available to bypass io.ReadFull overhead
+	if br, ok := r.(io.ByteReader); ok {
+		b, err := br.ReadByte()
+		if err != nil {
+			return 0, err
+		}
+		buf[0] = b
+	} else {
+		_, err := io.ReadFull(r, buf[:1])
 		if err != nil {
 			return 0, err
 		}
 	}
 
-	// Parse the varint
-	val, _, err := ReadVarint(buf)
-	return val, err
-}
+	// Determine the length from the first two bits
+	l := 1 << ((buf[0] & 0xc0) >> 6)
 
-// func ReadMessageLength(r io.Reader) (uint64, error) {
-// 	return ReadVarintFromReader(r)
-// }
+	// Read remaining bytes if needed
+	if l > 1 {
+		_, err := io.ReadFull(r, buf[1:l])
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	// Parse the varint inline to prevent buf escaping to the heap
+	var i uint64
+	switch l {
+	case 1:
+		i = uint64(buf[0] & (0xff - 0xc0))
+	case 2:
+		i = uint64(buf[0]&0x3f)<<8 | uint64(buf[1])
+	case 4:
+		i = uint64(buf[0]&0x3f)<<24 | uint64(buf[1])<<16 | uint64(buf[2])<<8 | uint64(buf[3])
+	case 8:
+		i = uint64(buf[0]&0x3f)<<56 | uint64(buf[1])<<48 | uint64(buf[2])<<40 | uint64(buf[3])<<32 |
+			uint64(buf[4])<<24 | uint64(buf[5])<<16 | uint64(buf[6])<<8 | uint64(buf[7])
+	}
+	return i, nil
+}
 
 func ReadBytes(b []byte) ([]byte, int, error) {
 	num, n, err := ReadVarint(b)
