@@ -28,31 +28,101 @@ func ReadVarint(b []byte) (uint64, int, error) {
 	return i, l, nil
 }
 
-// ReadVarintFromReader reads a QUIC varint from an io.Reader
+// ReadMessageLength reads a QUIC varint from an io.Reader
 func ReadMessageLength(r io.Reader) (uint64, error) {
-	// Read first byte to determine length
-	firstByte := make([]byte, 1)
-	_, err := io.ReadFull(r, firstByte)
-	if err != nil {
-		return 0, err
-	}
-
-	// Determine the length from the first two bits
-	l := 1 << ((firstByte[0] & 0xc0) >> 6)
-
-	// Read remaining bytes if needed
-	buf := make([]byte, l)
-	buf[0] = firstByte[0]
-	if l > 1 {
-		_, err = io.ReadFull(r, buf[1:])
+	// Fast path for io.ByteReader
+	if br, ok := r.(io.ByteReader); ok {
+		firstByte, err := br.ReadByte()
 		if err != nil {
 			return 0, err
 		}
+
+		l := 1 << ((firstByte & 0xc0) >> 6)
+		if l == 1 {
+			return uint64(firstByte & 0x3f), nil
+		}
+
+		switch l {
+		case 2:
+			b1, err := br.ReadByte()
+			if err != nil {
+				return 0, err
+			}
+			return uint64(firstByte&0x3f)<<8 | uint64(b1), nil
+		case 4:
+			b1, err := br.ReadByte()
+			if err != nil {
+				return 0, err
+			}
+			b2, err := br.ReadByte()
+			if err != nil {
+				return 0, err
+			}
+			b3, err := br.ReadByte()
+			if err != nil {
+				return 0, err
+			}
+			return uint64(firstByte&0x3f)<<24 | uint64(b1)<<16 | uint64(b2)<<8 | uint64(b3), nil
+		case 8:
+			b1, err := br.ReadByte()
+			if err != nil {
+				return 0, err
+			}
+			b2, err := br.ReadByte()
+			if err != nil {
+				return 0, err
+			}
+			b3, err := br.ReadByte()
+			if err != nil {
+				return 0, err
+			}
+			b4, err := br.ReadByte()
+			if err != nil {
+				return 0, err
+			}
+			b5, err := br.ReadByte()
+			if err != nil {
+				return 0, err
+			}
+			b6, err := br.ReadByte()
+			if err != nil {
+				return 0, err
+			}
+			b7, err := br.ReadByte()
+			if err != nil {
+				return 0, err
+			}
+			return uint64(firstByte&0x3f)<<56 | uint64(b1)<<48 | uint64(b2)<<40 | uint64(b3)<<32 |
+				uint64(b4)<<24 | uint64(b5)<<16 | uint64(b6)<<8 | uint64(b7), nil
+		}
 	}
 
-	// Parse the varint
-	val, _, err := ReadVarint(buf)
-	return val, err
+	// Fallback path
+	var buf [8]byte
+	if _, err := io.ReadFull(r, buf[:1]); err != nil {
+		return 0, err
+	}
+
+	firstByte := buf[0]
+	l := 1 << ((firstByte & 0xc0) >> 6)
+	if l == 1 {
+		return uint64(firstByte & 0x3f), nil
+	}
+
+	if _, err := io.ReadFull(r, buf[1:l]); err != nil {
+		return 0, err
+	}
+
+	switch l {
+	case 2:
+		return uint64(buf[0]&0x3f)<<8 | uint64(buf[1]), nil
+	case 4:
+		return uint64(buf[0]&0x3f)<<24 | uint64(buf[1])<<16 | uint64(buf[2])<<8 | uint64(buf[3]), nil
+	case 8:
+		return uint64(buf[0]&0x3f)<<56 | uint64(buf[1])<<48 | uint64(buf[2])<<40 | uint64(buf[3])<<32 |
+			uint64(buf[4])<<24 | uint64(buf[5])<<16 | uint64(buf[6])<<8 | uint64(buf[7]), nil
+	}
+	return 0, nil
 }
 
 // func ReadMessageLength(r io.Reader) (uint64, error) {

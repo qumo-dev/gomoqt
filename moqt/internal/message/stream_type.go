@@ -25,8 +25,17 @@ func (stm StreamType) Encode(w io.Writer) error {
 }
 
 func (stm *StreamType) Decode(r io.Reader) error {
-	buf := make([]byte, 1)
-	_, err := r.Read(buf)
+	if br, ok := r.(io.ByteReader); ok {
+		b, err := br.ReadByte()
+		if err != nil {
+			return err
+		}
+		*stm = StreamType(b)
+		return nil
+	}
+
+	var buf [1]byte
+	_, err := r.Read(buf[:])
 	if err != nil {
 		return err
 	}

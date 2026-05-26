@@ -1,0 +1,4 @@
+## 2025-05-19 - Escape Analysis in io.Reader Methods
+
+**Learning:** When reading from an `io.Reader` using small buffers (e.g. 1-8 bytes for headers/varints), dynamic allocation like `make([]byte, N)` creates severe performance bottlenecks because it allocates on the heap. Trying to optimize by using a stack-allocated array and passing its slice (e.g., `buf[:]`) to `io.Reader.Read` or `io.ReadFull` still causes the array to escape to the heap due to Go's escape analysis on interface methods.
+**Action:** The most effective pattern for avoiding allocation overhead when parsing byte sequences is to type-assert the reader to `io.ByteReader` (`if br, ok := r.(io.ByteReader); ok { ... }`) and read bytes individually. This allows fast-paths without heap allocations and drops allocations to zero. Use stack arrays for the non-ByteReader fallback path.
