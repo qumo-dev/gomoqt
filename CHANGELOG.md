@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **moqt/message:** Optimized varint and stream type decoding via `io.ByteReader` fast path to achieve zero-allocation parsing and significantly reduce execution overhead.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added
