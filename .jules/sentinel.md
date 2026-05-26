@@ -1,0 +1,4 @@
+## 2025-02-18 - Fix DoS Panics in Message Length Parsing
+**Vulnerability:** A denial-of-service vulnerability where maliciously crafted messages containing excessively large varint lengths (e.g. for `ReadBytes` and `ReadStringArray`) trigger a runtime `panic` during processing, crashing the host program. Preallocation based solely on untrusted lengths can also lead to out-of-memory errors ("cap out of range").
+**Learning:** `panic` should never be used as a general control flow mechanism when reading untrusted input payloads, as malformed lengths bypass typical safety checks. `count` parsed from unverified varint must be strictly bounded against the remaining buffer length.
+**Prevention:** Always return standard Go errors (`errors.New`, `io.EOF`, etc.) instead of panicking on invalid lengths, and ensure slice capacities are bound-checked against payload sizes before allocation.
