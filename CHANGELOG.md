@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **moqt/internal/message:** Fixed a Denial of Service (DoS) vulnerability in `ReadStringArray` and `ReadBytes` that could trigger panics or OOM errors with malformed lengths.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added
