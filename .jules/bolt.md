@@ -1,0 +1,3 @@
+## 2024-05-28 - ByteReader Optimization for Varint Decoding
+**Learning:** In Go, when decoding small payloads like QUIC varints, passing a stack-allocated byte slice (e.g., `buf[:1]`) to `io.Reader` interface methods like `io.ReadFull` causes the array to escape to the heap due to escape analysis limitations with interfaces.
+**Action:** When frequently reading a few bytes from an `io.Reader`, always type-assert the reader to `io.ByteReader` to use `ReadByte()`. This completely bypasses the interface slice argument and eliminates heap allocation overhead, which is critical for hot paths like varint parsing.

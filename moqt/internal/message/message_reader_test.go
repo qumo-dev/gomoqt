@@ -287,3 +287,17 @@ func TestReadStringArray(t *testing.T) {
 		})
 	}
 }
+
+func BenchmarkReadMessageLength(b *testing.B) {
+	// A 4-byte varint
+	data := []byte{0x80, 0x01, 0x02, 0x03}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		r := bytes.NewReader(data)
+		_, err := ReadMessageLength(r)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
