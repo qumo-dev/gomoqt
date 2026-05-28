@@ -184,10 +184,6 @@ func TestReadBytes(t *testing.T) {
 			input:   []byte{},
 			wantErr: true,
 		},
-		"count larger than buffer": {
-			input:   []byte{0x0a, 0x01, 0x02}, // count is 10, but only 2 bytes left in buffer
-			wantErr: true,
-		},
 	}
 
 	for name, tt := range tests {
@@ -274,6 +270,10 @@ func TestReadStringArray(t *testing.T) {
 		},
 		"invalid count": {
 			input:   []byte{},
+			wantErr: true,
+		},
+		"count larger than buffer": {
+			input:   []byte{0x0a, 0x01, 0x02}, // count is 10, but only 2 bytes left in buffer
 			wantErr: true,
 		},
 	}
