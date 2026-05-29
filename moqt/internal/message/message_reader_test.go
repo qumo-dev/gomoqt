@@ -184,6 +184,12 @@ func TestReadBytes(t *testing.T) {
 			input:   []byte{},
 			wantErr: true,
 		},
+		"prevent panic on large varint": {
+			// A valid 8-byte varint that decodes to a very large number (e.g. 1<<60)
+			// Followed by little data. The read should fail with EOF and not panic.
+			input:   []byte{0xd0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x41},
+			wantErr: true,
+		},
 	}
 
 	for name, tt := range tests {
@@ -270,6 +276,12 @@ func TestReadStringArray(t *testing.T) {
 		},
 		"invalid count": {
 			input:   []byte{},
+			wantErr: true,
+		},
+		"prevent OOM on large array count": {
+			// A valid 8-byte varint that decodes to a very large number for count
+			// It exceeds the available buffer, so it should fail with EOF.
+			input:   []byte{0xd0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x68},
 			wantErr: true,
 		},
 	}

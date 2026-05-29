@@ -1,0 +1,5 @@
+1. Fix DoS vulnerability in `moqt/internal/message/message_reader.go` by removing `panic` when parsing varints.
+2. In `ReadBytes()`, validate the requested byte slice capacity against the remaining buffer. Do not `panic()`. Return `io.EOF` if the available length is less than the required capacity. Remove the `math.MaxInt` check, as it's not valid for QUIC 62-bit varints on 64-bit platforms and causes dead code since capacity can be validated against the buffer anyway.
+3. In `ReadStringArray()`, similar to `ReadBytes`, do not `panic()`. The amount of available buffer space represents an upper bound on `count` (since each element in the array takes at least 1 byte for length + maybe the data itself). Validate `count` against `len(b)`.
+4. Create new unit tests in `moqt/internal/message/message_reader_test.go` to explicitly verify that reading overly large bytes or arrays correctly returns an error instead of panicking.
+5. Complete pre-commit steps.

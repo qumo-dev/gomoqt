@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **moqt/internal/message:** Fixed DoS and OOM vulnerabilities by removing `panic()` and bounding slice capacity on varint length parsing against buffer limits.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added

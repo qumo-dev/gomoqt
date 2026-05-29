@@ -1,0 +1,4 @@
+## 2024-05-29 - Prevent DoS from untrusted payload parsing
+**Vulnerability:** Parsing untrusted byte slices with `panic()` on large varints creates a Denial of Service (DoS) vulnerability. Additionally, unbounded slice allocation in `ReadStringArray` using unvalidated `count` values could lead to Out-Of-Memory (OOM) crashes.
+**Learning:** `panic()` should never be used for bounds validation in network parsers. Slice capacities must be validated against available buffer lengths before allocation. The `> math.MaxInt` check also created unreachable code on 64-bit architectures since QUIC varints max out at `1<<62-1`.
+**Prevention:** Always validate requested capacities against the remaining slice length (`len(b)`) and return `io.EOF` for incomplete data to allow for proper chunked reading, rather than panicking.
