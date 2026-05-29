@@ -30,28 +30,55 @@ func ReadVarint(b []byte) (uint64, int, error) {
 
 // ReadVarintFromReader reads a QUIC varint from an io.Reader
 func ReadMessageLength(r io.Reader) (uint64, error) {
+	// If the reader supports ByteReader, we avoid slice allocation entirely
+	if br, ok := r.(io.ByteReader); ok {
+		firstByte, err := br.ReadByte()
+		if err != nil {
+			return 0, err
+		}
+
+		l := 1 << ((firstByte & 0xc0) >> 6)
+		if l == 1 {
+			return uint64(firstByte & 0x3f), nil
+		}
+
+		var buf [8]byte
+		buf[0] = firstByte
+		for i := 1; i < l; i++ {
+			b, err := br.ReadByte()
+			if err != nil {
+				if err == io.EOF {
+					return 0, io.ErrUnexpectedEOF
+				}
+				return 0, err
+			}
+			buf[i] = b
+		}
+		val, _, err := ReadVarint(buf[:l])
+		return val, err
+	}
+
+	// Fallback for standard io.Reader
 	// Read first byte to determine length
-	firstByte := make([]byte, 1)
-	_, err := io.ReadFull(r, firstByte)
+	var buf [8]byte
+	_, err := io.ReadFull(r, buf[:1])
 	if err != nil {
 		return 0, err
 	}
 
 	// Determine the length from the first two bits
-	l := 1 << ((firstByte[0] & 0xc0) >> 6)
+	l := 1 << ((buf[0] & 0xc0) >> 6)
 
 	// Read remaining bytes if needed
-	buf := make([]byte, l)
-	buf[0] = firstByte[0]
 	if l > 1 {
-		_, err = io.ReadFull(r, buf[1:])
+		_, err = io.ReadFull(r, buf[1:l])
 		if err != nil {
 			return 0, err
 		}
 	}
 
 	// Parse the varint
-	val, _, err := ReadVarint(buf)
+	val, _, err := ReadVarint(buf[:l])
 	return val, err
 }
 

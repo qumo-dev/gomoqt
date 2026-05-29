@@ -2,6 +2,7 @@ package message
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -285,5 +286,30 @@ func TestReadStringArray(t *testing.T) {
 				assert.Equal(t, tt.n, n)
 			}
 		})
+	}
+}
+
+func BenchmarkReadMessageLength(b *testing.B) {
+	data := []byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00} // 8-byte varint
+	r := bytes.NewReader(data)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		r.Reset(data)
+		_, _ = ReadMessageLength(r)
+	}
+}
+
+type onlyReader struct {
+	io.Reader
+}
+
+func BenchmarkReadMessageLengthOnlyReader(b *testing.B) {
+	data := []byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00} // 8-byte varint
+	b.ResetTimer()
+	r := bytes.NewReader(data)
+	for i := 0; i < b.N; i++ {
+		r.Reset(data)
+		or := onlyReader{r}
+		_, _ = ReadMessageLength(or)
 	}
 }
