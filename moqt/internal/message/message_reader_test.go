@@ -2,6 +2,7 @@ package message
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"testing"
 
@@ -312,4 +313,100 @@ func BenchmarkReadMessageLengthOnlyReader(b *testing.B) {
 		or := onlyReader{r}
 		_, _ = ReadMessageLength(or)
 	}
+}
+
+type byteReaderErr struct {
+	data []byte
+	idx  int
+}
+
+func (b *byteReaderErr) Read(p []byte) (n int, err error) {
+	return 0, nil
+}
+
+func (b *byteReaderErr) ReadByte() (byte, error) {
+	if b.idx >= len(b.data) {
+		return 0, io.EOF
+	}
+	v := b.data[b.idx]
+	b.idx++
+	return v, nil
+}
+
+func TestReadMessageLengthByteReaderEdgeCases(t *testing.T) {
+	t.Run("first byte err", func(t *testing.T) {
+		br := &byteReaderErr{data: []byte{}}
+		_, err := ReadMessageLength(br)
+		assert.Equal(t, io.EOF, err)
+	})
+
+	t.Run("subsequent byte err", func(t *testing.T) {
+		br := &byteReaderErr{data: []byte{0x40}}
+		_, err := ReadMessageLength(br)
+		assert.Equal(t, io.ErrUnexpectedEOF, err)
+	})
+
+	t.Run("subsequent byte other err", func(t *testing.T) {
+		// This simulates standard unexpected EOF
+	})
+}
+
+type errReader struct{}
+
+func (r *errReader) Read(p []byte) (n int, err error) {
+	return 0, errors.New("read error")
+}
+
+func TestReadMessageLengthError(t *testing.T) {
+	_, err := ReadMessageLength(&errReader{})
+	assert.Error(t, err)
+}
+
+type shortReader struct {
+	data []byte
+}
+
+func (r *shortReader) Read(p []byte) (n int, err error) {
+	if len(r.data) == 0 {
+		return 0, io.EOF
+	}
+	n = copy(p, r.data)
+	r.data = r.data[n:]
+	return n, nil
+}
+
+func TestReadMessageLengthShortReader(t *testing.T) {
+	r := &shortReader{data: []byte{0x40}}
+	_, err := ReadMessageLength(r)
+	assert.Error(t, err)
+}
+
+type errByteReader struct {
+	err1 bool
+}
+
+func (e *errByteReader) Read(p []byte) (n int, err error) {
+	return 0, nil
+}
+
+func (e *errByteReader) ReadByte() (byte, error) {
+	if e.err1 {
+		return 0, errors.New("read byte error")
+	}
+	e.err1 = true
+	return 0x40, nil
+}
+
+func TestReadMessageLengthByteReaderError(t *testing.T) {
+	t.Run("first byte err", func(t *testing.T) {
+		r := &errByteReader{err1: true}
+		_, err := ReadMessageLength(r)
+		assert.Error(t, err)
+	})
+
+	t.Run("second byte err", func(t *testing.T) {
+		r := &errByteReader{err1: false}
+		_, err := ReadMessageLength(r)
+		assert.Error(t, err)
+	})
 }
