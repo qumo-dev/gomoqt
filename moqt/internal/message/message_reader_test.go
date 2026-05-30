@@ -2,6 +2,7 @@ package message
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -285,5 +286,25 @@ func TestReadStringArray(t *testing.T) {
 				assert.Equal(t, tt.n, n)
 			}
 		})
+	}
+}
+
+func TestReadStringArray_OutOfBounds(t *testing.T) {
+	// A varint of 10 for string array length, but the remaining buffer is too small (e.g., 5 bytes).
+	b := []byte{0x0a, 0x01, 0x02, 0x03, 0x04, 0x05}
+
+	_, _, err := ReadStringArray(b)
+	if err != io.EOF {
+		t.Errorf("expected io.EOF, got %v", err)
+	}
+}
+
+func TestReadBytes_OutOfBounds(t *testing.T) {
+	// A varint of 10 for bytes length, but the remaining buffer is too small.
+	b := []byte{0x0a, 0x01, 0x02, 0x03, 0x04, 0x05}
+
+	_, _, err := ReadBytes(b)
+	if err != io.EOF {
+		t.Errorf("expected io.EOF, got %v", err)
 	}
 }
