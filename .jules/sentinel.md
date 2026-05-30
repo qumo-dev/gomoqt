@@ -1,0 +1,5 @@
+## 2025-05-30 - Prevent DoS from MaxInt Panics in Untrusted Input Decoding
+
+**Vulnerability:** Untrusted network input triggering `panic()` due to payload size bounds-checking against `math.MaxInt` in `ReadBytes` and `ReadStringArray`. This is a classic Denial of Service (DoS) vulnerability in Go protocol parsing, as an attacker can provide arbitrarily large lengths encoded in varints to crash the service.
+**Learning:** Checking inputs strictly against `math.MaxInt` and panicking on failure turns an invalid payload error into a service disruption. Since `len(byte_slice)` evaluates lengths natively, using sizes directly in slices avoids arbitrary constant checks, and `io.EOF` provides the correct semantic failure for truncated buffers.
+**Prevention:** Never use `panic()` or constraints tied to `math.MaxInt` for boundary validation on parsed raw byte structures like string arrays or byte slices. Return `io.EOF` or an appropriate standard error to let callers cleanly tear down or reject malformed connections.

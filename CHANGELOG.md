@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Security
+- Fix: Removed `panic()` when decoding strings and byte arrays with maliciously large varint lengths in `moqt/internal/message/message_reader.go`, mitigating a potential Denial of Service (DoS) vulnerability by returning `io.EOF` instead.
 
 ## [v0.15.0] - 2026-04-26
 
