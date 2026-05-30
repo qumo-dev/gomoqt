@@ -1,0 +1,3 @@
+## 2024-05-30 - Escape Analysis and ByteReader in Go
+**Learning:** When trying to eliminate heap allocations for small `io.Reader` operations, passing a slice of a stack-allocated array (e.g., `buf[:]`) to `io.ReadFull` causes the array to escape to the heap. However, if you type-assert the `io.Reader` to an `io.ByteReader` and read bytes individually, the array stays on the stack, bringing allocations to zero for the hot path. Be careful to map `io.EOF` to `io.ErrUnexpectedEOF` in the `ByteReader` loop to preserve the correct error semantics for incomplete reads.
+**Action:** When optimizing tight `io.Reader` loops, prioritize `io.ByteReader` checks for zero-allocation fast paths.

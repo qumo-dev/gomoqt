@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **moqt:** Optimized `ReadMessageLength` in `moqt/internal/message/message_reader.go` to reduce memory allocations.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added
