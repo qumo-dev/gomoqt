@@ -2,6 +2,7 @@ package message
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -286,4 +287,111 @@ func TestReadStringArray(t *testing.T) {
 			}
 		})
 	}
+}
+
+// mockReader is a simple io.Reader that does not implement io.ByteReader
+type mockReader struct {
+	r io.Reader
+}
+
+func (m *mockReader) Read(p []byte) (n int, err error) {
+	return m.r.Read(p)
+}
+
+func TestReadMessageLength_NonByteReader(t *testing.T) {
+	tests := map[string]struct {
+		input    []byte
+		expected uint64
+		wantErr  bool
+	}{
+		"zero": {
+			input:    []byte{0x00},
+			expected: 0,
+			wantErr:  false,
+		},
+		"small value": {
+			input:    []byte{0x3f},
+			expected: 63,
+			wantErr:  false,
+		},
+		"2-byte varint": {
+			input:    []byte{0x40, 0x80},
+			expected: 128,
+			wantErr:  false,
+		},
+		"8-byte varint": {
+			input:    []byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00},
+			expected: 65536,
+			wantErr:  false,
+		},
+		"empty input": {
+			input:   []byte{},
+			wantErr: true,
+		},
+		"incomplete 4-byte": {
+			input:   []byte{0x80, 0x01},
+			wantErr: true,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			r := &mockReader{r: bytes.NewReader(tt.input)}
+			result, err := ReadMessageLength(r)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
+		})
+	}
+}
+
+// mockEOFByteReader returns an error on the second byte
+type mockEOFByteReader struct {
+	count int
+}
+
+func (m *mockEOFByteReader) ReadByte() (byte, error) {
+	if m.count == 0 {
+		m.count++
+		return 0x40, nil // 2-byte varint indicator
+	}
+	return 0, io.EOF
+}
+
+func (m *mockEOFByteReader) Read(p []byte) (n int, err error) {
+	return 0, io.EOF
+}
+
+func TestReadMessageLength_ByteReaderUnexpectedEOF(t *testing.T) {
+	r := &mockEOFByteReader{}
+	_, err := ReadMessageLength(r)
+	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+}
+
+// mockErrByteReader returns a non-EOF error on the second byte
+type mockErrByteReader struct {
+	count int
+	err   error
+}
+
+func (m *mockErrByteReader) ReadByte() (byte, error) {
+	if m.count == 0 {
+		m.count++
+		return 0x40, nil // 2-byte varint indicator
+	}
+	return 0, m.err
+}
+
+func (m *mockErrByteReader) Read(p []byte) (n int, err error) {
+	return 0, io.EOF
+}
+
+func TestReadMessageLength_ByteReaderOtherError(t *testing.T) {
+	expectedErr := assert.AnError
+	r := &mockErrByteReader{err: expectedErr}
+	_, err := ReadMessageLength(r)
+	assert.ErrorIs(t, err, expectedErr)
 }
