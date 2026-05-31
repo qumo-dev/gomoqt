@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **moqt:** Removed panics on excessive payload lengths in `message.ReadBytes` and `message.ReadStringArray`, mitigating a Denial of Service (DoS) vulnerability.
+- **moqt:** Added buffer-length bounds checking to `message.ReadStringArray` prior to slice allocation to prevent Out of Memory (OOM) crashes on malformed inputs.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added
