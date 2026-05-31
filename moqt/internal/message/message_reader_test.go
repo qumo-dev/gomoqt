@@ -184,6 +184,11 @@ func TestReadBytes(t *testing.T) {
 			input:   []byte{},
 			wantErr: true,
 		},
+		"count exceeds buffer bounds": {
+			// Length of remaining buffer (0 bytes) is less than the count (63 elements)
+			input:   []byte{0x3f},
+			wantErr: true,
+		},
 	}
 
 	for name, tt := range tests {
@@ -270,6 +275,16 @@ func TestReadStringArray(t *testing.T) {
 		},
 		"invalid count": {
 			input:   []byte{},
+			wantErr: true,
+		},
+		"count exceeds buffer bounds": {
+			// count=63 (0x3f), but buffer is empty after count
+			input:   []byte{0x3f},
+			wantErr: true,
+		},
+		"count exceeds buffer bounds with some strings": {
+			// count=5, but we only have length 2 buffer after
+			input:   []byte{0x05, 0x01, 0x61},
 			wantErr: true,
 		},
 	}

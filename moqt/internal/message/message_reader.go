@@ -2,7 +2,6 @@ package message
 
 import (
 	"io"
-	"math"
 )
 
 func ReadVarint(b []byte) (uint64, int, error) {
@@ -65,9 +64,6 @@ func ReadBytes(b []byte) ([]byte, int, error) {
 		return nil, 0, err
 	}
 	b = b[n:]
-	if num > math.MaxInt {
-		return nil, 0, io.EOF
-	}
 
 	if uint64(len(b)) < num {
 		return b, n + len(b), io.EOF
@@ -88,10 +84,6 @@ func ReadStringArray(b []byte) ([]string, int, error) {
 	count, total, err := ReadVarint(b)
 	if err != nil {
 		return nil, 0, err
-	}
-
-	if count > math.MaxInt {
-		return nil, 0, io.EOF
 	}
 
 	b = b[total:]
