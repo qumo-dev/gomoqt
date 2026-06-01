@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- **moqt/internal/message:** Optimized `ReadMessageLength` by fast-pathing `io.ByteReader`, reducing heap allocations per varint from 2 to 0.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added
