@@ -2,6 +2,7 @@ package message
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -284,6 +285,28 @@ func TestReadStringArray(t *testing.T) {
 				assert.Equal(t, tt.expected, result)
 				assert.Equal(t, tt.n, n)
 			}
+		})
+	}
+}
+
+func TestReadStringArray_OutOfBounds(t *testing.T) {
+	tests := map[string]struct {
+		input    []byte
+		expected []string
+		n        int
+		wantErr  bool
+	}{
+		"too large count": {
+			// This represents a count of 5 strings (0x05 varint), but only 2 bytes follow, not enough to even cover 5 varint string lengths
+			input:   []byte{0x05, 0x01, 0x02},
+			wantErr: true,
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := ReadStringArray(tt.input)
+			assert.Error(t, err)
+			assert.Equal(t, io.EOF, err)
 		})
 	}
 }

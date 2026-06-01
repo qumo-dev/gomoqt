@@ -356,3 +356,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Core `moqt` package with session, track, group, and frame handling.
 - Basic examples: broadcast, echo, relay.
 - Mage build system integration.
+
+## [Unreleased]
+### Security
+- **moqt:** Fixed an out-of-memory denial of service vulnerability in `message_reader` caused by unchecked string array lengths.
