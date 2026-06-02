@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **moqt/message:** Fixed a Denial of Service vulnerability where `panic` was used when reading overly large byte slices or string arrays.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added

@@ -1,0 +1,4 @@
+## 2025-06-02 - [Denial of Service in message_reader.go]
+**Vulnerability:** Found `panic` calls used when checking untrusted input lengths inside protocol parsing in `ReadBytes` and `ReadStringArray` (where lengths exceed `math.MaxInt`).
+**Learning:** Returning `panic` for invalid inputs in parsing layers leads to easy Application DoS by simply passing oversized values via protocol boundaries. Unhandled panics crash the application processing the buffer instead of gracefully closing connection or failing.
+**Prevention:** In protocol-layer parsers decoding user/network bytes, never use `panic()` to handle invalid data constraints; always return structured errors (e.g., `errors.New()`) to let higher levels handle the state properly.
