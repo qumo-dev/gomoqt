@@ -2,6 +2,7 @@ package message
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -138,8 +139,20 @@ func TestReadMessageLength(t *testing.T) {
 	}
 
 	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
+		t.Run(name+" ByteReader", func(t *testing.T) {
 			r := bytes.NewReader(tt.input)
+			result, err := ReadMessageLength(r)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
+		})
+
+		t.Run(name+" non-ByteReader", func(t *testing.T) {
+			// Wrapping in a type that only implements io.Reader
+			r := struct{ io.Reader }{bytes.NewReader(tt.input)}
 			result, err := ReadMessageLength(r)
 			if tt.wantErr {
 				assert.Error(t, err)
