@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **moqt:** Eliminated heap allocations when reading QUIC varints over an `io.ByteReader`.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added
