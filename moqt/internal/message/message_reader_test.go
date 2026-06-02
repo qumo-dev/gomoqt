@@ -184,6 +184,10 @@ func TestReadBytes(t *testing.T) {
 			input:   []byte{},
 			wantErr: true,
 		},
+		"too large varint slice": {
+			input:   []byte{0xc0, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+			wantErr: true,
+		},
 	}
 
 	for name, tt := range tests {
@@ -270,6 +274,10 @@ func TestReadStringArray(t *testing.T) {
 		},
 		"invalid count": {
 			input:   []byte{},
+			wantErr: true,
+		},
+		"too large varint string array": {
+			input:   []byte{0xc0, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
 			wantErr: true,
 		},
 	}
