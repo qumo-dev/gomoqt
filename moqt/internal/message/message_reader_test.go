@@ -272,6 +272,10 @@ func TestReadStringArray(t *testing.T) {
 			input:   []byte{},
 			wantErr: true,
 		},
+		"dos test: max int array size": {
+			input:   []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00},
+			wantErr: true,
+		},
 	}
 
 	for name, tt := range tests {

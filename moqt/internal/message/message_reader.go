@@ -2,7 +2,6 @@ package message
 
 import (
 	"io"
-	"math"
 )
 
 func ReadVarint(b []byte) (uint64, int, error) {
@@ -65,9 +64,6 @@ func ReadBytes(b []byte) ([]byte, int, error) {
 		return nil, 0, err
 	}
 	b = b[n:]
-	if num > math.MaxInt {
-		panic("byte slice too large")
-	}
 
 	if uint64(len(b)) < num {
 		return b, n + len(b), io.EOF
@@ -90,8 +86,11 @@ func ReadStringArray(b []byte) ([]string, int, error) {
 		return nil, 0, err
 	}
 
-	if count > math.MaxInt {
-		panic("string array too large")
+	// Prevent DoS: count cannot exceed the number of remaining bytes
+	// since each string requires at least 1 byte (varint length).
+	remaining := len(b) - total
+	if remaining < 0 || count > uint64(remaining) {
+		return nil, 0, io.EOF
 	}
 
 	b = b[total:]
