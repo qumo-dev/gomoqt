@@ -356,3 +356,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Core `moqt` package with session, track, group, and frame handling.
 - Basic examples: broadcast, echo, relay.
 - Mage build system integration.
+- Optimize `ReadMessageLength` for varints to remove heap allocations on hot paths.
