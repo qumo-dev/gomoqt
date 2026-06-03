@@ -2,6 +2,7 @@ package message
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -77,75 +78,6 @@ func TestReadVarint(t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expected, result)
 				assert.Equal(t, tt.n, n)
-			}
-		})
-	}
-}
-
-func TestReadMessageLength(t *testing.T) {
-	tests := map[string]struct {
-		input    []byte
-		expected uint64
-		wantErr  bool
-	}{
-		"zero": {
-			input:    []byte{0x00},
-			expected: 0,
-			wantErr:  false,
-		},
-		"small value": {
-			input:    []byte{0x3f},
-			expected: 63,
-			wantErr:  false,
-		},
-		"2-byte varint": {
-			input:    []byte{0x40, 0x80},
-			expected: 128,
-			wantErr:  false,
-		},
-		"2-byte varint 256": {
-			input:    []byte{0x41, 0x00},
-			expected: 256,
-			wantErr:  false,
-		},
-		"2-byte max": {
-			input:    []byte{0x7f, 0xff},
-			expected: 16383,
-			wantErr:  false,
-		},
-		"4-byte varint": {
-			input:    []byte{0x80, 0x01, 0x00, 0x00},
-			expected: 65536,
-			wantErr:  false,
-		},
-		"8-byte varint": {
-			input:    []byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00},
-			expected: 65536,
-			wantErr:  false,
-		},
-		"empty input": {
-			input:   []byte{},
-			wantErr: true,
-		},
-		"incomplete 2-byte": {
-			input:   []byte{0x40},
-			wantErr: true,
-		},
-		"incomplete 4-byte": {
-			input:   []byte{0x80, 0x01},
-			wantErr: true,
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			r := bytes.NewReader(tt.input)
-			result, err := ReadMessageLength(r)
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.expected, result)
 			}
 		})
 	}
@@ -286,4 +218,76 @@ func TestReadStringArray(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestReadMessageLength(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   []byte
+		want    uint64
+		wantErr error
+	}{
+		{"1-byte varint", []byte{0x25}, 0x25, nil},
+		{"2-byte varint", []byte{0x40, 0x25}, 0x25, nil},
+		{"4-byte varint", []byte{0x80, 0x00, 0x00, 0x25}, 0x25, nil},
+		{"8-byte varint", []byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x25}, 0x25, nil},
+		{"EOF on first byte", []byte{}, 0, io.EOF},
+		{"EOF on second byte (2-byte varint)", []byte{0x40}, 0, io.ErrUnexpectedEOF},
+		{"EOF on middle byte (4-byte varint)", []byte{0x80, 0x00}, 0, io.ErrUnexpectedEOF},
+		{"EOF on middle byte (8-byte varint)", []byte{0xc0, 0x00, 0x00}, 0, io.ErrUnexpectedEOF},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name+" (ByteReader)", func(t *testing.T) {
+			r := bytes.NewReader(tc.input)
+			got, err := ReadMessageLength(r)
+			if err != tc.wantErr {
+				t.Errorf("got error %v, want %v", err, tc.wantErr)
+			}
+			if got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+
+		t.Run(tc.name+" (NoByteReader)", func(t *testing.T) {
+			nr := &noByteReader{r: bytes.NewReader(tc.input)}
+			got, err := ReadMessageLength(nr)
+			if err != tc.wantErr {
+				t.Errorf("got error %v, want %v", err, tc.wantErr)
+			}
+			if got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+type noByteReader struct {
+	r *bytes.Reader
+}
+
+func (n *noByteReader) Read(p []byte) (int, error) {
+	return n.r.Read(p)
+}
+
+type errReader struct {
+	err error
+}
+
+func (e *errReader) Read(p []byte) (n int, err error) {
+	return 0, e.err
+}
+
+func TestReadMessageLength_Errors(t *testing.T) {
+	myErr := io.ErrClosedPipe
+
+	t.Run("first byte error (NoByteReader)", func(t *testing.T) {
+		got, err := ReadMessageLength(&errReader{err: myErr})
+		if err != myErr {
+			t.Errorf("got err %v, want %v", err, myErr)
+		}
+		if got != 0 {
+			t.Errorf("got %v, want 0", got)
+		}
+	})
 }
