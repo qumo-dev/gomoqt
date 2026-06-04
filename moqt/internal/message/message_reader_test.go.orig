@@ -367,18 +367,6 @@ func TestReadMessageLengthErrors(t *testing.T) {
 		assert.ErrorIs(t, err, assert.AnError)
 	})
 
-	t.Run("ByteReader 8-byte error on 4th byte", func(t *testing.T) {
-		r := &partialReader{data: []byte{0xc0, 0x00, 0x00, 0x00}}
-		_, err := ReadMessageLength(r)
-		assert.ErrorIs(t, err, assert.AnError)
-	})
-
-	t.Run("ByteReader 8-byte error on 6th byte", func(t *testing.T) {
-		r := &partialReader{data: []byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00}}
-		_, err := ReadMessageLength(r)
-		assert.ErrorIs(t, err, assert.AnError)
-	})
-
 	// Test remaining coverage paths for short reads
 	paths := []struct{
 		name string
@@ -471,27 +459,4 @@ func TestReadMessageLengthOtherErrors(t *testing.T) {
 
 func TestReadMessageLengthUnreachable(t *testing.T) {
     // Cannot reach it normally. Let's see if there are other uncovered lines.
-}
-
-func TestReadMessageLengthFallbackSuccess(t *testing.T) {
-	t.Run("Reader valid 2-byte fallback", func(t *testing.T) {
-		_, err := ReadMessageLength(&noByteReader{r: bytes.NewReader([]byte{0x40, 0x01})})
-		assert.NoError(t, err)
-	})
-	t.Run("Reader valid 4-byte fallback", func(t *testing.T) {
-		_, err := ReadMessageLength(&noByteReader{r: bytes.NewReader([]byte{0x80, 0x00, 0x00, 0x01})})
-		assert.NoError(t, err)
-	})
-	t.Run("Reader valid 8-byte fallback", func(t *testing.T) {
-		_, err := ReadMessageLength(&noByteReader{r: bytes.NewReader([]byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01})})
-		assert.NoError(t, err)
-	})
-}
-
-func TestReadBytesAndStringArrayPanic(t *testing.T) {
-	// 0xc0 is 8 bytes. max uint64 is 0x3fffffffffffffff. MaxInt on 64bit is 0x7fffffffffffffff which is bigger.
-	// We can't actually trigger "byte slice too large" panic easily if MaxInt is larger than QUIC varint max.
-	// Oh, wait, the max QUIC varint is 0x3fffffffffffffff which fits in MaxInt (0x7fffffffffffffff).
-	// So `num > math.MaxInt` is unreachable on 64-bit systems!
-	// We can't easily cover it unless we build for 32-bit.
 }

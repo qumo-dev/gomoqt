@@ -1,0 +1,22 @@
+--- moqt/internal/message/message_reader_test.go
++++ moqt/internal/message/message_reader_test.go
+@@ -383,6 +383,18 @@
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, assert.AnError)
+	})
++
++	t.Run("Reader valid 2-byte fallback", func(t *testing.T) {
++		_, err := ReadMessageLength(&noByteReader{r: bytes.NewReader([]byte{0x40, 0x01})})
++		assert.NoError(t, err)
++	})
++	t.Run("Reader valid 4-byte fallback", func(t *testing.T) {
++		_, err := ReadMessageLength(&noByteReader{r: bytes.NewReader([]byte{0x80, 0x00, 0x00, 0x01})})
++		assert.NoError(t, err)
++	})
++	t.Run("Reader valid 8-byte fallback", func(t *testing.T) {
++		_, err := ReadMessageLength(&noByteReader{r: bytes.NewReader([]byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01})})
++		assert.NoError(t, err)
++	})
+
+	// Test remaining coverage paths for short reads
+	paths := []struct{
