@@ -30,34 +30,96 @@ func ReadVarint(b []byte) (uint64, int, error) {
 
 // ReadVarintFromReader reads a QUIC varint from an io.Reader
 func ReadMessageLength(r io.Reader) (uint64, error) {
-	// Read first byte to determine length
-	firstByte := make([]byte, 1)
-	_, err := io.ReadFull(r, firstByte)
+	var b0 byte
+	var err error
+
+	// Fast path: Use io.ByteReader to prevent heap escapes when reading small lengths
+	if br, ok := r.(io.ByteReader); ok {
+		b0, err = br.ReadByte()
+	} else {
+		var firstByte [1]byte
+		_, err = io.ReadFull(r, firstByte[:])
+		b0 = firstByte[0]
+	}
 	if err != nil {
 		return 0, err
 	}
 
-	// Determine the length from the first two bits
-	l := 1 << ((firstByte[0] & 0xc0) >> 6)
+	l := 1 << ((b0 & 0xc0) >> 6)
+	if l == 1 {
+		return uint64(b0 & 0x3f), nil
+	}
 
-	// Read remaining bytes if needed
-	buf := make([]byte, l)
-	buf[0] = firstByte[0]
-	if l > 1 {
-		_, err = io.ReadFull(r, buf[1:])
+	// Use io.ByteReader fast path to avoid slice allocation
+	if br, ok := r.(io.ByteReader); ok {
+		switch l {
+		case 2:
+			b1, err := br.ReadByte()
+			if err != nil {
+				if err == io.EOF {
+					err = io.ErrUnexpectedEOF
+				}
+				return 0, err
+			}
+			return uint64(b0&0x3f)<<8 | uint64(b1), nil
+		case 4:
+			var b1, b2, b3 byte
+			b1, err = br.ReadByte()
+			if err == nil {
+				b2, err = br.ReadByte()
+			}
+			if err == nil {
+				b3, err = br.ReadByte()
+			}
+			if err != nil {
+				if err == io.EOF {
+					err = io.ErrUnexpectedEOF
+				}
+				return 0, err
+			}
+			return uint64(b0&0x3f)<<24 | uint64(b1)<<16 | uint64(b2)<<8 | uint64(b3), nil
+		case 8:
+			var b [8]byte
+			b[0] = b0
+			for i := 1; i < 8; i++ {
+				b[i], err = br.ReadByte()
+				if err != nil {
+					if err == io.EOF {
+						err = io.ErrUnexpectedEOF
+					}
+					return 0, err
+				}
+			}
+			val := uint64(b[0]&0x3f)<<56 | uint64(b[1])<<48 | uint64(b[2])<<40 | uint64(b[3])<<32 |
+				uint64(b[4])<<24 | uint64(b[5])<<16 | uint64(b[6])<<8 | uint64(b[7])
+			return val, nil
+		}
+	} else {
+		// Fallback for non-ByteReader: uses a stack array that escapes to heap,
+		// but guarantees correct reading behavior for any standard io.Reader.
+		var buf [8]byte
+		buf[0] = b0
+		_, err = io.ReadFull(r, buf[1:l])
 		if err != nil {
+			if err == io.EOF {
+				err = io.ErrUnexpectedEOF
+			}
 			return 0, err
+		}
+		switch l {
+		case 2:
+			return uint64(buf[0]&0x3f)<<8 | uint64(buf[1]), nil
+		case 4:
+			return uint64(buf[0]&0x3f)<<24 | uint64(buf[1])<<16 | uint64(buf[2])<<8 | uint64(buf[3]), nil
+		case 8:
+			val := uint64(buf[0]&0x3f)<<56 | uint64(buf[1])<<48 | uint64(buf[2])<<40 | uint64(buf[3])<<32 |
+				uint64(buf[4])<<24 | uint64(buf[5])<<16 | uint64(buf[6])<<8 | uint64(buf[7])
+			return val, nil
 		}
 	}
 
-	// Parse the varint
-	val, _, err := ReadVarint(buf)
-	return val, err
+	return 0, io.ErrUnexpectedEOF
 }
-
-// func ReadMessageLength(r io.Reader) (uint64, error) {
-// 	return ReadVarintFromReader(r)
-// }
 
 func ReadBytes(b []byte) ([]byte, int, error) {
 	num, n, err := ReadVarint(b)

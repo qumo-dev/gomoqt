@@ -1,0 +1,3 @@
+## 2024-06-04 - [Avoid heap allocations for small buffer slices in io.Reader calls]
+**Learning:** In Go, passing a stack-allocated buffer slice (e.g., `buf[:]`) to interface methods like `io.Reader.Read` or `io.ReadFull` causes the buffer to escape to the heap due to escape analysis because the compiler doesn't know what the interface implementation will do with the slice.
+**Action:** When reading small amounts of bytes from an `io.Reader`, try to type-assert to `io.ByteReader` and read bytes individually to avoid slice allocations. Keep a fallback for standard `io.Reader` using fixed-size arrays.
