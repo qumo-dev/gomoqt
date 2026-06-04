@@ -223,6 +223,10 @@ func TestReadString(t *testing.T) {
 			input:   []byte{0x05, 0x68, 0x65},
 			wantErr: true,
 		},
+		"invalid varint": {
+			input:   []byte{},
+			wantErr: true,
+		},
 	}
 
 	for name, tt := range tests {
@@ -270,6 +274,14 @@ func TestReadStringArray(t *testing.T) {
 		},
 		"invalid count": {
 			input:   []byte{},
+			wantErr: true,
+		},
+		"element read error": {
+			input:   []byte{0x02, 0x01, 0x41, 0x02, 0x41}, // count=2, 1st=A, 2nd=len 2 but only 1 byte
+			wantErr: true,
+		},
+		"count exceeds buffer": {
+			input:   []byte{0x40, 0x64, 0x00}, // count=100, but only 1 byte left
 			wantErr: true,
 		},
 	}
