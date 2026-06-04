@@ -115,6 +115,8 @@ func ReadMessageLength(r io.Reader) (uint64, error) {
 			val := uint64(buf[0]&0x3f)<<56 | uint64(buf[1])<<48 | uint64(buf[2])<<40 | uint64(buf[3])<<32 |
 				uint64(buf[4])<<24 | uint64(buf[5])<<16 | uint64(buf[6])<<8 | uint64(buf[7])
 			return val, nil
+		default:
+			// Math guarantees l is 1, 2, 4, 8. This is unreachable.
 		}
 	}
 

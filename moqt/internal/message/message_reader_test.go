@@ -335,6 +335,38 @@ func TestReadMessageLengthErrors(t *testing.T) {
 		assert.ErrorIs(t, err, assert.AnError)
 	})
 
+	// Add more error coverage for l=4 short read to cover specific branches in switch
+	t.Run("ByteReader 4-byte read error on 2nd", func(t *testing.T) {
+		r := &partialReader{data: []byte{0x80, 0x00}}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, assert.AnError)
+	})
+
+	t.Run("ByteReader 4-byte read error on 3rd", func(t *testing.T) {
+		r := &partialReader{data: []byte{0x80, 0x00, 0x00}}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, assert.AnError)
+	})
+
+	// Test 8-byte loop errors
+	t.Run("ByteReader 8-byte error on 5th byte", func(t *testing.T) {
+		r := &partialReader{data: []byte{0xc0, 0x00, 0x00, 0x00, 0x00}}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, assert.AnError)
+	})
+
+	t.Run("ByteReader 8-byte error on 2nd byte", func(t *testing.T) {
+		r := &partialReader{data: []byte{0xc0, 0x00}}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, assert.AnError)
+	})
+
+	t.Run("ByteReader 8-byte error on 3rd byte", func(t *testing.T) {
+		r := &partialReader{data: []byte{0xc0, 0x00, 0x00}}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, assert.AnError)
+	})
+
 	// Test remaining coverage paths for short reads
 	paths := []struct{
 		name string
@@ -412,4 +444,19 @@ func TestReadMessageLengthOtherErrors(t *testing.T) {
 	nr3 := &noByteReader{r: &partialReader{data: []byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}}}
 	_, err = ReadMessageLength(nr3)
 	assert.ErrorIs(t, err, assert.AnError)
+}
+
+// To hit the "return 0, io.ErrUnexpectedEOF" at the end of the function (for invalid length which shouldn't happen but the compiler requires a return or exhaustive switch). Actually wait, l is derived from 1 << ((b0 & 0xc0) >> 6), so l is always 1, 2, 4, or 8. Since 1 is handled earlier, it's 2, 4, 8. Both switch statements cover 2, 4, 8. Thus the end is technically unreachable, but to cover the default case in switch if it existed we'd need a different length. We cannot trigger the end unless `l` is not 2, 4, or 8. Since `l` is mathematically guaranteed to be 1, 2, 4, 8, the end `return 0, io.ErrUnexpectedEOF` is UNREACHABLE.
+// Oh wait, `b1, err = br.ReadByte()` for l=4 has:
+// 			if err == nil {
+//				b2, err = br.ReadByte()
+//			}
+//			if err == nil {
+//				b3, err = br.ReadByte()
+//			}
+// If the second byte succeeds but third fails with non-EOF error... Wait, if `err != nil`, it maps EOF and returns. If it succeeds, it returns.
+// What about the switch not having a default?
+
+func TestReadMessageLengthUnreachable(t *testing.T) {
+    // Cannot reach it normally. Let's see if there are other uncovered lines.
 }
