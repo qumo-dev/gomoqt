@@ -2,6 +2,7 @@ package message
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -297,4 +298,118 @@ func BenchmarkReadMessageLength(b *testing.B) {
 		r.Reset(input)
 		_, _ = ReadMessageLength(r)
 	}
+}
+
+type errReader struct{
+	err error
+}
+func (e *errReader) Read(p []byte) (n int, err error) {
+	return 0, e.err
+}
+
+type errByteReader struct{
+	err error
+}
+func (e *errByteReader) Read(p []byte) (n int, err error) {
+	return 0, e.err
+}
+func (e *errByteReader) ReadByte() (byte, error) {
+	return 0, e.err
+}
+
+type noByteReader struct{
+	r io.Reader
+}
+func (n *noByteReader) Read(p []byte) (int, error) {
+	return n.r.Read(p)
+}
+
+func TestReadMessageLengthErrors(t *testing.T) {
+	t.Run("ByteReader first byte error", func(t *testing.T) {
+		_, err := ReadMessageLength(&errByteReader{err: assert.AnError})
+		assert.ErrorIs(t, err, assert.AnError)
+	})
+
+	t.Run("Reader first byte error", func(t *testing.T) {
+		_, err := ReadMessageLength(&errReader{err: assert.AnError})
+		assert.ErrorIs(t, err, assert.AnError)
+	})
+
+	// Test remaining coverage paths for short reads
+	paths := []struct{
+		name string
+		input []byte
+		isByteReader bool
+	}{
+		{"ByteReader 2-byte short", []byte{0x40}, true},
+		{"ByteReader 4-byte short", []byte{0x80, 0x00, 0x00}, true},
+		{"ByteReader 8-byte short", []byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, true},
+		{"Reader 2-byte short", []byte{0x40}, false},
+		{"Reader 4-byte short", []byte{0x80, 0x00, 0x00}, false},
+		{"Reader 8-byte short", []byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, false},
+	}
+
+	for _, p := range paths {
+		t.Run(p.name, func(t *testing.T) {
+			var r io.Reader = bytes.NewReader(p.input)
+			if !p.isByteReader {
+				r = &noByteReader{r: r}
+			}
+			_, err := ReadMessageLength(r)
+			assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		})
+	}
+}
+
+// A test case that simulates reading an exact buffer and getting an unexpected EOF
+type partialReader struct {
+	data []byte
+	n    int
+}
+func (p *partialReader) Read(b []byte) (n int, err error) {
+	if p.n >= len(p.data) {
+		return 0, assert.AnError
+	}
+	n = copy(b, p.data[p.n:])
+	p.n += n
+	if n < len(b) {
+		return n, assert.AnError
+	}
+	return n, nil
+}
+func (p *partialReader) ReadByte() (byte, error) {
+	if p.n >= len(p.data) {
+		return 0, assert.AnError
+	}
+	b := p.data[p.n]
+	p.n++
+	return b, nil
+}
+
+func TestReadMessageLengthOtherErrors(t *testing.T) {
+	// byte reader with custom error
+	r1 := &partialReader{data: []byte{0x40}}
+	_, err := ReadMessageLength(r1)
+	assert.ErrorIs(t, err, assert.AnError)
+
+	r2 := &partialReader{data: []byte{0x80, 0x00, 0x00}}
+	_, err = ReadMessageLength(r2)
+	assert.ErrorIs(t, err, assert.AnError)
+
+	r3 := &partialReader{data: []byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}}
+	_, err = ReadMessageLength(r3)
+	assert.ErrorIs(t, err, assert.AnError)
+
+	// non-byte reader with custom error
+	nr1 := &noByteReader{r: &partialReader{data: []byte{0x40}}}
+	_, err = ReadMessageLength(nr1)
+	assert.ErrorIs(t, err, assert.AnError)
+
+	nr2 := &noByteReader{r: &partialReader{data: []byte{0x80, 0x00, 0x00}}}
+	_, err = ReadMessageLength(nr2)
+	assert.ErrorIs(t, err, assert.AnError)
+
+	nr3 := &noByteReader{r: &partialReader{data: []byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}}}
+	_, err = ReadMessageLength(nr3)
+	assert.ErrorIs(t, err, assert.AnError)
 }

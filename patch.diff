@@ -1,0 +1,13 @@
+--- CHANGELOG.md
++++ CHANGELOG.md
+@@ -6,6 +6,10 @@
+
+ ## [Unreleased]
+
++### Changed
++
++- **moqt:** Optimized `ReadMessageLength` parsing to be zero-allocation when reading from `io.ByteReader` sources (like network and file streams).
++
+ ## [v0.15.0] - 2026-04-26
+
+ ### Added
