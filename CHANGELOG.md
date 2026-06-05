@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **moqt:** Removed `panic()` calls when parsing untrusted payload sizes in `ReadBytes` and `ReadStringArray` to prevent Denial of Service (DoS) and excessive memory allocation vulnerabilities.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added
