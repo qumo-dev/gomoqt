@@ -1,0 +1,5 @@
+
+## 2024-05-18 - Denial of Service (DoS) Risk via Untrusted Payload Parsing
+**Vulnerability:** The application used `panic()` when parsing message types containing variable-length array payloads or byte arrays if the lengths provided in the network message were suspiciously large (e.g., greater than `math.MaxInt`).
+**Learning:** `panic()` terminates the application loop, turning a malformed network packet directly into an exploitable DoS vulnerability. Moreover, the bounds-checking logic using `math.MaxInt` becomes a problem because the expected types don't inherently constrain data safely on their own when used directly in panic. By explicitly allocating huge buffers using network-provided strings sizes, it could out-of-memory.
+**Prevention:** Always validate size values explicitly against the available capacity/remaining length of the buffer. Never use `panic()` to handle invalid data parsing lengths or boundaries constraints on untrusted network packets. Instead, return appropriate errors (such as `io.EOF`) to safely abort request parsing and properly support incomplete bounds/streams.
