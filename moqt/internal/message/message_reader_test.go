@@ -2,6 +2,7 @@ package message
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -286,4 +287,216 @@ func TestReadStringArray(t *testing.T) {
 			}
 		})
 	}
+}
+
+// mockReader wraps an io.Reader but does not implement io.ByteReader
+type mockReader struct {
+	io.Reader
+}
+
+func TestReadMessageLength_NonByteReader(t *testing.T) {
+	tests := map[string]struct {
+		input    []byte
+		expected uint64
+		wantErr  bool
+	}{
+		"zero": {
+			input:    []byte{0x00},
+			expected: 0,
+			wantErr:  false,
+		},
+		"small value": {
+			input:    []byte{0x3f},
+			expected: 63,
+			wantErr:  false,
+		},
+		"2-byte varint": {
+			input:    []byte{0x40, 0x80},
+			expected: 128,
+			wantErr:  false,
+		},
+		"2-byte varint 256": {
+			input:    []byte{0x41, 0x00},
+			expected: 256,
+			wantErr:  false,
+		},
+		"2-byte max": {
+			input:    []byte{0x7f, 0xff},
+			expected: 16383,
+			wantErr:  false,
+		},
+		"4-byte varint": {
+			input:    []byte{0x80, 0x01, 0x00, 0x00},
+			expected: 65536,
+			wantErr:  false,
+		},
+		"8-byte varint": {
+			input:    []byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00},
+			expected: 65536,
+			wantErr:  false,
+		},
+		"empty input": {
+			input:   []byte{},
+			wantErr: true,
+		},
+		"incomplete 2-byte": {
+			input:   []byte{0x40},
+			wantErr: true,
+		},
+		"incomplete 4-byte": {
+			input:   []byte{0x80, 0x01},
+			wantErr: true,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			r := &mockReader{Reader: bytes.NewReader(tt.input)}
+			result, err := ReadMessageLength(r)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
+		})
+	}
+}
+
+type earlyEOFByteReader struct {
+	*bytes.Reader
+}
+
+func (m *earlyEOFByteReader) ReadByte() (byte, error) {
+	return 0, io.EOF
+}
+
+func TestReadMessageLength_EarlyEOFByteReader(t *testing.T) {
+	r := &earlyEOFByteReader{Reader: bytes.NewReader([]byte{})}
+	_, err := ReadMessageLength(r)
+	assert.ErrorIs(t, err, io.EOF)
+}
+
+type mockByteReaderEarlyEOF struct {
+	data []byte
+	pos  int
+}
+
+func (m *mockByteReaderEarlyEOF) ReadByte() (byte, error) {
+	if m.pos >= len(m.data) {
+		return 0, io.EOF
+	}
+	b := m.data[m.pos]
+	m.pos++
+	return b, nil
+}
+
+func TestReadMessageLength_ByteReaderIncomplete(t *testing.T) {
+	r := &mockByteReaderEarlyEOF{data: []byte{0x40}}
+	_, err := ReadMessageLength(r)
+	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+}
+
+type mockReaderEarlyEOF struct {
+	data []byte
+	pos  int
+}
+
+func (m *mockReaderEarlyEOF) Read(p []byte) (n int, err error) {
+	if m.pos >= len(m.data) {
+		return 0, io.EOF
+	}
+	n = copy(p, m.data[m.pos:])
+	m.pos += n
+	return n, nil
+}
+
+func TestReadMessageLength_ReaderIncomplete(t *testing.T) {
+	r := &mockReaderEarlyEOF{data: []byte{0x40}}
+	_, err := ReadMessageLength(r)
+	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+}
+
+func (m *earlyEOFByteReader) Read(p []byte) (n int, err error) {
+	return 0, io.EOF
+}
+
+func (m *mockByteReaderEarlyEOF) Read(p []byte) (n int, err error) {
+	if m.pos >= len(m.data) {
+		return 0, io.EOF
+	}
+	n = copy(p, m.data[m.pos:])
+	m.pos += n
+	return n, nil
+}
+
+type failByteReader struct{}
+
+func (f *failByteReader) ReadByte() (byte, error) {
+	return 0, bytes.ErrTooLarge
+}
+
+func (f *failByteReader) Read(p []byte) (n int, err error) {
+	return 0, bytes.ErrTooLarge
+}
+
+func TestReadMessageLength_ByteReaderFail(t *testing.T) {
+	r := &failByteReader{}
+	_, err := ReadMessageLength(r)
+	assert.ErrorIs(t, err, bytes.ErrTooLarge)
+}
+
+type failReader struct{}
+
+func (f *failReader) Read(p []byte) (n int, err error) {
+	return 0, bytes.ErrTooLarge
+}
+
+func TestReadMessageLength_ReaderFail(t *testing.T) {
+	r := &failReader{}
+	_, err := ReadMessageLength(r)
+	assert.ErrorIs(t, err, bytes.ErrTooLarge)
+}
+
+type failByteReaderLater struct {
+	data []byte
+	pos  int
+}
+
+func (f *failByteReaderLater) ReadByte() (byte, error) {
+	if f.pos == 0 {
+		f.pos++
+		return 0x40, nil
+	}
+	return 0, bytes.ErrTooLarge
+}
+
+func (f *failByteReaderLater) Read(p []byte) (n int, err error) {
+	return 0, bytes.ErrTooLarge
+}
+
+func TestReadMessageLength_ByteReaderFailLater(t *testing.T) {
+	r := &failByteReaderLater{}
+	_, err := ReadMessageLength(r)
+	assert.ErrorIs(t, err, bytes.ErrTooLarge)
+}
+
+type failReaderLater struct {
+	data []byte
+	pos  int
+}
+
+func (f *failReaderLater) Read(p []byte) (n int, err error) {
+	if f.pos == 0 {
+		p[0] = 0x40
+		f.pos++
+		return 1, nil
+	}
+	return 0, bytes.ErrTooLarge
+}
+
+func TestReadMessageLength_ReaderFailLater(t *testing.T) {
+	r := &failReaderLater{}
+	_, err := ReadMessageLength(r)
+	assert.ErrorIs(t, err, bytes.ErrTooLarge)
 }
