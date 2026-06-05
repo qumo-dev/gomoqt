@@ -1,0 +1,3 @@
+## 2025-06-05 - Avoid Heap Allocation for Small Reads in io.Reader Interface Methods
+**Learning:** Passing a slice of a local stack-allocated array (like `buf[:1]`) to an interface method such as `io.ReadFull(r, buf[:1])` causes the array to escape to the heap due to escape analysis (because interfaces wrap the pointer). For high-throughput functions like varint reading, this creates huge allocation overhead.
+**Action:** When optimizing hot paths for byte reading, always type-assert to `io.ByteReader` and read bytes individually. If `io.ByteReader` is supported, zero allocations occur, which dramatically speeds up varint decoding.
