@@ -1,0 +1,12 @@
+--- moqt/internal/message/message_reader.go
++++ moqt/internal/message/message_reader.go
+@@ -65,9 +65,6 @@
+		return nil, 0, err
+	}
+	b = b[n:]
+-	if num > uint64(len(b)) {
+-		return nil, 0, io.EOF
+-	}
+
+	if uint64(len(b)) < num {
+		return b, n + len(b), io.EOF

@@ -1,0 +1,4 @@
+## 2025-02-24 - DoS vulnerability in byte slice parsing
+**Vulnerability:** The functions `ReadBytes` and `ReadStringArray` in `moqt/internal/message/message_reader.go` use `panic()` to handle invalid data lengths where the read number exceeded `math.MaxInt`. An attacker could exploit this by sending a crafted packet causing a `panic()` and crashing the application (Denial of Service).
+**Learning:** Using `panic()` during untrusted payload input parsing leads to DoS. All decoding/parsing issues should return standardized errors like `io.EOF` or an explicit error type to let the application handle the invalid data gracefully.
+**Prevention:** Never use `panic()` to handle parsing failures from external sources; always return standard error values. Additionally, validate payload length claims against actual available bytes or realistic limits.
