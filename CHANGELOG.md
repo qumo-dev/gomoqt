@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **moqt:** Replaced panicking with standardized `io.EOF` and error returns for varint and payload decoding limits in `moqt/internal/message/message_reader.go` to prevent Denial of Service via crafted packets.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added
