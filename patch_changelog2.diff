@@ -1,0 +1,13 @@
+--- CHANGELOG.md
++++ CHANGELOG.md
+@@ -7,6 +7,10 @@
+
+ ## [Unreleased]
+
++### Changed
++
++- **moqt:** Optimized `ReadMessageLength` varint parsing, eliminating heap allocations for improved performance and throughput.
++
+ ## [v0.15.0] - 2026-04-26
+
+ ### Added
