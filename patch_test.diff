@@ -1,0 +1,24 @@
+--- moqt/internal/message/message_reader_test.go
++++ moqt/internal/message/message_reader_test.go
+@@ -192,6 +192,10 @@
+			input:   []byte{},
+			wantErr: true,
+		},
++		"exceedingly large varint length": {
++			input:   []byte{0x7f, 0xff},
++			wantErr: true,
++		},
+	}
+
+	for name, tt := range tests {
+@@ -263,6 +267,10 @@
+			input:   []byte{},
+			wantErr: true,
+		},
++		"exceedingly large count length": {
++			input:   []byte{0x7f, 0xff},
++			wantErr: true,
++		},
+	}
+
+	for name, tt := range tests {

@@ -1,0 +1,13 @@
+--- CHANGELOG.md
++++ CHANGELOG.md
+@@ -2,6 +2,10 @@
+
+ All notable changes to this project will be documented in this file.
+
++## [Unreleased]
++### Fixed
++- **moqt:** Replaced panicking with standardized `io.EOF` and error returns for varint and payload decoding limits in `moqt/internal/message/message_reader.go` to prevent Denial of Service via crafted packets.
++
+ ## [v0.13.4] - 2026-06-03
+
+ ### Added
