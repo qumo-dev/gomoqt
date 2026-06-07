@@ -1,9 +1,7 @@
 package message
 
 import (
-	"errors"
 	"io"
-	"math"
 )
 
 func ReadVarint(b []byte) (uint64, int, error) {
@@ -56,20 +54,12 @@ func ReadMessageLength(r io.Reader) (uint64, error) {
 	return val, err
 }
 
-// func ReadMessageLength(r io.Reader) (uint64, error) {
-// 	return ReadVarintFromReader(r)
-// }
-
 func ReadBytes(b []byte) ([]byte, int, error) {
 	num, n, err := ReadVarint(b)
 	if err != nil {
 		return nil, 0, err
 	}
 	b = b[n:]
-	// Coverage ignore - only reachable on 32-bit systems where math.MaxInt < 1<<62
-	if num > math.MaxInt {
-		return nil, 0, errors.New("byte slice too large")
-	}
 
 	if uint64(len(b)) < num {
 		return b, n + len(b), io.EOF
@@ -90,11 +80,6 @@ func ReadStringArray(b []byte) ([]string, int, error) {
 	count, total, err := ReadVarint(b)
 	if err != nil {
 		return nil, 0, err
-	}
-
-	// Coverage ignore - only reachable on 32-bit systems where math.MaxInt < 1<<62
-	if count > math.MaxInt {
-		return nil, 0, errors.New("string array too large")
 	}
 
 	b = b[total:]
