@@ -2,6 +2,7 @@ package message
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -245,6 +246,7 @@ func TestReadStringArray(t *testing.T) {
 		expected []string
 		n        int
 		wantErr  bool
+		errType  error
 	}{
 		"empty array": {
 			input:    []byte{0x00},
@@ -264,13 +266,18 @@ func TestReadStringArray(t *testing.T) {
 			n:        13,
 			wantErr:  false,
 		},
-		"incomplete array": {
+		"incomplete array element": {
 			input:   []byte{0x01, 0x05, 0x68, 0x65},
 			wantErr: true,
 		},
 		"invalid count": {
 			input:   []byte{},
 			wantErr: true,
+		},
+		"count larger than remaining buffer": {
+			input:   []byte{0x80, 0x10, 0x00, 0x00, 0x01},
+			wantErr: true,
+			errType: io.EOF,
 		},
 	}
 
@@ -279,6 +286,9 @@ func TestReadStringArray(t *testing.T) {
 			result, n, err := ReadStringArray(tt.input)
 			if tt.wantErr {
 				assert.Error(t, err)
+				if tt.errType != nil {
+					assert.ErrorIs(t, err, tt.errType)
+				}
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expected, result)

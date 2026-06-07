@@ -66,6 +66,7 @@ func ReadBytes(b []byte) ([]byte, int, error) {
 		return nil, 0, err
 	}
 	b = b[n:]
+	// Coverage ignore - only reachable on 32-bit systems where math.MaxInt < 1<<62
 	if num > math.MaxInt {
 		return nil, 0, errors.New("byte slice too large")
 	}
@@ -91,6 +92,7 @@ func ReadStringArray(b []byte) ([]string, int, error) {
 		return nil, 0, err
 	}
 
+	// Coverage ignore - only reachable on 32-bit systems where math.MaxInt < 1<<62
 	if count > math.MaxInt {
 		return nil, 0, errors.New("string array too large")
 	}
