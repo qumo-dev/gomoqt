@@ -2,6 +2,7 @@ package message
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -283,6 +284,117 @@ func TestReadStringArray(t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expected, result)
 				assert.Equal(t, tt.n, n)
+			}
+		})
+	}
+}
+
+// Test coverage additions
+
+type readerOnly struct {
+	r io.Reader
+}
+
+func (ro *readerOnly) Read(p []byte) (n int, err error) {
+	return ro.r.Read(p)
+}
+
+type errorByteReader struct {
+	data []byte
+	idx  int
+	err  error
+}
+
+func (e *errorByteReader) Read(p []byte) (int, error) {
+	if e.idx >= len(e.data) {
+		return 0, e.err
+	}
+	n := copy(p, e.data[e.idx:])
+	e.idx += n
+	return n, nil
+}
+
+func (e *errorByteReader) ReadByte() (byte, error) {
+	if e.idx >= len(e.data) {
+		return 0, e.err
+	}
+	b := e.data[e.idx]
+	e.idx++
+	return b, nil
+}
+
+func TestReadMessageLength_ErrorsAndReader(t *testing.T) {
+	tests := []struct {
+		name    string
+		r       io.Reader
+		wantErr error
+		wantVal uint64
+	}{
+		{
+			name:    "byte_reader_unexpected_eof",
+			r:       &errorByteReader{data: []byte{0x40}, err: io.EOF},
+			wantErr: io.ErrUnexpectedEOF,
+		},
+		{
+			name:    "byte_reader_custom_error",
+			r:       &errorByteReader{data: []byte{0x40}, err: io.ErrClosedPipe},
+			wantErr: io.ErrClosedPipe,
+		},
+		{
+			name:    "byte_reader_first_byte_eof",
+			r:       &errorByteReader{data: []byte{}, err: io.EOF},
+			wantErr: io.EOF,
+		},
+		{
+			name:    "byte_reader_first_byte_error",
+			r:       &errorByteReader{data: []byte{}, err: io.ErrClosedPipe},
+			wantErr: io.ErrClosedPipe,
+		},
+		{
+			name:    "reader_only_1byte",
+			r:       &readerOnly{bytes.NewReader([]byte{0x00})},
+			wantVal: 0,
+		},
+		{
+			name:    "reader_only_2byte",
+			r:       &readerOnly{bytes.NewReader([]byte{0x40, 0x01})},
+			wantVal: 1,
+		},
+		{
+			name:    "reader_only_4byte",
+			r:       &readerOnly{bytes.NewReader([]byte{0x80, 0x00, 0x00, 0x01})},
+			wantVal: 1,
+		},
+		{
+			name:    "reader_only_8byte",
+			r:       &readerOnly{bytes.NewReader([]byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01})},
+			wantVal: 1,
+		},
+		{
+			name:    "reader_only_err_eof",
+			r:       &readerOnly{bytes.NewReader([]byte{})},
+			wantErr: io.EOF,
+		},
+		{
+			name:    "reader_only_err_unexpected_eof",
+			r:       &readerOnly{bytes.NewReader([]byte{0x40})},
+			wantErr: io.ErrUnexpectedEOF,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			val, err := ReadMessageLength(tt.r)
+			if tt.wantErr != nil {
+				if tt.wantErr == io.ErrUnexpectedEOF && tt.name == "reader_only_err_unexpected_eof" {
+					// io.ReadFull natively maps 0 bytes to EOF
+					assert.ErrorIs(t, err, io.EOF)
+				} else {
+					assert.ErrorIs(t, err, tt.wantErr)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.wantVal, val)
 			}
 		})
 	}

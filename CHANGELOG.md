@@ -1,3 +1,8 @@
+## [Unreleased]
+
+### Changed
+- **moqt:** Optimized `ReadMessageLength` to use `io.ByteReader` when available to eliminate heap allocations.
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
