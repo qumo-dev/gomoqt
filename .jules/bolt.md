@@ -1,0 +1,3 @@
+## 2024-05-18 - Avoid heap allocations in network stream varint decoding
+**Learning:** In Go, when passing a small slice (even if originally stack-allocated or an array subset) to an interface method like `io.Reader.Read` or `io.ReadFull`, the compiler's escape analysis forces the backing array to escape to the heap. For hot-path network operations like parsing QUIC varints from `io.Reader`, this causes significant allocation overhead.
+**Action:** Always type-assert the `io.Reader` to `io.ByteReader` when reading individual bytes (with a fallback to `io.Reader`). Use an internal buffer avoiding interface slice passing if possible, and process varint bytes sequentially. Map `io.EOF` properly if falling back or using `io.ByteReader` to read beyond the first byte.
