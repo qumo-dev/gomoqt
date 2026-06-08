@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **moqt/internal/message:** Fixed a Denial of Service vulnerability in `message_reader.go` caused by panicking on large payload allocations.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added

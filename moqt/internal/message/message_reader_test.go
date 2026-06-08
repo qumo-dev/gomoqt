@@ -2,6 +2,7 @@ package message
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,10 +10,11 @@ import (
 
 func TestReadVarint(t *testing.T) {
 	tests := map[string]struct {
-		input    []byte
-		expected uint64
-		n        int
-		wantErr  bool
+		input       []byte
+		expected    uint64
+		n           int
+		wantErr     bool
+		expectedErr error
 	}{
 		"1 byte - zero": {
 			input:    []byte{0x00},
@@ -84,9 +86,10 @@ func TestReadVarint(t *testing.T) {
 
 func TestReadMessageLength(t *testing.T) {
 	tests := map[string]struct {
-		input    []byte
-		expected uint64
-		wantErr  bool
+		input       []byte
+		expected    uint64
+		wantErr     bool
+		expectedErr error
 	}{
 		"zero": {
 			input:    []byte{0x00},
@@ -153,10 +156,11 @@ func TestReadMessageLength(t *testing.T) {
 
 func TestReadBytes(t *testing.T) {
 	tests := map[string]struct {
-		input    []byte
-		expected []byte
-		n        int
-		wantErr  bool
+		input       []byte
+		expected    []byte
+		n           int
+		wantErr     bool
+		expectedErr error
 	}{
 		"empty bytes": {
 			input:    []byte{0x00},
@@ -175,6 +179,11 @@ func TestReadBytes(t *testing.T) {
 			expected: []byte{0x41, 0x42, 0x43},
 			n:        4,
 			wantErr:  false,
+		},
+		"larger than buffer": {
+			input:       []byte{0x05, 0x41, 0x42},
+			wantErr:     true,
+			expectedErr: io.EOF,
 		},
 		"incomplete data": {
 			input:   []byte{0x05, 0x41, 0x42},
@@ -202,10 +211,11 @@ func TestReadBytes(t *testing.T) {
 
 func TestReadString(t *testing.T) {
 	tests := map[string]struct {
-		input    []byte
-		expected string
-		n        int
-		wantErr  bool
+		input       []byte
+		expected    string
+		n           int
+		wantErr     bool
+		expectedErr error
 	}{
 		"empty string": {
 			input:    []byte{0x00},
@@ -241,10 +251,11 @@ func TestReadString(t *testing.T) {
 
 func TestReadStringArray(t *testing.T) {
 	tests := map[string]struct {
-		input    []byte
-		expected []string
-		n        int
-		wantErr  bool
+		input       []byte
+		expected    []string
+		n           int
+		wantErr     bool
+		expectedErr error
 	}{
 		"empty array": {
 			input:    []byte{0x00},
@@ -263,6 +274,11 @@ func TestReadStringArray(t *testing.T) {
 			expected: []string{"hello", "world"},
 			n:        13,
 			wantErr:  false,
+		},
+		"count larger than buffer": {
+			input:       []byte{0x0A, 0x01}, // Count 10, but buffer is very small
+			wantErr:     true,
+			expectedErr: io.EOF,
 		},
 		"incomplete array": {
 			input:   []byte{0x01, 0x05, 0x68, 0x65},
