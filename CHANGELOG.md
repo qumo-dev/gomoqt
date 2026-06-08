@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- **moqt:** `ReadMessageLength` now uses an `io.ByteReader` fast path to avoid escaping local byte slices to the heap, reducing allocations and significantly improving varint decoding performance for 8-byte length messages.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added
