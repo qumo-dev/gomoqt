@@ -287,3 +287,47 @@ func TestReadStringArray(t *testing.T) {
 		})
 	}
 }
+
+func BenchmarkReadMessageLength(b *testing.B) {
+	// Create buffers for each length
+	b1 := []byte{0x3f}
+	b2 := []byte{0x40, 0x80}
+	b4 := []byte{0x80, 0x01, 0x00, 0x00}
+	b8 := []byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00}
+
+	b.Run("1-byte", func(b *testing.B) {
+		r := bytes.NewReader(b1)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			r.Reset(b1)
+			_, _ = ReadMessageLength(r)
+		}
+	})
+
+	b.Run("2-byte", func(b *testing.B) {
+		r := bytes.NewReader(b2)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			r.Reset(b2)
+			_, _ = ReadMessageLength(r)
+		}
+	})
+
+	b.Run("4-byte", func(b *testing.B) {
+		r := bytes.NewReader(b4)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			r.Reset(b4)
+			_, _ = ReadMessageLength(r)
+		}
+	})
+
+	b.Run("8-byte", func(b *testing.B) {
+		r := bytes.NewReader(b8)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			r.Reset(b8)
+			_, _ = ReadMessageLength(r)
+		}
+	})
+}

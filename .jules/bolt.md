@@ -1,0 +1,3 @@
+## 2024-06-08 - Escape Analysis and Interface Type Assertions in Varint Parsing
+**Learning:** When passing `buf[:]` to `io.Reader.Read` or `io.ReadFull`, the buffer necessarily escapes to the heap due to the interface method signature `Read(p []byte)`, leading to `make([]byte, ...)` allocations. Type-asserting to `io.ByteReader` allows reading bytes individually without passing a slice, completely eliminating heap allocations for supported readers.
+**Action:** Always provide an `io.ByteReader` fast path when decoding small, frequent network primitives like varints to bypass `io.Reader.Read`'s escape analysis constraints.
