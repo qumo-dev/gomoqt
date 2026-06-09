@@ -28,19 +28,120 @@ func ReadVarint(b []byte) (uint64, int, error) {
 	return i, l, nil
 }
 
-// ReadVarintFromReader reads a QUIC varint from an io.Reader
+// ReadMessageLength reads a QUIC varint from an io.Reader
 func ReadMessageLength(r io.Reader) (uint64, error) {
-	// Read first byte to determine length
+	if br, ok := r.(io.ByteReader); ok {
+		firstByte, err := br.ReadByte()
+		if err != nil {
+			return 0, err
+		}
+		l := 1 << ((firstByte & 0xc0) >> 6)
+		if l == 1 {
+			return uint64(firstByte & 0x3f), nil
+		}
+
+		var i uint64
+		switch l {
+		case 2:
+			b1, err := br.ReadByte()
+			if err != nil {
+				if err == io.EOF {
+					return 0, io.ErrUnexpectedEOF
+				}
+				return 0, err
+			}
+			i = uint64(firstByte&0x3f)<<8 | uint64(b1)
+		case 4:
+			b1, err := br.ReadByte()
+			if err != nil {
+				if err == io.EOF {
+					return 0, io.ErrUnexpectedEOF
+				}
+				return 0, err
+			}
+			b2, err := br.ReadByte()
+			if err != nil {
+				if err == io.EOF {
+					return 0, io.ErrUnexpectedEOF
+				}
+				return 0, err
+			}
+			b3, err := br.ReadByte()
+			if err != nil {
+				if err == io.EOF {
+					return 0, io.ErrUnexpectedEOF
+				}
+				return 0, err
+			}
+			i = uint64(firstByte&0x3f)<<24 | uint64(b1)<<16 | uint64(b2)<<8 | uint64(b3)
+		case 8:
+			b1, err := br.ReadByte()
+			if err != nil {
+				if err == io.EOF {
+					return 0, io.ErrUnexpectedEOF
+				}
+				return 0, err
+			}
+			b2, err := br.ReadByte()
+			if err != nil {
+				if err == io.EOF {
+					return 0, io.ErrUnexpectedEOF
+				}
+				return 0, err
+			}
+			b3, err := br.ReadByte()
+			if err != nil {
+				if err == io.EOF {
+					return 0, io.ErrUnexpectedEOF
+				}
+				return 0, err
+			}
+			b4, err := br.ReadByte()
+			if err != nil {
+				if err == io.EOF {
+					return 0, io.ErrUnexpectedEOF
+				}
+				return 0, err
+			}
+			b5, err := br.ReadByte()
+			if err != nil {
+				if err == io.EOF {
+					return 0, io.ErrUnexpectedEOF
+				}
+				return 0, err
+			}
+			b6, err := br.ReadByte()
+			if err != nil {
+				if err == io.EOF {
+					return 0, io.ErrUnexpectedEOF
+				}
+				return 0, err
+			}
+			b7, err := br.ReadByte()
+			if err != nil {
+				if err == io.EOF {
+					return 0, io.ErrUnexpectedEOF
+				}
+				return 0, err
+			}
+			i = uint64(firstByte&0x3f)<<56 | uint64(b1)<<48 | uint64(b2)<<40 | uint64(b3)<<32 |
+				uint64(b4)<<24 | uint64(b5)<<16 | uint64(b6)<<8 | uint64(b7)
+		}
+		return i, nil
+	}
+
+	// Fallback for non-ByteReader
 	firstByte := make([]byte, 1)
 	_, err := io.ReadFull(r, firstByte)
 	if err != nil {
 		return 0, err
 	}
 
-	// Determine the length from the first two bits
 	l := 1 << ((firstByte[0] & 0xc0) >> 6)
+	if l == 1 {
+		return uint64(firstByte[0] & 0x3f), nil
+	}
 
-	// Read remaining bytes if needed
 	buf := make([]byte, l)
 	buf[0] = firstByte[0]
 	if l > 1 {
@@ -50,14 +151,9 @@ func ReadMessageLength(r io.Reader) (uint64, error) {
 		}
 	}
 
-	// Parse the varint
 	val, _, err := ReadVarint(buf)
 	return val, err
 }
-
-// func ReadMessageLength(r io.Reader) (uint64, error) {
-// 	return ReadVarintFromReader(r)
-// }
 
 func ReadBytes(b []byte) ([]byte, int, error) {
 	num, n, err := ReadVarint(b)

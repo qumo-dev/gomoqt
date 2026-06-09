@@ -2,10 +2,31 @@ package message
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+// byteReader is a wrapper to force testing the io.ByteReader path
+type byteReader struct {
+	io.Reader
+}
+
+func (b *byteReader) ReadByte() (byte, error) {
+	var buf [1]byte
+	n, err := b.Read(buf[:])
+	if n == 1 {
+		return buf[0], nil
+	}
+	if err == io.EOF {
+		return 0, io.EOF
+	}
+	if err != nil {
+		return 0, err
+	}
+	return 0, io.ErrUnexpectedEOF
+}
 
 func TestReadVarint(t *testing.T) {
 	tests := map[string]struct {
@@ -138,7 +159,7 @@ func TestReadMessageLength(t *testing.T) {
 	}
 
 	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
+		t.Run(name+" without ByteReader", func(t *testing.T) {
 			r := bytes.NewReader(tt.input)
 			result, err := ReadMessageLength(r)
 			if tt.wantErr {
@@ -148,7 +169,37 @@ func TestReadMessageLength(t *testing.T) {
 				assert.Equal(t, tt.expected, result)
 			}
 		})
+
+		t.Run(name+" with ByteReader", func(t *testing.T) {
+			r := &byteReader{bytes.NewReader(tt.input)}
+			result, err := ReadMessageLength(r)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
+		})
 	}
+
+	// Test specific incomplete read scenarios for ByteReader
+	t.Run("ByteReader incomplete 2-byte", func(t *testing.T) {
+		r := &byteReader{bytes.NewReader([]byte{0x40})}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	})
+
+	t.Run("ByteReader incomplete 4-byte", func(t *testing.T) {
+		r := &byteReader{bytes.NewReader([]byte{0x80, 0x01, 0x00})}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	})
+
+	t.Run("ByteReader incomplete 8-byte", func(t *testing.T) {
+		r := &byteReader{bytes.NewReader([]byte{0xc0, 0x01, 0x00, 0x00, 0x00})}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	})
 }
 
 func TestReadBytes(t *testing.T) {
