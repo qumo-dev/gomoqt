@@ -1,0 +1,4 @@
+## 2025-02-23 - [Denial of Service via Unvalidated Varint Lengths]
+**Vulnerability:** Found `panic("byte slice too large")` and unvalidated slice capacity allocations `make([]string, 0, count)` based on unsanitized varints read from network payloads. An attacker could craft a payload with extremely large length values causing panic or Out-Of-Memory (OOM) crashes.
+**Learning:** Parsing untrusted payload inputs with raw byte sequences must safely handle bounds constraints and failure states instead of using `panic()`. Unvalidated sizes used for pre-allocation can cause resource exhaustion.
+**Prevention:** Always return standard errors (e.g., `errors.New()`, `io.EOF`) for invalid lengths. Explicitly validate requested payload sizes against the remaining buffer length (`uint64(len(b)) < requested`) before allocating memory or processing further, returning `io.EOF` to signal partial reads.
