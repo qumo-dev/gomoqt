@@ -1,0 +1,46 @@
+--- moqt/internal/message/message_reader_test.go
++++ moqt/internal/message/message_reader_test.go
+@@ -192,6 +192,42 @@
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	})
++
++	// Additional tests to cover error paths in switch branches
++	t.Run("ByteReader error mid-stream 4-byte 2nd byte", func(t *testing.T) {
++		r := &byteReader{bytes.NewReader([]byte{0x80, 0x01})}
++		_, err := ReadMessageLength(r)
++		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
++	})
++
++	t.Run("ByteReader error mid-stream 4-byte 3rd byte", func(t *testing.T) {
++		r := &byteReader{bytes.NewReader([]byte{0x80, 0x01, 0x00})}
++		_, err := ReadMessageLength(r)
++		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
++	})
++
++	t.Run("ByteReader error mid-stream 8-byte 2nd byte", func(t *testing.T) {
++		r := &byteReader{bytes.NewReader([]byte{0xc0, 0x00})}
++		_, err := ReadMessageLength(r)
++		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
++	})
++
++	t.Run("ByteReader error mid-stream 8-byte 4th byte", func(t *testing.T) {
++		r := &byteReader{bytes.NewReader([]byte{0xc0, 0x00, 0x00, 0x00})}
++		_, err := ReadMessageLength(r)
++		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
++	})
++
++	t.Run("ByteReader error mid-stream 8-byte 6th byte", func(t *testing.T) {
++		r := &byteReader{bytes.NewReader([]byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00})}
++		_, err := ReadMessageLength(r)
++		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
++	})
++
++	t.Run("ByteReader error mid-stream 8-byte 7th byte", func(t *testing.T) {
++		r := &byteReader{bytes.NewReader([]byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})}
++		_, err := ReadMessageLength(r)
++		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
++	})
+ }
+
+ func TestReadBytes(t *testing.T) {

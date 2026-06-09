@@ -1,0 +1,34 @@
+--- moqt/internal/message/message_reader_test.go
++++ moqt/internal/message/message_reader_test.go
+@@ -314,6 +314,35 @@
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, errTest)
+	})
++
++	// Non-ByteReader fast path tests
++	t.Run("Non-ByteReader generic error 1st byte", func(t *testing.T) {
++		errTest := errors.New("test error")
++		r := &byteReader{Reader: bytes.NewReader([]byte{0xc0}), err: errTest, errAt: 1}
++		// Cast to io.Reader to prevent ByteReader fast-path in ReadMessageLength
++		var reader io.Reader = struct{io.Reader}{r}
++		_, err := ReadMessageLength(reader)
++		assert.ErrorIs(t, err, errTest)
++	})
++
++	t.Run("Non-ByteReader generic error 2nd byte", func(t *testing.T) {
++		errTest := errors.New("test error")
++		r := &byteReader{Reader: bytes.NewReader([]byte{0xc0, 0x00}), err: errTest, errAt: 2}
++		var reader io.Reader = struct{io.Reader}{r}
++		_, err := ReadMessageLength(reader)
++		assert.ErrorIs(t, err, errTest)
++	})
++
++	t.Run("ByteReader generic error 1st byte", func(t *testing.T) {
++		errTest := errors.New("test error")
++		r := &byteReader{Reader: bytes.NewReader([]byte{0x40}), err: errTest, errAt: 1}
++		_, err := ReadMessageLength(r)
++		assert.ErrorIs(t, err, errTest)
++	})
+ }
+
+ func TestReadBytes(t *testing.T) {

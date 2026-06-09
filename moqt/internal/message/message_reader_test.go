@@ -2,18 +2,44 @@ package message
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
+type mockReader struct {
+	err       error
+	errAt     int
+	readCount int
+}
+
+func (m *mockReader) Read(p []byte) (n int, err error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	m.readCount++
+	if m.errAt == 0 || m.readCount >= m.errAt {
+		return 0, m.err
+	}
+	p[0] = 0xc0
+	return 1, nil
+}
+
 // byteReader is a wrapper to force testing the io.ByteReader path
 type byteReader struct {
 	io.Reader
+	err       error
+	errAt     int
+	readCount int
 }
 
 func (b *byteReader) ReadByte() (byte, error) {
+	b.readCount++
+	if b.errAt > 0 && b.readCount == b.errAt {
+		return 0, b.err
+	}
 	var buf [1]byte
 	n, err := b.Read(buf[:])
 	if n == 1 {
@@ -171,7 +197,7 @@ func TestReadMessageLength(t *testing.T) {
 		})
 
 		t.Run(name+" with ByteReader", func(t *testing.T) {
-			r := &byteReader{bytes.NewReader(tt.input)}
+			r := &byteReader{Reader: bytes.NewReader(tt.input)}
 			result, err := ReadMessageLength(r)
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -184,21 +210,152 @@ func TestReadMessageLength(t *testing.T) {
 
 	// Test specific incomplete read scenarios for ByteReader
 	t.Run("ByteReader incomplete 2-byte", func(t *testing.T) {
-		r := &byteReader{bytes.NewReader([]byte{0x40})}
+		r := &byteReader{Reader: bytes.NewReader([]byte{0x40})}
 		_, err := ReadMessageLength(r)
 		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
 	})
 
 	t.Run("ByteReader incomplete 4-byte", func(t *testing.T) {
-		r := &byteReader{bytes.NewReader([]byte{0x80, 0x01, 0x00})}
+		r := &byteReader{Reader: bytes.NewReader([]byte{0x80, 0x01, 0x00})}
 		_, err := ReadMessageLength(r)
 		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
 	})
 
 	t.Run("ByteReader incomplete 8-byte", func(t *testing.T) {
-		r := &byteReader{bytes.NewReader([]byte{0xc0, 0x01, 0x00, 0x00, 0x00})}
+		r := &byteReader{Reader: bytes.NewReader([]byte{0xc0, 0x01, 0x00, 0x00, 0x00})}
 		_, err := ReadMessageLength(r)
 		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	})
+
+	// Additional tests to cover error paths in switch branches
+	t.Run("ByteReader error mid-stream 4-byte 2nd byte", func(t *testing.T) {
+		r := &byteReader{Reader: bytes.NewReader([]byte{0x80, 0x01})}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	})
+
+	t.Run("ByteReader error mid-stream 4-byte 3rd byte", func(t *testing.T) {
+		r := &byteReader{Reader: bytes.NewReader([]byte{0x80, 0x01, 0x00})}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	})
+
+	t.Run("ByteReader error mid-stream 8-byte 2nd byte", func(t *testing.T) {
+		r := &byteReader{Reader: bytes.NewReader([]byte{0xc0, 0x00})}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	})
+
+	t.Run("ByteReader error mid-stream 8-byte 4th byte", func(t *testing.T) {
+		r := &byteReader{Reader: bytes.NewReader([]byte{0xc0, 0x00, 0x00, 0x00})}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	})
+
+	t.Run("ByteReader error mid-stream 8-byte 6th byte", func(t *testing.T) {
+		r := &byteReader{Reader: bytes.NewReader([]byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00})}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	})
+
+	t.Run("ByteReader error mid-stream 8-byte 7th byte", func(t *testing.T) {
+		r := &byteReader{Reader: bytes.NewReader([]byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	})
+
+	// Test underlying non-EOF errors
+	t.Run("ByteReader generic error 2-byte", func(t *testing.T) {
+		errTest := errors.New("test error")
+		r := &byteReader{Reader: bytes.NewReader([]byte{0x40, 0x00}), err: errTest, errAt: 2}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, errTest)
+	})
+
+	t.Run("ByteReader generic error 4-byte 2nd byte", func(t *testing.T) {
+		errTest := errors.New("test error")
+		r := &byteReader{Reader: bytes.NewReader([]byte{0x80, 0x00, 0x00, 0x00}), err: errTest, errAt: 2}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, errTest)
+	})
+	t.Run("ByteReader generic error 4-byte 3rd byte", func(t *testing.T) {
+		errTest := errors.New("test error")
+		r := &byteReader{Reader: bytes.NewReader([]byte{0x80, 0x00, 0x00, 0x00}), err: errTest, errAt: 3}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, errTest)
+	})
+	t.Run("ByteReader generic error 4-byte 4th byte", func(t *testing.T) {
+		errTest := errors.New("test error")
+		r := &byteReader{Reader: bytes.NewReader([]byte{0x80, 0x00, 0x00, 0x00}), err: errTest, errAt: 4}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, errTest)
+	})
+
+	t.Run("ByteReader generic error 8-byte 2nd byte", func(t *testing.T) {
+		errTest := errors.New("test error")
+		r := &byteReader{Reader: bytes.NewReader([]byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}), err: errTest, errAt: 2}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, errTest)
+	})
+	t.Run("ByteReader generic error 8-byte 3rd byte", func(t *testing.T) {
+		errTest := errors.New("test error")
+		r := &byteReader{Reader: bytes.NewReader([]byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}), err: errTest, errAt: 3}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, errTest)
+	})
+	t.Run("ByteReader generic error 8-byte 4th byte", func(t *testing.T) {
+		errTest := errors.New("test error")
+		r := &byteReader{Reader: bytes.NewReader([]byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}), err: errTest, errAt: 4}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, errTest)
+	})
+	t.Run("ByteReader generic error 8-byte 5th byte", func(t *testing.T) {
+		errTest := errors.New("test error")
+		r := &byteReader{Reader: bytes.NewReader([]byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}), err: errTest, errAt: 5}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, errTest)
+	})
+	t.Run("ByteReader generic error 8-byte 6th byte", func(t *testing.T) {
+		errTest := errors.New("test error")
+		r := &byteReader{Reader: bytes.NewReader([]byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}), err: errTest, errAt: 6}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, errTest)
+	})
+	t.Run("ByteReader generic error 8-byte 7th byte", func(t *testing.T) {
+		errTest := errors.New("test error")
+		r := &byteReader{Reader: bytes.NewReader([]byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}), err: errTest, errAt: 7}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, errTest)
+	})
+	t.Run("ByteReader generic error 8-byte 8th byte", func(t *testing.T) {
+		errTest := errors.New("test error")
+		r := &byteReader{Reader: bytes.NewReader([]byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}), err: errTest, errAt: 8}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, errTest)
+	})
+
+	// Non-ByteReader fast path tests
+	t.Run("Non-ByteReader generic error 1st byte", func(t *testing.T) {
+		errTest := errors.New("test error")
+		// Use a simple wrapper that calls Read directly and returns our error
+		wrapper := struct{ io.Reader }{&mockReader{err: errTest}}
+		_, err := ReadMessageLength(wrapper)
+		assert.ErrorIs(t, err, errTest)
+	})
+
+	t.Run("Non-ByteReader generic error 2nd byte", func(t *testing.T) {
+		errTest := errors.New("test error")
+		// Use a simple wrapper that calls Read directly and returns our error after 1 byte
+		wrapper := struct{ io.Reader }{&mockReader{err: errTest, errAt: 2}}
+		_, err := ReadMessageLength(wrapper)
+		assert.ErrorIs(t, err, errTest)
+	})
+
+	t.Run("ByteReader generic error 1st byte", func(t *testing.T) {
+		errTest := errors.New("test error")
+		r := &byteReader{Reader: bytes.NewReader([]byte{0x40}), err: errTest, errAt: 1}
+		_, err := ReadMessageLength(r)
+		assert.ErrorIs(t, err, errTest)
 	})
 }
 
