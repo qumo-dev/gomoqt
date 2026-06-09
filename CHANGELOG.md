@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **moqt:** `ReadMessageLength` uses `io.ByteReader` when available, eliminating heap allocations caused by reading QUIC varints.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added
