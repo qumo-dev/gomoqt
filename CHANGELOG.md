@@ -1,3 +1,9 @@
+
+## [Unreleased]
+
+### Changed
+- **moqt:** Replaced arbitrary `time.Sleep` with deterministic synchronization in `ReceiveSubscribeStream` tests to eliminate test flakiness and significantly improve execution speed.
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
