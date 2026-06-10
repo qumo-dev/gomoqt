@@ -1,0 +1,15 @@
+--- moqt/broadcast.go
++++ moqt/broadcast.go
+@@ -88,10 +88,10 @@ func (b *Broadcast) Close() {
+
+	b.mu.Lock()
+	entries := make([]*trackHandlerEntry, 0, len(b.trackHandlers))
+-	for _, entry := range b.trackHandlers {
++	for _, entry := range b.trackHandlers {
+		entries = append(entries, entry)
+	}
+-	b.trackHandlers = make(map[TrackName]*trackHandlerEntry)
++	clear(b.trackHandlers)
+	b.mu.Unlock()
+
+	for _, entry := range entries {
