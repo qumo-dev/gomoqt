@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **moqt:** `Encode` method in all message types now utilizes a `sync.Pool` to reuse byte slices, eliminating heap allocations on the hot path.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added

@@ -14,14 +14,14 @@ func (discardWriter) Write(p []byte) (int, error) {
 
 func BenchmarkSubscribeMessage_Encode(b *testing.B) {
 	msg := message.SubscribeMessage{
-		SubscribeID:          12345,
-		BroadcastPath:        "this/is/a/long/broadcast/path/to/test/performance",
-		TrackName:            "high-quality-video-track",
-		SubscriberPriority:   100,
-		SubscriberOrdered:    1,
+		SubscribeID:        12345,
+		BroadcastPath:      "this/is/a/long/broadcast/path/to/test/performance",
+		TrackName:          "high-quality-video-track",
+		SubscriberPriority: 100,
+		SubscriberOrdered:  1,
 		SubscriberMaxLatency: 500,
-		StartGroup:           10,
-		EndGroup:             20,
+		StartGroup:         10,
+		EndGroup:           20,
 	}
 
 	w := discardWriter{}

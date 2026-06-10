@@ -28,9 +28,7 @@ func (su SubscribeUpdateMessage) Len() int {
 
 func (su SubscribeUpdateMessage) Encode(w io.Writer) error {
 	msgLen := su.Len()
-	bufPtr := getBuf()
-	defer putBuf(bufPtr)
-	p := *bufPtr
+	p := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
 
 	p, _ = WriteMessageLength(p, uint64(msgLen))
 	p = append(p, su.SubscriberPriority)
