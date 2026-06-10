@@ -356,3 +356,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Core `moqt` package with session, track, group, and frame handling.
 - Basic examples: broadcast, echo, relay.
 - Mage build system integration.
+
+## [Unreleased]
+
+### Performance
+- **moqt/internal/message:** Pre-allocated memory using `slices.Grow` in serialization routines (`WriteBytes`, `WriteString`, `WriteStringArray`, `WriteParameters`) to avoid dynamic slice growth allocations.
+- **moqt/internal/message:** Optimized `WriteString` to append strings directly without casting to `[]byte`, saving a temporary heap allocation.
