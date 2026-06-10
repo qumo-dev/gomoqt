@@ -20,7 +20,9 @@ func (f FetchMessage) Len() int {
 
 func (f FetchMessage) Encode(w io.Writer) error {
 	msgLen := f.Len()
-	b := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
+	bufPtr := getBuf()
+	defer putBuf(bufPtr)
+	b := *bufPtr
 	b, _ = WriteMessageLength(b, uint64(msgLen))
 	b, _ = WriteVarint(b, uint64(len(f.BroadcastPath)))
 	b = append(b, f.BroadcastPath...)

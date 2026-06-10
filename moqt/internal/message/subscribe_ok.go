@@ -33,7 +33,9 @@ func (som SubscribeOkMessage) Len() int {
 
 func (som SubscribeOkMessage) Encode(w io.Writer) error {
 	msgLen := som.Len()
-	b := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
+	bufPtr := getBuf()
+	defer putBuf(bufPtr)
+	b := *bufPtr
 
 	b, _ = WriteMessageLength(b, uint64(msgLen))
 	b = append(b, som.PublisherPriority)
