@@ -13,10 +13,12 @@ func newReceiveSubscribeStream(id SubscribeID, stream transport.Stream, config *
 		config:      config,
 		stream:      stream,
 		updatedCh:   make(chan struct{}, 1),
+		doneCh:      make(chan struct{}),
 	}
 
 	// Listen for updates in a separate goroutine
 	go func() {
+		defer close(substr.doneCh)
 		var updateMsg message.SubscribeUpdateMessage
 		var err error
 
@@ -57,6 +59,7 @@ type receiveSubscribeStream struct {
 
 	config          *SubscribeConfig
 	updatedCh       chan struct{}
+	doneCh          chan struct{}
 	responseStarted bool
 }
 

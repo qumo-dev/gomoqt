@@ -51,7 +51,7 @@ func TestNewReceiveSubscribeStream(t *testing.T) {
 			assert.NotNil(t, rss, "newReceiveSubscribeStream should not return nil")
 			assert.Equal(t, tt.subscribeID, rss.SubscribeID(), "SubscribeID should match")
 			assert.NotNil(t, rss.Updated(), "Updated channel should not be nil") // Wait for goroutine to process EOF and close
-			time.Sleep(10 * time.Millisecond)
+			<-rss.doneCh
 		})
 	}
 }
@@ -90,7 +90,7 @@ func TestReceiveSubscribeStream_SubscribeID(t *testing.T) {
 			result := rss.SubscribeID()
 			assert.Equal(t, tt.subscribeID, result, "SubscribeID should match expected value")
 
-			time.Sleep(10 * time.Millisecond)
+			<-rss.doneCh
 		})
 	}
 }
@@ -128,7 +128,7 @@ func TestReceiveSubscribeStream_TrackConfig(t *testing.T) {
 				assert.Equal(t, tt.config.Priority, resultConfig.Priority, "TrackPriority should match")
 			}
 
-			time.Sleep(10 * time.Millisecond)
+			<-rss.doneCh
 		})
 	}
 }
@@ -146,12 +146,10 @@ func TestReceiveSubscribeStream_Updated(t *testing.T) {
 	updatedCh := rss.Updated()
 	assert.NotNil(t, updatedCh, "Updated channel should not be nil")
 
-	// EOF stops the background goroutine; it does not close Updated().
-	time.Sleep(10 * time.Millisecond)
-	assert.NotNil(t, updatedCh)
+	<-rss.doneCh
 
-	// Give some time for the goroutine to complete
-	time.Sleep(10 * time.Millisecond)
+	// EOF stops the background goroutine; it does not close Updated().
+	assert.NotNil(t, updatedCh)
 }
 
 func TestReceiveSubscribeStream_ListenUpdates_WithSubscribeUpdateMessage(t *testing.T) {
@@ -190,8 +188,7 @@ func TestReceiveSubscribeStream_ListenUpdates_WithSubscribeUpdateMessage(t *test
 		assert.Equal(t, TrackPriority(5), updatedConfig.Priority, "TrackPriority should be updated")
 	}
 
-	// Give some time for the goroutine to complete
-	time.Sleep(10 * time.Millisecond)
+	<-rss.doneCh
 }
 
 func TestReceiveSubscribeStream_CloseWithError(t *testing.T) {
@@ -321,9 +318,7 @@ func TestReceiveSubscribeStream_ConcurrentAccess(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	// Give some time for the goroutine to complete
-	time.Sleep(10 * time.Millisecond)
-
+	<-rss.doneCh
 }
 
 func TestReceiveSubscribeStream_Close_DoesNotCancelReadOnGracefulClose(t *testing.T) {
@@ -351,10 +346,11 @@ func TestReceiveSubscribeStream_UpdateChannelBehavior(t *testing.T) {
 
 		rss := newReceiveSubscribeStream(subscribeID, mockStream, config)
 
-		// Wait for the goroutine to handle EOF and close the channel
-		time.Sleep(50 * time.Millisecond)
+		// Wait for the goroutine to handle EOF
+		<-rss.doneCh
 
-		// Verify channel is closed by trying to receive
+		// Verify channel is NOT explicitly closed by EOF, but the test ensures stability.
+		// Tests here verify that it doesn't crash or behave improperly when the loop ends.
 		select {
 		case _, ok := <-rss.Updated():
 			if ok {
@@ -362,13 +358,9 @@ func TestReceiveSubscribeStream_UpdateChannelBehavior(t *testing.T) {
 			} else {
 				t.Log("Channel is properly closed")
 			}
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(10 * time.Millisecond):
 			t.Log("Channel should be closed and ready to receive")
 		}
-
-		// Give some time for the goroutine to complete
-		time.Sleep(10 * time.Millisecond)
-
 	})
 
 	t.Run("multiple updates sent to channel", func(t *testing.T) {
@@ -418,7 +410,6 @@ func TestReceiveSubscribeStream_UpdateChannelBehavior(t *testing.T) {
 		// We received at least the minimum expected updates
 		assert.GreaterOrEqual(t, updateCount, expectedUpdates, "Should receive at least expected number of updates")
 
-		// Give some time for the goroutine to complete
-		time.Sleep(10 * time.Millisecond)
+		<-rss.doneCh
 	})
 }
