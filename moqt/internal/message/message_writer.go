@@ -2,9 +2,11 @@ package message
 
 import (
 	"fmt"
+	"slices"
 )
 
 func WriteVarint(b []byte, i uint64) ([]byte, int) {
+	b = slices.Grow(b, VarintLen(i))
 	if i <= maxVarInt1 {
 		b = append(b, byte(i))
 		return b, 1
@@ -42,16 +44,21 @@ func WriteVarint(b []byte, i uint64) ([]byte, int) {
 }
 
 func WriteBytes(dest []byte, b []byte) ([]byte, int) {
+	dest = slices.Grow(dest, BytesLen(b))
 	dest, n := WriteVarint(dest, uint64(len(b)))
 	dest = append(dest, b...)
 	return dest, n + len(b)
 }
 
 func WriteString(dest []byte, s string) ([]byte, int) {
-	return WriteBytes(dest, []byte(s))
+	dest = slices.Grow(dest, StringLen(s))
+	dest, n := WriteVarint(dest, uint64(len(s)))
+	dest = append(dest, s...)
+	return dest, n + len(s)
 }
 
 func WriteStringArray(dest []byte, arr []string) ([]byte, int) {
+	dest = slices.Grow(dest, StringArrayLen(arr))
 	dest, n := WriteVarint(dest, uint64(len(arr)))
 	var m int
 	for _, str := range arr {
@@ -62,6 +69,7 @@ func WriteStringArray(dest []byte, arr []string) ([]byte, int) {
 }
 
 func WriteParameters(dest []byte, params map[uint64][]byte) ([]byte, int) {
+	dest = slices.Grow(dest, ParametersLen(params))
 	dest, n := WriteVarint(dest, uint64(len(params)))
 	var m int
 	for key, value := range params {
