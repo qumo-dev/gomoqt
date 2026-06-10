@@ -93,6 +93,9 @@ func (f *Frame) decode(src io.Reader) error {
 	}
 
 	// Ensure the payload slice has enough capacity
+	if num > uint64(50*1024*1024) { // Protect against large allocations (e.g., 50MB max)
+		return io.ErrUnexpectedEOF
+	}
 	if cap(f.body) < int(num) {
 		f.body = make([]byte, num)
 	} else {
