@@ -95,6 +95,10 @@ func ReadStringArray(b []byte) ([]string, int, error) {
 		return nil, 0, errors.New("string array too large")
 	}
 
+	if count > uint64(len(b)) {
+		return nil, 0, io.ErrUnexpectedEOF
+	}
+
 	b = b[total:]
 
 	arr := make([]string, 0, count)

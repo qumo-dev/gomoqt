@@ -303,3 +303,27 @@ func TestFrame_Encode(t *testing.T) {
 		})
 	}
 }
+
+func TestFrameDecode_TooLarge(t *testing.T) {
+	// Construct a payload that indicates a length larger than our 50MB bound.
+	// 50 * 1024 * 1024 = 52428800. We will request 60MB.
+	val := uint64(60 * 1024 * 1024)
+
+	var buf []byte
+	if val <= 63 {
+		buf = append(buf, byte(val))
+	} else if val <= 16383 {
+		buf = append(buf, uint8(val>>8)|0x40, byte(val))
+	} else if val <= 1073741823 {
+		buf = append(buf, uint8(val>>24)|0x80, uint8(val>>16), uint8(val>>8), byte(val))
+	} else {
+		buf = append(buf, uint8(val>>56)|0xc0, uint8(val>>48), uint8(val>>40), uint8(val>>32), uint8(val>>24), uint8(val>>16), uint8(val>>8), byte(val))
+	}
+
+	reader := bytes.NewReader(buf)
+	frame := NewFrame(0)
+	err := frame.decode(reader)
+
+	assert.Error(t, err)
+	assert.Equal(t, io.ErrUnexpectedEOF, err)
+}

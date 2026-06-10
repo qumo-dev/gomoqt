@@ -287,3 +287,77 @@ func TestReadStringArray(t *testing.T) {
 		})
 	}
 }
+
+func TestReadBytes_TooLarge(t *testing.T) {
+	// Construct a payload that indicates a length larger than math.MaxInt
+	buf := make([]byte, 10)
+	// Varint length > math.MaxInt (assuming 64-bit systems, MaxInt is 1<<63-1)
+	// We'll write max varint length allowed by QUIC (1<<62-1)
+	val := uint64(1<<62) - 1
+	var l int
+	if val <= maxVarInt1 {
+		buf[0] = byte(val)
+		l = 1
+	} else if val <= maxVarInt2 {
+		buf[0] = uint8(val>>8) | 0x40
+		buf[1] = byte(val)
+		l = 2
+	} else if val <= maxVarInt4 {
+		buf[0] = uint8(val>>24) | 0x80
+		buf[1] = uint8(val >> 16)
+		buf[2] = uint8(val >> 8)
+		buf[3] = byte(val)
+		l = 4
+	} else {
+		buf[0] = uint8(val>>56) | 0xc0
+		buf[1] = uint8(val >> 48)
+		buf[2] = uint8(val >> 40)
+		buf[3] = uint8(val >> 32)
+		buf[4] = uint8(val >> 24)
+		buf[5] = uint8(val >> 16)
+		buf[6] = uint8(val >> 8)
+		buf[7] = byte(val)
+		l = 8
+	}
+
+	res, n, err := ReadBytes(buf[:l])
+	assert.Equal(t, []byte{}, res) // Actually, due to `return b, n+len(b), io.EOF`, an empty slice is returned when buf doesn't have enough data!
+	assert.Equal(t, l, n)
+	assert.Error(t, err)
+}
+
+func TestReadStringArray_TooLarge(t *testing.T) {
+	// Construct a payload that indicates a count larger than math.MaxInt
+	buf := make([]byte, 10)
+	val := uint64(1<<62) - 1
+	var l int
+	if val <= maxVarInt1 {
+		buf[0] = byte(val)
+		l = 1
+	} else if val <= maxVarInt2 {
+		buf[0] = uint8(val>>8) | 0x40
+		buf[1] = byte(val)
+		l = 2
+	} else if val <= maxVarInt4 {
+		buf[0] = uint8(val>>24) | 0x80
+		buf[1] = uint8(val >> 16)
+		buf[2] = uint8(val >> 8)
+		buf[3] = byte(val)
+		l = 4
+	} else {
+		buf[0] = uint8(val>>56) | 0xc0
+		buf[1] = uint8(val >> 48)
+		buf[2] = uint8(val >> 40)
+		buf[3] = uint8(val >> 32)
+		buf[4] = uint8(val >> 24)
+		buf[5] = uint8(val >> 16)
+		buf[6] = uint8(val >> 8)
+		buf[7] = byte(val)
+		l = 8
+	}
+
+	res, n, err := ReadStringArray(buf[:l])
+	assert.Nil(t, res)
+	assert.Equal(t, 0, n) // It returns 0 when hitting UnexpectedEOF due to length bounds check
+	assert.Error(t, err)
+}
