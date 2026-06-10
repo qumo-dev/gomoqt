@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **moqt:** Optimized `Broadcast.Close()` to use `clear()` for O(1) bulk map clearing instead of O(n) per-element deletion.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added
