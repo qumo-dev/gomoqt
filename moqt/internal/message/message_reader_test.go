@@ -2,6 +2,7 @@ package message
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -283,6 +284,79 @@ func TestReadStringArray(t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expected, result)
 				assert.Equal(t, tt.n, n)
+			}
+		})
+	}
+}
+
+type mockReader struct {
+	data []byte
+	pos  int
+}
+
+func (m *mockReader) Read(p []byte) (n int, err error) {
+	if m.pos >= len(m.data) {
+		return 0, io.EOF
+	}
+	n = copy(p, m.data[m.pos:])
+	m.pos += n
+	return n, nil
+}
+
+func TestReadMessageLength_Fallback(t *testing.T) {
+	tests := map[string]struct {
+		input    []byte
+		expected uint64
+		wantErr  bool
+	}{
+		"zero": {
+			input:    []byte{0x00},
+			expected: 0,
+			wantErr:  false,
+		},
+		"small value": {
+			input:    []byte{0x3f},
+			expected: 63,
+			wantErr:  false,
+		},
+		"2-byte varint": {
+			input:    []byte{0x40, 0x80},
+			expected: 128,
+			wantErr:  false,
+		},
+		"4-byte varint": {
+			input:    []byte{0x80, 0x01, 0x00, 0x00},
+			expected: 65536,
+			wantErr:  false,
+		},
+		"8-byte varint": {
+			input:    []byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00},
+			expected: 65536,
+			wantErr:  false,
+		},
+		"empty input": {
+			input:   []byte{},
+			wantErr: true,
+		},
+		"incomplete 2-byte": {
+			input:   []byte{0x40},
+			wantErr: true,
+		},
+		"incomplete 4-byte": {
+			input:   []byte{0x80, 0x01},
+			wantErr: true,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			r := &mockReader{data: tt.input}
+			result, err := ReadMessageLength(r)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
 			}
 		})
 	}
