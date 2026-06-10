@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -51,8 +52,8 @@ func BenchmarkSession_Subscribe(b *testing.B) {
 			paths := make([]BroadcastPath, size)
 			names := make([]TrackName, size)
 			for i := range size {
-				paths[i] = BroadcastPath(fmt.Sprintf("/broadcast/%d", i))
-				names[i] = TrackName(fmt.Sprintf("track_%d", i))
+				paths[i] = BroadcastPath("/broadcast/" + strconv.Itoa(i))
+				names[i] = TrackName("track_" + strconv.Itoa(i))
 			}
 
 			b.ReportAllocs()
@@ -108,8 +109,8 @@ func BenchmarkSession_ConcurrentSubscribe(b *testing.B) {
 			b.RunParallel(func(pb *testing.PB) {
 				i := 0
 				for pb.Next() {
-					path := BroadcastPath(fmt.Sprintf("/broadcast/%d", i))
-					name := TrackName(fmt.Sprintf("track_%d", i))
+					path := BroadcastPath("/broadcast/" + strconv.Itoa(i))
+					name := TrackName("track_" + strconv.Itoa(i))
 					_, _ = session.Subscribe(context.Background(), path, name, nil)
 					i++
 				}
