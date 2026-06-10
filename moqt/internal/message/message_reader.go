@@ -96,13 +96,13 @@ func ReadStringArray(b []byte) ([]string, int, error) {
 
 	b = b[total:]
 
-	arr := make([]string, 0, count)
-	for range count {
+	arr := make([]string, count)
+	for i := uint64(0); i < count; i++ {
 		str, n, err := ReadString(b)
 		if err != nil {
 			return nil, 0, err
 		}
-		arr = append(arr, str)
+		arr[i] = str
 		b = b[n:]
 		total += n
 	}
