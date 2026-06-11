@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **moqt:** Fixed Denial of Service (DoS) vulnerability in message reader caused by unhandled panics on invalid varint length inputs and missing buffer length validation.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added
