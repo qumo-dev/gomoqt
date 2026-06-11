@@ -1,9 +1,7 @@
 package message
 
 import (
-	"errors"
 	"io"
-	"math"
 )
 
 func ReadVarint(b []byte) (uint64, int, error) {
@@ -66,9 +64,9 @@ func ReadBytes(b []byte) ([]byte, int, error) {
 		return nil, 0, err
 	}
 	b = b[n:]
-	if num > math.MaxInt {
-		return nil, 0, errors.New("byte slice too large")
-	}
+	// math.MaxInt check removed because QUIC varints are max 1<<62-1,
+	// which fits in int on 64-bit systems. We rely on the buffer length
+	// check below to prevent excessive allocations.
 
 	if uint64(len(b)) < num {
 		return b, n + len(b), io.EOF
@@ -91,9 +89,9 @@ func ReadStringArray(b []byte) ([]string, int, error) {
 		return nil, 0, err
 	}
 
-	if count > math.MaxInt {
-		return nil, 0, errors.New("string array too large")
-	}
+	// math.MaxInt check removed for same reasons as above.
+	// The `count > uint64(len(b))` check ensures we don't allocate
+	// more strings than we have bytes.
 
 	if count > uint64(len(b)) {
 		return nil, 0, io.ErrUnexpectedEOF

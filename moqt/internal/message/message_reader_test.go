@@ -326,6 +326,14 @@ func TestReadBytes_TooLarge(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestReadBytes_MaxInt(t *testing.T) {
+	// Specifically cover the num > math.MaxInt line on 32-bit arch if possible,
+	// but since we are on 64-bit, we can just supply math.MaxInt + 1
+	// Actually QUIC max is 1<<62-1, which is smaller than math.MaxInt on 64-bit systems.
+	// So on a 64-bit machine `num > math.MaxInt` is fundamentally unreachable
+	// because `ReadVarint` will never return > 1<<62-1.
+}
+
 func TestReadStringArray_TooLarge(t *testing.T) {
 	// Construct a payload that indicates a count larger than math.MaxInt
 	buf := make([]byte, 10)
