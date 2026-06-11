@@ -88,10 +88,11 @@ func (b *Broadcast) Close() {
 
 	b.mu.Lock()
 	entries := make([]*trackHandlerEntry, 0, len(b.trackHandlers))
-	for name, entry := range b.trackHandlers {
-		delete(b.trackHandlers, name)
+	for _, entry := range b.trackHandlers {
 		entries = append(entries, entry)
 	}
+	// Optimize map clearing: Built-in clear() is O(1) bulk operation compared to O(n) iteration with delete()
+	clear(b.trackHandlers)
 	b.mu.Unlock()
 
 	for _, entry := range entries {
