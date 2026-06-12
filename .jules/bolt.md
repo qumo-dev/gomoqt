@@ -1,0 +1,3 @@
+## 2024-06-12 - Avoid unnecessary string-to-byte conversion overhead
+**Learning:** In Go, converting strings to byte slices using `[]byte(str)` before appending causes a temporary heap allocation because strings and byte slices are fundamentally different under the hood. For small frequent operations like appending strings or network writing, this adds up quickly, creating GC overhead and degrading performance.
+**Action:** Use `append(dest, str...)` directly instead of `append(dest, []byte(str)...)` or `WriteBytes(dest, []byte(str))` to avoid an extra temporary heap allocation for the string cast. This zero-allocation method leverages compiler optimizations.

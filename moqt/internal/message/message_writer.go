@@ -48,7 +48,9 @@ func WriteBytes(dest []byte, b []byte) ([]byte, int) {
 }
 
 func WriteString(dest []byte, s string) ([]byte, int) {
-	return WriteBytes(dest, []byte(s))
+	dest, n := WriteVarint(dest, uint64(len(s)))
+	dest = append(dest, s...)
+	return dest, n + len(s)
 }
 
 func WriteStringArray(dest []byte, arr []string) ([]byte, int) {
