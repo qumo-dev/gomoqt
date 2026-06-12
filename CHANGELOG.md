@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+- **moqt**: Avoided a string-to-byte conversion allocation in `WriteString`, saving 1 allocation per write.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added
