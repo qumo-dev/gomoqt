@@ -1,6 +1,7 @@
 package message
 
 import (
+	"errors"
 	"io"
 	"math"
 )
@@ -52,6 +53,9 @@ func ReadMessageLength(r io.Reader) (uint64, error) {
 
 	// Parse the varint
 	val, _, err := ReadVarint(buf)
+	if err == nil && val > 50*1024*1024 {
+		return 0, errors.New("message length exceeds maximum limit (50MB)")
+	}
 	return val, err
 }
 
@@ -66,7 +70,7 @@ func ReadBytes(b []byte) ([]byte, int, error) {
 	}
 	b = b[n:]
 	if num > math.MaxInt {
-		panic("byte slice too large")
+		return nil, 0, errors.New("byte slice too large")
 	}
 
 	if uint64(len(b)) < num {
@@ -91,7 +95,7 @@ func ReadStringArray(b []byte) ([]string, int, error) {
 	}
 
 	if count > math.MaxInt {
-		panic("string array too large")
+		return nil, 0, errors.New("string array too large")
 	}
 
 	b = b[total:]

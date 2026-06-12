@@ -135,6 +135,11 @@ func TestReadMessageLength(t *testing.T) {
 			input:   []byte{0x80, 0x01},
 			wantErr: true,
 		},
+		"exceeds 50MB limit": {
+			input:    []byte{0xc0, 0x00, 0x00, 0x00, 0x03, 0x20, 0x00, 0x01}, // 50MB + 1 is 52428801
+			expected: 0,
+			wantErr:  true,
+		},
 	}
 
 	for name, tt := range tests {
