@@ -277,6 +277,10 @@ func TestReadStringArray(t *testing.T) {
 			input:   []byte{},
 			wantErr: true,
 		},
+		"count exceeds length": {
+			input:   []byte{0x0A, 0x01}, // Count is 10, but only 1 byte available
+			wantErr: true,
+		},
 	}
 
 	for name, tt := range tests {
