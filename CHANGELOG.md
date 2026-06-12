@@ -356,3 +356,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Core `moqt` package with session, track, group, and frame handling.
 - Basic examples: broadcast, echo, relay.
 - Mage build system integration.
+
+- **moqt:** Add 50MB bound check on message lengths to prevent DoS via OOM and replace slice capacity panics with proper `error` returns.
