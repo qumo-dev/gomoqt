@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **moqt:** Fix DoS vulnerability in message reader by enforcing a 50MB message length limit and removing panic calls on malformed varint inputs.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added

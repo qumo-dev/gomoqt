@@ -287,3 +287,16 @@ func TestReadStringArray(t *testing.T) {
 		})
 	}
 }
+
+func TestReadMessageLength_TooLarge(t *testing.T) {
+	// Create a varint larger than 50MB (50*1024*1024 = 52428800)
+	// Let's use 60MB: 62914560
+	// 62914560 in hex is 0x3C00000 -> 4 bytes varint: 1000 0000 | 0011 1100 | ...
+	// 0x83 0xC0 0x00 0x00
+	b := []byte{0x83, 0xc0, 0x00, 0x00}
+	r := bytes.NewReader(b)
+	val, err := ReadMessageLength(r)
+	assert.Error(t, err)
+	assert.Equal(t, "message too large", err.Error())
+	assert.Equal(t, uint64(0), val)
+}
