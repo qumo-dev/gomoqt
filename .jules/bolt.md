@@ -1,0 +1,4 @@
+## 2024-06-13 - Eliminate Heap Allocation in message.ReadMessageLength via stack arrays and io.ByteReader
+
+**Learning:** When reading small variable-length integers (varints) from an `io.Reader`, passing a small slice (`make([]byte, size)` or `buf[:]`) to `io.ReadFull` often causes the underlying buffer to escape to the heap. For typical QUIC varints up to 8 bytes, this leads to millions of unnecessary small heap allocations in high-throughput network parsers.
+**Action:** Use a fast path using `io.ByteReader.ReadByte()` in a loop with a local `var buf [8]byte` array for readers that support it (like `bytes.Reader`, `bufio.Reader`), and fallback to stack-allocated `var buf [8]byte` slice reads via `io.ReadFull(r, buf[:length])` for naive `io.Reader` implementation. This completely eliminates allocations on the fast path (16 bytes/op to 0 bytes/op) and improves performance significantly.
