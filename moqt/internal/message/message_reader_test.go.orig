@@ -1,7 +1,6 @@
 package message
 
 import (
-	"io"
 	"bytes"
 	"testing"
 
@@ -81,14 +80,6 @@ func TestReadVarint(t *testing.T) {
 			}
 		})
 	}
-}
-
-type onlyReader struct {
-	r io.Reader
-}
-
-func (o *onlyReader) Read(p []byte) (n int, err error) {
-	return o.r.Read(p)
 }
 
 func TestReadMessageLength(t *testing.T) {
@@ -295,69 +286,4 @@ func TestReadStringArray(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestReadMessageLengthFallbackErrors(t *testing.T) {
-	// Test error on first byte read in fallback
-	errReader1 := &errorReader{err: io.ErrClosedPipe}
-	r1 := &onlyReader{r: errReader1}
-	_, err := ReadMessageLength(r1)
-	assert.Equal(t, io.ErrClosedPipe, err)
-
-	// Test error on subsequent bytes read in fallback
-	// Need a reader that returns 1 byte then an error
-	errReader2 := &errorReader{data: []byte{0x41}, err: io.ErrClosedPipe}
-	r2 := &onlyReader{r: errReader2}
-	_, err = ReadMessageLength(r2)
-	assert.Equal(t, io.ErrClosedPipe, err)
-}
-
-type errorReader struct {
-	data []byte
-	err  error
-}
-
-func (e *errorReader) Read(p []byte) (n int, err error) {
-	if len(e.data) > 0 {
-		n = copy(p, e.data)
-		e.data = e.data[n:]
-		if len(e.data) == 0 {
-			return n, e.err
-		}
-		return n, nil
-	}
-	return 0, e.err
-}
-
-type errorByteReader struct {
-	data []byte
-	err  error
-}
-
-func (e *errorByteReader) ReadByte() (byte, error) {
-	if len(e.data) > 0 {
-		b := e.data[0]
-		e.data = e.data[1:]
-		if len(e.data) == 0 {
-			// Do not return error yet if we read a byte, return on next call
-		}
-		return b, nil
-	}
-	return 0, e.err
-}
-
-func (e *errorByteReader) Read(p []byte) (n int, err error) {
-	return 0, io.EOF // unused
-}
-
-func TestReadMessageLengthFastPathErrors(t *testing.T) {
-	// Test error on first byte read in fast path
-	br1 := &errorByteReader{err: io.ErrClosedPipe}
-	_, err := ReadMessageLength(br1)
-	assert.Equal(t, io.ErrClosedPipe, err)
-
-	// Test error on subsequent bytes read in fast path
-	br2 := &errorByteReader{data: []byte{0x41}, err: io.ErrClosedPipe}
-	_, err = ReadMessageLength(br2)
-	assert.Equal(t, io.ErrClosedPipe, err)
 }

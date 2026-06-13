@@ -1,0 +1,18 @@
+--- message_reader_test.go	2024-06-13 10:22:00.000000000 +0000
++++ message_reader_test.go	2024-06-13 10:22:00.000000000 +0000
+@@ -149,6 +157,15 @@
+			}
+			r := bytes.NewReader(tc.input)
+			result, err := ReadMessageLength(r)
++			if err != nil {
++				assert.Equal(t, tc.expectedErr, err)
++				return
++			}
++			assert.Equal(t, tc.expected, result)
++
++			// Test non-ByteReader fallback path
++			r2 := &onlyReader{r: bytes.NewReader(tc.input)}
++			result, err = ReadMessageLength(r2)
+			if err != nil {
+				assert.Equal(t, tc.expectedErr, err)
+				return
