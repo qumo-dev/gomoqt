@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **moqt:** Avoid string to []byte allocation in WriteString
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added
