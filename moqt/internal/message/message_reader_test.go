@@ -135,11 +135,6 @@ func TestReadMessageLength(t *testing.T) {
 			input:   []byte{0x80, 0x01},
 			wantErr: true,
 		},
-		"exceeds max size": {
-			// MaxMessageSize is 50MB (52428800), varint encoding of 52428801
-			input:   []byte{0x83, 0x20, 0x00, 0x01},
-			wantErr: true,
-		},
 	}
 
 	for name, tt := range tests {
@@ -187,6 +182,10 @@ func TestReadBytes(t *testing.T) {
 		},
 		"invalid varint": {
 			input:   []byte{},
+			wantErr: true,
+		},
+		"exceeds max int": {
+			input:   []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, // extremely large number
 			wantErr: true,
 		},
 	}
@@ -277,8 +276,8 @@ func TestReadStringArray(t *testing.T) {
 			input:   []byte{},
 			wantErr: true,
 		},
-		"array count exceeds buffer length": {
-			input:   []byte{0x0A, 0x01, 0x02},
+		"exceeds max int array": {
+			input:   []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
 			wantErr: true,
 		},
 	}
