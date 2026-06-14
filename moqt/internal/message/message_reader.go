@@ -1,6 +1,7 @@
 package message
 
 import (
+	"errors"
 	"io"
 	"math"
 )
@@ -28,6 +29,9 @@ func ReadVarint(b []byte) (uint64, int, error) {
 	return i, l, nil
 }
 
+// MaxMessageSize defines the maximum allowed message payload size to prevent OOM
+const MaxMessageSize = 50 * 1024 * 1024 // 50MB upper limit
+
 // ReadVarintFromReader reads a QUIC varint from an io.Reader
 func ReadMessageLength(r io.Reader) (uint64, error) {
 	// Read first byte to determine length
@@ -52,6 +56,9 @@ func ReadMessageLength(r io.Reader) (uint64, error) {
 
 	// Parse the varint
 	val, _, err := ReadVarint(buf)
+	if err == nil && val > MaxMessageSize {
+		return 0, errors.New("message size exceeds max allowed size (50MB)")
+	}
 	return val, err
 }
 
@@ -66,7 +73,7 @@ func ReadBytes(b []byte) ([]byte, int, error) {
 	}
 	b = b[n:]
 	if num > math.MaxInt {
-		panic("byte slice too large")
+		return nil, 0, errors.New("byte slice too large")
 	}
 
 	if uint64(len(b)) < num {
@@ -91,10 +98,14 @@ func ReadStringArray(b []byte) ([]string, int, error) {
 	}
 
 	if count > math.MaxInt {
-		panic("string array too large")
+		return nil, 0, errors.New("string array count too large")
 	}
 
 	b = b[total:]
+
+	if count > uint64(len(b)) {
+		return nil, 0, errors.New("string array count exceeds remaining buffer length")
+	}
 
 	arr := make([]string, 0, count)
 	for range count {
