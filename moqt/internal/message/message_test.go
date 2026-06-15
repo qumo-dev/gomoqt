@@ -91,25 +91,3 @@ func TestStringArrayLen(t *testing.T) {
 		})
 	}
 }
-
-func TestParametersLen(t *testing.T) {
-	tests := map[string]struct {
-		input    map[uint64][]byte
-		expected int
-	}{
-		"empty parameters": {map[uint64][]byte{}, VarintLen(0)},
-		"single parameter": {map[uint64][]byte{1: []byte("value")}, VarintLen(1) + VarintLen(1) + BytesLen([]byte("value"))},
-		"multiple parameters": {map[uint64][]byte{
-			1: []byte("value1"),
-			2: []byte("value2"),
-		}, VarintLen(2) + VarintLen(1) + BytesLen([]byte("value1")) + VarintLen(2) + BytesLen([]byte("value2"))},
-		"empty value": {map[uint64][]byte{1: {}}, VarintLen(1) + VarintLen(1) + BytesLen([]byte{})},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			result := ParametersLen(tt.input)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}

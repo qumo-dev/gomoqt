@@ -35,11 +35,3 @@ func StringArrayLen(arr []string) int {
 	}
 	return total
 }
-
-func ParametersLen(params map[uint64][]byte) int {
-	total := VarintLen(uint64(len(params)))
-	for key, value := range params {
-		total += VarintLen(uint64(key)) + BytesLen(value)
-	}
-	return total
-}

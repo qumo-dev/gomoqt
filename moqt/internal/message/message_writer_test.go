@@ -107,25 +107,3 @@ func TestWriteStringArray(t *testing.T) {
 		}
 	}
 }
-
-func TestWriteParameters(t *testing.T) {
-	tests := []struct {
-		dest     []byte
-		params   map[uint64][]byte
-		expected []byte
-		n        int
-	}{
-		{[]byte{}, map[uint64][]byte{}, []byte{0}, 1},
-		{[]byte{}, map[uint64][]byte{1: {1, 2}}, []byte{1, 1, 2, 1, 2}, 5},
-	}
-
-	for _, tt := range tests {
-		result, n := WriteParameters(tt.dest, tt.params)
-		if n != tt.n {
-			t.Errorf("WriteParameters n = %d, want %d", n, tt.n)
-		}
-		if !reflect.DeepEqual(result, tt.expected) {
-			t.Errorf("WriteParameters = %v, want %v", result, tt.expected)
-		}
-	}
-}
