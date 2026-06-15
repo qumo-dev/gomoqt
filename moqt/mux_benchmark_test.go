@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -451,11 +452,14 @@ func BenchmarkTrackMux_LockContention(b *testing.B) {
 	ctx := context.Background()
 	handler := TrackHandlerFunc(func(tw *TrackWriter) {})
 
-	// Pre-populate with handlers
+	// Pre-populate handlers and a matching read-path pool. Path strings are
+	// built ONCE here (outside every measured loop) so alloc/CPU/GC profiles
+	// reflect mux cost, not fmt.Sprintf string construction in the hot loop.
 	const numPaths = 1000
+	readPaths := make([]BroadcastPath, numPaths)
 	for i := range numPaths {
-		path := BroadcastPath(fmt.Sprintf("/path/%d", i))
-		mux.Publish(ctx, path, handler)
+		readPaths[i] = BroadcastPath("/path/" + strconv.Itoa(i))
+		mux.Publish(ctx, readPaths[i], handler)
 	}
 
 	b.Run("read-heavy", func(b *testing.B) {
@@ -465,32 +469,41 @@ func BenchmarkTrackMux_LockContention(b *testing.B) {
 		b.RunParallel(func(pb *testing.PB) {
 			i := 0
 			for pb.Next() {
-				path := BroadcastPath(fmt.Sprintf("/path/%d", i%numPaths))
-				mux.TrackHandler(path)
+				mux.TrackHandler(readPaths[i%numPaths])
 				i++
 			}
 		})
 	})
 
 	// write-heavy exercises concurrent Publish calls against the SAME shared
-	// TrackMux (mux above), so the mux.mu write lock is genuinely contended.
-	// The previous version constructed a fresh mux per iteration, measuring
-	// allocation/initialization cost rather than lock contention.
+	// TrackMux so the mux.mu write lock is genuinely contended. Paths cycle
+	// through a fixed pool (re-registration is safe: registerHandler replaces
+	// the indexed handler and ends the previous one), keeping the measured
+	// loop allocation-free so it reports pure lock+map cost.
 	b.Run("write-heavy", func(b *testing.B) {
+		const writePool = 8192
+		writePaths := make([]BroadcastPath, writePool)
+		for i := range writePaths {
+			writePaths[i] = BroadcastPath("/new/" + strconv.Itoa(i))
+		}
 		b.ReportAllocs()
 		b.ResetTimer()
 
 		b.RunParallel(func(pb *testing.PB) {
 			i := 0
 			for pb.Next() {
-				path := BroadcastPath(fmt.Sprintf("/new/%d", i))
-				mux.Publish(ctx, path, handler)
+				mux.Publish(ctx, writePaths[i%writePool], handler)
 				i++
 			}
 		})
 	})
 
 	b.Run("mixed-contention", func(b *testing.B) {
+		const writePool = 8192
+		writePaths := make([]BroadcastPath, writePool)
+		for i := range writePaths {
+			writePaths[i] = BroadcastPath("/contention/" + strconv.Itoa(i))
+		}
 		b.ReportAllocs()
 		b.ResetTimer()
 
@@ -499,12 +512,10 @@ func BenchmarkTrackMux_LockContention(b *testing.B) {
 			for pb.Next() {
 				if i%20 == 0 {
 					// 5% writes
-					path := BroadcastPath(fmt.Sprintf("/contention/%d", i))
-					mux.Publish(ctx, path, handler)
+					mux.Publish(ctx, writePaths[i%writePool], handler)
 				} else {
 					// 95% reads
-					path := BroadcastPath(fmt.Sprintf("/path/%d", i%numPaths))
-					mux.TrackHandler(path)
+					mux.TrackHandler(readPaths[i%numPaths])
 				}
 				i++
 			}
