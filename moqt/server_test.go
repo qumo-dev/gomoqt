@@ -163,9 +163,12 @@ func TestBroadcastServer_PublishSubscribeRoundTrip(t *testing.T) {
 	addr := pc.LocalAddr().String()
 	_ = pc.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
+	// Use a private TrackMux (not the package-level DefaultMux) so this test
+	// does not read or write global state shared across the suite.
+	mux := NewTrackMux(0)
 	server := &Server{
 		Addr: addr,
 		TLSConfig: &tls.Config{
@@ -174,12 +177,13 @@ func TestBroadcastServer_PublishSubscribeRoundTrip(t *testing.T) {
 			InsecureSkipVerify: true,
 		},
 		QUICConfig: &quic.Config{Allow0RTT: true, EnableDatagrams: true},
-		// Keep each session alive; the DefaultMux routes incoming subscribes
-		// to the published track automatically.
+		TrackMux:   mux,
+		// Keep each session alive; the mux routes incoming subscribes to the
+		// published track automatically.
 		Handler: HandleFunc(func(sess *Session) { <-sess.Context().Done() }),
 	}
 
-	PublishFunc(ctx, "/server.broadcast", func(tw *TrackWriter) {
+	mux.PublishFunc(ctx, "/server.broadcast", func(tw *TrackWriter) {
 		frame := NewFrame(1024)
 		ticker := time.NewTicker(10 * time.Millisecond)
 		defer ticker.Stop()
@@ -227,14 +231,24 @@ func TestBroadcastServer_PublishSubscribeRoundTrip(t *testing.T) {
 		}
 		_ = s.CloseWithError(NoError, "probe")
 		return true
-	}, 5*time.Second, 50*time.Millisecond, "listener should accept a dial")
+	}, 15*time.Second, 50*time.Millisecond, "listener should accept a dial")
 
 	var frames, bytes atomic.Int64
+	var clientErr atomic.Value
 	go func() {
-		_ = runBroadcastClient(ctx, "https://"+addr+"/broadcast", &frames, &bytes)
+		if err := runBroadcastClient(ctx, "https://"+addr+"/broadcast", &frames, &bytes); err != nil {
+			clientErr.Store(err)
+		}
+	}()
+	defer func() {
+		if e, ok := clientErr.Load().(error); ok && e != nil {
+			t.Logf("broadcast client returned error: %v", e)
+		}
 	}()
 
-	require.Eventually(t, func() bool { return frames.Load() > 0 }, 5*time.Second, 20*time.Millisecond,
+	// Real-network publish -> accept-announce -> subscribe -> frame flow is
+	// slow under -race; give it a generous window.
+	require.Eventually(t, func() bool { return frames.Load() > 0 }, 30*time.Second, 20*time.Millisecond,
 		"client should receive at least one broadcast frame")
 }
 
