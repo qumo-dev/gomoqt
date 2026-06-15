@@ -2964,3 +2964,82 @@ func TestSession_Probe_ConcurrentAccess(t *testing.T) {
 	consumeCancel()
 	_ = session.CloseWithError(NoError, "")
 }
+
+// TestSession_ProcessUniStream_TrackReadersRace exercises the group-dispatch path
+// (processUniStream reading sess.trackReaders at session.go:732) concurrently with
+// addTrackReader/removeTrackReader (which write sess.trackReaders under
+// trackReaderMapLocker). Run with -race to detect the missing lock on the read
+// path; without synchronization Go also panics with "concurrent map read and map
+// write" when the overlap is hit.
+func TestSession_ProcessUniStream_TrackReadersRace(t *testing.T) {
+	const iterations = 200
+
+	for range iterations {
+		conn := &FakeStreamConn{}
+
+		// acceptStreamCh feeds exactly one GROUP uni stream per session.
+		acceptStreamCh := make(chan transport.ReceiveStream, 1)
+		conn.AcceptUniStreamFunc = func(ctx context.Context) (transport.ReceiveStream, error) {
+			select {
+			case s := <-acceptStreamCh:
+				return s, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+
+		session := newTestSession(conn)
+		t.Cleanup(func() { _ = session.CloseWithError(NoError, "") })
+
+		// A barrier the GROUP stream's Read blocks on until released; this lets us
+		// force processUniStream to reach the trackReaders read at :732 while the
+		// writer goroutine below is concurrently mutating the map.
+		releaseRead := make(chan struct{})
+		decodeDone := make(chan struct{})
+
+		mockRecvStream := &FakeQUICReceiveStream{}
+		var buf bytes.Buffer
+		_ = message.StreamTypeGroup.Encode(&buf)
+		gm := message.GroupMessage{SubscribeID: 1, GroupSequence: 0}
+		_ = gm.Encode(&buf)
+		payload := buf.Bytes()
+
+		mockRecvStream.ReadFunc = func(p []byte) (int, error) {
+			// Block the very first Read (stream-type decode) until the writer is
+			// ramping up, then serve all bytes in one shot.
+			<-releaseRead
+			n := copy(p, payload)
+			payload = payload[n:]
+			if len(payload) == 0 {
+				close(decodeDone)
+				return n, io.EOF
+			}
+			return n, nil
+		}
+
+		// Hand the stream to handleUniStreams -> processUniStream (real goroutine).
+		acceptStreamCh <- mockRecvStream
+
+		// Mutate trackReaders from another goroutine, overlapping the read at :732.
+		writerDone := make(chan struct{})
+		go func() {
+			defer close(writerDone)
+			mockTrackStream := &FakeQUICStream{}
+			mockTrackStream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
+			substr := newTestSendSubscribeStreamFromStream(mockTrackStream, &SubscribeConfig{})
+			reader := newTrackReader("/test", "video", substr, func() {})
+			// Add then repeatedly remove/re-add the same id to maximize write
+			// activity during the contended read window.
+			session.addTrackReader(SubscribeID(1), reader)
+			for range 8 {
+				session.removeTrackReader(SubscribeID(1))
+				session.addTrackReader(SubscribeID(1), reader)
+			}
+		}()
+
+		// Release the blocked read so processUniStream's read races the writer.
+		close(releaseRead)
+		<-decodeDone
+		<-writerDone
+	}
+}
