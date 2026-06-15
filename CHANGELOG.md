@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Dependencies:** Updated `quic-go` to v0.60.0.
 ### Removed
 
 - **moqt:** Removed the unused `Parameters` type and its `ParametersLen` / `WriteParameters` helpers from the internal `message` package; they had no production callers.
