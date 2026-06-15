@@ -729,7 +729,9 @@ func (sess *Session) processUniStream(stream transport.ReceiveStream) {
 			return
 		}
 
+		sess.trackReaderMapLocker.RLock()
 		track, ok := sess.trackReaders[SubscribeID(gm.SubscribeID)]
+		sess.trackReaderMapLocker.RUnlock()
 		if !ok {
 			stream.CancelRead(transport.StreamErrorCode(InvalidSubscribeIDErrorCode))
 			return
