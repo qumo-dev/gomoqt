@@ -6,8 +6,16 @@ name: Go
 on:
   push:
     branches: ["main"]
+    tags: ["v*"]
   pull_request:
-    branches: ["main"]
+    # Only run the full suite for PRs that touch Go code so we don't pay
+    # for benchmark/race jobs on docs-only changes.
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "magefiles/**"
+      - ".github/workflows/go.yml"
   workflow_dispatch: {}
 
 jobs:
@@ -36,3 +44,121 @@ jobs:
           name: go-coverage
           fail_ci_if_error: false
           verbose: true
+
+  # Race detection requires CGO + a C compiler (gcc). The ubuntu runner has
+  # gcc; local dev machines without gcc cannot run -race. We isolate it in
+  # its own job so the rest of CI is unaffected by CGO_ENABLED.
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.26.0"
+
+      - name: Test with -race
+        env:
+          # -race needs CGO and a C compiler; ubuntu-latest ships gcc.
+          CGO_ENABLED: "1"
+        run: |
+          # Run the full moqt suite under the race detector. This covers the
+          # concurrent-access regression tests (e.g. TestSession_ConcurrentAccess
+          # and the trackReaders map at session.go ~732).
+          go test -race -count=1 -timeout=10m ./moqt/...
+
+  # Capture a benchmark baseline on main / tags / manual dispatch, and compare
+  # PRs against the latest baseline using benchstat. Bounded -benchtime keeps
+  # CI affordable while -count=10 gives benchstat enough samples for variance.
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.26.0"
+
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+
+      - name: Download latest baseline artifact (PRs only)
+        id: baseline
+        # On push-to-main / tags / dispatch there is no PR baseline to compare
+        # against — we only capture. On PRs we pull the most recent baseline
+        # produced by a main run of this same workflow.
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p baseline
+          # Find the most recent successful run of this workflow on main that
+          # produced a bench-baseline artifact. download-artifact@v4 cannot
+          # reach across runs by default, so we resolve the run + download
+          # the artifact explicitly via gh.
+          RUN_ID=$(gh run list \
+            --workflow=go.yml \
+            --branch=main \
+            --status=success \
+            --event=push \
+            --limit=20 \
+            --json databaseId,conclusion \
+            --jq '[.[] | select(.conclusion=="success")] | .[0].databaseId') || true
+          if [ -z "${RUN_ID}" ] || [ "${RUN_ID}" = "null" ]; then
+            echo "No baseline run found; skipping comparison."
+            exit 0
+          fi
+          echo "Using baseline from run ${RUN_ID}"
+          gh run download "${RUN_ID}" \
+            --name bench-baseline \
+            --dir baseline || true
+          if [ -f baseline/bench-new.txt ]; then
+            # Upload step wrote bench-new.txt; normalize the name for comparison.
+            mv baseline/bench-new.txt baseline/bench-baseline.txt
+          fi
+          test -f baseline/bench-baseline.txt && echo "have_baseline=true" >> "$GITHUB_OUTPUT" || true
+
+      - name: Run benchmarks
+        # -run=^$ skips all tests so only benchmarks execute.
+        # -benchmem reports allocs/op and B/op.
+        # -count=10 gives benchstat enough samples to estimate variance.
+        # -benchtime is bounded so the job stays affordable.
+        # -timeout guards against a runaway benchmark.
+        run: |
+          go test -run='^$' -bench=. -benchmem -benchtime=1x -count=10 -timeout=20m ./moqt/... | tee bench-new.txt
+
+      - name: Compare against baseline (PRs only)
+        if: github.event_name == 'pull_request' && steps.baseline.outputs.have_baseline == 'true'
+        run: |
+          echo "::group::benchstat comparison"
+          # benchstat compares old (baseline) vs new. With multiple files it
+          # reports per-benchmark delta on mean (ns/op, B/op, allocs/op) and
+          # surfaces variance inflation via the variance columns. A `~` means
+          # no significant change; a `+x%`/`-x%` is a real drift.
+          benchstat baseline/bench-baseline.txt bench-new.txt
+          echo "::endgroup::"
+        # benchstat exits non-zero when a benchmark changes beyond noise
+        # (p < 0.05). Improvements also exit non-zero, so this step is
+        # informational on PRs — do not let it fail the job. The uploaded
+        # artifact is what reviewers use to evaluate bot PRs.
+        continue-on-error: true
+
+      - name: Upload baseline (main / tags / dispatch)
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-baseline
+          path: bench-new.txt
+          retention-days: 90
+
+      - name: Upload PR bench output
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-pr-${{ github.event.pull_request.number }}
+          path: bench-new.txt
+          retention-days: 14

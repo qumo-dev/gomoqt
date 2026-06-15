@@ -581,8 +581,11 @@ func (sess *Session) handleBiStreams() {
 			return
 		}
 
-		// Handle the stream
-		go sess.processBiStream(stream)
+		// Handle the stream. Tracked on sess.wg so CloseWithError joins in-flight
+		// stream handlers before closing the probe channels (avoids send-on-close races).
+		sess.wg.Go(func() {
+			sess.processBiStream(stream)
+		})
 	}
 }
 
@@ -708,7 +711,9 @@ func (sess *Session) handleUniStreams() {
 			return
 		}
 
-		go sess.processUniStream(stream)
+		sess.wg.Go(func() {
+			sess.processUniStream(stream)
+		})
 	}
 }
 

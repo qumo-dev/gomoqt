@@ -194,6 +194,76 @@ func (t Test) Coverage() error {
 }
 
 // ======================================
+// BENCHMARKS
+// ======================================
+
+type Bench mg.Namespace
+
+// Short runs the moqt benchmarks once with allocations reporting. Use this for
+// a quick local sanity check while iterating.
+func (Bench) Short() error {
+	fmt.Println("Running benchmarks (short: -count=1 -benchtime=1x -benchmem)...")
+	return sh.RunV("go", "test", "-run=^$", "-bench=.", "-benchmem",
+		"-benchtime=1x", "-count=1", "-timeout=10m", "./moqt/...")
+}
+
+// Full runs the moqt benchmarks with enough samples for benchstat. Mirrors what
+// CI captures: -count=10 -benchmem, bounded -benchtime. Output is written to
+// bench-new.txt so it can be compared with Bench.Compare.
+func (Bench) Full() error {
+	fmt.Println("Running benchmarks (full: -count=10 -benchtime=1x -benchmem)...")
+	return sh.RunV("go", "test", "-run=^$", "-bench=.",
+		"-benchmem", "-benchtime=1x", "-count=10", "-timeout=20m", "./moqt/...")
+}
+
+// Compare runs the benchmarks, writes the result to bench-new.txt, and compares
+// it against a baseline file using benchstat. The baseline file path defaults to
+// bench-baseline.txt; pass a different path to compare against a previously
+// captured artifact (e.g. a baseline downloaded from CI).
+//
+// benchstat is installed on demand if missing.
+//
+//	mage bench:compare                          # compares ./bench-baseline.txt
+//	mage bench:compare path/to/baseline.txt     # compare against a specific file
+func (Bench) Compare(baselinePath string) error {
+	if baselinePath == "" {
+		baselinePath = "bench-baseline.txt"
+	}
+	if _, err := os.Stat(baselinePath); err != nil {
+		return fmt.Errorf("baseline file not found: %s\nCapture one first with `mage bench:full > bench-baseline.txt` or download the CI artifact", baselinePath)
+	}
+
+	// Install benchstat if missing.
+	if _, err := exec.LookPath("benchstat"); err != nil {
+		fmt.Println("Installing benchstat...")
+		if err := sh.RunV("go", "install", "golang.org/x/perf/cmd/benchstat@latest"); err != nil {
+			return err
+		}
+	}
+
+	newPath := "bench-new.txt"
+	fmt.Printf("Running benchmarks (writing to %s)...\n", newPath)
+
+	// Run benchmarks with stdout captured to bench-new.txt (tee to console too).
+	out, err := os.Create(newPath)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", newPath, err)
+	}
+	defer out.Close()
+	cmd := exec.Command("go", "test", "-run=^$", "-bench=.",
+		"-benchmem", "-benchtime=1x", "-count=10", "-timeout=20m", "./moqt/...")
+	cmd.Stdout = out
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	fmt.Println()
+	fmt.Printf("Comparing %s (baseline) vs %s (new):\n", baselinePath, newPath)
+	return sh.RunV("benchstat", baselinePath, newPath)
+}
+
+// ======================================
 // INTEROP
 // ======================================
 
@@ -315,6 +385,11 @@ func Help() {
 	fmt.Println("Testing:")
 	fmt.Println("  mage test:all      - Run all tests")
 	fmt.Println("  mage test:coverage - Run tests with coverage")
+	fmt.Println("")
+	fmt.Println("Benchmarks:")
+	fmt.Println("  mage bench:short                       - Quick benchmark sanity check (-count=1)")
+	fmt.Println("  mage bench:full                        - Full benchmark run for baselines (-count=10)")
+	fmt.Println("  mage bench:compare [baseline.txt]      - Run benchmarks and compare vs a baseline with benchstat")
 	fmt.Println("")
 	fmt.Println("Interop:")
 	fmt.Println("  mage interop:ts                       - Dockerized interop using TypeScript client (preferred)")
