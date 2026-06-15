@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -102,15 +103,26 @@ func BenchmarkSession_ConcurrentSubscribe(b *testing.B) {
 
 			session := newTestSession(conn)
 
+			// Pre-compute path/name pairs ONCE so the measured loop does not
+			// allocate path/name strings via fmt.Sprintf (which would pollute
+			// the alloc/CPU profile with formatting noise instead of the real
+			// subscribe cost). Subscribe IDs still advance per call, matching
+			// the original behavior.
+			const subPool = 8192
+			subPaths := make([]BroadcastPath, subPool)
+			subNames := make([]TrackName, subPool)
+			for i := range subPaths {
+				subPaths[i] = BroadcastPath("/broadcast/" + strconv.Itoa(i))
+				subNames[i] = TrackName("track_" + strconv.Itoa(i))
+			}
+
 			b.ReportAllocs()
 			b.ResetTimer()
 
 			b.RunParallel(func(pb *testing.PB) {
 				i := 0
 				for pb.Next() {
-					path := BroadcastPath(fmt.Sprintf("/broadcast/%d", i))
-					name := TrackName(fmt.Sprintf("track_%d", i))
-					_, _ = session.Subscribe(context.Background(), path, name, nil)
+					_, _ = session.Subscribe(context.Background(), subPaths[i%subPool], subNames[i%subPool], nil)
 					i++
 				}
 			})
