@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -34,6 +35,44 @@ func TestServer_Init(t *testing.T) {
 	assert.NotNil(t, s.listeners)
 	assert.NotNil(t, s.connManager)
 	assert.NotNil(t, s.WebTransportServer)
+}
+
+// TestServer_defaultWebTransportHandler_WiresServerFields guards against the
+// regression where Server.init() passed a nil HTTP handler to
+// NewWebTransportServer, causing every WebTransport request to 404. The default
+// handler must now carry the Server's Handler so upgraded sessions dispatch.
+func TestServer_defaultWebTransportHandler_WiresServerFields(t *testing.T) {
+	h := HandleFunc(func(*Session) {})
+	cfg := &Config{}
+	mux := NewTrackMux(0)
+
+	s := &Server{Config: cfg, TrackMux: mux, Handler: h}
+	got := s.defaultWebTransportHandler()
+
+	wth, ok := got.(*WebTransportHandler)
+	require.True(t, ok, "default handler must be a *WebTransportHandler")
+	assert.NotNil(t, wth.Handler, "Handler must be wired (was nil -> 404 before the fix)")
+	_, isHandleFunc := wth.Handler.(HandleFunc)
+	assert.True(t, isHandleFunc, "Handler must be the Server's HandleFunc")
+	assert.Equal(t, cfg, wth.Config)
+	assert.Equal(t, mux, wth.TrackMux)
+}
+
+// TestWebTransportHandler_ServeHTTP_NilHandlerFallsBack ensures a
+// WebTransportHandler with no configured Handler does not panic (the previous
+// path called u.Handler.ServeMOQ unconditionally) and instead falls back.
+func TestWebTransportHandler_ServeHTTP_NilHandlerFallsBack(t *testing.T) {
+	u := &WebTransportHandler{} // Handler and FallbackHandler are both nil
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodConnect, "/broadcast", nil)
+
+	require.NotPanics(t, func() {
+		u.ServeHTTP(rr, req)
+	})
+
+	// With no Handler and no FallbackHandler, the fallback returns 400.
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 func TestServer_connContext_AppliesCustomAndInjectsServer(t *testing.T) {
