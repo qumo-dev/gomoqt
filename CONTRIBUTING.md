@@ -85,6 +85,10 @@ go test -race ./...
 go test -bench=. ./...
 ```
 
+For benchmarks and performance regression comparison with `benchstat`, see
+[BENCHMARKS.md](./BENCHMARKS.md). CI runs `-race` on every Go-touching PR and
+compares PR benchmarks against a baseline captured on `main`.
+
 ### 5. Code Quality
 
 Ensure your code meets our standards:
