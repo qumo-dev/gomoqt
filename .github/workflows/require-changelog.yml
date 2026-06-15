@@ -16,7 +16,8 @@ jobs:
 
       - name: Skip CHANGELOG check (no-changelog label)
         if: ${{ contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
-        run: echo "Skipping CHANGELOG requirement: 'no-changelog' label is present."
+        run: |
+          echo "Skipping CHANGELOG requirement: 'no-changelog' label is present."
 
       - name: Verify CHANGELOG.md modification
         if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
