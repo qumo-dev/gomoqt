@@ -155,7 +155,15 @@ func BenchmarkTrackWriter_OpenGroup(b *testing.B) {
 	}
 }
 
-// BenchmarkTrackWriter_ConcurrentOpenGroup benchmarks concurrent group opening
+// BenchmarkTrackWriter_ConcurrentOpenGroup benchmarks concurrent group opening.
+//
+// The openUniStreamFunc stand-in allocates a fresh FakeQUICSendStream per call
+// WITHOUT taking a shared mutex. Production's OpenUniStream (quic-go) draws a
+// stream from a connection-wide pool and does not serialize callers on a single
+// global lock, so the previous version's artificial streamMu inflated lock
+// contention beyond what the real transport imposes. This version measures only
+// the contention that TrackWriter itself introduces (groupManager.mu and the
+// writer's RWMutex during OpenGroup/Close).
 func BenchmarkTrackWriter_ConcurrentOpenGroup(b *testing.B) {
 	concurrency := []int{2, 10, 50}
 
@@ -165,11 +173,9 @@ func BenchmarkTrackWriter_ConcurrentOpenGroup(b *testing.B) {
 
 			substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
-			var streamMu sync.Mutex
+			// No shared lock: each call returns an independent send stream,
+			// matching quic-go's non-serializing OpenUniStream semantics.
 			openUniStreamFunc := func() (transport.SendStream, error) {
-				streamMu.Lock()
-				defer streamMu.Unlock()
-
 				mockSendStream := &FakeQUICSendStream{}
 				mockSendStream.WriteFunc = func(p []byte) (int, error) {
 					return len(p), nil
