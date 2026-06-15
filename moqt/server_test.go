@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -73,6 +74,70 @@ func TestWebTransportHandler_ServeHTTP_NilHandlerFallsBack(t *testing.T) {
 
 	// With no Handler and no FallbackHandler, the fallback returns 400.
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+// TestServer_WebTransportDial_UpgradesSession is an end-to-end regression
+// test. Before the fix, Server.init() wired a nil HTTP handler, so a
+// WebTransport dial to the server 404'd (see BenchmarkStreamIo_RealQUIC's
+// b.Skipf and BenchmarkBroadcastServer_HighLoad reporting 0 frames/op).
+// After the fix, the default WebTransportHandler upgrades the request and
+// dispatches the upgraded session to the Server's Handler.
+func TestServer_WebTransportDial_UpgradesSession(t *testing.T) {
+	// Grab a free UDP port for the QUIC listener.
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := pc.LocalAddr().String()
+	_ = pc.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var handlerCalled atomic.Bool
+	server := &Server{
+		Addr: addr,
+		TLSConfig: &tls.Config{
+			NextProtos:         []string{NextProtoH3, NextProtoMOQ},
+			Certificates:       []tls.Certificate{generateTestCert(t)},
+			InsecureSkipVerify: true,
+		},
+		Handler: HandleFunc(func(sess *Session) {
+			handlerCalled.Store(true)
+			<-sess.Context().Done()
+		}),
+	}
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, ErrServerClosed) {
+			t.Logf("server ListenAndServe: %v", err)
+		}
+	}()
+	// Close the server with a bounded wait. Server.Close() blocks on
+	// <-connManager.Done(), and a peer connection closed immediately before
+	// Close is not always removed from the connManager in time, so an
+	// unbounded Close would hang the test. That drain race is tracked
+	// separately; here we just keep the test from hanging.
+	defer func() {
+		done := make(chan struct{})
+		go func() { _ = server.Close(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+		}
+	}()
+
+	// Allow the QUIC listener to bind.
+	time.Sleep(100 * time.Millisecond)
+
+	client := &Dialer{
+		TLSConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+
+	sess, err := client.Dial(ctx, "https://"+addr+"/moqt", nil)
+	require.NoError(t, err, "dial should upgrade to a MOQ session, not 404 (regression)")
+	defer sess.CloseWithError(NoError, "test done")
+
+	require.Eventually(t, handlerCalled.Load, time.Second, 10*time.Millisecond,
+		"server Handler must be invoked for the upgraded session")
 }
 
 func TestServer_connContext_AppliesCustomAndInjectsServer(t *testing.T) {

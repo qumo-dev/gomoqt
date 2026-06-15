@@ -324,8 +324,8 @@ func runBroadcastClient(ctx context.Context, serverAddr string, framesReceived, 
 	}
 }
 
-func generateTestCert(b *testing.B) tls.Certificate {
-	b.Helper()
+func generateTestCert(tb testing.TB) tls.Certificate {
+	tb.Helper()
 
 	// Use in-memory self-signed certificate for testing
 	certPEM := []byte(`-----BEGIN CERTIFICATE-----
@@ -348,7 +348,7 @@ EKTcWGekdmdDPsHloRNtsiCa697B2O9IFA==
 
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
-		b.Fatalf("failed to load test certificate: %v", err)
+		tb.Fatalf("failed to load test certificate: %v", err)
 	}
 	return cert
 }
