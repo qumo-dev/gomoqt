@@ -1398,8 +1398,9 @@ func TestSession_ProcessBiStream_Probe(t *testing.T) {
 		return quic.ConnectionStats{}
 	}
 
-	session := newTestSession(conn)
-	session.config = &Config{ProbeInterval: 5 * time.Millisecond}
+	// Construct WITH the config — never mutate session.config after newSession,
+	// because detectBitrateChanges (started inside newSession) reads it concurrently.
+	session := newSession(conn, NewTrackMux(0), nil, &Config{ProbeInterval: 5 * time.Millisecond}, nil, nil, nil)
 
 	probeStream := &FakeQUICStream{}
 
@@ -1431,10 +1432,10 @@ func TestSession_ProcessBiStream_Probe(t *testing.T) {
 	}
 
 	done := make(chan struct{})
-	go func() {
+	session.wg.Go(func() {
 		session.processBiStream(probeStream)
 		close(done)
-	}()
+	})
 
 	// Wait for at least one ProbeMessage from the publisher.
 	select {
@@ -1493,10 +1494,10 @@ func TestSession_ProcessBiStream_ProbeMultipleMessages(t *testing.T) {
 	}
 
 	done := make(chan struct{})
-	go func() {
+	session.wg.Go(func() {
 		session.processBiStream(probeStream)
 		close(done)
-	}()
+	})
 
 	// Let multiple max-age-triggered sends accumulate.
 	time.Sleep(100 * time.Millisecond)
