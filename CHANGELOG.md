@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **moqt:** Optimized `message.WriteString` and `message.ReadMessageLength` to avoid heap allocations in hot paths.
+
+## [Unreleased]
+
+### Changed
+
 - **Dependencies:** Updated `quic-go` to v0.60.0.
 ### Removed
 
