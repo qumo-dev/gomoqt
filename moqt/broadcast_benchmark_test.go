@@ -3,11 +3,11 @@ package moqt
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
-	"net/http"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -28,7 +28,7 @@ func BenchmarkBroadcastServer_HighLoad(b *testing.B) {
 
 			// Setup server
 			server, addr := setupBroadcastServer(b, ctx)
-			defer server.Close()
+			defer closeBroadcastServer(b, server)
 
 			// Metrics
 			var (
@@ -82,7 +82,7 @@ func BenchmarkBroadcastServer_Profile(b *testing.B) {
 
 	// Setup server
 	server, addr := setupBroadcastServer(b, ctx)
-	defer server.Close()
+	defer closeBroadcastServer(b, server)
 
 	const (
 		numClients = 100
@@ -142,7 +142,7 @@ func BenchmarkBroadcastServer_FrameSizes(b *testing.B) {
 			ctx := b.Context()
 
 			server, addr := setupBroadcastServerWithFrameSize(b, ctx, frameSize)
-			defer server.Close()
+			defer closeBroadcastServer(b, server)
 
 			const numClients = 10
 			var framesReceived, bytesReceived atomic.Int64
@@ -167,52 +167,46 @@ func BenchmarkBroadcastServer_FrameSizes(b *testing.B) {
 	}
 }
 
-func setupBroadcastServer(b *testing.B, ctx context.Context) (*http.Server, string) {
+func setupBroadcastServer(b *testing.B, ctx context.Context) (*Server, string) {
 	return setupBroadcastServerWithFrameSize(b, ctx, 1024)
 }
 
-func setupBroadcastServerWithFrameSize(b *testing.B, ctx context.Context, frameSize int) (*http.Server, string) {
+// setupBroadcastServerWithFrameSize starts a real QUIC/WebTransport broadcast
+// server. The Server's default WebTransport handler upgrades any dialed path to
+// a MOQ session (#179); the session Handler just keeps the connection alive
+// while DefaultMux routes incoming subscribes to the published track
+// (Server.TrackMux is nil, so sessions use DefaultMux, where PublishFunc
+// registers below). The previous version built a separate net/http server and
+// never wired the handler into the QUIC server, so it 404'd and the benchmark
+// silently reported 0 frames/op.
+func setupBroadcastServerWithFrameSize(b *testing.B, ctx context.Context, frameSize int) (*Server, string) {
 	b.Helper()
 
-	// Find available port
-	listener, err := net.Listen("tcp", "localhost:0")
+	// Grab a free UDP port for the QUIC listener.
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
 		b.Fatalf("failed to find available port: %v", err)
 	}
-	addr := listener.Addr().String()
-	listener.Close()
+	addr := pc.LocalAddr().String()
+	_ = pc.Close()
 
-	moqtServer := &Server{
+	server := &Server{
 		Addr: addr,
 		TLSConfig: &tls.Config{
-			NextProtos:         []string{"h3", "moq-00"},
+			NextProtos:         []string{NextProtoH3, NextProtoMOQ},
 			Certificates:       []tls.Certificate{generateTestCert(b)},
 			InsecureSkipVerify: true,
 		},
-		QUICConfig: &quic.Config{
-			Allow0RTT:       true,
-			EnableDatagrams: true,
-		},
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		QUICConfig: &quic.Config{Allow0RTT: true, EnableDatagrams: true},
+		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Handler:    HandleFunc(func(sess *Session) { <-sess.Context().Done() }),
 	}
 
-	// Setup HTTP handler for WebTransport
-	mux := http.NewServeMux()
-	upgrader := &WebTransportHandler{}
-	mux.Handle("/broadcast", upgrader)
-
-	httpServer := &http.Server{
-		Addr:      addr,
-		Handler:   mux,
-		TLSConfig: moqtServer.TLSConfig,
-	}
-
-	// Register broadcast handler
+	// Publish the broadcast track on DefaultMux.
 	PublishFunc(ctx, "/server.broadcast", func(tw *TrackWriter) {
 		frame := NewFrame(frameSize)
 		ticker := time.NewTicker(33 * time.Millisecond) // ~30fps
 		defer ticker.Stop()
-
 		for {
 			select {
 			case <-ctx.Done():
@@ -222,38 +216,42 @@ func setupBroadcastServerWithFrameSize(b *testing.B, ctx context.Context, frameS
 				if err != nil {
 					return
 				}
-
 				frame.Reset()
-				// Write realistic frame data
 				data := make([]byte, frameSize)
 				for i := range data {
 					data[i] = byte(gw.GroupSequence() % 256)
 				}
 				frame.Write(data)
-
-				err = gw.WriteFrame(frame)
-				if err != nil {
+				if err := gw.WriteFrame(frame); err != nil {
 					gw.CancelWrite(InternalGroupErrorCode)
 					return
 				}
-
 				gw.Close()
 			}
 		}
 	})
 
-	// Start server in background
 	go func() {
-		err := moqtServer.ListenAndServe()
-		if err != nil && err != http.ErrServerClosed {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, ErrServerClosed) {
 			b.Logf("server error: %v", err)
 		}
 	}()
 
-	// Wait for server to be ready
-	time.Sleep(100 * time.Millisecond)
+	return server, "https://" + addr + "/broadcast"
+}
 
-	return httpServer, "https://" + addr + "/broadcast"
+// closeBroadcastServer closes the broadcast server with a bounded wait.
+// Server.Close() can block on <-connManager.Done() when a peer connection
+// closed immediately before Close isn't drained in time (#181); bounding it
+// keeps a flaky drain from hanging the benchmark.
+func closeBroadcastServer(tb testing.TB, server *Server) {
+	tb.Helper()
+	done := make(chan struct{})
+	go func() { _ = server.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+	}
 }
 
 func runBroadcastClient(ctx context.Context, serverAddr string, framesReceived, bytesReceived *atomic.Int64) error {

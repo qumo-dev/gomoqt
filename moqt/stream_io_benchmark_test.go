@@ -53,7 +53,7 @@ func BenchmarkStreamIo_RealQUIC(b *testing.B) {
 
 			// Reuse the proven server-setup helper from broadcast_benchmark_test.go.
 			srv, addr := setupBroadcastServerWithFrameSize(b, ctx, size)
-			defer srv.Close()
+			defer closeBroadcastServer(b, srv)
 
 			client := Dialer{
 				Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -62,17 +62,23 @@ func BenchmarkStreamIo_RealQUIC(b *testing.B) {
 				},
 			}
 
-			sess, err := client.Dial(ctx, addr, nil)
-			if err != nil {
-				// Real-QUIC WebTransport upgrade is broken in this worktree:
-				// the dial returns HTTP 404 because the Server's HTTP/3 handler
-				// is nil (Server.init defaults WebTransportServer to
-				// NewWebTransportServer(nil)). The existing
-				// BenchmarkBroadcastServer_HighLoad exhibits the same failure
-				// (it reports N errors/op and 0 frames/op but does not
-				// b.Fatal). Skip rather than fail, and rely on
-				// BenchmarkWriteThroughput_Memcpy for real-write throughput.
-				b.Skipf("real-QUIC WebTransport dial failed in this environment (the existing broadcast harness has the same issue): %v", err)
+			// Dial once the listener is ready (it binds asynchronously in the
+			// setup goroutine). The WebTransport path now works end-to-end (#179);
+			// see TestBroadcastServer_PublishSubscribeRoundTrip for the validated flow.
+			var sess *Session
+			ready, cancelWait := context.WithTimeout(ctx, 5*time.Second)
+			for {
+				s, derr := client.Dial(ready, addr, nil)
+				if derr == nil {
+					sess = s
+					cancelWait()
+					break
+				}
+				if ready.Err() != nil {
+					cancelWait()
+					b.Fatalf("dial %s: %v (listener not ready or upgrade failed)", addr, derr)
+				}
+				time.Sleep(50 * time.Millisecond)
 			}
 			defer sess.CloseWithError(NoError, "done")
 
@@ -283,11 +289,11 @@ type sinkWriterSendStream struct {
 	w io.Writer
 }
 
-func (s *sinkWriterSendStream) Write(p []byte) (int, error) { return s.w.Write(p) }
+func (s *sinkWriterSendStream) Write(p []byte) (int, error)           { return s.w.Write(p) }
 func (s *sinkWriterSendStream) CancelWrite(transport.StreamErrorCode) {}
-func (s *sinkWriterSendStream) SetWriteDeadline(time.Time) error    { return nil }
-func (s *sinkWriterSendStream) Close() error                        { return nil }
-func (s *sinkWriterSendStream) Context() context.Context            { return context.Background() }
+func (s *sinkWriterSendStream) SetWriteDeadline(time.Time) error      { return nil }
+func (s *sinkWriterSendStream) Close() error                          { return nil }
+func (s *sinkWriterSendStream) Context() context.Context              { return context.Background() }
 
 // humanSize returns a short label (1K, 16K, 64K, 256K, 1M) for a byte size.
 func humanSize(n int) string {
