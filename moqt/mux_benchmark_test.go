@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/qumo-dev/gomoqt/transport"
@@ -107,7 +108,25 @@ func BenchmarkTrackMux_ServeTrack(b *testing.B) {
 	}
 }
 
-// BenchmarkTrackMux_ServeAnnouncements benchmarks announcement setup overhead
+// BenchmarkTrackMux_ServeAnnouncements measures the real announcement fan-out
+// pipeline end to end: each iteration Publishes a new track whose path matches
+// a registered AnnouncementWriter's prefix, which triggers
+// Announce -> announcement-tree walk -> per-node subscription snapshot ->
+// channel send -> SendAnnouncement -> AnnounceMessage encode on the writer's
+// stream.
+//
+// The previous version constructed an AnnouncementWriter per iteration but
+// never invoked Announce/Publish, so it measured only allocation and none of
+// the fan-out.
+//
+// A long-lived AnnouncementWriter is registered via serveAnnouncements (run in
+// a background goroutine). serveAnnouncements' subscription channel has a
+// fixed buffer of 8 and, when full, the production code drops the subscription
+// and closes the writer. To measure the steady-state fan-out (channel send
+// succeeding) rather than the drop/close path, each iteration waits for the
+// consumer to acknowledge delivery (via a WriteFunc signal) before publishing
+// the next announcement. This yields a stable per-operation latency for the
+// full relay forwarding path.
 func BenchmarkTrackMux_ServeAnnouncements(b *testing.B) {
 	sizes := []int{100, 1000, 10000}
 
@@ -117,21 +136,62 @@ func BenchmarkTrackMux_ServeAnnouncements(b *testing.B) {
 			ctx := context.Background()
 			handler := TrackHandlerFunc(func(tw *TrackWriter) {})
 
-			// Pre-populate with handlers under /room/ prefix
+			// Pre-populate with handlers under /room/ prefix so the tree has depth.
 			for i := range size {
 				path := BroadcastPath(fmt.Sprintf("/room/user%d", i))
 				mux.Publish(ctx, path, handler)
 			}
 
+			awCtx, cancelAW := context.WithCancel(ctx)
+			// delivered is signaled on every Write to the writer's stream (during
+			// init AND on each forwarded announcement). Used both to wait for
+			// init completion before timing and to acknowledge each fan-out.
+			delivered := make(chan struct{}, 1)
+			mockStream := &FakeQUICStream{
+				ParentCtx: awCtx,
+				WriteFunc: func(p []byte) (int, error) {
+					select {
+					case delivered <- struct{}{}:
+					default:
+					}
+					return len(p), nil
+				},
+			}
+			aw := newAnnouncementWriter(mockStream, "/room/", 0, 0, nil)
+
+			var awWG sync.WaitGroup
+			awWG.Add(1)
+			go func() {
+				defer awWG.Done()
+				mux.serveAnnouncements(aw)
+			}()
+
+			// Block until init has fully completed. The fan-out path in
+			// Announce does a non-blocking channel send and, on overflow, closes
+			// the writer (setting aw.actives = nil); if a Publish raced init's
+			// registerEndHandler it would nil-deref. initDone is closed at the
+			// end of the writer's one-shot init, so waiting on it guarantees no
+			// concurrent Publish until init is done.
+			select {
+			case <-aw.initDone:
+			case <-awCtx.Done():
+			}
+
+			b.Cleanup(func() {
+				cancelAW()
+				awWG.Wait()
+			})
+
 			b.ReportAllocs()
 			b.ResetTimer()
 
-			// Benchmark announcement writer creation (not the blocking operation)
-			for b.Loop() {
-				mockStream := &FakeQUICStream{
-					ParentCtx: ctx,
-				}
-				_ = newAnnouncementWriter(mockStream, "/room/", 0, 0, nil)
+			// Each iteration Publishes a new matching track and waits for the
+			// consumer to encode the forwarded announcement, measuring one full
+			// announce -> deliver round trip.
+			for i := 0; b.Loop(); i++ {
+				path := BroadcastPath(fmt.Sprintf("/room/bench%d", i))
+				mux.Publish(ctx, path, handler)
+				<-delivered
 			}
 		})
 	}
@@ -412,6 +472,10 @@ func BenchmarkTrackMux_LockContention(b *testing.B) {
 		})
 	})
 
+	// write-heavy exercises concurrent Publish calls against the SAME shared
+	// TrackMux (mux above), so the mux.mu write lock is genuinely contended.
+	// The previous version constructed a fresh mux per iteration, measuring
+	// allocation/initialization cost rather than lock contention.
 	b.Run("write-heavy", func(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
@@ -419,9 +483,8 @@ func BenchmarkTrackMux_LockContention(b *testing.B) {
 		b.RunParallel(func(pb *testing.PB) {
 			i := 0
 			for pb.Next() {
-				newMux := NewTrackMux(0)
 				path := BroadcastPath(fmt.Sprintf("/new/%d", i))
-				newMux.Publish(ctx, path, handler)
+				mux.Publish(ctx, path, handler)
 				i++
 			}
 		})
@@ -449,7 +512,12 @@ func BenchmarkTrackMux_LockContention(b *testing.B) {
 	})
 }
 
-// BenchmarkTrackMux_AnnouncementTree benchmarks the announcement tree operations
+// BenchmarkTrackMux_AnnouncementTree measures the announcement-tree fan-out
+// across a deep tree. A writer is registered at a shallow prefix ("/level1/")
+// so each Publish of a deeply-nested track must add the announcement to every
+// node along the root->leaf path and send to the subscriber snapshot at each
+// node. The previous version only constructed an AnnouncementWriter and never
+// exercised Announce/Publish, so the per-node walk was never measured.
 func BenchmarkTrackMux_AnnouncementTree(b *testing.B) {
 	sizes := []int{100, 1000, 10000}
 
@@ -459,19 +527,58 @@ func BenchmarkTrackMux_AnnouncementTree(b *testing.B) {
 			ctx := context.Background()
 			handler := TrackHandlerFunc(func(tw *TrackWriter) {})
 
-			// Create a deep tree structure
+			// Create a deep tree structure.
 			for i := range size {
 				path := BroadcastPath(fmt.Sprintf("/level1/level2/level3/track%d", i))
 				mux.Publish(ctx, path, handler)
 			}
 
+			// Register a writer at the shallow "/level1/" prefix so each new
+			// deeply-nested Publish walks root -> level1 -> level2 -> level3 ->
+			// leaf and fans out at each node. delivered acknowledges every
+			// Write so the benchmark can wait for init to flush and then
+			// synchronize each fan-out round trip (see ServeAnnouncements for
+			// why this avoids the overflow -> drop/close path).
+			awCtx, cancelAW := context.WithCancel(ctx)
+			delivered := make(chan struct{}, 1)
+			mockStream := &FakeQUICStream{
+				ParentCtx: awCtx,
+				WriteFunc: func(p []byte) (int, error) {
+					select {
+					case delivered <- struct{}{}:
+					default:
+					}
+					return len(p), nil
+				},
+			}
+			aw := newAnnouncementWriter(mockStream, "/level1/", 0, 0, nil)
+
+			var awWG sync.WaitGroup
+			awWG.Add(1)
+			go func() {
+				defer awWG.Done()
+				mux.serveAnnouncements(aw)
+			}()
+
+			// Block until init completes; see ServeAnnouncements for why this
+			// prevents a Publish from racing init's registerEndHandler.
+			select {
+			case <-aw.initDone:
+			case <-awCtx.Done():
+			}
+
+			b.Cleanup(func() {
+				cancelAW()
+				awWG.Wait()
+			})
+
 			b.ReportAllocs()
 			b.ResetTimer()
 
-			// Benchmark announcement writer creation and tree structure access
-			for b.Loop() {
-				mockStream := &FakeQUICStream{}
-				_ = newAnnouncementWriter(mockStream, "/level1/", 0, 0, nil)
+			for i := 0; b.Loop(); i++ {
+				path := BroadcastPath(fmt.Sprintf("/level1/level2/level3/bench%d", i))
+				mux.Publish(ctx, path, handler)
+				<-delivered
 			}
 		})
 	}
