@@ -89,7 +89,7 @@ func TestServer_WebTransportDial_UpgradesSession(t *testing.T) {
 	addr := pc.LocalAddr().String()
 	_ = pc.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	var handlerCalled atomic.Bool
@@ -122,19 +122,31 @@ func TestServer_WebTransportDial_UpgradesSession(t *testing.T) {
 		select {
 		case <-done:
 		case <-time.After(3 * time.Second):
+			t.Log("server.Close() did not complete in 3s (connManager drain race; see #181)")
 		}
 	}()
-
-	// Allow the QUIC listener to bind.
-	time.Sleep(100 * time.Millisecond)
 
 	client := &Dialer{
 		TLSConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 
-	sess, err := client.Dial(ctx, "https://"+addr+"/moqt", nil)
-	require.NoError(t, err, "dial should upgrade to a MOQ session, not 404 (regression)")
-	defer sess.CloseWithError(NoError, "test done")
+	// Retry the dial until the QUIC listener is ready (it binds asynchronously
+	// in the ListenAndServe goroutine) or the window expires. A fixed sleep
+	// here would race with listener startup under CI load.
+	var sess *Session
+	require.Eventually(t, func() bool {
+		s, err := client.Dial(ctx, "https://"+addr+"/moqt", nil)
+		if err != nil {
+			return false
+		}
+		sess = s
+		return true
+	}, 5*time.Second, 50*time.Millisecond, "dial should upgrade to a MOQ session once the listener is ready")
+	defer func() {
+		if sess != nil {
+			sess.CloseWithError(NoError, "test done")
+		}
+	}()
 
 	require.Eventually(t, handlerCalled.Load, time.Second, 10*time.Millisecond,
 		"server Handler must be invoked for the upgraded session")
