@@ -61,18 +61,6 @@ func WriteStringArray(dest []byte, arr []string) ([]byte, int) {
 	return dest, n
 }
 
-func WriteParameters(dest []byte, params map[uint64][]byte) ([]byte, int) {
-	dest, n := WriteVarint(dest, uint64(len(params)))
-	var m int
-	for key, value := range params {
-		dest, m = WriteVarint(dest, uint64(key))
-		n += m
-		dest, m = WriteBytes(dest, value)
-		n += m
-	}
-	return dest, n
-}
-
 const (
 	maxVarInt1 = 1<<(8-2) - 1
 	maxVarInt2 = 1<<(16-2) - 1
