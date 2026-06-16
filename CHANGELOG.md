@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **moqt:** Removed the unused `Parameters` type and its `ParametersLen` / `WriteParameters` helpers from the internal `message` package; they had no production callers.
 
+### Fixed
+
+- **moqt:** `Server` now wires a `WebTransportHandler` (built from the Server's `Handler` / `TrackMux` / `Config`) as the default WebTransport handler. Previously `Server.init()` passed a nil HTTP handler, so every WebTransport request fell through to `http.DefaultServeMux` (no MOQ route) and 404'd — the Server's default WebTransport path was non-functional, and `BenchmarkBroadcastServer_HighLoad` silently reported 0 frames/op.
+
 ## [v0.15.0] - 2026-04-26
 
 ### Added

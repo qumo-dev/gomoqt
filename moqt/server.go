@@ -106,9 +106,30 @@ func (s *Server) init() {
 		s.listeners = make(map[QUICListener]struct{})
 		s.connManager = newConnManager()
 		if s.WebTransportServer == nil {
-			s.WebTransportServer = NewWebTransportServer(nil)
+			// Wire a WebTransportHandler built from the Server's fields so that,
+			// out of the box, incoming WebTransport requests upgrade to MOQ
+			// sessions and dispatch to s.Handler. Passing nil here previously
+			// fell back to http.DefaultServeMux (via webtransportgo.Server),
+			// which serves no MOQ route, so every WebTransport request 404'd.
+			s.WebTransportServer = NewWebTransportServer(s.defaultWebTransportHandler())
 		}
 	})
+}
+
+// defaultWebTransportHandler builds the http.Handler used by the default
+// WebTransportServer to upgrade incoming WebTransport requests to MOQ sessions.
+// It is wired with the Server's Config, TrackMux, Handler, FetchHandler, and
+// Logger. If Handler is nil, the returned handler falls back for every request
+// (no session is created), matching the native-QUIC "no handler configured"
+// behavior.
+func (s *Server) defaultWebTransportHandler() http.Handler {
+	return &WebTransportHandler{
+		Config:       s.Config,
+		TrackMux:     s.TrackMux,
+		Handler:      s.Handler,
+		FetchHandler: s.FetchHandler,
+		Logger:       s.Logger,
+	}
 }
 
 type serverContextKeyType struct{}
@@ -277,6 +298,12 @@ func (u *WebTransportHandler) upgradeWebTransport(w http.ResponseWriter, r *http
 // dispatches it to the configured handler. If the upgrade fails, it falls back
 // to FallbackHandler or returns a 400 response.
 func (u *WebTransportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if u.Handler == nil {
+		// No MOQ handler configured; do not upgrade a session we cannot serve.
+		u.fallback(w, r)
+		return
+	}
+
 	conn, err := u.upgradeWebTransport(w, r)
 	if err != nil {
 		u.fallback(w, r)

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,6 +36,120 @@ func TestServer_Init(t *testing.T) {
 	assert.NotNil(t, s.listeners)
 	assert.NotNil(t, s.connManager)
 	assert.NotNil(t, s.WebTransportServer)
+}
+
+// TestServer_defaultWebTransportHandler_WiresServerFields guards against the
+// regression where Server.init() passed a nil HTTP handler to
+// NewWebTransportServer, causing every WebTransport request to 404. The default
+// handler must now carry the Server's Handler so upgraded sessions dispatch.
+func TestServer_defaultWebTransportHandler_WiresServerFields(t *testing.T) {
+	h := HandleFunc(func(*Session) {})
+	cfg := &Config{}
+	mux := NewTrackMux(0)
+
+	s := &Server{Config: cfg, TrackMux: mux, Handler: h}
+	got := s.defaultWebTransportHandler()
+
+	wth, ok := got.(*WebTransportHandler)
+	require.True(t, ok, "default handler must be a *WebTransportHandler")
+	assert.NotNil(t, wth.Handler, "Handler must be wired (was nil -> 404 before the fix)")
+	_, isHandleFunc := wth.Handler.(HandleFunc)
+	assert.True(t, isHandleFunc, "Handler must be the Server's HandleFunc")
+	assert.Equal(t, cfg, wth.Config)
+	assert.Equal(t, mux, wth.TrackMux)
+}
+
+// TestWebTransportHandler_ServeHTTP_NilHandlerFallsBack ensures a
+// WebTransportHandler with no configured Handler does not panic (the previous
+// path called u.Handler.ServeMOQ unconditionally) and instead falls back.
+func TestWebTransportHandler_ServeHTTP_NilHandlerFallsBack(t *testing.T) {
+	u := &WebTransportHandler{} // Handler and FallbackHandler are both nil
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodConnect, "/broadcast", nil)
+
+	require.NotPanics(t, func() {
+		u.ServeHTTP(rr, req)
+	})
+
+	// With no Handler and no FallbackHandler, the fallback returns 400.
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+// TestServer_WebTransportDial_UpgradesSession is an end-to-end regression
+// test. Before the fix, Server.init() wired a nil HTTP handler, so a
+// WebTransport dial to the server 404'd (see BenchmarkStreamIo_RealQUIC's
+// b.Skipf and BenchmarkBroadcastServer_HighLoad reporting 0 frames/op).
+// After the fix, the default WebTransportHandler upgrades the request and
+// dispatches the upgraded session to the Server's Handler.
+func TestServer_WebTransportDial_UpgradesSession(t *testing.T) {
+	// Grab a free UDP port for the QUIC listener.
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := pc.LocalAddr().String()
+	_ = pc.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var handlerCalled atomic.Bool
+	server := &Server{
+		Addr: addr,
+		TLSConfig: &tls.Config{
+			NextProtos:         []string{NextProtoH3, NextProtoMOQ},
+			Certificates:       []tls.Certificate{generateTestCert(t)},
+			InsecureSkipVerify: true,
+		},
+		Handler: HandleFunc(func(sess *Session) {
+			handlerCalled.Store(true)
+			<-sess.Context().Done()
+		}),
+	}
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, ErrServerClosed) {
+			t.Logf("server ListenAndServe: %v", err)
+		}
+	}()
+	// Close the server with a bounded wait. Server.Close() blocks on
+	// <-connManager.Done(), and a peer connection closed immediately before
+	// Close is not always removed from the connManager in time, so an
+	// unbounded Close would hang the test. That drain race is tracked
+	// separately; here we just keep the test from hanging.
+	defer func() {
+		done := make(chan struct{})
+		go func() { _ = server.Close(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Log("server.Close() did not complete in 3s (connManager drain race; see #181)")
+		}
+	}()
+
+	client := &Dialer{
+		TLSConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+
+	// Retry the dial until the QUIC listener is ready (it binds asynchronously
+	// in the ListenAndServe goroutine) or the window expires. A fixed sleep
+	// here would race with listener startup under CI load.
+	var sess *Session
+	require.Eventually(t, func() bool {
+		s, err := client.Dial(ctx, "https://"+addr+"/moqt", nil)
+		if err != nil {
+			return false
+		}
+		sess = s
+		return true
+	}, 5*time.Second, 50*time.Millisecond, "dial should upgrade to a MOQ session once the listener is ready")
+	defer func() {
+		if sess != nil {
+			sess.CloseWithError(NoError, "test done")
+		}
+	}()
+
+	require.Eventually(t, handlerCalled.Load, time.Second, 10*time.Millisecond,
+		"server Handler must be invoked for the upgraded session")
 }
 
 func TestServer_connContext_AppliesCustomAndInjectsServer(t *testing.T) {
