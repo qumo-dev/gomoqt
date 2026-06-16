@@ -408,6 +408,64 @@ func TestServer_Close_ClosesListenersAndWTServer(t *testing.T) {
 	assert.True(t, closed)
 }
 
+// TestServer_Close_ReturnsWithActiveSession is a regression test for #181:
+// Server.Close() previously hung on <-connManager.Done() because the
+// "terminate sessions" loop had an empty goroutine body (active connections
+// were never closed) and peer-/force-closed sessions were never removed from
+// the manager. With the fix, Close() closes active connections (so their
+// sessions unblock and clean up) and returns promptly.
+func TestServer_Close_ReturnsWithActiveSession(t *testing.T) {
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := pc.LocalAddr().String()
+	_ = pc.Close()
+
+	server := &Server{
+		Addr: addr,
+		TLSConfig: &tls.Config{
+			NextProtos:         []string{NextProtoH3, NextProtoMOQ},
+			Certificates:       []tls.Certificate{generateTestCert(t)},
+			InsecureSkipVerify: true,
+		},
+		Handler: HandleFunc(func(sess *Session) { <-sess.Context().Done() }),
+	}
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, ErrServerClosed) {
+			t.Logf("server: %v", err)
+		}
+	}()
+
+	// Dial and keep the client session open so the server has an ACTIVE session.
+	client := &Dialer{TLSConfig: &tls.Config{InsecureSkipVerify: true}}
+	var active *Session
+	require.Eventually(t, func() bool {
+		s, derr := client.Dial(context.Background(), "https://"+addr+"/moqt", nil)
+		if derr != nil {
+			return false
+		}
+		active = s
+		return true
+	}, 5*time.Second, 50*time.Millisecond, "listener should accept a dial")
+	defer func() {
+		if active != nil {
+			_ = active.CloseWithError(NoError, "test done")
+		}
+	}()
+
+	// Server.Close() must return promptly even with the active session.
+	done := make(chan struct{})
+	go func() {
+		_ = server.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Server.Close() hung with an active connection (regression #181)")
+	}
+}
+
 func TestServer_Shutdown_NoSessions(t *testing.T) {
 	s := &Server{}
 	s.init()

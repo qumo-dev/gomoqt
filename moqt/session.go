@@ -187,6 +187,16 @@ func (s *Session) CloseWithError(code SessionErrorCode, msg string) error {
 	}
 	s.isTerminating.Store(true)
 
+	// Always remove the conn from the manager exactly once, even if the
+	// underlying conn.CloseWithError fails (e.g. the peer already closed it).
+	// Without this, a peer-closed session leaks in the connManager and
+	// Server.Close()/Shutdown() hang on <-connManager.Done().
+	if s.connManager != nil {
+		connManager := s.connManager
+		s.connManager = nil
+		defer connManager.removeConn(s.conn)
+	}
+
 	err := s.conn.CloseWithError(transport.ConnErrorCode(code), msg)
 	if err != nil {
 		if appErr, ok := errors.AsType[*transport.ApplicationError](err); ok {
@@ -203,13 +213,6 @@ func (s *Session) CloseWithError(code SessionErrorCode, msg string) error {
 
 	close(s.probeResponseCh)
 	close(s.probeTargetsCh)
-
-	if s.connManager != nil {
-		connManager := s.connManager
-		s.connManager = nil
-
-		connManager.removeConn(s.conn)
-	}
 
 	return nil
 }
