@@ -73,8 +73,14 @@ type Server struct {
 	// If nil, the server should use a global default mux or initialize a new one.
 	TrackMux *TrackMux
 
-	// Handler serves accepted native QUIC sessions (i.e. connections negotiated with NextProtoMOQ).
-	// If nil, native QUIC connections are not handled.
+	// Handler serves accepted sessions for both native QUIC (NextProtoMOQ) and
+	// the default WebTransport path. If nil, sessions are not handled (native
+	// QUIC connections are rejected; WebTransport requests fall back).
+	//
+	// The default WebTransport handler captures Handler when the Server is
+	// initialized (init runs once, on the first Serve* call), so Handler must
+	// be set before the server starts serving to take effect for WebTransport.
+	// The native-QUIC path reads Handler live at connection time.
 	Handler Handler
 
 	// FetchHandler serves incoming FETCH requests on native QUIC sessions.
@@ -122,6 +128,10 @@ func (s *Server) init() {
 // Logger. If Handler is nil, the returned handler falls back for every request
 // (no session is created), matching the native-QUIC "no handler configured"
 // behavior.
+//
+// The Server's fields are snapshotted here at init time (init runs once, on the
+// first Serve* call), unlike the native-QUIC path which reads Handler live.
+// Set Handler (and the other fields) before the server starts serving.
 func (s *Server) defaultWebTransportHandler() http.Handler {
 	return &WebTransportHandler{
 		Config:       s.Config,
