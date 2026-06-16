@@ -152,6 +152,106 @@ func TestServer_WebTransportDial_UpgradesSession(t *testing.T) {
 		"server Handler must be invoked for the upgraded session")
 }
 
+// TestBroadcastServer_PublishSubscribeRoundTrip validates the full broadcast
+// flow on the fixed WebTransport path: a Server publishes a track on DefaultMux
+// (sessions use DefaultMux when Server.TrackMux is nil), and a client dials,
+// accepts the announce, subscribes, and reads at least one frame. This is the
+// flow BenchmarkBroadcastServer_HighLoad / BenchmarkStreamIo_RealQUIC exercise.
+func TestBroadcastServer_PublishSubscribeRoundTrip(t *testing.T) {
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := pc.LocalAddr().String()
+	_ = pc.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	// Use a private TrackMux (not the package-level DefaultMux) so this test
+	// does not read or write global state shared across the suite.
+	mux := NewTrackMux(0)
+	server := &Server{
+		Addr: addr,
+		TLSConfig: &tls.Config{
+			NextProtos:         []string{NextProtoH3, NextProtoMOQ},
+			Certificates:       []tls.Certificate{generateTestCert(t)},
+			InsecureSkipVerify: true,
+		},
+		QUICConfig: &quic.Config{Allow0RTT: true, EnableDatagrams: true},
+		TrackMux:   mux,
+		// Keep each session alive; the mux routes incoming subscribes to the
+		// published track automatically.
+		Handler: HandleFunc(func(sess *Session) { <-sess.Context().Done() }),
+	}
+
+	mux.PublishFunc(ctx, "/server.broadcast", func(tw *TrackWriter) {
+		frame := NewFrame(1024)
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				gw, err := tw.OpenGroup()
+				if err != nil {
+					return
+				}
+				frame.Reset()
+				frame.Write([]byte("frame"))
+				if err := gw.WriteFrame(frame); err != nil {
+					gw.CancelWrite(InternalGroupErrorCode)
+					return
+				}
+				gw.Close()
+			}
+		}
+	})
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, ErrServerClosed) {
+			t.Logf("server: %v", err)
+		}
+	}()
+	defer func() {
+		done := make(chan struct{})
+		go func() { _ = server.Close(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Log("server.Close timed out (#181)")
+		}
+	}()
+
+	// Wait for the listener before launching the client (which dials once).
+	probe := &Dialer{TLSConfig: &tls.Config{InsecureSkipVerify: true}}
+	require.Eventually(t, func() bool {
+		s, err := probe.Dial(ctx, "https://"+addr+"/broadcast", nil)
+		if err != nil {
+			return false
+		}
+		_ = s.CloseWithError(NoError, "probe")
+		return true
+	}, 15*time.Second, 50*time.Millisecond, "listener should accept a dial")
+
+	var frames, bytes atomic.Int64
+	var clientErr atomic.Value
+	go func() {
+		if err := runBroadcastClient(ctx, "https://"+addr+"/broadcast", &frames, &bytes); err != nil {
+			clientErr.Store(err)
+		}
+	}()
+	defer func() {
+		if e, ok := clientErr.Load().(error); ok && e != nil {
+			t.Logf("broadcast client returned error: %v", e)
+		}
+	}()
+
+	// Real-network publish -> accept-announce -> subscribe -> frame flow is
+	// slow under -race; give it a generous window.
+	require.Eventually(t, func() bool { return frames.Load() > 0 }, 30*time.Second, 20*time.Millisecond,
+		"client should receive at least one broadcast frame")
+}
+
 func TestServer_connContext_AppliesCustomAndInjectsServer(t *testing.T) {
 	type customKey struct{}
 
