@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **moqt/internal/message:** `ReadBytes` and `ReadStringArray` now return errors instead of panicking on massive length inputs, and properly validate the available buffer length before allocating slices, preventing Out-Of-Memory (OOM) / Denial of Service (DoS) conditions.
+
 ### Changed
 
 - **moqt/internal/message:** `ReadMessageLength` now fast-paths `io.ByteReader` (bytes.Reader, bufio.Reader, QUIC streams), eliminating a per-call heap allocation (1 → 0) and ~65% faster varint-length decoding. Behavior is unchanged; non-ByteReader callers use the previous allocating path.
