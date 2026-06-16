@@ -199,21 +199,33 @@ func (t Test) Coverage() error {
 
 type Bench mg.Namespace
 
-// Short runs the moqt benchmarks once with allocations reporting. Use this for
-// a quick local sanity check while iterating.
+// Short runs the moqt microbenchmarks once with allocations reporting. Use this
+// for a quick local sanity check while iterating. Skips the slow broadcast/QUIC
+// integration benchmarks (see Bench.Integration) so it actually finishes fast.
 func (Bench) Short() error {
-	fmt.Println("Running benchmarks (short: -count=1 -benchtime=1x -benchmem)...")
-	return sh.RunV("go", "test", "-run=^$", "-bench=.", "-benchmem",
+	fmt.Println("Running benchmarks (short: micro only, -count=1 -benchtime=1x -benchmem)...")
+	return sh.RunV("go", "test", "-run=^$", "-bench=.", "-skip=BroadcastServer|StreamIo_RealQUIC", "-benchmem",
 		"-benchtime=1x", "-count=1", "-timeout=10m", "./moqt/...")
 }
 
-// Full runs the moqt benchmarks with enough samples for benchstat. Mirrors what
-// CI captures: -count=10 -benchmem, bounded -benchtime. Output is written to
-// bench-new.txt so it can be compared with Bench.Compare.
+// Full runs the moqt microbenchmarks with enough samples for benchstat. Mirrors
+// CI's benchmark (micro) job: -count=10 -benchmem -benchtime=1s, with the slow
+// broadcast/QUIC integration benchmarks skipped (see Bench.Integration). Prints
+// to stdout; capture it for a baseline, e.g. `mage bench:full > bench-baseline.txt`.
 func (Bench) Full() error {
-	fmt.Println("Running benchmarks (full: -count=10 -benchtime=1x -benchmem)...")
-	return sh.RunV("go", "test", "-run=^$", "-bench=.",
-		"-benchmem", "-benchtime=1x", "-count=10", "-timeout=20m", "./moqt/...")
+	fmt.Println("Running benchmarks (full: micro only, -count=10 -benchtime=1s -benchmem)...")
+	return sh.RunV("go", "test", "-run=^$", "-bench=.", "-skip=BroadcastServer|StreamIo_RealQUIC",
+		"-benchmem", "-benchtime=1s", "-count=10", "-timeout=15m", "./moqt/...")
+}
+
+// Integration runs the slow broadcast/QUIC integration benchmarks. Each op is a
+// multi-second aggregate (frames/sec, MB/s), so -benchtime=1x is appropriate
+// here (unlike the microbenchmarks). Mirrors CI's benchmark-integration job.
+// Expect roughly 10-19 minutes.
+func (Bench) Integration() error {
+	fmt.Println("Running benchmarks (integration: broadcast/QUIC, -count=5 -benchtime=1x -benchmem)...")
+	return sh.RunV("go", "test", "-run=^$", "-bench=BroadcastServer|StreamIo_RealQUIC",
+		"-benchmem", "-benchtime=1x", "-count=5", "-timeout=25m", "./moqt/...")
 }
 
 // Compare runs the benchmarks, writes the result to bench-new.txt, and compares
@@ -250,8 +262,8 @@ func (Bench) Compare(baselinePath string) error {
 		return fmt.Errorf("create %s: %w", newPath, err)
 	}
 	defer out.Close()
-	cmd := exec.Command("go", "test", "-run=^$", "-bench=.",
-		"-benchmem", "-benchtime=1x", "-count=10", "-timeout=20m", "./moqt/...")
+	cmd := exec.Command("go", "test", "-run=^$", "-bench=.", "-skip=BroadcastServer|StreamIo_RealQUIC",
+		"-benchmem", "-benchtime=1s", "-count=10", "-timeout=15m", "./moqt/...")
 	cmd.Stdout = out
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -387,9 +399,10 @@ func Help() {
 	fmt.Println("  mage test:coverage - Run tests with coverage")
 	fmt.Println("")
 	fmt.Println("Benchmarks:")
-	fmt.Println("  mage bench:short                       - Quick benchmark sanity check (-count=1)")
-	fmt.Println("  mage bench:full                        - Full benchmark run for baselines (-count=10)")
-	fmt.Println("  mage bench:compare [baseline.txt]      - Run benchmarks and compare vs a baseline with benchstat")
+	fmt.Println("  mage bench:short                       - Quick microbenchmark sanity check (-count=1)")
+	fmt.Println("  mage bench:full                        - Full microbenchmark run for baselines (-count=10); mirrors CI's micro job")
+	fmt.Println("  mage bench:integration                 - Slow broadcast/QUIC integration benchmarks; mirrors CI's integration job")
+	fmt.Println("  mage bench:compare [baseline.txt]      - Run microbenchmarks and compare vs a baseline with benchstat")
 	fmt.Println("")
 	fmt.Println("Interop:")
 	fmt.Println("  mage interop:ts                       - Dockerized interop using TypeScript client (preferred)")
