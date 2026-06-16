@@ -1,0 +1,4 @@
+## 2025-02-24 - [Denial of Service via Panic and OOM in Message Reader]
+**Vulnerability:** The message reader used `panic()` when parsing abnormally large length headers from untrusted input (varints > math.MaxInt) and risked Out-Of-Memory (OOM) by allocating slices purely based on the parsed length before validating against the actual buffer size in `ReadStringArray`. This allows an attacker to easily crash the application by sending malformed or excessively large length prefixes.
+**Learning:** Returning `panic()` for bad input and trusting size hints before allocation are anti-patterns in network protocol parsers.
+**Prevention:** Always return proper error values (e.g. `errors.New`, `io.EOF`) instead of panicking on invalid length inputs. Always validate the requested allocation size against the available buffer remaining (`count > uint64(len(b)-total)`) before making the slice.
