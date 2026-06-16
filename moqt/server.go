@@ -318,6 +318,10 @@ func (u *WebTransportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 
 	sess := newSession(conn, u.TrackMux, manager, u.Config, u.FetchHandler, nil, u.Logger)
+	// Ensure the session is cleaned up (conn removed from the manager) when
+	// the Handler returns, even if it did not call CloseWithError itself (e.g.
+	// the peer closed the connection). Idempotent.
+	defer sess.CloseWithError(NoError, "session ended")
 
 	u.Handler.ServeMOQ(sess)
 }
@@ -343,6 +347,9 @@ func (f HandleFunc) ServeMOQ(sess *Session) {
 func (s *Server) handleNativeQUIC(conn StreamConn) error {
 	if s.Handler != nil {
 		sess := newSession(conn, s.TrackMux, s.connManager, s.Config, s.FetchHandler, nil, s.Logger)
+		// Clean up the session when the Handler returns (idempotent if the
+		// Handler already closed it), so the conn is removed from the manager.
+		defer sess.CloseWithError(NoError, "session ended")
 		s.Handler.ServeMOQ(sess)
 	}
 	return fmt.Errorf("no native QUIC handler configured")
@@ -457,11 +464,13 @@ func (s *Server) Close() error {
 	connectionManager := s.connManager
 	s.connManager = nil
 
-	// Terminate all active sessions
-	for conn := range connectionManager.connections {
-		// Close sessions concurrently; log potential errors.
+	// Terminate all active connections so their sessions unblock and run their
+	// cleanup (ServeHTTP/handleNativeQUIC defer CloseWithError -> removeConn),
+	// draining the connManager. Previously this goroutine body was empty, so
+	// active connections were never closed and <-Done() hung forever (#181).
+	for _, conn := range connectionManager.conns() {
 		go func(conn StreamConn) {
-
+			_ = conn.CloseWithError(transport.ConnErrorCode(NoError), "server shutdown")
 		}(conn)
 	}
 
@@ -515,7 +524,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	connManager := s.connManager
 	s.connManager = nil
 
-	for conn := range connManager.connections {
+	for _, conn := range connManager.conns() {
 		// Send goaway to sessions concurrently; log potential errors.
 		go func(conn StreamConn) {
 			err := s.goAway(ctx, conn)
