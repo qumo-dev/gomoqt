@@ -28,19 +28,35 @@ func ReadVarint(b []byte) (uint64, int, error) {
 	return i, l, nil
 }
 
-// ReadVarintFromReader reads a QUIC varint from an io.Reader
+// ReadMessageLength reads a QUIC varint length prefix from r. On the
+// io.ByteReader fast path (bytes.Reader, bufio.Reader, QUIC streams, etc.) it
+// reads byte-by-byte and allocates nothing; other readers fall back to the
+// allocating ReadFull path. Behavior is unchanged for all callers.
 func ReadMessageLength(r io.Reader) (uint64, error) {
-	// Read first byte to determine length
+	if br, ok := r.(io.ByteReader); ok {
+		first, err := br.ReadByte()
+		if err != nil {
+			return 0, err
+		}
+		l := 1 << ((first & 0xc0) >> 6)
+		val := uint64(first & 0x3f)
+		for i := 1; i < l; i++ {
+			b, err := br.ReadByte()
+			if err != nil {
+				return 0, err
+			}
+			val = val<<8 | uint64(b)
+		}
+		return val, nil
+	}
+
+	// Fallback for readers that are not io.ByteReader.
 	firstByte := make([]byte, 1)
 	_, err := io.ReadFull(r, firstByte)
 	if err != nil {
 		return 0, err
 	}
-
-	// Determine the length from the first two bits
 	l := 1 << ((firstByte[0] & 0xc0) >> 6)
-
-	// Read remaining bytes if needed
 	buf := make([]byte, l)
 	buf[0] = firstByte[0]
 	if l > 1 {
@@ -49,8 +65,6 @@ func ReadMessageLength(r io.Reader) (uint64, error) {
 			return 0, err
 		}
 	}
-
-	// Parse the varint
 	val, _, err := ReadVarint(buf)
 	return val, err
 }

@@ -2,6 +2,7 @@ package message
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -147,6 +148,37 @@ func TestReadMessageLength(t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expected, result)
 			}
+		})
+	}
+}
+
+// nonByteReader wraps an io.Reader so it does NOT implement io.ByteReader,
+// exercising ReadMessageLength's fallback path.
+type nonByteReader struct{ r io.Reader }
+
+func (nr *nonByteReader) Read(p []byte) (int, error) { return nr.r.Read(p) }
+
+func TestReadMessageLength_NonByteReader(t *testing.T) {
+	// Same magnitudes as TestReadMessageLength, but through a reader that is NOT
+	// an io.ByteReader, so the allocating fallback path is exercised. Both paths
+	// must decode identically.
+	cases := []struct {
+		name     string
+		input    []byte
+		expected uint64
+	}{
+		{"zero", []byte{0x00}, 0},
+		{"1-byte max", []byte{0x3f}, 63},
+		{"2-byte", []byte{0x40, 0x80}, 128},
+		{"4-byte", []byte{0x80, 0x01, 0x00, 0x00}, 65536},
+		{"8-byte", []byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00}, 65536},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &nonByteReader{r: bytes.NewReader(tc.input)}
+			got, err := ReadMessageLength(r)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.expected, got)
 		})
 	}
 }
