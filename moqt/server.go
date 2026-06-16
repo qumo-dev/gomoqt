@@ -468,7 +468,7 @@ func (s *Server) Close() error {
 	// cleanup (ServeHTTP/handleNativeQUIC defer CloseWithError -> removeConn),
 	// draining the connManager. Previously this goroutine body was empty, so
 	// active connections were never closed and <-Done() hung forever (#181).
-	for conn := range connectionManager.connections {
+	for _, conn := range connectionManager.conns() {
 		go func(conn StreamConn) {
 			_ = conn.CloseWithError(transport.ConnErrorCode(NoError), "server shutdown")
 		}(conn)
@@ -524,7 +524,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	connManager := s.connManager
 	s.connManager = nil
 
-	for conn := range connManager.connections {
+	for _, conn := range connManager.conns() {
 		// Send goaway to sessions concurrently; log potential errors.
 		go func(conn StreamConn) {
 			err := s.goAway(ctx, conn)
