@@ -2,7 +2,6 @@ package moqt
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/qumo-dev/gomoqt/transport"
 )
@@ -265,7 +264,7 @@ func (err SessionError) Error() string {
 	}
 	text := err.SessionErrorCode().String()
 	if text != "" {
-		return fmt.Sprintf("%s (%s)", text, role)
+		return text + " (" + role + ")"
 	}
 	return err.ApplicationError.Error()
 }
