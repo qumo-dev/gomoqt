@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **moqt/internal/message:** `ReadBytes` and `ReadStringArray` now return errors instead of panicking on massive length inputs, and properly validate the available buffer length before allocating slices, preventing Out-Of-Memory (OOM) / Denial of Service (DoS) conditions.
+- **moqt/internal/message:** `ReadBytes` and `ReadStringArray` properly validate the available buffer length before allocating slices, preventing Out-Of-Memory (OOM) / Denial of Service (DoS) conditions.
 
 ### Changed
 
