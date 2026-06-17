@@ -68,11 +68,15 @@ jobs:
           # and the trackReaders map at session.go ~732).
           go test -race -count=1 -timeout=10m ./moqt/...
 
-  # Microbenchmark baseline + regression comparison. Captures a baseline on
-  # main / tags / manual dispatch and compares PRs against it with benchstat.
+  # Microbenchmark baseline capture. Runs ONLY on push (main/tags) and manual
+  # dispatch to produce the bench-baseline artifact that the performance-check
+  # label workflow (.github/workflows/benchmark-label.yml) compares PRs against.
+  # Benchmarking a PR is NOT done here -- add the `performance-check` label to a
+  # PR and benchmark-label.yml runs the comparison and posts it as a comment.
   # Microbenchmarks only (fast, stable signal); the slow broadcast/QUIC
   # integration suite runs in the benchmark-integration job below.
   benchmark:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -82,95 +86,21 @@ jobs:
         with:
           go-version: "1.26.0"
 
-      - name: Install benchstat
-        run: go install golang.org/x/perf/cmd/benchstat@latest
-
-      - name: Download latest baseline artifact (PRs only)
-        id: baseline
-        # On push-to-main / tags / dispatch there is no PR baseline to compare
-        # against — we only capture. On PRs we pull the most recent baseline
-        # produced by a main run of this same workflow.
-        if: github.event_name == 'pull_request'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          mkdir -p baseline
-          # Find the most recent successful run of this workflow on main that
-          # produced a bench-baseline artifact. download-artifact@v4 cannot
-          # reach across runs by default, so we resolve the run + download
-          # the artifact explicitly via gh.
-          RUN_ID=$(gh run list \
-            --workflow=go.yml \
-            --branch=main \
-            --status=success \
-            --event=push \
-            --limit=20 \
-            --json databaseId,conclusion \
-            --jq '[.[] | select(.conclusion=="success")] | .[0].databaseId') || true
-          if [ -z "${RUN_ID}" ] || [ "${RUN_ID}" = "null" ]; then
-            echo "No baseline run found; skipping comparison."
-            exit 0
-          fi
-          echo "Using baseline from run ${RUN_ID}"
-          gh run download "${RUN_ID}" \
-            --name bench-baseline \
-            --dir baseline || true
-          if [ -f baseline/bench-new.txt ]; then
-            # Upload step wrote bench-new.txt; normalize the name for comparison.
-            mv baseline/bench-new.txt baseline/bench-baseline.txt
-          fi
-          test -f baseline/bench-baseline.txt && echo "have_baseline=true" >> "$GITHUB_OUTPUT" || true
-
       - name: Run benchmarks (micro)
         # Microbenchmarks only: -skip excludes the slow broadcast/QUIC
         # integration benchmarks (BenchmarkBroadcastServer_* and
-        # BenchmarkStreamIo_RealQUIC, run separately in benchmark-integration)
-        # so this job stays fast and relevant for wire-layer / encode-decode PRs.
-        # -run=^$ skips all tests so only benchmarks execute.
-        # -benchmem reports allocs/op and B/op.
-        # -benchtime=1s lets Go pick a high iteration count per sample, so ns/op
-        #   has a stable mean. (At -benchtime=1x a single-iteration sample had
-        #   ~150% CV on microbenchmarks — unusable for benchstat. 1s vs 1x is
-        #   identical for the excluded 10s/op integration benchmarks, so raising
-        #   it costs nothing there.)
+        # BenchmarkStreamIo_RealQUIC, run separately in benchmark-integration).
+        # -benchtime=1s gives a stable mean (1x had ~150% CV on micros);
         # -count=10 gives benchstat enough samples to estimate variance.
-        # -timeout guards against a runaway benchmark.
         run: |
           go test -run='^$' -bench=. -skip='BroadcastServer|StreamIo_RealQUIC' -benchmem -benchtime=1s -count=10 -timeout=15m ./moqt/... | tee bench-new.txt
 
-      - name: Compare against baseline (PRs only)
-        if: github.event_name == 'pull_request' && steps.baseline.outputs.have_baseline == 'true'
-        run: |
-          echo "::group::benchstat comparison"
-          # benchstat compares old (baseline) vs new. With multiple files it
-          # reports per-benchmark delta on mean (ns/op, B/op, allocs/op) and
-          # surfaces variance inflation via the variance columns. A `~` means
-          # no significant change; a `+x%`/`-x%` is a real drift.
-          benchstat baseline/bench-baseline.txt bench-new.txt
-          echo "::endgroup::"
-        # benchstat exits non-zero when a benchmark changes beyond noise
-        # (p < 0.05). Improvements also exit non-zero, so this step is
-        # informational on PRs — do not let it fail the job. The uploaded
-        # artifact is what reviewers use to evaluate bot PRs.
-        continue-on-error: true
-
-      - name: Upload baseline (main / tags / dispatch)
-        if: github.event_name != 'pull_request'
+      - name: Upload baseline
         uses: actions/upload-artifact@v4
         with:
           name: bench-baseline
           path: bench-new.txt
           retention-days: 90
-
-      - name: Upload PR bench output
-        if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: bench-pr-${{ github.event.pull_request.number }}
-          path: bench-new.txt
-          retention-days: 14
 
   # Slow broadcast/QUIC integration benchmarks. Each op is a multi-second
   # aggregate (frames/sec, MB/s) that is stable across samples, so -benchtime=1x
