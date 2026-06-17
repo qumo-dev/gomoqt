@@ -20,6 +20,13 @@ func encodeMessage(m interface{ Encode(io.Writer) error }) []byte {
 	return buf.Bytes()
 }
 
+// The *_Encode benchmarks below write to io.Discard rather than a *bytes.Buffer.
+// A bytes.Buffer grows its internal slice on Write, and that growth is counted by
+// -benchmem — previously inflating the reported Encode cost to ~3 allocs/op when
+// Encode's own allocation is only 1 scratch buffer. io.Discard isolates Encode's
+// true allocation. (The encodeMessage helper above still uses bytes.Buffer because
+// it needs the encoded bytes back for the *_Decode benchmarks.)
+
 // --- GroupMessage ---
 
 func BenchmarkGroupMessage_Encode(b *testing.B) {
@@ -32,8 +39,7 @@ func BenchmarkGroupMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -84,8 +90,7 @@ func BenchmarkSubscribeMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -142,8 +147,7 @@ func BenchmarkAnnounceMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -194,8 +198,7 @@ func BenchmarkAnnounceInterestMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -242,8 +245,7 @@ func BenchmarkFetchMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -293,8 +295,7 @@ func BenchmarkSubscribeOkMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -345,8 +346,7 @@ func BenchmarkSubscribeUpdateMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -395,8 +395,7 @@ func BenchmarkSubscribeDropMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -441,8 +440,7 @@ func BenchmarkGoawayMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -486,8 +484,7 @@ func BenchmarkProbeMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -531,10 +528,10 @@ var varintMagnitudes = []struct {
 	val  uint64
 }{
 	{"0", 0},
-	{"127", 127},        // maxVarInt1 (1-byte)
-	{"16383", 16383},    // maxVarInt2 (2-byte)
-	{"1<<21", 1 << 21},  // inside 4-byte bucket
-	{"1<<28", 1 << 28},  // inside 4-byte bucket
+	{"127", 127},             // maxVarInt1 (1-byte)
+	{"16383", 16383},         // maxVarInt2 (2-byte)
+	{"1<<21", 1 << 21},       // inside 4-byte bucket
+	{"1<<28", 1 << 28},       // inside 4-byte bucket
 	{"maxUint62", maxUint62}, // maxVarInt8 (8-byte, max valid)
 }
 

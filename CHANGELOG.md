@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **moqt/internal/message:** The `*_Encode` benchmarks now write to `io.Discard` instead of a `bytes.Buffer`. The Buffer's internal growth on `Write` was counted by `-benchmem`, inflating the reported Encode cost to ~3 allocs/op when Encode's own allocation is only 1 scratch buffer (~8–96 B by message size). No production behavior change; this corrects the measurement. (A production memprofile of the broadcast path confirms `message.Encode` is not an allocation hot spot — `(*Frame).decode`, QUIC stream setup, and `slog` dominate.)
 - **moqt/internal/message:** `ReadMessageLength` now fast-paths `io.ByteReader` (bytes.Reader, bufio.Reader, QUIC streams), eliminating a per-call heap allocation (1 → 0) and ~65% faster varint-length decoding. Behavior is unchanged; non-ByteReader callers use the previous allocating path.
 - **Dependencies:** Updated `quic-go` to v0.60.0.
 ### Removed
