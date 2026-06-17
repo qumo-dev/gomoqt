@@ -13,6 +13,7 @@ import (
 
 	"github.com/quic-go/quic-go"
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
+	"github.com/qumo-dev/gomoqt/moqttrace"
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
@@ -61,6 +62,8 @@ type Session struct {
 	probeTargetsCh      chan ProbeResult
 
 	bitrateTracker bitrateTracker
+
+	trace *moqttrace.SessionTrace
 }
 
 func newSession(
@@ -94,6 +97,7 @@ func newSession(
 			maxAge:   config.probeMaxAge(),
 			maxDelta: config.probeMaxDelta(),
 		},
+		trace: moqttrace.SessionTraceFromContext(connCtx),
 	}
 
 	if manager != nil {
@@ -284,7 +288,7 @@ func (s *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackN
 		return nil, fmt.Errorf("failed to encode SUBSCRIBE message: %w", err)
 	}
 
-	substr := newSendSubscribeStream(id, stream, config)
+	substr := newSendSubscribeStream(id, stream, config, s.trace)
 
 	track := newTrackReader(path, name, substr, func() { s.removeTrackReader(id) })
 	s.addTrackReader(id, track)
@@ -311,6 +315,11 @@ func (s *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackN
 	if dropMsg != nil {
 		cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeInternal))
 		return nil, fmt.Errorf("moqt: unexpected SUBSCRIBE_DROP message received")
+	}
+
+	if okMsg == nil {
+		cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeInternal))
+		return nil, fmt.Errorf("moqt: expected SUBSCRIBE_OK message but got none")
 	}
 
 	substr.updateInfo(PublishInfo{
@@ -601,6 +610,10 @@ func (sess *Session) processBiStream(stream transport.Stream) {
 		return
 	}
 
+	if t := sess.trace; t != nil && t.IncomingBiStreamStart != nil {
+		t.IncomingBiStreamStart(uint8(streamType))
+	}
+
 	switch streamType {
 	case message.StreamTypeAnnounce:
 		var aim message.AnnounceInterestMessage
@@ -726,6 +739,10 @@ func (sess *Session) processUniStream(stream transport.ReceiveStream) {
 	if err != nil {
 		sess.logError("failed to decode uni stream type", err)
 		return
+	}
+
+	if t := sess.trace; t != nil && t.IncomingUniStreamStart != nil {
+		t.IncomingUniStreamStart(uint8(streamType))
 	}
 
 	switch streamType {

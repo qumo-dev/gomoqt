@@ -14,6 +14,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func newTestReceiveSubscribeStream(tb testing.TB) (*receiveSubscribeStream, *FakeQUICStream) {
+	tb.Helper()
+	stream := &FakeQUICStream{}
+	substr := newReceiveSubscribeStream(SubscribeID(1), stream, &SubscribeConfig{})
+	return substr, stream
+}
+
 func TestNewReceiveSubscribeStream(t *testing.T) {
 	tests := map[string]struct {
 		subscribeID SubscribeID

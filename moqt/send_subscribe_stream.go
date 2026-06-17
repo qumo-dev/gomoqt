@@ -6,15 +6,17 @@ import (
 	"sync"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
+	"github.com/qumo-dev/gomoqt/moqttrace"
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
-func newSendSubscribeStream(id SubscribeID, stream transport.Stream, initConfig *SubscribeConfig) *sendSubscribeStream {
+func newSendSubscribeStream(id SubscribeID, stream transport.Stream, config *SubscribeConfig, trace *moqttrace.SessionTrace) *sendSubscribeStream {
 	substr := &sendSubscribeStream{
 		id:        id,
-		config:    initConfig,
+		config:    config,
 		stream:    stream,
 		droppedCh: make(chan struct{}, 1),
+		trace:     trace,
 	}
 
 	return substr
@@ -33,6 +35,8 @@ type sendSubscribeStream struct {
 	drops     []SubscribeDrop
 
 	id SubscribeID
+
+	trace *moqttrace.SessionTrace
 }
 
 func (substr *sendSubscribeStream) readSubscribeResponses() {
