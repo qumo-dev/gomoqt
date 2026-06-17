@@ -216,6 +216,11 @@ func TestReadBytes(t *testing.T) {
 			input:   []byte{},
 			wantErr: true,
 		},
+		"too large byte slice": {
+			// 0xc0 0x00 0x00 0x00 0x04 0x00 0x00 0x00 is 67108864 (> 50MB)
+			input:   []byte{0xc0, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00},
+			wantErr: true,
+		},
 	}
 
 	for name, tt := range tests {
@@ -253,6 +258,10 @@ func TestReadString(t *testing.T) {
 		},
 		"incomplete string": {
 			input:   []byte{0x05, 0x68, 0x65},
+			wantErr: true,
+		},
+		"too large string size": {
+			input:   []byte{0xc0, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00},
 			wantErr: true,
 		},
 	}
@@ -302,6 +311,14 @@ func TestReadStringArray(t *testing.T) {
 		},
 		"invalid count": {
 			input:   []byte{},
+			wantErr: true,
+		},
+		"too large array count": {
+			input:   []byte{0xc0, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00},
+			wantErr: true,
+		},
+		"count exceeds buffer length": {
+			input:   []byte{0x04, 0x05, 0x68, 0x65},
 			wantErr: true,
 		},
 	}
