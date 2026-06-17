@@ -68,9 +68,10 @@ jobs:
           # and the trackReaders map at session.go ~732).
           go test -race -count=1 -timeout=10m ./moqt/...
 
-  # Capture a benchmark baseline on main / tags / manual dispatch, and compare
-  # PRs against the latest baseline using benchstat. Bounded -benchtime keeps
-  # CI affordable while -count=10 gives benchstat enough samples for variance.
+  # Microbenchmark baseline + regression comparison. Captures a baseline on
+  # main / tags / manual dispatch and compares PRs against it with benchstat.
+  # Microbenchmarks only (fast, stable signal); the slow broadcast/QUIC
+  # integration suite runs in the benchmark-integration job below.
   benchmark:
     runs-on: ubuntu-latest
     steps:
@@ -122,14 +123,22 @@ jobs:
           fi
           test -f baseline/bench-baseline.txt && echo "have_baseline=true" >> "$GITHUB_OUTPUT" || true
 
-      - name: Run benchmarks
+      - name: Run benchmarks (micro)
+        # Microbenchmarks only: -skip excludes the slow broadcast/QUIC
+        # integration benchmarks (BenchmarkBroadcastServer_* and
+        # BenchmarkStreamIo_RealQUIC, run separately in benchmark-integration)
+        # so this job stays fast and relevant for wire-layer / encode-decode PRs.
         # -run=^$ skips all tests so only benchmarks execute.
         # -benchmem reports allocs/op and B/op.
+        # -benchtime=1s lets Go pick a high iteration count per sample, so ns/op
+        #   has a stable mean. (At -benchtime=1x a single-iteration sample had
+        #   ~150% CV on microbenchmarks — unusable for benchstat. 1s vs 1x is
+        #   identical for the excluded 10s/op integration benchmarks, so raising
+        #   it costs nothing there.)
         # -count=10 gives benchstat enough samples to estimate variance.
-        # -benchtime is bounded so the job stays affordable.
         # -timeout guards against a runaway benchmark.
         run: |
-          go test -run='^$' -bench=. -benchmem -benchtime=1x -count=10 -timeout=20m ./moqt/... | tee bench-new.txt
+          go test -run='^$' -bench=. -skip='BroadcastServer|StreamIo_RealQUIC' -benchmem -benchtime=1s -count=10 -timeout=15m ./moqt/... | tee bench-new.txt
 
       - name: Compare against baseline (PRs only)
         if: github.event_name == 'pull_request' && steps.baseline.outputs.have_baseline == 'true'
@@ -162,3 +171,31 @@ jobs:
           name: bench-pr-${{ github.event.pull_request.number }}
           path: bench-new.txt
           retention-days: 14
+
+  # Slow broadcast/QUIC integration benchmarks. Each op is a multi-second
+  # aggregate (frames/sec, MB/s) that is stable across samples, so -benchtime=1x
+  # is appropriate here (unlike the microbenchmarks above). Runs only on push
+  # (main/tags) and manual dispatch — NOT on PRs — because it costs ~10-19
+  # runner-minutes and is irrelevant to wire-layer micro-PRs. Uploaded for trend
+  # archival only; no benchstat gate.
+  benchmark-integration:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.26.0"
+
+      - name: Run integration benchmarks
+        run: |
+          go test -run='^$' -bench='BroadcastServer|StreamIo_RealQUIC' -benchmem -benchtime=1x -count=5 -timeout=25m ./moqt/... | tee bench-integration.txt
+
+      - name: Upload integration bench output
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-integration
+          path: bench-integration.txt
+          retention-days: 90
