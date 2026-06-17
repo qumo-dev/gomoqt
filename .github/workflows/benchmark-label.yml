@@ -1,0 +1,94 @@
+# On-demand micro-benchmark for performance-focused PRs.
+#
+# Triggered when the `performance-check` label is added to a pull request (or by
+# manual dispatch). Runs the moqt microbenchmarks with -benchtime=1s (stable
+# signal; -benchtime=1x gave ~150% CV on microbenchmarks — unusable for
+# benchstat) and compares against the latest baseline captured on main by
+# go.yml's `benchmark` job.
+#
+# The slow broadcast/QUIC integration benchmarks are excluded — each op there is
+# a multi-second aggregate where -benchtime=1x is appropriate, and they are
+# irrelevant to wire-layer micro-PRs. They run on main via go.yml's
+# `benchmark-integration` job.
+#
+# Allocation metrics (B/op, allocs/op) are deterministic regardless of
+# -benchtime, so the alloc columns are meaningful even before go.yml's baseline
+# is captured at -benchtime=1s. ns/op becomes trustworthy once main's baseline
+# is also -benchtime=1s.
+name: Benchmark (performance-check)
+
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  benchmark:
+    # Only run when the performance-check label is added (or on manual dispatch).
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'performance-check'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Check out the PR head so the benchmark measures the PR's code.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.26.0"
+
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+
+      - name: Download latest baseline artifact
+        id: baseline
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p baseline
+          RUN_ID=$(gh run list \
+            --workflow=go.yml \
+            --branch=main \
+            --status=success \
+            --event=push \
+            --limit=20 \
+            --json databaseId,conclusion \
+            --jq '[.[] | select(.conclusion=="success")] | .[0].databaseId') || true
+          if [ -z "${RUN_ID}" ] || [ "${RUN_ID}" = "null" ]; then
+            echo "No baseline run found; skipping comparison."
+            exit 0
+          fi
+          echo "Using baseline from run ${RUN_ID}"
+          gh run download "${RUN_ID}" --name bench-baseline --dir baseline || true
+          if [ -f baseline/bench-new.txt ]; then
+            mv baseline/bench-new.txt baseline/bench-baseline.txt
+          fi
+          test -f baseline/bench-baseline.txt && echo "have_baseline=true" >> "$GITHUB_OUTPUT" || true
+
+      - name: Run benchmarks (micro)
+        # -skip excludes the slow broadcast/QUIC integration benchmarks.
+        # -benchtime=1s lets Go pick a high iteration count for a stable mean.
+        run: |
+          go test -run='^$' -bench=. -skip='BroadcastServer|StreamIo_RealQUIC' -benchmem -benchtime=1s -count=10 -timeout=15m ./moqt/... | tee bench-new.txt
+
+      - name: Compare against baseline
+        if: steps.baseline.outputs.have_baseline == 'true'
+        run: |
+          echo "::group::benchstat comparison (baseline -> PR)"
+          benchstat baseline/bench-baseline.txt bench-new.txt
+          echo "::endgroup::"
+        continue-on-error: true
+
+      - name: Upload PR bench output
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-perfcheck-pr-${{ github.event.pull_request.number || 'manual' }}
+          path: bench-new.txt
+          retention-days: 30
