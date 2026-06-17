@@ -108,6 +108,15 @@ func TestFrame_Clone(t *testing.T) {
 	assert.NotSame(t, &frame.Body()[0], &clone.Body()[0])
 }
 
+func TestFrame_Decode_HugePayloadRejected(t *testing.T) {
+	frame := NewFrame(0)
+	// 51MB payload length header: 0xc0 0x00 0x00 0x00 0x03 0x0A 0x00 0x00 (51 * 1024 * 1024 = 53477376)
+	// Actually let's use 55MB: 0xc0 0x00 0x00 0x00 0x03 0x47 0x3a 0x00 -> wait let's just write something definitely > 50MB
+	hugeHeader, _ := message.WriteMessageLength(nil, 55*1024*1024)
+	err := frame.decode(bytes.NewReader(hugeHeader))
+	assert.ErrorIs(t, err, io.EOF)
+}
+
 func TestFrame_EncodeDecode_RoundTrip(t *testing.T) {
 	// Test encode/decode round trip with various payloads
 	tests := []struct {
