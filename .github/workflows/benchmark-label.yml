@@ -25,6 +25,7 @@ on:
 permissions:
   contents: read
   actions: read
+  pull-requests: write # post the benchstat comparison as a PR comment
 
 jobs:
   benchmark:
@@ -78,13 +79,36 @@ jobs:
         run: |
           go test -run='^$' -bench=. -skip='BroadcastServer|StreamIo_RealQUIC' -benchmem -benchtime=1s -count=10 -timeout=15m ./moqt/... | tee bench-new.txt
 
-      - name: Compare against baseline
+      - name: Compare against baseline and build comment
         if: steps.baseline.outputs.have_baseline == 'true'
-        run: |
-          echo "::group::benchstat comparison (baseline -> PR)"
-          benchstat baseline/bench-baseline.txt bench-new.txt
-          echo "::endgroup::"
         continue-on-error: true
+        run: |
+          {
+            echo '## 🏎️ Benchmark comparison (main → PR)'
+            echo ''
+            echo '<sub>Triggered by the `performance-check` label. Microbenchmarks only (`-benchtime=1s -count=10`); the slow broadcast/QUIC integration suite is excluded via `-skip`. `↓`/`↑` = significant decrease/increase; `~` = no significant change (p ≥ 0.05).</sub>'
+            echo ''
+            echo '```text'
+            benchstat baseline/bench-baseline.txt bench-new.txt
+            echo '```'
+            echo ''
+            echo '**How to read:** `allocs/op` and `B/op` are deterministic — any delta there is real. `sec/op` deltas flagged `↓`/`↑` are statistically significant (p < 0.05); the `±%` column is run-to-run variance, not the magnitude of the change. Full raw output is in the workflow log and the uploaded `bench-perfcheck-pr-*` artifact.'
+          } > benchstat-comment.md
+          echo '::group::benchstat comparison (main -> PR)'
+          cat benchstat-comment.md
+          echo '::endgroup::'
+
+      - name: Post comparison as PR comment
+        if: steps.baseline.outputs.have_baseline == 'true' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -s benchstat-comment.md ]; then
+            gh pr comment "$PR" --body-file benchstat-comment.md
+          else
+            echo "Empty comment body; skipping."
+          fi
 
       - name: Upload PR bench output
         uses: actions/upload-artifact@v4
