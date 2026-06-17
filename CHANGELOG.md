@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **moqt:** `Server` now wires a `WebTransportHandler` (built from the Server's `Handler` / `TrackMux` / `Config`) as the default WebTransport handler. Previously `Server.init()` passed a nil HTTP handler, so every WebTransport request fell through to `http.DefaultServeMux` (no MOQ route) and 404'd — the Server's default WebTransport path was non-functional, and `BenchmarkBroadcastServer_HighLoad` silently reported 0 frames/op.
 - **moqt:** `Server.Close()` no longer hangs when connections are active. Previously the "terminate sessions" loop had an empty body (active connections were never closed) and sessions were removed from the connection manager only on an explicit, successful `CloseWithError` — so peer-/force-closed sessions leaked and `Server.Close()`/`Shutdown()` blocked forever on `<-connManager.Done()`. `Server.Close()` now closes active connections, the serving paths (`WebTransportHandler.ServeHTTP`, `handleNativeQUIC`) clean up the session when the Handler returns, and `Session.CloseWithError` always removes the connection from the manager.
+- **moqt:** `ReceiveSubscribeStream` tests now wait on a `doneCh` signal instead of arbitrary `time.Sleep`, eliminating flakiness and speeding up the suite.
 
 ## [v0.15.0] - 2026-04-26
 
