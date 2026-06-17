@@ -92,6 +92,12 @@ func (f *Frame) decode(src io.Reader) error {
 		return nil
 	}
 
+	// Maximum allowable payload size (50 MB)
+	const maxPayloadSize = 50 * 1024 * 1024
+	if num > maxPayloadSize {
+		return io.EOF
+	}
+
 	// Ensure the payload slice has enough capacity
 	if cap(f.body) < int(num) {
 		f.body = make([]byte, num)

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Fix potential Denial of Service (DoS) due to unbounded slice allocations when parsing network varint message lengths in MOQ frames and messages.
+
 ### Changed
 
 - **moqt/internal/message:** `ReadMessageLength` now fast-paths `io.ByteReader` (bytes.Reader, bufio.Reader, QUIC streams), eliminating a per-call heap allocation (1 → 0) and ~65% faster varint-length decoding. Behavior is unchanged; non-ByteReader callers use the previous allocating path.

@@ -1,8 +1,8 @@
 package message
 
 import (
+	"errors"
 	"io"
-	"math"
 )
 
 func ReadVarint(b []byte) (uint64, int, error) {
@@ -79,8 +79,10 @@ func ReadBytes(b []byte) ([]byte, int, error) {
 		return nil, 0, err
 	}
 	b = b[n:]
-	if num > math.MaxInt {
-		panic("byte slice too large")
+	// Maximum allowable byte array size (50 MB)
+	const maxByteArraySize = 50 * 1024 * 1024
+	if num > maxByteArraySize {
+		return nil, 0, errors.New("byte slice too large")
 	}
 
 	if uint64(len(b)) < num {
@@ -104,11 +106,19 @@ func ReadStringArray(b []byte) ([]string, int, error) {
 		return nil, 0, err
 	}
 
-	if count > math.MaxInt {
-		panic("string array too large")
+	// Limit the maximum number of items to prevent out-of-memory errors
+	// and excessive CPU usage, even if math.MaxInt allows more.
+	// We use 50MB as a conservative limit which translates to fewer strings.
+	const maxStringArrayCount = 50 * 1024 * 1024
+	if count > maxStringArrayCount {
+		return nil, 0, errors.New("string array too large")
 	}
 
 	b = b[total:]
+
+	if count > uint64(len(b)) {
+		return nil, 0, io.EOF
+	}
 
 	arr := make([]string, 0, count)
 	for range count {
