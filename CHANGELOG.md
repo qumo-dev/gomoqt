@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
+
 - **moqt/internal/message:** `ReadMessageLength` now fast-paths `io.ByteReader` (bytes.Reader, bufio.Reader, QUIC streams), eliminating a per-call heap allocation (1 → 0) and ~65% faster varint-length decoding. Behavior is unchanged; non-ByteReader callers use the previous allocating path.
 - **Dependencies:** Updated `quic-go` to v0.60.0.
 ### Removed
@@ -28,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **moqt/moq-web:** Added comprehensive concurrent access tests for probe methods.
 
 ### Changed
+
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
 
 - **moqt/moq-web:** Refactored `bitrateTracker` to be an active monitor, encapsulating its own monitoring loop and sampling logic.
 - **moqt/moq-web:** Moved communication channels (`probeResponse` and `probeTargets`) back to the `Session` class, separating measurement from notification.
@@ -51,6 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
+
 - Repository owner changed from `okdaichi` to `qumo-dev`.
 - **moqt:** `Session.Probe()` reuses the same stream on repeated calls; the channel is closed when the stream or session ends.
 - **moqt:** `ProbeResult.RTT` removed; RTT is available via the underlying transport API.
@@ -69,6 +75,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [v0.13.3] - 2026-04-20
 
 ### Changed
+
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
 
 - **moqt:** Removed the unused `path` argument from `Dialer.DialQUIC()`. The native QUIC dialer now accepts only `addr` and `mux`.
 
@@ -98,6 +106,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
+
 - **moqt:** Upgraded protocol version from `moq-lite-03` to `moq-lite-04` (ALPN `moq-lite-04`).
 - **moqt:** `NewTrackMux(id uint64)` now requires a hop ID. Pass `0` for edge nodes; relay nodes should use `NewHopID()`.
 - **moqt:** `Session.Probe()` returns `(*ProbeResult, error)` instead of `(uint64, error)`.
@@ -118,6 +128,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
+
 - **moq-web:** `Client` class is now `@deprecated`; use `connect()` instead. Kept as a back-compat shim.
 - **moq-web:** `ConnectOptions` and `MOQOptions` are now `@deprecated` aliases for `ConnectInit`.
 - **moq-web:** `TransportFactory` now returns `WebTransport` (the browser interface); automatically wrapped in `WebTransportSession` inside `connect()`.
@@ -131,6 +143,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **moq-web:** Comprehensive JSDoc documentation for all exported symbols, following JSR conventions.
 
 ### Changed
+
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
 
 - **docs:** Restructured and updated existing documentation pages to reflect the current API.
 - **README:** Added MSF package references to all language translations; removed outdated QUIC wrapper and WebTransport server references.
@@ -151,6 +165,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **moqt:** `NativeQUICHandler` for native MOQ-over-QUIC session handling.
 
 ### Changed
+
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
 
 - **moqt:** Native QUIC dialer now defaults `TLSConfig.NextProtos` to `moq-lite-03` if unset.
 - **Dependencies:** Switched to `github.com/okdaichi/webtransport-go v0.10.2-okdaichi.1`.
@@ -173,11 +189,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
+
 - **moq-web/msf:** Adopted `zod` for JSON boundary validation in catalog, catalog delta, and timeline parsing.
 
 ## [v0.10.8] - 2026-03-12
 
 ### Changed
+
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
 
 - **moq-web:** Reorganized MSF code into `src/msf/` with a generic `Broadcast` class and MSF-aware broadcast implementation.
 - **moq-web:** Exposed `NotFoundTrackHandler` and added `NotFound` helper for API parity with Go.
@@ -189,6 +209,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Non-root `appuser` and workspace ownership in Dockerfile.
 
 ### Changed
+
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
 
 - Updated README files across all language translations.
 
@@ -215,6 +237,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
+
 - **Dependencies:** Updated `quic-go` to v0.59.0 and `webtransport-go` to v0.10.0.
 
 ## [v0.10.1] - 2026-01-04
@@ -225,11 +249,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
+
 - **moq-web:** `GroupWriter.writeFrame()` now accepts `ByteSource | Uint8Array`; `GroupReader.readFrame()` now accepts `ByteSink | ByteSinkFunc`.
 
 ## [v0.10.0] - 2026-01-04
 
 ### Changed
+
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
 
 - **moq-web:** Frame API redesigned with `ByteSource`/`ByteSink` pattern — replaced `bytes` property access with `ByteSource.copyTo()` for safer data handling.
 
@@ -245,6 +273,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
+
 - **moqt:** `OpenGroup()` now returns sequences starting from `0`.
 - **moqt:** `GroupSequence.Next()` wraps from `MaxGroupSequence` to `1` (avoids returning unspecified `0`).
 
@@ -252,11 +282,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
+
 - **moqt:** Improved message encoding/decoding performance by switching to direct buffer allocation.
 
 ## [v0.7.0] - 2025-12-16
 
 ### Changed
+
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
 
 - **Protocol:** Message length encoding changed from uint16 big-endian to QUIC variable-length integer (varint), aligning with the QUIC spec and reducing overhead for small messages. **Breaking change** — all endpoints must be updated simultaneously.
 
@@ -269,6 +303,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
+
 - **moqt:** `sendSubscribeStream.UpdateSubscribe()` changed from public to private (`updateSubscribe()`). Use `TrackReader.Update()` as the public API for updating subscription configurations.
 
 ## [v0.6.1] - 2025-12-09
@@ -279,6 +315,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Language selection links in all README files.
 
 ### Changed
+
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
 
 - Repository owner renamed from `OkutaniDaichi0106` to `okdaichi`.
 - `Session.SessionUpdated()` renamed to `Session.Updated()`.
@@ -298,12 +336,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
+
 - **Broadcast example:** Switched from LiveKit to UDP as media source.
 - **moqt:** `Mux` returns `ErrNoSubscribers` when no subscribers are found, instead of sending GOAWAY.
 
 ## [v0.4.3] - 2025-11-26
 
 ### Changed
+
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
 
 - **moqt:** Distinguish between temporary and permanent errors.
 
@@ -330,6 +372,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
+
 - **moqt:** `TrackPublisher` replaced by the new `TrackWriter` API.
 - **moqt:** `SendSubscribeStream` now returns `*TrackWriter`.
 
@@ -347,6 +391,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
+
 - **Dependencies:** Separated QUIC and WebTransport dependencies for flexible usage.
 
 ## [v0.2.0] - 2025-11-15
@@ -358,6 +404,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TypeScript client in `moq-web`.
 
 ### Changed
+
+- **moqt:** Replaced `fmt.Sprintf` with `strconv.FormatUint` in `PublishInfo`, `SubscribeConfig`, and `GroupSequence` string methods for improved performance.
 
 - Improved session management and error handling.
 
