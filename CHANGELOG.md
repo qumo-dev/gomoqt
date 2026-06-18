@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### Changed
+
+- **moqt:** `Frame.decode()` now uses exponential capacity growth (`newCap := max(required, 2*cap(slice))`) instead of exactly-sized allocations, significantly reducing GC pressure and maintaining proper struct buffer invariants.
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
