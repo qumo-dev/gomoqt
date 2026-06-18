@@ -76,6 +76,11 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
+	// Check context immediately
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// Implement a proper shutdown logic that passes the context to the server
 	closeCh := make(chan struct{})
 
