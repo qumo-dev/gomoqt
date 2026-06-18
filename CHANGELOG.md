@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **msf:** `CatalogDelta.Clone()` now uses `slices.Clone` and `maps.Clone` to shallow copy track lists and extra fields. Since these structures are functionally immutable, this avoids unnecessary allocations and significantly improves clone performance.
 - **moqt/internal/message:** `ReadMessageLength` now fast-paths `io.ByteReader` (bytes.Reader, bufio.Reader, QUIC streams), eliminating a per-call heap allocation (1 → 0) and ~65% faster varint-length decoding. Behavior is unchanged; non-ByteReader callers use the previous allocating path.
 - **Dependencies:** Updated `quic-go` to v0.60.0.
 ### Removed

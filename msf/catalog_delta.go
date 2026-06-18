@@ -3,6 +3,7 @@ package msf
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 )
 
@@ -57,10 +58,10 @@ type TrackClone struct {
 // Clone returns a deep copy of the delta catalog.
 func (d CatalogDelta) Clone() CatalogDelta {
 	clone := d
-	clone.AddTracks = cloneTracks(d.AddTracks)
-	clone.RemoveTracks = cloneTrackRefs(d.RemoveTracks)
-	clone.CloneTracks = cloneTrackClones(d.CloneTracks)
-	clone.ExtraFields = cloneRawMessages(d.ExtraFields)
+	clone.AddTracks = slices.Clone(d.AddTracks)
+	clone.RemoveTracks = slices.Clone(d.RemoveTracks)
+	clone.CloneTracks = slices.Clone(d.CloneTracks)
+	clone.ExtraFields = maps.Clone(d.ExtraFields)
 	clone.deltaOpOrder = slices.Clone(d.deltaOpOrder)
 	return clone
 }
@@ -346,26 +347,3 @@ func (c *TrackClone) UnmarshalJSON(data []byte) error {
 	return c.Track.unmarshalObject(trackRaw)
 }
 
-// cloneTrackRefs returns a deep copy of a TrackRef slice.
-func cloneTrackRefs(in []TrackRef) []TrackRef {
-	if in == nil {
-		return nil
-	}
-	out := make([]TrackRef, len(in))
-	for i, track := range in {
-		out[i] = track.Clone()
-	}
-	return out
-}
-
-// cloneTrackClones returns a deep copy of a TrackClone slice.
-func cloneTrackClones(in []TrackClone) []TrackClone {
-	if in == nil {
-		return nil
-	}
-	out := make([]TrackClone, len(in))
-	for i, track := range in {
-		out[i] = track.Clone()
-	}
-	return out
-}

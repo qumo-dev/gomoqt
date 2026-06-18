@@ -1,0 +1,3 @@
+## 2024-05-24 - Avoid Deep Cloning Immutable JSON Trees
+**Learning:** Deep cloning nested JSON-derived data structures (like track lists and maps) in performance-critical paths (like delta updates) incurs heavy allocation overhead and CPU cycles. If the application logic treats these inner slices and maps as functionally immutable after creation, deep copying is unnecessary.
+**Action:** Use shallow copy primitives (`slices.Clone`, `maps.Clone` in Go 1.21+) when duplicating outer objects containing immutable references to eliminate redundant recursive allocations and drastically speed up the cloning operation.
