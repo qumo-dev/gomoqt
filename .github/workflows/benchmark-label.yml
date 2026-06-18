@@ -77,7 +77,7 @@ jobs:
         # -skip excludes the slow broadcast/QUIC integration benchmarks.
         # -benchtime=1s lets Go pick a high iteration count for a stable mean.
         run: |
-          go test -run='^$' -bench=. -skip='BroadcastServer|StreamIo_RealQUIC' -benchmem -benchtime=1s -count=10 -timeout=15m ./moqt/... | tee bench-new.txt
+          go test -run='^$' -bench=. -skip='BroadcastServer|StreamIo_RealQUIC|Egress_Saturating' -benchmem -benchtime=1s -count=10 -timeout=15m ./moqt/... | tee bench-new.txt
 
       - name: Compare against baseline and build comment
         if: steps.baseline.outputs.have_baseline == 'true'

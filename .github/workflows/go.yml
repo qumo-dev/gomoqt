@@ -87,13 +87,14 @@ jobs:
           go-version: "1.26.0"
 
       - name: Run benchmarks (micro)
-        # Microbenchmarks only: -skip excludes the slow broadcast/QUIC
-        # integration benchmarks (BenchmarkBroadcastServer_* and
-        # BenchmarkStreamIo_RealQUIC, run separately in benchmark-integration).
+        # Microbenchmarks only: -skip excludes the slow real-QUIC integration
+        # benchmarks (BenchmarkBroadcastServer_*, BenchmarkStreamIo_RealQUIC,
+        # and BenchmarkEgress_Saturating — run separately in
+        # benchmark-integration).
         # -benchtime=1s gives a stable mean (1x had ~150% CV on micros);
         # -count=10 gives benchstat enough samples to estimate variance.
         run: |
-          go test -run='^$' -bench=. -skip='BroadcastServer|StreamIo_RealQUIC' -benchmem -benchtime=1s -count=10 -timeout=15m ./moqt/... | tee bench-new.txt
+          go test -run='^$' -bench=. -skip='BroadcastServer|StreamIo_RealQUIC|Egress_Saturating' -benchmem -benchtime=1s -count=10 -timeout=15m ./moqt/... | tee bench-new.txt
 
       - name: Upload baseline
         uses: actions/upload-artifact@v4
@@ -121,7 +122,7 @@ jobs:
 
       - name: Run integration benchmarks
         run: |
-          go test -run='^$' -bench='BroadcastServer|StreamIo_RealQUIC' -benchmem -benchtime=1x -count=5 -timeout=25m ./moqt/... | tee bench-integration.txt
+          go test -run='^$' -bench='BroadcastServer|StreamIo_RealQUIC|Egress_Saturating' -benchmem -benchtime=1x -count=5 -timeout=25m ./moqt/... | tee bench-integration.txt
 
       - name: Upload integration bench output
         uses: actions/upload-artifact@v4
