@@ -38,6 +38,10 @@ func (g *GroupMessage) Decode(src io.Reader) error {
 		return err
 	}
 
+	if size > MaxMessageSize {
+		return ErrMessageTooLarge
+	}
+
 	b := make([]byte, size)
 
 	_, err = io.ReadFull(src, b)
@@ -67,3 +71,9 @@ func (g *GroupMessage) Decode(src io.Reader) error {
 }
 
 var ErrMessageTooShort = errors.New("message too short")
+
+// MaxMessageSize is the maximum allowed size for a single MOQT message payload.
+// This prevents Out-Of-Memory (OOM) DoS attacks from maliciously crafted lengths.
+const MaxMessageSize = 10 * 1024 * 1024 // 10 MB
+
+var ErrMessageTooLarge = errors.New("message too large")
