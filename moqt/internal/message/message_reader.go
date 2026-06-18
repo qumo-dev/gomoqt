@@ -1,6 +1,8 @@
 package message
 
 import (
+	"unsafe"
+
 	"io"
 	"math"
 )
@@ -95,7 +97,7 @@ func ReadString(b []byte) (string, int, error) {
 	if err != nil {
 		return "", 0, err
 	}
-	return string(str), n, nil
+	return unsafe.String(unsafe.SliceData(str), len(str)), n, nil
 }
 
 func ReadStringArray(b []byte) ([]string, int, error) {
