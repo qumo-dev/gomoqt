@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **moqt/internal/message:** Fixed an Out-Of-Memory (OOM) Denial of Service (DoS) vulnerability where decoding messages with enormous malicious QUIC varint lengths directly caused unbounded byte slice allocations. Added `MaxMessageSize` limits.
 - **moqt:** `Server` now wires a `WebTransportHandler` (built from the Server's `Handler` / `TrackMux` / `Config`) as the default WebTransport handler. Previously `Server.init()` passed a nil HTTP handler, so every WebTransport request fell through to `http.DefaultServeMux` (no MOQ route) and 404'd — the Server's default WebTransport path was non-functional, and `BenchmarkBroadcastServer_HighLoad` silently reported 0 frames/op.
 - **moqt:** `Server.Close()` no longer hangs when connections are active. Previously the "terminate sessions" loop had an empty body (active connections were never closed) and sessions were removed from the connection manager only on an explicit, successful `CloseWithError` — so peer-/force-closed sessions leaked and `Server.Close()`/`Shutdown()` blocked forever on `<-connManager.Done()`. `Server.Close()` now closes active connections, the serving paths (`WebTransportHandler.ServeHTTP`, `handleNativeQUIC`) clean up the session when the Handler returns, and `Session.CloseWithError` always removes the connection from the manager.
 
@@ -37,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **moqt/internal/message:** Fixed an Out-Of-Memory (OOM) Denial of Service (DoS) vulnerability where decoding messages with enormous malicious QUIC varint lengths directly caused unbounded byte slice allocations. Added `MaxMessageSize` limits.
 - **moqt/moq-web:** Fixed a delta detection bug where raw measurements were incorrectly compared against themselves instead of the last sent baseline.
 - **moqt:** Resolved a deadlock in tests by correctly linking mock stream contexts to the session lifecycle.
 - **moq-web:** Fixed an initialization race condition in TypeScript where initial probe messages were sometimes omitted.
@@ -58,12 +60,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **moqt/internal/message:** Fixed an Out-Of-Memory (OOM) Denial of Service (DoS) vulnerability where decoding messages with enormous malicious QUIC varint lengths directly caused unbounded byte slice allocations. Added `MaxMessageSize` limits.
 - **moqt:** Fixed probe stream cleanup on session or stream close.
 
 ## [v0.13.4] - 2026-04-20
 
 ### Fixed
 
+- **moqt/internal/message:** Fixed an Out-Of-Memory (OOM) Denial of Service (DoS) vulnerability where decoding messages with enormous malicious QUIC varint lengths directly caused unbounded byte slice allocations. Added `MaxMessageSize` limits.
 - **moqt:** Republished as `v0.13.4` to ensure Go module consumers can resolve the correct immutable version after the `v0.13.3` tag was moved.
 
 ## [v0.13.3] - 2026-04-20
@@ -80,12 +84,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **moqt/internal/message:** Fixed an Out-Of-Memory (OOM) Denial of Service (DoS) vulnerability where decoding messages with enormous malicious QUIC varint lengths directly caused unbounded byte slice allocations. Added `MaxMessageSize` limits.
 - **moqt:** Fixed `NewHopID()` to always generate identifiers within the 62-bit varint range.
 
 ## [v0.13.1] - 2026-04-17
 
 ### Fixed
 
+- **moqt/internal/message:** Fixed an Out-Of-Memory (OOM) Denial of Service (DoS) vulnerability where decoding messages with enormous malicious QUIC varint lengths directly caused unbounded byte slice allocations. Added `MaxMessageSize` limits.
 - **moqt:** Injected the WebTransport subprotocol externally and updated draft-04 references in WebTransport dialing.
 
 ## [v0.13.0] - 2026-04-16
@@ -157,6 +163,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **moqt/internal/message:** Fixed an Out-Of-Memory (OOM) Denial of Service (DoS) vulnerability where decoding messages with enormous malicious QUIC varint lengths directly caused unbounded byte slice allocations. Added `MaxMessageSize` limits.
 - **moqt:** Fixed missing message-type prefix bytes for `SubscribeOk` and `SubscribeDrop` that caused type mismatches when a TypeScript client decoded subscribe responses.
 - **moqt:** Fixed premature `CancelRead()` on group streams passed to a `TrackReader`.
 - **moqt:** `WebTransportHandler.ServeHTTP` no longer panics when used standalone without `Server`.
@@ -203,6 +210,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **moqt/internal/message:** Fixed an Out-Of-Memory (OOM) Denial of Service (DoS) vulnerability where decoding messages with enormous malicious QUIC varint lengths directly caused unbounded byte slice allocations. Added `MaxMessageSize` limits.
 - **moqt:** Enabled `EnableDatagrams` and `EnableStreamResetPartialDelivery` by default in `ListenAndServe()` / `ListenAndServeTLS()` so WebTransport connections work without manual configuration.
 - **moqt:** Fixed server shutdown hang caused by a `WaitGroup` leak in `Close()` / `Shutdown()`.
 - **webtransport:** Initialized HTTP/3 server pointer in `NewServer()` to avoid a nil-pointer panic with `webtransport-go v0.10.0`.
@@ -221,6 +229,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **moqt/internal/message:** Fixed an Out-Of-Memory (OOM) Denial of Service (DoS) vulnerability where decoding messages with enormous malicious QUIC varint lengths directly caused unbounded byte slice allocations. Added `MaxMessageSize` limits.
 - **moq-web:** Fixed QUIC varint encoding/decoding for values exceeding 32 bits — JavaScript bitwise operations are limited to 32 bits, causing incorrect encoding of 8-byte varints.
 
 ### Changed
@@ -235,6 +244,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **moqt/internal/message:** Fixed an Out-Of-Memory (OOM) Denial of Service (DoS) vulnerability where decoding messages with enormous malicious QUIC varint lengths directly caused unbounded byte slice allocations. Added `MaxMessageSize` limits.
 - **moq-web:** Fixed buffer overflow in `Frame.copyTo()` caused by a mismatched internal buffer size.
 
 ## [v0.9.0] - 2025-12-24
@@ -292,6 +302,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **moqt/internal/message:** Fixed an Out-Of-Memory (OOM) Denial of Service (DoS) vulnerability where decoding messages with enormous malicious QUIC varint lengths directly caused unbounded byte slice allocations. Added `MaxMessageSize` limits.
 - **moqt:** `AnnouncementWriter` now calls end functions asynchronously to avoid deadlock.
 
 ## [v0.5.0] - 2025-11-27
@@ -311,12 +322,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **moqt/internal/message:** Fixed an Out-Of-Memory (OOM) Denial of Service (DoS) vulnerability where decoding messages with enormous malicious QUIC varint lengths directly caused unbounded byte slice allocations. Added `MaxMessageSize` limits.
 - **moqt:** Fixed duplicate panic in announcement handling.
 
 ## [v0.4.1] - 2025-11-24
 
 ### Fixed
 
+- **moqt/internal/message:** Fixed an Out-Of-Memory (OOM) Denial of Service (DoS) vulnerability where decoding messages with enormous malicious QUIC varint lengths directly caused unbounded byte slice allocations. Added `MaxMessageSize` limits.
 - **moqt:** `TrackWriter.Close()` now handles stream closure errors correctly.
 - **moqt:** Added nil check in `GroupWriter` to prevent panic on uninitialized frame field.
 
