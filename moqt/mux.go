@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"strings"
 	"sync"
 )
 
@@ -478,19 +479,23 @@ func prefixSegments(prefix string) []prefixSegment {
 		return nil
 	}
 
-	// Manual scanning to avoid strings.Split allocation
-	// Need to preserve empty segments to match original behavior
-	str := prefix[1 : len(prefix)-1]        // Skip leading and trailing slashes
-	segments := make([]prefixSegment, 0, 8) // Pre-allocate for typical depth
-	start := 0
-	for i := 0; i < len(str); i++ {
-		if str[i] == '/' {
-			segments = append(segments, str[start:i]) // Include empty strings
-			start = i + 1
+	str := prefix[1 : len(prefix)-1] // Skip leading and trailing slashes
+
+	// Use highly optimized assembly string functions
+	slashCount := strings.Count(str, "/")
+
+	segments := make([]prefixSegment, slashCount+1)
+	idx := 0
+	for {
+		i := strings.IndexByte(str, '/')
+		if i < 0 {
+			break
 		}
+		segments[idx] = prefixSegment(str[:i])
+		str = str[i+1:]
+		idx++
 	}
-	// Add last segment (always, even if empty)
-	segments = append(segments, str[start:])
+	segments[idx] = prefixSegment(str)
 	return segments
 }
 
@@ -503,26 +508,25 @@ func pathSegments(path BroadcastPath) (prefixSegments []prefixSegment, last stri
 		return nil, p
 	}
 
-	// Count slashes to pre-allocate exact size and avoid allocations
 	str := p[1:] // Skip leading slash
-	slashCount := 0
-	for i := 0; i < len(str); i++ {
-		if str[i] == '/' {
-			slashCount++
-		}
-	}
+
+	// Use highly optimized assembly string functions
+	slashCount := strings.Count(str, "/")
 
 	// Allocate exact size needed
-	segments := make([]string, 0, slashCount+1)
-	start := 0
-	for i := 0; i < len(str); i++ {
-		if str[i] == '/' {
-			segments = append(segments, str[start:i])
-			start = i + 1
+	segments := make([]string, slashCount+1)
+	idx := 0
+	for {
+		i := strings.IndexByte(str, '/')
+		if i < 0 {
+			break
 		}
+		segments[idx] = str[:i]
+		str = str[i+1:]
+		idx++
 	}
 	// Add last segment
-	segments = append(segments, str[start:])
+	segments[idx] = str
 
 	if len(segments) == 0 {
 		return nil, p
