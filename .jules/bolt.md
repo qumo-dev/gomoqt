@@ -1,0 +1,3 @@
+## 2025-06-18 - Avoid heap allocations in variadic appends
+**Learning:** In Go, calling `append(args, "key", val)` when `args` is an empty variadic slice `...any` forces a heap allocation for the resulting slice before it can be passed to another variadic function (like a logger). This causes unnecessary memory allocations and garbage collection overhead in hot code paths.
+**Action:** When delegating variadic arguments and appending new ones, check `if len(args) == 0` first. If true, explicitly pass the new arguments to the target function to allow the Go compiler to safely stack-allocate the variadic slice. Only use `append` as a fallback when `args` is non-empty.

@@ -54,7 +54,11 @@ func (aw *AnnouncementWriter) logError(msg string, err error, args ...any) {
 		return
 	}
 	if aw.logger != nil {
-		aw.logger.Error(msg, append(args, "error", err)...)
+		if len(args) == 0 {
+			aw.logger.Error(msg, "error", err)
+		} else {
+			aw.logger.Error(msg, append(args, "error", err)...)
+		}
 	}
 }
 

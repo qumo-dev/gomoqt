@@ -129,7 +129,11 @@ func (s *Session) logError(msg string, err error, args ...any) {
 	}
 
 	if s.logger != nil {
-		s.logger.Error(msg, append(args, "error", err)...)
+		if len(args) == 0 {
+			s.logger.Error(msg, "error", err)
+		} else {
+			s.logger.Error(msg, append(args, "error", err)...)
+		}
 	}
 }
 
