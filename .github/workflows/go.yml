@@ -87,13 +87,13 @@ jobs:
           go-version: "1.26.0"
 
       - name: Run benchmarks (micro)
-        # Microbenchmarks only: -skip excludes the slow broadcast/QUIC
-        # integration benchmarks (BenchmarkBroadcastServer_* and
-        # BenchmarkStreamIo_RealQUIC, run separately in benchmark-integration).
+        # Microbenchmarks only: -short skips the slow real-QUIC integration
+        # benchmarks (each calls testing.Short() -> b.Skip). They run in
+        # benchmark-integration below, without -short.
         # -benchtime=1s gives a stable mean (1x had ~150% CV on micros);
         # -count=10 gives benchstat enough samples to estimate variance.
         run: |
-          go test -run='^$' -bench=. -skip='BroadcastServer|StreamIo_RealQUIC' -benchmem -benchtime=1s -count=10 -timeout=15m ./moqt/... | tee bench-new.txt
+          go test -run='^$' -bench=. -short -benchmem -benchtime=1s -count=10 -timeout=15m ./moqt/... | tee bench-new.txt
 
       - name: Upload baseline
         uses: actions/upload-artifact@v4
@@ -102,12 +102,12 @@ jobs:
           path: bench-new.txt
           retention-days: 90
 
-  # Slow broadcast/QUIC integration benchmarks. Each op is a multi-second
-  # aggregate (frames/sec, MB/s) that is stable across samples, so -benchtime=1x
-  # is appropriate here (unlike the microbenchmarks above). Runs only on push
-  # (main/tags) and manual dispatch — NOT on PRs — because it costs ~10-19
-  # runner-minutes and is irrelevant to wire-layer micro-PRs. Uploaded for trend
-  # archival only; no benchstat gate.
+  # Slow real-QUIC integration benchmarks. Runs the FULL benchmark suite WITHOUT
+  # -short, so the benchmarks that self-skip under testing.Short() actually run
+  # here. Each op is a multi-second aggregate (frames/sec, MB/s) stable across
+  # samples, so -benchtime=1x is appropriate (unlike the microbenchmarks above).
+  # Runs only on push (main/tags) and manual dispatch — NOT on PRs — because it
+  # costs ~10-19 runner-minutes. Uploaded for trend archival only; no benchstat gate.
   benchmark-integration:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -121,7 +121,7 @@ jobs:
 
       - name: Run integration benchmarks
         run: |
-          go test -run='^$' -bench='BroadcastServer|StreamIo_RealQUIC' -benchmem -benchtime=1x -count=5 -timeout=25m ./moqt/... | tee bench-integration.txt
+          go test -run='^$' -bench=. -benchmem -benchtime=1x -count=5 -timeout=25m ./moqt/... | tee bench-integration.txt
 
       - name: Upload integration bench output
         uses: actions/upload-artifact@v4
