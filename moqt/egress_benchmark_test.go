@@ -50,6 +50,9 @@ import (
 //	    -benchtime=5s -count=10 -cpuprofile=cpu.out -memprofile=mem.out ./moqt/
 
 func BenchmarkEgress_Saturating(b *testing.B) {
+	if testing.Short() {
+		b.Skip("real-QUIC integration benchmark; skipped in -short")
+	}
 	configs := []struct{ size, fpg int }{
 		{1 << 10, 256},
 		{16 << 10, 1}, {16 << 10, 256},
