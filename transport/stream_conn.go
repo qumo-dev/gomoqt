@@ -35,7 +35,17 @@ type StreamConn interface {
 	OpenStream() (Stream, error)
 
 	// OpenUniStream opens a new unidirectional stream without blocking.
+	// It returns a StreamLimitReachedError (wrapped by the transport) when the
+	// peer's MAX_STREAMS credit is exhausted; use OpenUniStreamSync to block
+	// (backpressure) instead.
 	OpenUniStream() (SendStream, error)
+
+	// OpenUniStreamSync opens a new unidirectional stream, blocking until the
+	// peer's stream-limit flow control grants one (or ctx is canceled). Prefer
+	// this when opening a stream should backpressure rather than fail — e.g.
+	// opening MoQ group streams in a publish loop, where a stream-limit error
+	// would otherwise abort the whole publisher.
+	OpenUniStreamSync(ctx context.Context) (SendStream, error)
 
 	// RemoteAddr returns the remote network address.
 	RemoteAddr() net.Addr

@@ -67,6 +67,11 @@ func (conn *sessionWrapper) OpenUniStream() (transport.SendStream, error) {
 	return &sendStreamWrapper{stream: stream}, err
 }
 
+func (conn *sessionWrapper) OpenUniStreamSync(ctx context.Context) (transport.SendStream, error) {
+	stream, err := conn.sess.OpenUniStreamSync(ctx)
+	return &sendStreamWrapper{stream: stream}, err
+}
+
 func (conn *sessionWrapper) RemoteAddr() net.Addr {
 	return conn.sess.RemoteAddr()
 }

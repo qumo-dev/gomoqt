@@ -49,8 +49,11 @@ func (noStatsConn) Context() context.Context                             { retur
 func (noStatsConn) LocalAddr() net.Addr                                  { return &net.TCPAddr{} }
 func (noStatsConn) OpenStream() (transport.Stream, error)                { return nil, io.EOF }
 func (noStatsConn) OpenUniStream() (transport.SendStream, error)         { return nil, io.EOF }
-func (noStatsConn) RemoteAddr() net.Addr                                 { return &net.TCPAddr{} }
-func (noStatsConn) TLS() *tls.ConnectionState                            { return nil }
+func (noStatsConn) OpenUniStreamSync(context.Context) (transport.SendStream, error) {
+	return nil, io.EOF
+}
+func (noStatsConn) RemoteAddr() net.Addr      { return &net.TCPAddr{} }
+func (noStatsConn) TLS() *tls.ConnectionState { return nil }
 
 func TestNewSession(t *testing.T) {
 	tests := map[string]struct {

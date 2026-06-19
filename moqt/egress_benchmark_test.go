@@ -33,12 +33,16 @@ import (
 //
 //	framesPerGroup (fpg) isolates the cost:
 //	  - 1   : one frame per group — OpenGroup overhead per frame (the broadcast
-//	          harness's pattern; worst case). Omitted at 1K: at that size the
-//	          per-group stream churn is fast enough to trip quic-go's idle
-//	          timeout before a group lands under -benchtime=1s.
+//	          harness's pattern; worst case).
 //	  - 256 : many frames per group — amortizes OpenGroup; isolates WriteFrame.
 //
 //	Matrix: 1K{fpg-256}, 16K{fpg-1,fpg-256}, 64K{fpg-1,fpg-256}.
+//
+//	1K/fpg-1 (one uni stream per frame at high rate) is covered by
+//	TestOpenGroup_BackpressuresOnStreamLimit, which exercises the uni-stream-limit
+//	path that OpenGroup now backpressures via OpenUniStreamSync. It's omitted here
+//	because -benchtime=1x (the integration job) reads too few groups to reach the
+//	stream limit.
 //
 // This is a real-QUIC integration benchmark (like BenchmarkStreamIo_RealQUIC),
 // so it is excluded from the PR microbenchmark run and measured in the
@@ -111,13 +115,15 @@ func BenchmarkEgress_Saturating(b *testing.B) {
 // streams frames back-to-back (NO ticker), writing framesPerGroup frames per
 // group. It reuses the proven TLS/quic/server wiring from
 // broadcast_benchmark_test.go verbatim; only the publisher pacing differs.
-func setupSaturatingServer(b *testing.B, ctx context.Context, frameSize, framesPerGroup int) (*Server, string) {
-	b.Helper()
+// It takes testing.TB so both benchmarks (*testing.B) and tests (*testing.T)
+// can reuse it.
+func setupSaturatingServer(tb testing.TB, ctx context.Context, frameSize, framesPerGroup int) (*Server, string) {
+	tb.Helper()
 
 	// Grab a free UDP port for the QUIC listener.
 	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
-		b.Fatalf("failed to find available port: %v", err)
+		tb.Fatalf("failed to find available port: %v", err)
 	}
 	addr := pc.LocalAddr().String()
 	_ = pc.Close()
@@ -126,7 +132,7 @@ func setupSaturatingServer(b *testing.B, ctx context.Context, frameSize, framesP
 		Addr: addr,
 		TLSConfig: &tls.Config{
 			NextProtos:         []string{NextProtoH3, NextProtoMOQ},
-			Certificates:       []tls.Certificate{generateTestCert(b)},
+			Certificates:       []tls.Certificate{generateTestCert(tb)},
 			InsecureSkipVerify: true,
 		},
 		QUICConfig: &quic.Config{Allow0RTT: true, EnableDatagrams: true},
@@ -169,7 +175,7 @@ func setupSaturatingServer(b *testing.B, ctx context.Context, frameSize, framesP
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, ErrServerClosed) {
-			b.Logf("server error: %v", err)
+			tb.Logf("server error: %v", err)
 		}
 	}()
 
@@ -178,9 +184,10 @@ func setupSaturatingServer(b *testing.B, ctx context.Context, frameSize, framesP
 
 // dialAndSubscribe connects a single client and subscribes to the broadcast
 // track, retrying the dial until the asynchronously-bound listener is ready
-// (same pattern as stream_io_benchmark_test.go).
-func dialAndSubscribe(b *testing.B, ctx context.Context, addr string) (*Session, *TrackReader) {
-	b.Helper()
+// (same pattern as stream_io_benchmark_test.go). testing.TB so tests and
+// benchmarks can share it.
+func dialAndSubscribe(tb testing.TB, ctx context.Context, addr string) (*Session, *TrackReader) {
+	tb.Helper()
 
 	client := Dialer{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -200,28 +207,28 @@ func dialAndSubscribe(b *testing.B, ctx context.Context, addr string) (*Session,
 		}
 		if ready.Err() != nil {
 			cancelWait()
-			b.Fatalf("dial %s: %v (listener not ready or upgrade failed)", addr, derr)
+			tb.Fatalf("dial %s: %v (listener not ready or upgrade failed)", addr, derr)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 
 	annRecv, err := sess.AcceptAnnounce("/")
 	if err != nil {
-		b.Fatalf("accept announce: %v", err)
+		tb.Fatalf("accept announce: %v", err)
 	}
 	defer annRecv.Close()
 
 	ann, err := annRecv.ReceiveAnnouncement(ctx)
 	if err != nil {
-		b.Fatalf("receive announcement: %v", err)
+		tb.Fatalf("receive announcement: %v", err)
 	}
 	if !ann.IsActive() {
-		b.Fatal("announcement not active")
+		tb.Fatal("announcement not active")
 	}
 
 	tr, err := sess.Subscribe(ctx, ann.BroadcastPath(), TrackName("index"), nil)
 	if err != nil {
-		b.Fatalf("subscribe: %v", err)
+		tb.Fatalf("subscribe: %v", err)
 	}
 	return sess, tr
 }

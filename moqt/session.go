@@ -645,7 +645,14 @@ func (sess *Session) processBiStream(stream transport.Stream) {
 			BroadcastPath(sm.BroadcastPath),
 			TrackName(sm.TrackName),
 			substr,
-			sess.conn.OpenUniStream,
+			func() (transport.SendStream, error) {
+				// Backpressure: block until the peer grants a uni stream (MAX_STREAMS)
+				// rather than returning a stream-limit error. Without this, a publisher
+				// opening groups faster than the peer recycles streams hit
+				// StreamLimitReachedError and aborted the whole track, idling the
+				// connection (see the payload-1K/fpg-1 stream-churn repro).
+				return sess.conn.OpenUniStreamSync(sess.ctx)
+			},
 			func() { sess.removeTrackWriter(SubscribeID(sm.SubscribeID)) },
 		)
 		sess.addTrackWriter(SubscribeID(sm.SubscribeID), track)
