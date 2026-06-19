@@ -20,6 +20,9 @@ import (
 // BenchmarkBroadcastServer_HighLoad benchmarks a realistic broadcast scenario
 // with 100 concurrent clients subscribing to a 30fps stream with 1-10KB frames
 func BenchmarkBroadcastServer_HighLoad(b *testing.B) {
+	if testing.Short() {
+		b.Skip("real-QUIC integration benchmark; skipped in -short")
+	}
 	clients := []int{10, 50, 100}
 
 	for _, numClients := range clients {
@@ -135,6 +138,9 @@ func BenchmarkBroadcastServer_Profile(b *testing.B) {
 
 // BenchmarkBroadcastServer_FrameSizes tests different frame sizes
 func BenchmarkBroadcastServer_FrameSizes(b *testing.B) {
+	if testing.Short() {
+		b.Skip("real-QUIC integration benchmark; skipped in -short")
+	}
 	frameSizes := []int{100, 1024, 10240} // 100B, 1KB, 10KB
 
 	for _, frameSize := range frameSizes {
