@@ -52,6 +52,9 @@ func (som *SubscribeOkMessage) Decode(src io.Reader) error {
 	if err != nil {
 		return err
 	}
+	if num > 50*1024*1024 { // 50MB limit to prevent OOM
+		return io.ErrUnexpectedEOF
+	}
 
 	b := make([]byte, num)
 	_, err = io.ReadFull(src, b)

@@ -71,6 +71,9 @@ func (s *SubscribeMessage) Decode(src io.Reader) error {
 	if err != nil {
 		return err
 	}
+	if size > 50*1024*1024 { // 50MB limit to prevent OOM
+		return io.ErrUnexpectedEOF
+	}
 
 	b := make([]byte, size)
 
