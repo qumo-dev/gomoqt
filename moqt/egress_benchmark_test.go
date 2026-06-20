@@ -145,6 +145,7 @@ func setupSaturatingServer(tb testing.TB, ctx context.Context, frameSize, frames
 	// and then holds the flood until start is closed, so the unpaced uni-stream
 	// churn can't race the SUBSCRIBE_OK read on slow/CI runners.
 	PublishFunc(ctx, "/server.broadcast", func(tw *TrackWriter) {
+		tb.Logf("setupSaturatingServer: publisher handler invoked; track ctx err=%v", tw.Context().Err())
 		frame := NewFrame(frameSize)
 		data := make([]byte, frameSize)
 		for i := range data {
@@ -170,6 +171,7 @@ func setupSaturatingServer(tb testing.TB, ctx context.Context, frameSize, frames
 
 			gw, err := tw.OpenGroup(ctx)
 			if err != nil {
+				tb.Logf("setupSaturatingServer: publisher OpenGroup failed: %v (track ctx err=%v)", err, tw.Context().Err())
 				return
 			}
 			for i := 0; i < framesPerGroup; i++ {
