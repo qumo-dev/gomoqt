@@ -34,12 +34,17 @@ func TestOpenGroup_BackpressuresOnStreamLimit(t *testing.T) {
 	defer cancel()
 
 	// 1K frames, one group per frame -> maximum uni-stream churn.
-	srv, addr := setupSaturatingServer(t, ctx, 1<<10, 1)
+	// Gate the publisher's flood until the subscribe handshake completes: the
+	// unpaced uni-stream churn otherwise races the SUBSCRIBE_OK read on slow/CI
+	// runners (the client sees EOF). Closed after dialAndSubscribe below.
+	start := make(chan struct{})
+	srv, addr := setupSaturatingServer(t, ctx, 1<<10, 1, start)
 	defer closeBroadcastServer(t, srv)
 
 	sess, tr := dialAndSubscribe(t, ctx, addr)
 	defer sess.CloseWithError(NoError, "done")
 	defer tr.Close()
+	close(start)
 
 	// quic-go's default concurrent uni-stream limit is ~100; read well past it.
 	const minGroups = 500

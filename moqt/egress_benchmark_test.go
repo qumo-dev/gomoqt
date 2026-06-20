@@ -71,7 +71,7 @@ func BenchmarkEgress_Saturating(b *testing.B) {
 			// The publisher streams from setup (no gate); QUIC flow control
 			// paces it to the subscriber's drain rate, so it stalls until the
 			// subscriber connects and the timed loop sees steady-state egress.
-			srv, addr := setupSaturatingServer(b, ctx, size, fpg)
+			srv, addr := setupSaturatingServer(b, ctx, size, fpg, nil)
 			defer closeBroadcastServer(b, srv)
 
 			sess, tr := dialAndSubscribe(b, ctx, addr)
@@ -117,7 +117,7 @@ func BenchmarkEgress_Saturating(b *testing.B) {
 // broadcast_benchmark_test.go verbatim; only the publisher pacing differs.
 // It takes testing.TB so both benchmarks (*testing.B) and tests (*testing.T)
 // can reuse it.
-func setupSaturatingServer(tb testing.TB, ctx context.Context, frameSize, framesPerGroup int) (*Server, string) {
+func setupSaturatingServer(tb testing.TB, ctx context.Context, frameSize, framesPerGroup int, start <-chan struct{}) (*Server, string) {
 	tb.Helper()
 
 	// Grab a free UDP port for the QUIC listener.
@@ -140,7 +140,10 @@ func setupSaturatingServer(tb testing.TB, ctx context.Context, frameSize, frames
 		Handler:    HandleFunc(func(sess *Session) { <-sess.Context().Done() }),
 	}
 
-	// Publish the broadcast track on DefaultMux. Unpaced: no ticker.
+	// Publish the broadcast track on DefaultMux. Unpaced: no ticker. When start
+	// is non-nil, the publisher opens the first group (which carries SUBSCRIBE_OK)
+	// and then holds the flood until start is closed, so the unpaced uni-stream
+	// churn can't race the SUBSCRIBE_OK read on slow/CI runners.
 	PublishFunc(ctx, "/server.broadcast", func(tw *TrackWriter) {
 		frame := NewFrame(frameSize)
 		data := make([]byte, frameSize)
@@ -148,12 +151,22 @@ func setupSaturatingServer(tb testing.TB, ctx context.Context, frameSize, frames
 			data[i] = byte(i % 256)
 		}
 
+		first := true
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			default:
 			}
+
+			if !first && start != nil {
+				select {
+				case <-start:
+				case <-ctx.Done():
+					return
+				}
+			}
+			first = false
 
 			gw, err := tw.OpenGroup(ctx)
 			if err != nil {
