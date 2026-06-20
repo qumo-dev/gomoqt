@@ -93,6 +93,10 @@ func (f *Frame) decode(src io.Reader) error {
 	}
 
 	// Ensure the payload slice has enough capacity
+	if num > message.MaxMessageSize {
+		return message.ErrMessageTooLarge
+	}
+
 	if cap(f.body) < int(num) {
 		f.body = make([]byte, num)
 	} else {
