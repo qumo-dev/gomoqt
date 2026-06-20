@@ -94,10 +94,9 @@ func (f *Frame) decode(src io.Reader) error {
 
 	// Ensure the payload slice has enough capacity
 	if cap(f.body) < int(num) {
-		f.body = make([]byte, num)
-	} else {
-		f.body = f.body[:num]
+		f.init(int(num))
 	}
+	f.body = f.body[:num]
 
 	_, err = io.ReadFull(src, f.body)
 
