@@ -126,7 +126,7 @@ func BenchmarkTrackWriter_OpenGroup(b *testing.B) {
 			substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
 			var streamMu sync.Mutex
-			openUniStreamFunc := func() (transport.SendStream, error) {
+			openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 				streamMu.Lock()
 				defer streamMu.Unlock()
 
@@ -143,7 +143,7 @@ func BenchmarkTrackWriter_OpenGroup(b *testing.B) {
 			b.ResetTimer()
 
 			for i := 0; b.Loop(); i++ {
-				group, err := writer.OpenGroup()
+				group, err := writer.OpenGroup(context.Background())
 				if err == nil && group != nil {
 					_ = group.Close()
 				}
@@ -175,7 +175,7 @@ func BenchmarkTrackWriter_ConcurrentOpenGroup(b *testing.B) {
 
 			// No shared lock: each call returns an independent send stream,
 			// matching quic-go's non-serializing OpenUniStream semantics.
-			openUniStreamFunc := func() (transport.SendStream, error) {
+			openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 				mockSendStream := &FakeQUICSendStream{}
 				mockSendStream.WriteFunc = func(p []byte) (int, error) {
 					return len(p), nil
@@ -190,7 +190,7 @@ func BenchmarkTrackWriter_ConcurrentOpenGroup(b *testing.B) {
 
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
-					group, err := writer.OpenGroup()
+					group, err := writer.OpenGroup(context.Background())
 					if err == nil && group != nil {
 						_ = group.Close()
 					}
@@ -213,7 +213,7 @@ func BenchmarkTrackWriter_ActiveGroupManagement(b *testing.B) {
 
 			substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
-			openUniStreamFunc := func() (transport.SendStream, error) {
+			openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 				mockSendStream := &FakeQUICSendStream{}
 				mockSendStream.WriteFunc = func(p []byte) (int, error) {
 					return len(p), nil
@@ -226,7 +226,7 @@ func BenchmarkTrackWriter_ActiveGroupManagement(b *testing.B) {
 			// Pre-create groups
 			groups := make([]*GroupWriter, size)
 			for i := range size {
-				group, _ := writer.OpenGroup()
+				group, _ := writer.OpenGroup(context.Background())
 				groups[i] = group
 			}
 
@@ -241,7 +241,7 @@ func BenchmarkTrackWriter_ActiveGroupManagement(b *testing.B) {
 					_ = groups[idx].Close()
 				}
 
-				group, err := writer.OpenGroup()
+				group, err := writer.OpenGroup(context.Background())
 				if err == nil {
 					groups[idx] = group
 				}
@@ -262,7 +262,7 @@ func BenchmarkTrackWriter_MemoryAllocation(b *testing.B) {
 
 		substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
-		openUniStreamFunc := func() (transport.SendStream, error) {
+		openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 			mockSendStream := &FakeQUICSendStream{}
 			return mockSendStream, nil
 		}
@@ -270,7 +270,7 @@ func BenchmarkTrackWriter_MemoryAllocation(b *testing.B) {
 		writer := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {})
 
 		// Open and close a group
-		group, _ := writer.OpenGroup()
+		group, _ := writer.OpenGroup(context.Background())
 		if group != nil {
 			_ = group.Close()
 		}
@@ -314,7 +314,7 @@ func BenchmarkTrackWriter_CloseWithActiveGroups(b *testing.B) {
 
 				substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
-				openUniStreamFunc := func() (transport.SendStream, error) {
+				openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 					mockSendStream := &FakeQUICSendStream{}
 					mockSendStream.WriteFunc = func(p []byte) (int, error) {
 						return len(p), nil
@@ -326,7 +326,7 @@ func BenchmarkTrackWriter_CloseWithActiveGroups(b *testing.B) {
 
 				// Create many active groups
 				for range size {
-					_, _ = writer.OpenGroup()
+					_, _ = writer.OpenGroup(context.Background())
 				}
 
 				// Close all at once

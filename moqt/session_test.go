@@ -48,6 +48,7 @@ func (noStatsConn) CloseWithError(transport.ConnErrorCode, string) error { retur
 func (noStatsConn) Context() context.Context                             { return context.Background() }
 func (noStatsConn) LocalAddr() net.Addr                                  { return &net.TCPAddr{} }
 func (noStatsConn) OpenStream() (transport.Stream, error)                { return nil, io.EOF }
+func (noStatsConn) OpenStreamSync(context.Context) (transport.Stream, error) { return nil, io.EOF }
 func (noStatsConn) OpenUniStream() (transport.SendStream, error)         { return nil, io.EOF }
 func (noStatsConn) OpenUniStreamSync(context.Context) (transport.SendStream, error) {
 	return nil, io.EOF

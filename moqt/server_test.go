@@ -192,7 +192,7 @@ func TestBroadcastServer_PublishSubscribeRoundTrip(t *testing.T) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				gw, err := tw.OpenGroup()
+				gw, err := tw.OpenGroup(ctx)
 				if err != nil {
 					return
 				}

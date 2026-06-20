@@ -9,21 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **moqt:** `BenchmarkEgress_Saturating`, a saturating (unpaced) real-QUIC egress benchmark that drives `GroupWriter.WriteFrame` → `frame.encode` → QUIC stream write under load. Fills a gap: every prior I/O benchmark is either `io.Discard` (no Write work) or publisher-paced at ~30fps (transport idle). Baseline throughput is ~100 MB/s flat across 1K–64K frames; CPU-profiling under it shows the egress encode path is ~0% of cost (the UDP write syscall dominates at ~48%). Classified with the other real-QUIC integration benchmarks (run in `benchmark-integration`, not on PRs).
+- **moqt:** `BenchmarkEgress_Saturating`, a saturating real-QUIC egress benchmark that drives `GroupWriter.WriteFrame` end-to-end (encode → QUIC stream → UDP). Run in the `benchmark-integration` job, not on PRs.
 
 ### Changed
 
-- **moqt/internal/message:** `ReadMessageLength` now fast-paths `io.ByteReader` (bytes.Reader, bufio.Reader, QUIC streams), eliminating a per-call heap allocation (1 → 0) and ~65% faster varint-length decoding. Behavior is unchanged; non-ByteReader callers use the previous allocating path.
+- **moqt/internal/message:** `ReadMessageLength` fast-paths `io.ByteReader`, eliminating a per-call allocation and improving varint-length decoding ~65%.
 - **Dependencies:** Updated `quic-go` to v0.60.0.
+- **moqt:** **Breaking:** `TrackWriter.OpenGroup` and `OpenGroupAt` now take a `context.Context` as their first argument. Update call sites: `tw.OpenGroup()` → `tw.OpenGroup(ctx)`.
+
+### Deprecated
+
+- **transport:** `StreamConn.OpenStream` and `OpenUniStream`; use `OpenStreamSync` / `OpenUniStreamSync`, which backpressure on the peer's stream-limit flow control instead of returning a stream-limit error. Slated for removal in a future release.
+
 ### Removed
 
 - **moqt:** Removed the unused `Parameters` type and its `ParametersLen` / `WriteParameters` helpers from the internal `message` package; they had no production callers.
 
 ### Fixed
 
-- **moqt:** `TrackWriter.OpenGroup` now backpressures (blocks via `OpenUniStreamSync`) when the peer's unidirectional-stream limit is reached, instead of returning quic-go's `StreamLimitReachedError` ("too many open streams") and aborting the publisher. Previously, opening groups faster than the subscriber recycled streams (e.g. one group per frame at high rate) aborted the whole track, after which the connection idle-timed out (~30s, "no recent network activity"). `transport.StreamConn` gains `OpenUniStreamSync` (added on the webtransport wrapper; the quic-go wrapper already had it). Behavior change: `OpenGroup` now blocks rather than erroring on this transient flow-control condition.
-- **moqt:** `Server` now wires a `WebTransportHandler` (built from the Server's `Handler` / `TrackMux` / `Config`) as the default WebTransport handler. Previously `Server.init()` passed a nil HTTP handler, so every WebTransport request fell through to `http.DefaultServeMux` (no MOQ route) and 404'd — the Server's default WebTransport path was non-functional, and `BenchmarkBroadcastServer_HighLoad` silently reported 0 frames/op.
-- **moqt:** `Server.Close()` no longer hangs when connections are active. Previously the "terminate sessions" loop had an empty body (active connections were never closed) and sessions were removed from the connection manager only on an explicit, successful `CloseWithError` — so peer-/force-closed sessions leaked and `Server.Close()`/`Shutdown()` blocked forever on `<-connManager.Done()`. `Server.Close()` now closes active connections, the serving paths (`WebTransportHandler.ServeHTTP`, `handleNativeQUIC`) clean up the session when the Handler returns, and `Session.CloseWithError` always removes the connection from the manager.
+- **moqt:** Outgoing streams now backpressure on the peer's stream limit instead of aborting. Group streams open via `OpenUniStreamSync` (`OpenGroup`/`OpenGroupAt`) and control streams (`Subscribe`, `Fetch`, `AcceptAnnounce`, `Probe`, `Server.goAway`) via `OpenStreamSync` — both are now declared on `StreamConn`. Previously a stream-limit error could abort the publisher or stall the connection.
+- **moqt:** `Server` now serves WebTransport by default; previously it passed a nil handler and WebTransport requests 404'd via `http.DefaultServeMux`.
+- **moqt:** `Server.Close()` no longer hangs when connections are active; active connections are now closed and sessions are always removed from the connection manager.
 
 ## [v0.15.0] - 2026-04-26
 

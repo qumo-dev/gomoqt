@@ -31,13 +31,31 @@ type StreamConn interface {
 	// LocalAddr returns the local network address.
 	LocalAddr() net.Addr
 
-	// OpenStream opens a new bidirectional stream without blocking.
+	// OpenStream opens a new bidirectional stream without blocking, returning a
+	// StreamLimitReachedError (wrapped by the transport) when the peer's
+	// MAX_STREAMS credit is exhausted.
+	//
+	// Deprecated: Use OpenStreamSync, which backpressures on the peer's
+	// stream-limit flow control instead of failing. All of gomoqt's outgoing
+	// streams use the Sync variant; this non-blocking form has no production
+	// callers and remains only for parity with quic-go.
 	OpenStream() (Stream, error)
 
-	// OpenUniStream opens a new unidirectional stream without blocking.
-	// It returns a StreamLimitReachedError (wrapped by the transport) when the
-	// peer's MAX_STREAMS credit is exhausted; use OpenUniStreamSync to block
-	// (backpressure) instead.
+	// OpenStreamSync opens a new bidirectional stream, blocking until the peer's
+	// stream-limit flow control grants one (or ctx is canceled). Prefer this over
+	// OpenStream when opening a stream should backpressure rather than fail on a
+	// transient stream-limit condition — e.g. opening MoQ control streams
+	// (subscribe, fetch, announce, probe) and GOAWAY.
+	OpenStreamSync(ctx context.Context) (Stream, error)
+
+	// OpenUniStream opens a new unidirectional stream without blocking,
+	// returning a StreamLimitReachedError (wrapped by the transport) when the
+	// peer's MAX_STREAMS credit is exhausted.
+	//
+	// Deprecated: Use OpenUniStreamSync, which backpressures on the peer's
+	// stream-limit flow control instead of failing. gomoqt opens group streams
+	// via OpenUniStreamSync; this non-blocking form has no production callers
+	// and remains only for parity with quic-go.
 	OpenUniStream() (SendStream, error)
 
 	// OpenUniStreamSync opens a new unidirectional stream, blocking until the

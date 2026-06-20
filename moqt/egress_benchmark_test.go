@@ -155,7 +155,7 @@ func setupSaturatingServer(tb testing.TB, ctx context.Context, frameSize, frames
 			default:
 			}
 
-			gw, err := tw.OpenGroup()
+			gw, err := tw.OpenGroup(ctx)
 			if err != nil {
 				return
 			}

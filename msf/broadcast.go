@@ -228,7 +228,7 @@ func (b *Broadcast) serveCatalogTrack(tw *moqt.TrackWriter) {
 		return
 	}
 
-	group, err := tw.OpenGroup()
+	group, err := tw.OpenGroup(tw.Context())
 	if err != nil {
 		tw.CloseWithError(moqt.SubscribeErrorCodeInternal)
 		return

@@ -578,7 +578,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // closing the connection with a timeout error if needed.
 func (s *Server) goAway(ctx context.Context, conn StreamConn) error {
 	// Best-effort attempt to send a GOAWAY message.
-	stream, err := conn.OpenStream()
+	stream, err := conn.OpenStreamSync(ctx)
 	if err != nil {
 		return err
 	}

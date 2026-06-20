@@ -15,7 +15,7 @@ func main() {
 		for {
 			time.Sleep(100 * time.Millisecond)
 
-			gw, err := tw.OpenGroup()
+			gw, err := tw.OpenGroup(tw.Context())
 			if err != nil {
 				slog.Error("failed to open group", "error", err)
 				return

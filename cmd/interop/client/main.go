@@ -148,7 +148,7 @@ func main() {
 		}()
 
 		fmt.Print("Opening group...")
-		group, err := tw.OpenGroup()
+		group, err := tw.OpenGroup(tw.Context())
 		if err != nil {
 			fmt.Printf("failed\n  Error: %v\n", err)
 			return

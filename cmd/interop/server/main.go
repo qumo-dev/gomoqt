@@ -104,7 +104,7 @@ func runInteropSession(sess *moqt.Session, mux *moqt.TrackMux, serverDone chan s
 	mux.PublishFunc(context.Background(), path, func(tw *moqt.TrackWriter) {
 		fmt.Printf("Serving a track: %s\n", string(path))
 
-		group, err := tw.OpenGroup()
+		group, err := tw.OpenGroup(tw.Context())
 		if err != nil {
 			fmt.Printf("Opening group... failed\n  Error: %v\n", err)
 			return

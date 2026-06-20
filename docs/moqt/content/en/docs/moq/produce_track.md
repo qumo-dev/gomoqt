@@ -20,7 +20,7 @@ Producing a track involves writing media data to a `moqt.TrackWriter`, which man
         defer tw.Close() // Always close when done
 
         for {
-            gw, err := tw.OpenGroup() // Create a new group
+            gw, err := tw.OpenGroup(ctx) // Create a new group
             if err != nil {
                 // Handle error
                 return
@@ -89,7 +89,7 @@ For explicit sequence control, use `TrackWriter.OpenGroupAt` method with a speci
 
 ```go
     var tw *moqt.TrackWriter
-    gw, err := tw.OpenGroup() // Auto-incrementing sequence
+    gw, err := tw.OpenGroup(tw.Context()) // Auto-incrementing sequence
     if err != nil {
         // Handle error
         return
@@ -100,12 +100,15 @@ For explicit sequence control, use `TrackWriter.OpenGroupAt` method with a speci
 
 ```go
     // Or use OpenGroupAt for explicit sequence control
-    gw, err := tw.OpenGroupAt(moqt.GroupSequence(42))
+    gw, err := tw.OpenGroupAt(tw.Context(), moqt.GroupSequence(42))
     if err != nil {
         // Handle error
         return
     }
 ```
+
+> [!NOTE] Note: Context and Backpressure
+> `OpenGroup`/`OpenGroupAt` take a `context.Context` as their first argument. The group is opened on a fresh QUIC stream; when the peer's concurrent-stream limit (MAX_STREAMS) is reached, the call blocks — applying flow-control backpressure — until a stream is granted or the context is done, instead of failing. Pass `tw.Context()` to bound the open to the track's lifetime, or a deadline-bearing context to drop a group under pressure rather than wait.
 
 > [!NOTE] Note: Group Ordering
 > Groups are supposed to be produced in order, with each group having a unique increasing sequence number and then consumed in order by the subscriber.

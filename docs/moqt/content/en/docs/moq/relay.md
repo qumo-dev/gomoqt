@@ -26,7 +26,7 @@ To forward media data, a server subscribes to a source track as a subscriber to 
 
             writers := make([]*moqt.GroupWriter, 0, len(dests))
             for _, dest := range dests {
-                gw, err := dest.OpenGroupAt(seq)
+                gw, err := dest.OpenGroupAt(dest.Context(), seq)
                 if err != nil {
                     break
                 }

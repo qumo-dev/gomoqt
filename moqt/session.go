@@ -239,7 +239,7 @@ func (s *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackN
 
 	id := s.nextSubscribeID()
 
-	stream, err := s.conn.OpenStream()
+	stream, err := s.conn.OpenStreamSync(ctx)
 	if err != nil {
 		if appErr, ok := errors.AsType[*transport.ApplicationError](err); ok {
 			return nil, &SessionError{
@@ -340,7 +340,7 @@ func (s *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
 		return nil, ErrClosedSession
 	}
 
-	stream, err := s.conn.OpenStream()
+	stream, err := s.conn.OpenStreamSync(s.ctx)
 	if err != nil {
 		if appErr, ok := errors.AsType[*transport.ApplicationError](err); ok {
 			return nil, &SessionError{
@@ -399,7 +399,7 @@ func (sess *Session) AcceptAnnounce(prefix string) (*AnnouncementReader, error) 
 		return nil, ErrClosedSession
 	}
 
-	stream, err := sess.conn.OpenStream()
+	stream, err := sess.conn.OpenStreamSync(sess.ctx)
 	if err != nil {
 		if appErr, ok := errors.AsType[*transport.ApplicationError](err); ok {
 			return nil, &SessionError{
@@ -490,7 +490,7 @@ func (sess *Session) Probe(targetBitrate uint64) (<-chan ProbeResult, error) {
 	probeStream := sess.outgoingProbeStream
 	// Lazily open the probe stream.
 	if probeStream == nil || probeStream.Context().Err() != nil {
-		stream, err := sess.conn.OpenStream()
+		stream, err := sess.conn.OpenStreamSync(sess.ctx)
 		if err != nil {
 			if appErr, ok := errors.AsType[*transport.ApplicationError](err); ok {
 				return nil, &SessionError{ApplicationError: appErr}
@@ -645,14 +645,13 @@ func (sess *Session) processBiStream(stream transport.Stream) {
 			BroadcastPath(sm.BroadcastPath),
 			TrackName(sm.TrackName),
 			substr,
-			func() (transport.SendStream, error) {
-				// Backpressure: block until the peer grants a uni stream (MAX_STREAMS)
-				// rather than returning a stream-limit error. Without this, a publisher
-				// opening groups faster than the peer recycles streams hit
-				// StreamLimitReachedError and aborted the whole track, idling the
-				// connection (see the payload-1K/fpg-1 stream-churn repro).
-				return sess.conn.OpenUniStreamSync(sess.ctx)
-			},
+			// Backpressure: OpenUniStreamSync blocks until the peer grants a uni
+			// stream (MAX_STREAMS) instead of returning a stream-limit error.
+			// Without this, a publisher opening groups faster than the peer
+			// recycles streams hit StreamLimitReachedError and aborted the whole
+			// track, idling the connection (payload-1K/fpg-1 stream-churn repro).
+			// The ctx handed to OpenGroup/OpenGroupAt flows through for cancellation.
+			sess.conn.OpenUniStreamSync,
 			func() { sess.removeTrackWriter(SubscribeID(sm.SubscribeID)) },
 		)
 		sess.addTrackWriter(SubscribeID(sm.SubscribeID), track)

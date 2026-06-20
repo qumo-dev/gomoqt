@@ -25,7 +25,7 @@ func newTrackWriterDropTestSender(t *testing.T) (*TrackWriter, *bytes.Buffer) {
 
 	substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		mockSendStream := &FakeQUICSendStream{}
 		return mockSendStream, nil
 	}
@@ -34,7 +34,7 @@ func newTrackWriterDropTestSender(t *testing.T) (*TrackWriter, *bytes.Buffer) {
 }
 
 func TestNewTrackWriter(t *testing.T) {
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		mockSendStream := &FakeQUICSendStream{}
 		return mockSendStream, nil
 	}
@@ -66,7 +66,7 @@ func TestTrackWriter_OpenGroup(t *testing.T) {
 	}
 	substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		mockSendStream := &FakeQUICSendStream{}
 		return mockSendStream, nil
 	}
@@ -76,7 +76,7 @@ func TestTrackWriter_OpenGroup(t *testing.T) {
 	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, onCloseTrack)
 
 	// Test opening a group
-	group, err := sender.OpenGroup()
+	group, err := sender.OpenGroup(context.Background())
 	assert.NoError(t, err, "OpenGroup should not return error")
 	assert.NotNil(t, group, "group should not be nil")
 	assert.True(t, acceptCalled, "accept function should be called")
@@ -89,7 +89,7 @@ func TestTrackWriter_OpenGroup_ContextCanceled(t *testing.T) {
 	mockStream := &FakeQUICStream{}
 	mockStream.ParentCtx = ctx
 
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		return nil, nil
 	}
 	substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
@@ -98,7 +98,7 @@ func TestTrackWriter_OpenGroup_ContextCanceled(t *testing.T) {
 	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, onCloseTrack)
 
 	// Test opening a group with canceled context
-	group, err := sender.OpenGroup()
+	group, err := sender.OpenGroup(context.Background())
 	assert.Error(t, err, "OpenGroup should return error with canceled context")
 	assert.Nil(t, group, "group should be nil with canceled context")
 	assert.Equal(t, context.Canceled, err, "error should be context.Canceled")
@@ -107,7 +107,7 @@ func TestTrackWriter_OpenGroup_ContextCanceled(t *testing.T) {
 func TestTrackWriter_OpenGroup_OpenGroupError(t *testing.T) {
 	expectedError := errors.New("failed to open group")
 
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		return nil, expectedError
 	}
 
@@ -119,7 +119,7 @@ func TestTrackWriter_OpenGroup_OpenGroupError(t *testing.T) {
 	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, onCloseTrack)
 
 	// Test opening a group when openUniStreamFunc returns error
-	group, err := sender.OpenGroup()
+	group, err := sender.OpenGroup(context.Background())
 	assert.Error(t, err, "OpenGroup should return error when openUniStreamFunc fails")
 	assert.Nil(t, group, "group should be nil when openUniStreamFunc fails")
 	assert.Contains(t, err.Error(), expectedError.Error(), "error should contain the error from openUniStreamFunc")
@@ -135,7 +135,7 @@ func TestTrackWriter_OpenGroup_Success(t *testing.T) {
 	}
 	substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		mockSendStream := &FakeQUICSendStream{}
 		return mockSendStream, nil
 	}
@@ -145,7 +145,7 @@ func TestTrackWriter_OpenGroup_Success(t *testing.T) {
 	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, onCloseTrack)
 
 	// Test successful group opening
-	group, err := sender.OpenGroup()
+	group, err := sender.OpenGroup(context.Background())
 	assert.NoError(t, err, "OpenGroup should not return error")
 	assert.NotNil(t, group, "group should not be nil")
 	assert.True(t, acceptCalled, "accept function should be called")
@@ -159,7 +159,7 @@ func TestTrackWriter_OpenGroup_Success(t *testing.T) {
 func TestTrackWriter_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		mockSendStream := &FakeQUICSendStream{}
 		mockSendStream.ParentCtx = ctx
 		return mockSendStream, nil
@@ -172,7 +172,7 @@ func TestTrackWriter_ContextCancellation(t *testing.T) {
 	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, onCloseTrack)
 
 	// Open a group first
-	group, err := sender.OpenGroup()
+	group, err := sender.OpenGroup(context.Background())
 	assert.NoError(t, err)
 	assert.NotNil(t, group)
 
@@ -180,14 +180,14 @@ func TestTrackWriter_ContextCancellation(t *testing.T) {
 	cancel()
 
 	// Try to open another group - this should fail due to cancelled context
-	group2, err := sender.OpenGroup()
+	group2, err := sender.OpenGroup(context.Background())
 	assert.Error(t, err, "OpenGroup should return error with cancelled context")
 	assert.Nil(t, group2, "group should be nil with cancelled context")
 	assert.Equal(t, context.Canceled, err, "error should be context.Canceled")
 }
 
 func TestTrackWriter_Close(t *testing.T) {
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		mockSendStream := &FakeQUICSendStream{}
 		return mockSendStream, nil
 	}
@@ -214,7 +214,7 @@ func TestTrackWriter_Close(t *testing.T) {
 }
 
 func TestTrackWriter_OpenAfterClose(t *testing.T) {
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		mockSendStream := &FakeQUICSendStream{}
 		return mockSendStream, nil
 	}
@@ -253,7 +253,7 @@ func TestTrackWriter_OpenAfterClose(t *testing.T) {
 			}
 		}()
 
-		group, err = sender.OpenGroup()
+		group, err = sender.OpenGroup(context.Background())
 	}()
 
 	if panicked {
@@ -270,7 +270,7 @@ func TestTrackWriter_OpenAfterClose(t *testing.T) {
 }
 
 func TestTrackWriter_OpenWhileClose(t *testing.T) {
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		mockSendStream := &FakeQUICSendStream{}
 		return mockSendStream, nil
 	}
@@ -289,7 +289,7 @@ func TestTrackWriter_OpenWhileClose(t *testing.T) {
 				t.Logf("OpenGroup panicked during concurrent Close: %v", r)
 			}
 		}()
-		group, err := sender.OpenGroup()
+		group, err := sender.OpenGroup(context.Background())
 		// Because Close is called concurrently, OpenGroup may return nil
 		if err == nil && group != nil {
 			// If it succeeded, ensure group is closed later
@@ -308,7 +308,7 @@ func TestTrackWriter_OpenWhileClose(t *testing.T) {
 }
 
 func TestTrackWriter_Context(t *testing.T) {
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		mockSendStream := &FakeQUICSendStream{}
 		return mockSendStream, nil
 	}
@@ -323,7 +323,7 @@ func TestTrackWriter_Context(t *testing.T) {
 }
 
 func TestTrackWriter_TrackConfig(t *testing.T) {
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		mockSendStream := &FakeQUICSendStream{}
 		return mockSendStream, nil
 	}
@@ -344,7 +344,7 @@ func TestTrackWriter_TrackConfig(t *testing.T) {
 }
 
 func TestTrackWriter_RemoveGroup(t *testing.T) {
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		mockSendStream := &FakeQUICSendStream{}
 		return mockSendStream, nil
 	}
@@ -368,7 +368,7 @@ func TestTrackWriter_OpenGroup_AutoIncrement(t *testing.T) {
 	mockStream := &FakeQUICStream{}
 	substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		mockSendStream := &FakeQUICSendStream{}
 		return mockSendStream, nil
 	}
@@ -377,15 +377,15 @@ func TestTrackWriter_OpenGroup_AutoIncrement(t *testing.T) {
 	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, onCloseTrack)
 
 	// Test that sequences auto-increment
-	group1, err := sender.OpenGroup()
+	group1, err := sender.OpenGroup(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, GroupSequence(1), group1.GroupSequence())
 
-	group2, err := sender.OpenGroup()
+	group2, err := sender.OpenGroup(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, GroupSequence(2), group2.GroupSequence())
 
-	group3, err := sender.OpenGroup()
+	group3, err := sender.OpenGroup(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, GroupSequence(3), group3.GroupSequence())
 }
@@ -394,7 +394,7 @@ func TestTrackWriter_SkipGroups(t *testing.T) {
 	mockStream := &FakeQUICStream{}
 	substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		mockSendStream := &FakeQUICSendStream{}
 		return mockSendStream, nil
 	}
@@ -403,7 +403,7 @@ func TestTrackWriter_SkipGroups(t *testing.T) {
 	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, onCloseTrack)
 
 	// First group
-	group1, err := sender.OpenGroup()
+	group1, err := sender.OpenGroup(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, GroupSequence(1), group1.GroupSequence())
 
@@ -411,7 +411,7 @@ func TestTrackWriter_SkipGroups(t *testing.T) {
 	sender.SkipGroups(3)
 
 	// Next group should be 5
-	group2, err := sender.OpenGroup()
+	group2, err := sender.OpenGroup(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, GroupSequence(5), group2.GroupSequence())
 
@@ -419,7 +419,7 @@ func TestTrackWriter_SkipGroups(t *testing.T) {
 	sender.SkipGroups(1)
 
 	// Next should be 7
-	group3, err := sender.OpenGroup()
+	group3, err := sender.OpenGroup(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, GroupSequence(7), group3.GroupSequence())
 }
@@ -459,14 +459,14 @@ func TestTrackWriter_DropGroups(t *testing.T) {
 func TestTrackWriter_DropNextGroups(t *testing.T) {
 	sender, buf := newTrackWriterDropTestSender(t)
 
-	group, err := sender.OpenGroup()
+	group, err := sender.OpenGroup(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, GroupSequence(1), group.GroupSequence())
 
 	err = sender.DropNextGroups(3, SubscribeErrorCodeInternal)
 	require.NoError(t, err)
 
-	group2, err := sender.OpenGroup()
+	group2, err := sender.OpenGroup(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, GroupSequence(5), group2.GroupSequence())
 
@@ -493,20 +493,20 @@ func TestTrackWriter_OpenGroupAt(t *testing.T) {
 	mockStream := &FakeQUICStream{}
 	substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		return &FakeQUICSendStream{}, nil
 	}
 
 	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {})
 
 	// Open at a specific sequence
-	group, err := sender.OpenGroupAt(GroupSequence(10))
+	group, err := sender.OpenGroupAt(context.Background(), GroupSequence(10))
 	assert.NoError(t, err)
 	assert.NotNil(t, group)
 	assert.Equal(t, GroupSequence(10), group.GroupSequence())
 
 	// Next OpenGroup should be at 12 (counter was advanced to 11, Add(1) → 12)
-	group2, err := sender.OpenGroup()
+	group2, err := sender.OpenGroup(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, GroupSequence(12), group2.GroupSequence())
 }
@@ -515,35 +515,35 @@ func TestTrackWriter_OpenGroupAt_AdvancesCounter(t *testing.T) {
 	mockStream := &FakeQUICStream{}
 	substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		return &FakeQUICSendStream{}, nil
 	}
 
 	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {})
 
 	// Open some groups first
-	g1, err := sender.OpenGroup()
+	g1, err := sender.OpenGroup(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, GroupSequence(1), g1.GroupSequence())
 
 	// OpenGroupAt at a lower sequence than current counter should still work
 	// but not reduce the counter
-	g2, err := sender.OpenGroupAt(GroupSequence(1))
+	g2, err := sender.OpenGroupAt(context.Background(), GroupSequence(1))
 	assert.NoError(t, err)
 	assert.Equal(t, GroupSequence(1), g2.GroupSequence())
 
 	// Next OpenGroup should still be at 3 (counter stayed at 2, Add(1) → 3)
-	g3, err := sender.OpenGroup()
+	g3, err := sender.OpenGroup(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, GroupSequence(3), g3.GroupSequence())
 
 	// OpenGroupAt at a high sequence advances counter to 101
-	g4, err := sender.OpenGroupAt(GroupSequence(100))
+	g4, err := sender.OpenGroupAt(context.Background(), GroupSequence(100))
 	assert.NoError(t, err)
 	assert.Equal(t, GroupSequence(100), g4.GroupSequence())
 
 	// counter is now 101, Add(1) → 102
-	g5, err := sender.OpenGroup()
+	g5, err := sender.OpenGroup(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, GroupSequence(102), g5.GroupSequence())
 }
@@ -578,7 +578,7 @@ func TestTrackWriter_Updated(t *testing.T) {
 	mockStream := &FakeQUICStream{}
 	substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		return &FakeQUICSendStream{}, nil
 	}
 
@@ -635,7 +635,7 @@ func TestTrackWriter_DropGroups_ContextCanceled(t *testing.T) {
 	mockStream := &FakeQUICStream{ParentCtx: ctx}
 	substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		return &FakeQUICSendStream{}, nil
 	}
 

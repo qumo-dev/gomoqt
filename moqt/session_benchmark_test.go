@@ -180,7 +180,7 @@ func BenchmarkSession_TrackWriterOperations(b *testing.B) {
 			BroadcastPath("/test"),
 			TrackName("track"),
 			substr,
-			func() (transport.SendStream, error) { return nil, nil },
+			func(_ context.Context) (transport.SendStream, error) { return nil, nil },
 			func() {},
 		)
 
