@@ -47,15 +47,21 @@ func WriteBytes(dest []byte, b []byte) ([]byte, int) {
 	return dest, n + len(b)
 }
 
+// WriteString appends a string to the byte slice directly, avoiding string-to-bytes conversion allocations.
 func WriteString(dest []byte, s string) ([]byte, int) {
-	return WriteBytes(dest, []byte(s))
+	dest, n := WriteVarint(dest, uint64(len(s)))
+	dest = append(dest, s...)
+	return dest, n + len(s)
 }
 
+// WriteStringArray appends an array of strings, inlining the string append for zero-allocation performance.
 func WriteStringArray(dest []byte, arr []string) ([]byte, int) {
 	dest, n := WriteVarint(dest, uint64(len(arr)))
 	var m int
 	for _, str := range arr {
-		dest, m = WriteString(dest, str)
+		dest, m = WriteVarint(dest, uint64(len(str)))
+		dest = append(dest, str...)
+		m += len(str)
 		n += m
 	}
 	return dest, n
