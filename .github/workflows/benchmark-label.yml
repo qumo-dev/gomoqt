@@ -15,6 +15,24 @@
 # -benchtime, so the alloc columns are meaningful even before go.yml's baseline
 # is captured at -benchtime=1s. ns/op becomes trustworthy once main's baseline
 # is also -benchtime=1s.
+#
+# Turnaround over precision: this workflow is intentionally tuned for fast
+# per-PR feedback, not maximum statistical rigor. -count=3 (down from 10) keeps
+# a solo run well under the job's 25m timeout; allocs/op and B/op are
+# deterministic and unaffected by -count, so allocation deltas stay a reliable
+# signal at any -count. For ns/op significance on important changes, re-run
+# locally with a higher -count.
+#
+# Known wall-time driver (why -count stays low): several micro-benchmarks wrap
+# expensive per-iteration setup in b.StopTimer()/b.StartTimer() — e.g.
+# BenchmarkAnnouncement_EndWithHandlers registers up to 1000 handlers/iter,
+# BenchmarkSession_* spin up mock streams/iter, and BenchmarkTrackWriter_*
+# (_OpenGroup/_ConcurrentOpenGroup/_ActiveGroupManagement) build per-iter
+# state. With -benchtime=1s the measured slice stays small but b.N grows large,
+# so WALL time per benchmark is dominated by the stopped setup, not the measured
+# code. -count=3 + the 25m timeout keep this bounded; fully fixing it needs
+# reworking those benchmarks (b.Loop + Cleanup, or lower benchtime) — tracked
+# as follow-up, not here.
 name: Benchmark (performance-check)
 
 on:
@@ -32,6 +50,10 @@ jobs:
     # Only run when the performance-check label is added (or on manual dispatch).
     if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'performance-check'
     runs-on: ubuntu-latest
+    # Safety net: a normal -count=3 micro run finishes in ~10-15m. 25m lets a
+    # slow shared runner finish while ensuring a stuck/hung benchmark fails fast
+    # instead of churning for hours.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -78,8 +100,10 @@ jobs:
         # testing.Short() -> b.Skip); they are measured by go.yml's
         # benchmark-integration job (on main, not on PRs).
         # -benchtime=1s lets Go pick a high iteration count for a stable mean.
+        # -count=3 (must match go.yml's baseline `benchmark` job) trades
+        # statistical power for turnaround; allocs/op stay deterministic.
         run: |
-          go test -run='^$' -bench=. -short -benchmem -benchtime=1s -count=10 -timeout=15m ./moqt/... | tee bench-new.txt
+          go test -run='^$' -bench=. -short -benchmem -benchtime=1s -count=3 -timeout=15m ./moqt/... | tee bench-new.txt
 
       - name: Compare against baseline and build comment
         if: steps.baseline.outputs.have_baseline == 'true'
@@ -88,7 +112,7 @@ jobs:
           {
             echo '## 🏎️ Benchmark comparison (main → PR)'
             echo ''
-            echo '<sub>Triggered by the `performance-check` label. Microbenchmarks only (`-benchtime=1s -count=10`); the slow broadcast/QUIC integration suite is excluded via `-skip`. `↓`/`↑` = significant decrease/increase; `~` = no significant change (p ≥ 0.05).</sub>'
+            echo '<sub>Triggered by the `performance-check` label. Microbenchmarks only (`-benchtime=1s -count=3`, tuned for turnaround not precision); the slow broadcast/QUIC integration suite is skipped via `-short`. `↓`/`↑` = significant decrease/increase; `~` = no significant change (p ≥ 0.05). `allocs/op`/`B/op` deltas are deterministic and reliable; treat `sec/op` as a quick signal and re-run locally with higher `-count` for important changes.</sub>'
             echo ''
             echo '```text'
             benchstat baseline/bench-baseline.txt bench-new.txt
