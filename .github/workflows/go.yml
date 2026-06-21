@@ -33,7 +33,10 @@ jobs:
         run: go test -v ./...
 
       - name: Test with coverage
-        run: go test -coverprofile=coverage.out -covermode=atomic ./moqt/...
+        # -coverpkg=./... records coverage across all packages, not just the one
+        # under test, so cross-package execution (e.g. moqt tests exercising
+        # moqt/internal/* and transport) is attributed correctly.
+        run: go test -coverprofile=coverage.out -covermode=atomic -coverpkg=./... ./...
 
       - name: Upload coverage report
         uses: codecov/codecov-action@v5
