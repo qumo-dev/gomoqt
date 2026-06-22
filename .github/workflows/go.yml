@@ -68,46 +68,19 @@ jobs:
           # and the trackReaders map at session.go ~732).
           go test -race -count=1 -timeout=10m ./moqt/...
 
-  # Microbenchmark baseline capture. Runs ONLY on push (main/tags) and manual
-  # dispatch to produce the bench-baseline artifact that the performance-check
-  # label workflow (.github/workflows/benchmark-label.yml) compares PRs against.
-  # Benchmarking a PR is NOT done here -- add the `performance-check` label to a
-  # PR and benchmark-label.yml runs the comparison and posts it as a comment.
-  # Microbenchmarks only (fast, stable signal); the slow broadcast/QUIC
-  # integration suite runs in the benchmark-integration job below.
-  benchmark:
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+  # (The per-PR microbenchmark baseline job used to live here, uploading a
+  # bench-baseline artifact. Removed: benchmark-label.yml now runs base and PR
+  # back-to-back in the same job, so no pre-captured baseline is needed -- and a
+  # separately captured baseline was the source of cross-run drift (different
+  # runner/settings/commit). Main-branch microbenchmark trends are still
+  # captured by benchmark-integration below for archival.)
 
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: "1.26.0"
-
-      - name: Run benchmarks (micro)
-        # Microbenchmarks only: -skip excludes the slow broadcast/QUIC
-        # integration benchmarks (BenchmarkBroadcastServer_* and
-        # BenchmarkStreamIo_RealQUIC, run separately in benchmark-integration).
-        # -benchtime=1s gives a stable mean (1x had ~150% CV on micros);
-        # -count=10 gives benchstat enough samples to estimate variance.
-        run: |
-          go test -run='^$' -bench=. -skip='BroadcastServer|StreamIo_RealQUIC' -benchmem -benchtime=1s -count=10 -timeout=15m ./moqt/... | tee bench-new.txt
-
-      - name: Upload baseline
-        uses: actions/upload-artifact@v4
-        with:
-          name: bench-baseline
-          path: bench-new.txt
-          retention-days: 90
-
-  # Slow broadcast/QUIC integration benchmarks. Each op is a multi-second
-  # aggregate (frames/sec, MB/s) that is stable across samples, so -benchtime=1x
-  # is appropriate here (unlike the microbenchmarks above). Runs only on push
-  # (main/tags) and manual dispatch — NOT on PRs — because it costs ~10-19
-  # runner-minutes and is irrelevant to wire-layer micro-PRs. Uploaded for trend
-  # archival only; no benchstat gate.
+  # Slow real-QUIC integration benchmarks. Runs the FULL benchmark suite WITHOUT
+  # -short, so the benchmarks that self-skip under testing.Short() actually run
+  # here. Each op is a multi-second aggregate (frames/sec, MB/s) stable across
+  # samples, so -benchtime=1x is appropriate (unlike the microbenchmarks above).
+  # Runs only on push (main/tags) and manual dispatch — NOT on PRs — because it
+  # costs ~10-19 runner-minutes. Uploaded for trend archival only; no benchstat gate.
   benchmark-integration:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -121,7 +94,7 @@ jobs:
 
       - name: Run integration benchmarks
         run: |
-          go test -run='^$' -bench='BroadcastServer|StreamIo_RealQUIC' -benchmem -benchtime=1x -count=5 -timeout=25m ./moqt/... | tee bench-integration.txt
+          go test -run='^$' -bench=. -benchmem -benchtime=1x -count=5 -timeout=25m ./moqt/... | tee bench-integration.txt
 
       - name: Upload integration bench output
         uses: actions/upload-artifact@v4

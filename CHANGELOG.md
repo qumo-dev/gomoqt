@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### Changed
+
+- **moqt:** `Frame.decode()` now uses exponential capacity growth (`newCap := max(required, 2*cap(slice))`) instead of exactly-sized allocations, significantly reducing GC pressure and maintaining proper struct buffer invariants.
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
@@ -6,6 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Added
+
+- **moqt:** `BenchmarkEgress_Saturating`, a saturating (unpaced) real-QUIC egress benchmark that drives `GroupWriter.WriteFrame` → `frame.encode` → QUIC stream write under load. Fills a gap: every prior I/O benchmark is either `io.Discard` (no Write work) or publisher-paced at ~30fps (transport idle). Baseline throughput is ~100 MB/s flat across 1K–64K frames; CPU-profiling under it shows the egress encode path is ~0% of cost (the UDP write syscall dominates at ~48%). Classified with the other real-QUIC integration benchmarks (run in `benchmark-integration`, not on PRs).
 
 ### Changed
 
