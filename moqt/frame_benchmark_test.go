@@ -46,9 +46,7 @@ func BenchmarkFrame_Decode(b *testing.B) {
 			_ = frame.encode(&buf)
 			encodedData := buf.Bytes()
 
-			// Prepare repeating reader
-			repeatingData := bytes.Repeat(encodedData, b.N+1)
-			reader := bytes.NewReader(repeatingData)
+			reader := bytes.NewReader(encodedData)
 
 			decodeFrame := NewFrame(size)
 
@@ -57,11 +55,9 @@ func BenchmarkFrame_Decode(b *testing.B) {
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
+				reader.Reset(encodedData)
 				decodeFrame.Reset()
 				err := decodeFrame.decode(reader)
-				if err == io.EOF {
-					break
-				}
 				if err != nil {
 					b.Fatal(err)
 				}
