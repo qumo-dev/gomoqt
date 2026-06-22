@@ -45,6 +45,9 @@ import (
 // Note: ns/op and MB/s are PRELIMINARY — concurrent worktrees may perturb
 // timing. Treat numbers as comparative across payload sizes within one run.
 func BenchmarkStreamIo_RealQUIC(b *testing.B) {
+	if testing.Short() {
+		b.Skip("real-QUIC integration benchmark; skipped in -short")
+	}
 	sizes := []int{1 << 10, 16 << 10, 64 << 10} // 1K 16K 64K (harness cap at ~30fps makes 256K/1M slow)
 
 	for _, size := range sizes {

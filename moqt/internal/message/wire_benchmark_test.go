@@ -531,10 +531,10 @@ var varintMagnitudes = []struct {
 	val  uint64
 }{
 	{"0", 0},
-	{"127", 127},        // maxVarInt1 (1-byte)
-	{"16383", 16383},    // maxVarInt2 (2-byte)
-	{"1<<21", 1 << 21},  // inside 4-byte bucket
-	{"1<<28", 1 << 28},  // inside 4-byte bucket
+	{"127", 127},             // maxVarInt1 (1-byte)
+	{"16383", 16383},         // maxVarInt2 (2-byte)
+	{"1<<21", 1 << 21},       // inside 4-byte bucket
+	{"1<<28", 1 << 28},       // inside 4-byte bucket
 	{"maxUint62", maxUint62}, // maxVarInt8 (8-byte, max valid)
 }
 

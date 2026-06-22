@@ -1,0 +1,2 @@
+# CI helper scripts run on Ubuntu runners — keep LF regardless of checkout OS.
+*.sh text eol=lf
