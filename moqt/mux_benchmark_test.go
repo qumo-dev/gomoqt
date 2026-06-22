@@ -436,12 +436,18 @@ func BenchmarkTrackMux_StringOperations(b *testing.B) {
 			BroadcastPath("/game/match456/audio"),
 		}
 
+		// Pre-convert paths to strings to measure just the splitting operation
+		stringPaths := make([]string, len(paths))
+		for i, p := range paths {
+			stringPaths[i] = string(p)
+		}
+
 		b.ReportAllocs()
 		b.ResetTimer()
 
 		for i := 0; b.Loop(); i++ {
-			path := paths[i%len(paths)]
-			strings.Split(string(path), "/")
+			path := stringPaths[i%len(stringPaths)]
+			strings.Split(path, "/")
 		}
 	})
 }

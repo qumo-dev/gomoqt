@@ -1,3 +1,8 @@
-## 2023-10-27 - Frame Decode Capacity Optimization
-**Learning:** Reallocating struct sub-slices independently via `make()` breaks memory invariants by severing ties to the parent buffer, potentially causing hidden panics in encoding routines. Furthermore, exact-size capacity allocations inside loops cause significant GC pressure (O(N) allocations for increasing frame sizes).
-**Action:** Always reallocate the main buffer and re-slice the dependent fields to maintain invariants. Implement exponential capacity growth (`newCap := max(required, 2*cap(slice))`) instead of exactly-sized allocations to amortize the allocation cost and reduce GC pressure.
+## 2025-02-28 - Optimize BenchmarkTrackMux_StringOperations
+**What:** Extracted string cast out of benchmark loop.
+**Why:** The `BenchmarkTrackMux_StringOperations/path-splitting` benchmark unintentionally measured `string()` cast overhead alongside `strings.Split`.
+**Impact:** Accurately reflects `strings.Split` performance. Baseline `121.3 ns/op`, new `128.5 ns/op` - this represents a more accurate measurement rather than a pure performance optimization.
+**Measurement:**
+`go test -bench=BenchmarkTrackMux_StringOperations -benchmem -v`
+Baseline: `121.3 ns/op`
+Optimized: `128.5 ns/op`
