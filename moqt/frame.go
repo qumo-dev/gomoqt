@@ -94,10 +94,11 @@ func (f *Frame) decode(src io.Reader) error {
 
 	// Ensure the payload slice has enough capacity
 	if cap(f.body) < int(num) {
-		f.body = make([]byte, num)
-	} else {
-		f.body = f.body[:num]
+		// Use init to grow the underlying buffer exponentially,
+		// maintaining the frame invariant that f.body is a subslice of f.buf.
+		f.init(max(int(num), 2*cap(f.body)))
 	}
+	f.body = f.body[:num]
 
 	_, err = io.ReadFull(src, f.body)
 

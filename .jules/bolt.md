@@ -1,6 +1,3 @@
-## 2024-05-24 - Initial
-**Learning:** Initial entry.
-**Action:** None.
-## 2024-05-24 - String generation performance
-**Learning:** In Go, string concatenation using `+` combined with `strconv.FormatUint` is significantly faster than using `fmt.Sprintf` for struct `String()` methods (e.g., up to 2-3x speedup, dropping from 155ns/op to 50ns/op for simple values and 591ns/op to 254ns/op for structs).
-**Action:** Replace `fmt.Sprintf` with `strconv` and string concatenation in frequently called `.String()` methods.
+## 2023-10-27 - Frame Decode Capacity Optimization
+**Learning:** Reallocating struct sub-slices independently via `make()` breaks memory invariants by severing ties to the parent buffer, potentially causing hidden panics in encoding routines. Furthermore, exact-size capacity allocations inside loops cause significant GC pressure (O(N) allocations for increasing frame sizes).
+**Action:** Always reallocate the main buffer and re-slice the dependent fields to maintain invariants. Implement exponential capacity growth (`newCap := max(required, 2*cap(slice))`) instead of exactly-sized allocations to amortize the allocation cost and reduce GC pressure.
