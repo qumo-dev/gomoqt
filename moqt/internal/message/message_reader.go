@@ -51,22 +51,24 @@ func ReadMessageLength(r io.Reader) (uint64, error) {
 	}
 
 	// Fallback for readers that are not io.ByteReader.
-	firstByte := make([]byte, 1)
-	_, err := io.ReadFull(r, firstByte)
+	var firstByte [1]byte
+	_, err := io.ReadFull(r, firstByte[:])
 	if err != nil {
 		return 0, err
 	}
 	l := 1 << ((firstByte[0] & 0xc0) >> 6)
-	buf := make([]byte, l)
-	buf[0] = firstByte[0]
+	val := uint64(firstByte[0] & 0x3f)
 	if l > 1 {
-		_, err = io.ReadFull(r, buf[1:])
+		var buf [7]byte
+		_, err = io.ReadFull(r, buf[:l-1])
 		if err != nil {
 			return 0, err
 		}
+		for i := 0; i < l-1; i++ {
+			val = val<<8 | uint64(buf[i])
+		}
 	}
-	val, _, err := ReadVarint(buf)
-	return val, err
+	return val, nil
 }
 
 // func ReadMessageLength(r io.Reader) (uint64, error) {
