@@ -52,7 +52,7 @@ improv=$(grep -E ' -[0-9]+\.[0-9]+% ' "$full" | grep -vc '^geomean' || true)
   echo "<!-- bench-report -->"
   echo "## 🏎️ Benchmark comparison (main → PR)"
   echo
-  echo "<sub>Microbenchmarks \`-benchtime=100ms -count=6\` (turnaround over precision). \`allocs/op\` and \`B/op\` are deterministic — any delta there is real. \`sec/op\` is a quick signal; re-run locally with \`-benchtime=1s -count=10+\` for significance. In the table, \`+\` = regression, \`-\` = improvement, \`~\` = not significant.</sub>"
+  echo "<sub>Microbenchmarks \`-benchtime=50ms -count=10\` (turnaround over precision; significance from -count). \`allocs/op\` and \`B/op\` are deterministic — any delta there is real. \`sec/op\` is a quick signal; re-run locally with \`-benchtime=1s -count=10+\` for significance. In the table, \`+\` = regression, \`-\` = improvement, \`~\` = not significant.</sub>"
   echo
 } > "$out"
 
