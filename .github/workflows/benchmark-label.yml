@@ -17,11 +17,16 @@
 # Only packages whose *.go changed are benchmarked, so a PR that touches no
 # implementation (docs/CI-only) runs no benchmarks and posts no comment.
 #
-# Turnaround over precision: -benchtime=100ms -count=4. allocs/op and B/op are
-# deterministic regardless of these flags -> the reliable signal; sec/op is a
-# quick indicator (re-run locally with -benchtime=1s -count=10+ for significance).
-# count must be >=4: at count=3 benchstat reports "~" for every benchmark. The
-# slow real-QUIC integration benchmarks self-skip under -short (testing.Short()).
+# Turnaround over precision: -benchtime=50ms -count=10. Statistical significance
+# comes from -count (10 samples); -benchtime is kept low because the moqt suite
+# is large and shared-runner wall time is ~2-3x variable, so a higher benchtime
+# blows the timeout (count=4/100ms already timed out on a slow runner). 50ms
+# still runs 10k+ iterations/sample, so per-sample means stay stable. allocs/op
+# and B/op are deterministic regardless of these flags -> the reliable signal;
+# sec/op is a quick indicator (re-run locally with -benchtime=1s -count=10+).
+# count=10: benchstat needs >=6 samples for a CI / meaningful p-values; at
+# count=4 it flags every non-identical median at p=0.029 (spurious "significant"
+# deltas). The slow real-QUIC integration benchmarks self-skip under -short.
 name: Benchmark (performance-check)
 
 on:
@@ -37,12 +42,12 @@ jobs:
   benchmark:
     if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'performance-check'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
       BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       # Same flags for base and PR so the comparison is like-for-like.
-      BENCH_FLAGS: "-benchtime=100ms -count=4"
+      BENCH_FLAGS: "-benchtime=50ms -count=10"
     steps:
       - name: Checkout PR head (full history for base diff + worktree)
         uses: actions/checkout@v4
@@ -54,6 +59,7 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version: "1.26.0"
+          cache: true # reuse the Go build cache -> faster cold compile of base + PR test binaries
 
       - name: Install benchstat
         run: go install golang.org/x/perf/cmd/benchstat@latest
@@ -92,7 +98,7 @@ jobs:
             [ -d "./$pkg" ] || continue
             echo "::group::Base benchmark: $pkg"
             # || true: a build/run failure in one package must not abort the rest.
-            go test -run='^$' -bench=. -short -benchmem $BENCH_FLAGS -timeout=10m "./$pkg" \
+            go test -run='^$' -bench=. -short -benchmem $BENCH_FLAGS -timeout=15m "./$pkg" \
               >> "$GITHUB_WORKSPACE/base.txt" 2>&1 || true
             echo "::endgroup::"
           done < "$GITHUB_WORKSPACE/pkgs.txt"
@@ -104,7 +110,7 @@ jobs:
           while IFS= read -r pkg; do
             [ -d "./$pkg" ] || continue
             echo "::group::PR benchmark: $pkg"
-            go test -run='^$' -bench=. -short -benchmem $BENCH_FLAGS -timeout=10m "./$pkg" \
+            go test -run='^$' -bench=. -short -benchmem $BENCH_FLAGS -timeout=15m "./$pkg" \
               >> pr.txt 2>&1 || true
             echo "::endgroup::"
           done < pkgs.txt
