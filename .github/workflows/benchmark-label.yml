@@ -115,31 +115,97 @@ jobs:
         if: steps.baseline.outputs.have_baseline == 'true'
         continue-on-error: true
         run: |
+          # Full benchstat across all metrics (sec/op, B/op, allocs/op). Default
+          # alpha=0.05; allocs/op deltas are deterministic -> always significant.
+          benchstat baseline/bench-baseline.txt bench-new.txt > benchstat-full.txt || true
+
+          # Readable subset: keep a metric section only if it has >=1 significant
+          # per-benchmark change; within kept sections drop the non-significant
+          # ("~") rows, the geomean row, and benchstat footnotes. Env metadata
+          # (goos/goarch/pkg/cpu) is printed once at the top -- the view reviewers
+          # actually read. The full table stays available, collapsed, below.
+          awk '
+            function printBlock() {
+              if (outCount == 0) printf "%s", envBlock; else print ""
+              printf "%s", buf; outCount++
+            }
+            BEGIN { outCount = 0 }
+            /^(goos|goarch|pkg|cpu):/ { envBlock = envBlock $0 "\n"; next }
+            /~/ { next }
+            /need >= |are equal|must be >0/ { next }
+            /^[[:space:]]*$/ { if (emit) printBlock(); buf = ""; emit = 0; next }
+            { buf = buf $0 "\n"; if ($0 ~ / [+-][0-9]+\.[0-9]+% / && $0 !~ /^geomean/) emit = 1 }
+            END { if (emit) printBlock() }
+          ' benchstat-full.txt > benchstat.txt
+
+          # Count significant per-benchmark regressions (+) and improvements (-),
+          # excluding geomean rows so the summary isn't double-counted.
+          regress=$(grep -E ' \+[0-9]+\.[0-9]+% ' benchstat-full.txt | grep -vc '^geomean' || true)
+          improv=$(grep -E ' -[0-9]+\.[0-9]+% ' benchstat-full.txt | grep -vc '^geomean' || true)
+
           {
-            echo '## 🏎️ Benchmark comparison (main → PR)'
-            echo ''
-            echo '<sub>Triggered by the `performance-check` label. Microbenchmarks only (`-benchtime=100ms -count=3`, tuned for turnaround not precision); the slow broadcast/QUIC integration suite is skipped via `-short`. `↓`/`↑` = significant decrease/increase; `~` = no significant change (p ≥ 0.05). `allocs/op`/`B/op` deltas are deterministic and reliable; treat `sec/op` as a quick signal and re-run locally with `-benchtime=1s -count=10+` for important changes.</sub>'
-            echo ''
-            echo '```text'
-            benchstat baseline/bench-baseline.txt bench-new.txt
-            echo '```'
-            echo ''
-            echo '**How to read:** `allocs/op` and `B/op` are deterministic — any delta there is real. `sec/op` deltas flagged `↓`/`↑` are statistically significant (p < 0.05); the `±%` column is run-to-run variance, not the magnitude of the change. Full raw output is in the workflow log and the uploaded `bench-perfcheck-pr-*` artifact.'
+            echo "<!-- bench-report -->"
+            echo "## 🏎️ Benchmark comparison (main → PR)"
+            echo
+            echo "<sub>Microbenchmarks \`-benchtime=100ms -count=3\` (turnaround over precision). \`allocs/op\` and \`B/op\` are deterministic — any delta there is real. \`sec/op\` is a quick signal; re-run locally with \`-benchtime=1s -count=10+\` for significance. In the table, \`+\` = regression, \`-\` = improvement, \`~\` = not significant.</sub>"
+            echo
           } > benchstat-comment.md
+
+          summary=""
+          [ "$regress" -gt 0 ] && summary="⚠️ **${regress} regression(s)**"
+          if [ "$improv" -gt 0 ]; then
+            [ -n "$summary" ] && summary="$summary  •  "
+            summary="${summary}✅ **${improv} improvement(s)**"
+          fi
+          if [ -z "$summary" ]; then
+            echo "✅ **No significant changes** — all benchmarks within measurement noise." >> benchstat-comment.md
+          else
+            echo "$summary" >> benchstat-comment.md
+          fi
+          echo >> benchstat-comment.md
+
+          # Significant changes shown prominently (open); full table collapsed.
+          if [ "$regress" -gt 0 ] || [ "$improv" -gt 0 ]; then
+            {
+              echo "<details open>"
+              echo "<summary>📊 Significant changes (main → PR, filtered)</summary>"
+              echo
+              echo '```text'
+              cat benchstat.txt
+              echo '```'
+              echo "</details>"
+            } >> benchstat-comment.md
+          fi
+          {
+            echo "<details>"
+            echo "<summary>🔎 Full benchstat output (all benchmarks, all metrics)</summary>"
+            echo
+            echo '```text'
+            cat benchstat-full.txt
+            echo '```'
+            echo "</details>"
+          } >> benchstat-comment.md
+
           echo '::group::benchstat comparison (main -> PR)'
           cat benchstat-comment.md
           echo '::endgroup::'
 
-      - name: Post comparison as PR comment
+      - name: Post or update comment
         if: steps.baseline.outputs.have_baseline == 'true' && github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          if [ -s benchstat-comment.md ]; then
-            gh pr comment "$PR" --body-file benchstat-comment.md
+          # Update the existing bench-report comment in place (found by its
+          # marker) so re-runs don't stack duplicates; create it on first run.
+          marker="<!-- bench-report -->"
+          comment_id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --paginate --jq ".[] | select(.body | contains(\"$marker\")) | .id" | head -n1)
+          if [ -n "$comment_id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" \
+              -f body="$(cat benchstat-comment.md)" >/dev/null
           else
-            echo "Empty comment body; skipping."
+            gh pr comment "$PR" --body-file benchstat-comment.md
           fi
 
       - name: Upload PR bench output
