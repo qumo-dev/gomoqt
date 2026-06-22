@@ -112,9 +112,9 @@ func (c *CountingSendStream) Inner() transport.SendStream { return c.inner }
 
 // WriteCounters is an immutable snapshot of the counting stream's state.
 type WriteCounters struct {
-	WriteCalls  int64   // total number of Write calls observed
-	BytesWritten int64  // total bytes successfully written
-	Buckets     []int64 // write-size histogram (index = floor(log2(size)), size 0 -> 0)
+	WriteCalls   int64   // total number of Write calls observed
+	BytesWritten int64   // total bytes successfully written
+	Buckets      []int64 // write-size histogram (index = floor(log2(size)), size 0 -> 0)
 }
 
 // Snapshot returns a consistent point-in-time view of the counters.
