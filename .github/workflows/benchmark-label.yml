@@ -17,11 +17,13 @@
 # Only packages whose *.go changed are benchmarked, so a PR that touches no
 # implementation (docs/CI-only) runs no benchmarks and posts no comment.
 #
-# Turnaround over precision: -benchtime=100ms -count=4. allocs/op and B/op are
+# Turnaround over precision: -benchtime=100ms -count=6. allocs/op and B/op are
 # deterministic regardless of these flags -> the reliable signal; sec/op is a
 # quick indicator (re-run locally with -benchtime=1s -count=10+ for significance).
-# count must be >=4: at count=3 benchstat reports "~" for every benchmark. The
-# slow real-QUIC integration benchmarks self-skip under -short (testing.Short()).
+# count=6: benchstat needs >=6 samples to compute a confidence interval and
+# meaningful p-values; at count=4 it flags every non-identical median at p=0.029
+# (noise shows up as spurious "significant" deltas). The slow real-QUIC
+# integration benchmarks self-skip under -short (testing.Short()).
 name: Benchmark (performance-check)
 
 on:
@@ -42,7 +44,7 @@ jobs:
       BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       # Same flags for base and PR so the comparison is like-for-like.
-      BENCH_FLAGS: "-benchtime=100ms -count=4"
+      BENCH_FLAGS: "-benchtime=100ms -count=6"
     steps:
       - name: Checkout PR head (full history for base diff + worktree)
         uses: actions/checkout@v4
