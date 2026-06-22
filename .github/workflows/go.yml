@@ -98,7 +98,7 @@ jobs:
         # -count=3 likewise must match. Tuned for turnaround, not precision
         # (allocs/op are deterministic regardless of -benchtime/-count).
         run: |
-          go test -run='^$' -bench=. -short -benchmem -benchtime=100ms -count=3 -timeout=15m ./moqt/... | tee bench-new.txt
+          go test -run='^$' -bench=. -short -benchmem -benchtime=100ms -count=4 -timeout=15m ./moqt/... | tee bench-new.txt
 
       - name: Upload baseline
         uses: actions/upload-artifact@v4

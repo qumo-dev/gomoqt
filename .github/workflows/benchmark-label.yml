@@ -22,7 +22,8 @@
 #     1s->100ms is ~10x faster. 100ms still runs 100k+ iterations for a typical
 #     bench, so ns/op stays usable as a quick signal (unlike -benchtime=1x,
 #     which gave ~150% CV).
-#   - -count=3 (from 10): enough for benchstat to indicate a delta's direction.
+#   - -count=4 (from 10): benchstat needs >=4 samples to flag a per-benchmark
+#     delta (at 3 it reports "~" for everything), so 4 is the functional minimum.
 # allocs/op and B/op are deterministic regardless of -benchtime/-count, so they
 # remain the reliable signal. For ns/op significance on important changes,
 # re-run locally with -benchtime=1s -count=10+.
@@ -109,83 +110,13 @@ jobs:
         # -count=3 must match go.yml's baseline `benchmark` job so the benchstat
         # comparison is like-for-like; allocs/op are deterministic regardless.
         run: |
-          go test -run='^$' -bench=. -short -benchmem -benchtime=100ms -count=3 -timeout=15m ./moqt/... | tee bench-new.txt
+          go test -run='^$' -bench=. -short -benchmem -benchtime=100ms -count=4 -timeout=15m ./moqt/... | tee bench-new.txt
 
       - name: Compare against baseline and build comment
         if: steps.baseline.outputs.have_baseline == 'true'
         continue-on-error: true
         run: |
-          # Full benchstat across all metrics (sec/op, B/op, allocs/op). Default
-          # alpha=0.05; allocs/op deltas are deterministic -> always significant.
-          benchstat baseline/bench-baseline.txt bench-new.txt > benchstat-full.txt || true
-
-          # Readable subset: keep a metric section only if it has >=1 significant
-          # per-benchmark change; within kept sections drop the non-significant
-          # ("~") rows, the geomean row, and benchstat footnotes. Env metadata
-          # (goos/goarch/pkg/cpu) is printed once at the top -- the view reviewers
-          # actually read. The full table stays available, collapsed, below.
-          awk '
-            function printBlock() {
-              if (outCount == 0) printf "%s", envBlock; else print ""
-              printf "%s", buf; outCount++
-            }
-            BEGIN { outCount = 0 }
-            /^(goos|goarch|pkg|cpu):/ { envBlock = envBlock $0 "\n"; next }
-            /~/ { next }
-            /need >= |are equal|must be >0/ { next }
-            /^[[:space:]]*$/ { if (emit) printBlock(); buf = ""; emit = 0; next }
-            { buf = buf $0 "\n"; if ($0 ~ / [+-][0-9]+\.[0-9]+% / && $0 !~ /^geomean/) emit = 1 }
-            END { if (emit) printBlock() }
-          ' benchstat-full.txt > benchstat.txt
-
-          # Count significant per-benchmark regressions (+) and improvements (-),
-          # excluding geomean rows so the summary isn't double-counted.
-          regress=$(grep -E ' \+[0-9]+\.[0-9]+% ' benchstat-full.txt | grep -vc '^geomean' || true)
-          improv=$(grep -E ' -[0-9]+\.[0-9]+% ' benchstat-full.txt | grep -vc '^geomean' || true)
-
-          {
-            echo "<!-- bench-report -->"
-            echo "## 🏎️ Benchmark comparison (main → PR)"
-            echo
-            echo "<sub>Microbenchmarks \`-benchtime=100ms -count=3\` (turnaround over precision). \`allocs/op\` and \`B/op\` are deterministic — any delta there is real. \`sec/op\` is a quick signal; re-run locally with \`-benchtime=1s -count=10+\` for significance. In the table, \`+\` = regression, \`-\` = improvement, \`~\` = not significant.</sub>"
-            echo
-          } > benchstat-comment.md
-
-          summary=""
-          [ "$regress" -gt 0 ] && summary="⚠️ **${regress} regression(s)**"
-          if [ "$improv" -gt 0 ]; then
-            [ -n "$summary" ] && summary="$summary  •  "
-            summary="${summary}✅ **${improv} improvement(s)**"
-          fi
-          if [ -z "$summary" ]; then
-            echo "✅ **No significant changes** — all benchmarks within measurement noise." >> benchstat-comment.md
-          else
-            echo "$summary" >> benchstat-comment.md
-          fi
-          echo >> benchstat-comment.md
-
-          # Significant changes shown prominently (open); full table collapsed.
-          if [ "$regress" -gt 0 ] || [ "$improv" -gt 0 ]; then
-            {
-              echo "<details open>"
-              echo "<summary>📊 Significant changes (main → PR, filtered)</summary>"
-              echo
-              echo '```text'
-              cat benchstat.txt
-              echo '```'
-              echo "</details>"
-            } >> benchstat-comment.md
-          fi
-          {
-            echo "<details>"
-            echo "<summary>🔎 Full benchstat output (all benchmarks, all metrics)</summary>"
-            echo
-            echo '```text'
-            cat benchstat-full.txt
-            echo '```'
-            echo "</details>"
-          } >> benchstat-comment.md
-
+          bash .github/scripts/bench-report.sh baseline/bench-baseline.txt bench-new.txt benchstat-comment.md
           echo '::group::benchstat comparison (main -> PR)'
           cat benchstat-comment.md
           echo '::endgroup::'
