@@ -168,7 +168,7 @@ func (a *Announcement) end() {
 		}
 
 		// Fast path for small number of handlers
-		if handlerCount <= 2 {
+		if handlerCount <= 128 {
 			// Execute handlers inline for small counts to avoid goroutine overhead
 			for _, handler := range handlers {
 				if handler != nil {
@@ -189,7 +189,7 @@ func (a *Announcement) end() {
 			}
 
 			var wg sync.WaitGroup
-			wg.Add(handlerCount)
+			wg.Add(workerCount)
 
 			// Distribute work among workers
 			chunkSize := (handlerCount + workerCount - 1) / workerCount
@@ -198,17 +198,17 @@ func (a *Announcement) end() {
 				end := min(start+chunkSize, handlerCount)
 
 				if start >= handlerCount {
-					break
+					wg.Done()
+					continue
 				}
 
 				go func(handlers []func()) {
+					defer wg.Done()
 					for _, h := range handlers {
 						h()
-						wg.Done()
 					}
 				}(handlerSlice[start:end])
 			}
-
 			wg.Wait()
 		}
 

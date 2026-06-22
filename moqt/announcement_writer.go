@@ -237,6 +237,14 @@ func (aw *AnnouncementWriter) SendAnnouncement(announcement *Announcement) error
 	aw.mu.Lock()
 	defer aw.mu.Unlock()
 
+	// The writer may have been Closed (or CloseWithError'd) while the lock was
+	// released above to call the previous announcement's end handler -- Close
+	// nils aw.actives. Re-check before encoding: assigning into a nil map panics,
+	// and we must not encode onto a closing stream.
+	if aw.actives == nil {
+		return nil
+	}
+
 	// Encode and send ACTIVE announcement
 	err := message.AnnounceMessage{
 		AnnounceStatus:      message.ACTIVE,

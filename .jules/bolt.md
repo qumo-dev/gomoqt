@@ -1,3 +1,3 @@
-## 2024-06-21 - String encoding allocations
-**Learning:** In Go, passing a `string` to a function that accepts `[]byte` by doing `[]byte(s)` forces a heap allocation, even if the bytes are immediately appended. However, using `append([]byte, s...)` is handled natively by the compiler and performs a zero-allocation direct copy from the string to the slice.
-**Action:** When appending strings to a byte slice in hot paths like network encoding (`WriteString` or `WriteStringArray`), always use `append(dest, s...)` directly instead of converting to bytes or passing to byte-writing functions.
+## 2023-10-27 - Frame Decode Capacity Optimization
+**Learning:** Reallocating struct sub-slices independently via `make()` breaks memory invariants by severing ties to the parent buffer, potentially causing hidden panics in encoding routines. Furthermore, exact-size capacity allocations inside loops cause significant GC pressure (O(N) allocations for increasing frame sizes).
+**Action:** Always reallocate the main buffer and re-slice the dependent fields to maintain invariants. Implement exponential capacity growth (`newCap := max(required, 2*cap(slice))`) instead of exactly-sized allocations to amortize the allocation cost and reduce GC pressure.
