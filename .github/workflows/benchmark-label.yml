@@ -17,22 +17,27 @@
 # is also -benchtime=1s.
 #
 # Turnaround over precision: this workflow is intentionally tuned for fast
-# per-PR feedback, not maximum statistical rigor. -count=3 (down from 10) keeps
-# a solo run well under the job's 25m timeout; allocs/op and B/op are
-# deterministic and unaffected by -count, so allocation deltas stay a reliable
-# signal at any -count. For ns/op significance on important changes, re-run
-# locally with a higher -count.
+# per-PR feedback, not maximum statistical rigor. Two levers, both turned down:
+#   - -benchtime=100ms (from 1s): wall time scales linearly with -benchtime, so
+#     1s->100ms is ~10x faster. 100ms still runs 100k+ iterations for a typical
+#     bench, so ns/op stays usable as a quick signal (unlike -benchtime=1x,
+#     which gave ~150% CV).
+#   - -count=3 (from 10): enough for benchstat to indicate a delta's direction.
+# allocs/op and B/op are deterministic regardless of -benchtime/-count, so they
+# remain the reliable signal. For ns/op significance on important changes,
+# re-run locally with -benchtime=1s -count=10+.
 #
-# Known wall-time driver (why -count stays low): several micro-benchmarks wrap
-# expensive per-iteration setup in b.StopTimer()/b.StartTimer() — e.g.
-# BenchmarkAnnouncement_EndWithHandlers registers up to 1000 handlers/iter,
-# BenchmarkSession_* spin up mock streams/iter, and BenchmarkTrackWriter_*
+# Why -benchtime had to drop (the real wall-time driver): several micro-
+# benchmarks wrap expensive per-iteration setup in b.StopTimer()/b.StartTimer()
+# -- e.g. BenchmarkAnnouncement_EndWithHandlers registers up to 1000 handlers
+# per iter, BenchmarkSession_* spin up mock streams/iter, BenchmarkTrackWriter_*
 # (_OpenGroup/_ConcurrentOpenGroup/_ActiveGroupManagement) build per-iter
-# state. With -benchtime=1s the measured slice stays small but b.N grows large,
-# so WALL time per benchmark is dominated by the stopped setup, not the measured
-# code. -count=3 + the 25m timeout keep this bounded; fully fixing it needs
-# reworking those benchmarks (b.Loop + Cleanup, or lower benchtime) — tracked
-# as follow-up, not here.
+# state. Go sizes b.N off the cheap measured slice, so every iteration also
+# pays the expensive stopped setup: WALL time ~= benchtime * (setup/measured),
+# dominated by the setup. Empirically, -benchtime=1s -count=3 could not finish
+# even the Announcement benchmarks within the 25m job timeout; at 100ms the
+# full micro suite fits comfortably. The real fix is reworking those benchmarks
+# (b.Loop + Cleanup) so -benchtime reflects wall time -- tracked as follow-up.
 name: Benchmark (performance-check)
 
 on:
@@ -99,11 +104,12 @@ jobs:
         # -short skips the slow real-QUIC integration benchmarks (each calls
         # testing.Short() -> b.Skip); they are measured by go.yml's
         # benchmark-integration job (on main, not on PRs).
-        # -benchtime=1s lets Go pick a high iteration count for a stable mean.
-        # -count=3 (must match go.yml's baseline `benchmark` job) trades
-        # statistical power for turnaround; allocs/op stay deterministic.
+        # -benchtime=100ms bounds wall time for the StopTimer-heavy benches
+        # (see header); 100k+ iters/bench keeps ns/op usable as a quick signal.
+        # -count=3 must match go.yml's baseline `benchmark` job so the benchstat
+        # comparison is like-for-like; allocs/op are deterministic regardless.
         run: |
-          go test -run='^$' -bench=. -short -benchmem -benchtime=1s -count=3 -timeout=15m ./moqt/... | tee bench-new.txt
+          go test -run='^$' -bench=. -short -benchmem -benchtime=100ms -count=3 -timeout=15m ./moqt/... | tee bench-new.txt
 
       - name: Compare against baseline and build comment
         if: steps.baseline.outputs.have_baseline == 'true'
@@ -112,7 +118,7 @@ jobs:
           {
             echo '## 🏎️ Benchmark comparison (main → PR)'
             echo ''
-            echo '<sub>Triggered by the `performance-check` label. Microbenchmarks only (`-benchtime=1s -count=3`, tuned for turnaround not precision); the slow broadcast/QUIC integration suite is skipped via `-short`. `↓`/`↑` = significant decrease/increase; `~` = no significant change (p ≥ 0.05). `allocs/op`/`B/op` deltas are deterministic and reliable; treat `sec/op` as a quick signal and re-run locally with higher `-count` for important changes.</sub>'
+            echo '<sub>Triggered by the `performance-check` label. Microbenchmarks only (`-benchtime=100ms -count=3`, tuned for turnaround not precision); the slow broadcast/QUIC integration suite is skipped via `-short`. `↓`/`↑` = significant decrease/increase; `~` = no significant change (p ≥ 0.05). `allocs/op`/`B/op` deltas are deterministic and reliable; treat `sec/op` as a quick signal and re-run locally with `-benchtime=1s -count=10+` for important changes.</sub>'
             echo ''
             echo '```text'
             benchstat baseline/bench-baseline.txt bench-new.txt

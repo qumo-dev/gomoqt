@@ -93,12 +93,12 @@ jobs:
         # Microbenchmarks only: -short skips the slow real-QUIC integration
         # benchmarks (each calls testing.Short() -> b.Skip). They run in
         # benchmark-integration below, without -short.
-        # -benchtime=1s gives a stable mean (1x had ~150% CV on micros).
-        # -count=3 MUST match benchmark-label.yml's per-PR run so the benchstat
-        # baseline/PR comparison is like-for-like. Tuned for turnaround, not
-        # precision (allocs/op are deterministic regardless of -count).
+        # -benchtime=100ms MUST match benchmark-label.yml's per-PR run (wall-time
+        # bound for StopTimer-heavy benches; see benchmark-label.yml's header).
+        # -count=3 likewise must match. Tuned for turnaround, not precision
+        # (allocs/op are deterministic regardless of -benchtime/-count).
         run: |
-          go test -run='^$' -bench=. -short -benchmem -benchtime=1s -count=3 -timeout=15m ./moqt/... | tee bench-new.txt
+          go test -run='^$' -bench=. -short -benchmem -benchtime=100ms -count=3 -timeout=15m ./moqt/... | tee bench-new.txt
 
       - name: Upload baseline
         uses: actions/upload-artifact@v4
