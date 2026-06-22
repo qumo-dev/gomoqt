@@ -123,14 +123,21 @@ func main() {
 	// so a fixed sleep is unreliable.
 	{
 		addrToCheck := "localhost:" + port
+		ticker := time.NewTicker(500 * time.Millisecond)
+	loop:
 		for range 40 { // try up to 20 seconds
 			c, err := net.Dial("tcp", addrToCheck)
 			if err == nil {
 				c.Close()
-				break
+				break loop
 			}
-			time.Sleep(500 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				break loop
+			case <-ticker.C:
+			}
 		}
+		ticker.Stop()
 	}
 
 	// Run client and wait for completion
