@@ -2,6 +2,7 @@ package message
 
 import (
 	"errors"
+	"fmt"
 	"io"
 )
 
@@ -56,6 +57,9 @@ func (sdm *SubscribeDropMessage) Decode(src io.Reader) error {
 		return err
 	}
 
+	if size > 50*1024*1024 {
+		return fmt.Errorf("message too large")
+	}
 	b := make([]byte, size)
 
 	_, err = io.ReadFull(src, b)

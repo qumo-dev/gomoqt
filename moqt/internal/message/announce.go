@@ -1,6 +1,7 @@
 package message
 
 import (
+	"fmt"
 	"io"
 )
 
@@ -58,6 +59,9 @@ func (am *AnnounceMessage) Decode(src io.Reader) error {
 		return err
 	}
 
+	if size > 50*1024*1024 {
+		return fmt.Errorf("message too large")
+	}
 	b := make([]byte, size)
 
 	_, err = io.ReadFull(src, b)
