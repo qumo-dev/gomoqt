@@ -648,3 +648,58 @@ func TestTrackWriter_DropGroups_ContextCanceled(t *testing.T) {
 	})
 	assert.Error(t, err)
 }
+
+func TestTrackWriter_CloseWithError(t *testing.T) {
+	mockStreams := make([]*FakeQUICSendStream, 0)
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
+		mockSendStream := &FakeQUICSendStream{}
+		mockStreams = append(mockStreams, mockSendStream)
+		return mockSendStream, nil
+	}
+
+	mockStream := &FakeQUICStream{}
+	substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
+	var onCloseTrackCalled bool
+	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {
+		onCloseTrackCalled = true
+	})
+
+	// Open a group to ensure activeGroups is populated
+	_, err := sender.OpenGroup(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, mockStreams, 1)
+
+	// Open a second group
+	_, err = sender.OpenGroup(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, mockStreams, 2)
+
+	// Now call CloseWithError
+	errorCode := SubscribeErrorCode(123)
+	sender.CloseWithError(errorCode)
+
+	// Verify groupManager is nil and activeGroups are cancelled
+	assert.Nil(t, sender.groupManager)
+
+	// Both groups should have CancelWrite called with PublishAbortedErrorCode
+	for _, stream := range mockStreams {
+		assert.NotNil(t, stream.cancelWriteErr)
+		streamErr, ok := stream.cancelWriteErr.(*transport.StreamError)
+		assert.True(t, ok)
+		assert.Equal(t, transport.StreamErrorCode(PublishAbortedErrorCode), streamErr.ErrorCode)
+	}
+
+	// Verify onCloseTrack was called
+	assert.True(t, onCloseTrackCalled)
+
+	// Verify subscribe stream was closed with error
+	assert.NotNil(t, mockStream.cancelReadErr)
+	streamErr, ok := mockStream.cancelReadErr.(*transport.StreamError)
+	assert.True(t, ok)
+	assert.Equal(t, transport.StreamErrorCode(errorCode), streamErr.ErrorCode)
+
+	assert.NotNil(t, mockStream.cancelWriteErr)
+	streamErr2, ok2 := mockStream.cancelWriteErr.(*transport.StreamError)
+	assert.True(t, ok2)
+	assert.Equal(t, transport.StreamErrorCode(errorCode), streamErr2.ErrorCode)
+}

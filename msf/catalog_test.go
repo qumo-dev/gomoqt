@@ -996,8 +996,8 @@ func TestTrackRef_MarshalJSON_RoundTrip(t *testing.T) {
 
 func TestTrackRef_Clone(t *testing.T) {
 	ref := TrackRef{
-		Namespace:   "live",
-		Name:        "video",
+		Namespace: "live",
+		Name:      "video",
 		ExtraFields: map[string]json.RawMessage{
 			"x":      json.RawMessage(`[1, 2, 3]`),
 			"nilval": nil,
