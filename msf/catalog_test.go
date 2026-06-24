@@ -996,8 +996,8 @@ func TestTrackRef_MarshalJSON_RoundTrip(t *testing.T) {
 
 func TestTrackRef_Clone(t *testing.T) {
 	ref := TrackRef{
-		Namespace:   "live",
-		Name:        "video",
+		Namespace: "live",
+		Name:      "video",
 		ExtraFields: map[string]json.RawMessage{
 			"x":      json.RawMessage(`[1, 2, 3]`),
 			"nilval": nil,
@@ -1424,4 +1424,21 @@ func TestBroadcast_SetCatalog_KeepsActiveRemovesStale(t *testing.T) {
 	catalog := b.Catalog()
 	assert.Len(t, catalog.Tracks, 1)
 	assert.Equal(t, "video", catalog.Tracks[0].Name)
+}
+
+func TestParseCatalogDeltaString(t *testing.T) {
+	input := `{
+		"deltaUpdate": true,
+		"addTracks": [
+			{"name": "video", "packaging": "loc", "isLive": true}
+		]
+	}`
+
+	delta, err := ParseCatalogDeltaString(input)
+	require.NoError(t, err)
+	require.Len(t, delta.AddTracks, 1)
+	assert.Equal(t, "video", delta.AddTracks[0].Name)
+
+	_, err = ParseCatalogDeltaString(`{"deltaUpdate": "invalid_type"}`)
+	require.Error(t, err)
 }
