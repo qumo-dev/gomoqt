@@ -603,96 +603,11 @@ func (sess *Session) processBiStream(stream transport.Stream) {
 
 	switch streamType {
 	case message.StreamTypeAnnounce:
-		var aim message.AnnounceInterestMessage
-		err := aim.Decode(stream)
-		if err != nil {
-			sess.logError("failed to decode ANNOUNCE_INTEREST message", err)
-			cancelStreamWithError(stream, transport.StreamErrorCode(AnnounceErrorCodeInternal))
-			return
-		}
-
-		prefix := aim.BroadcastPathPrefix
-
-		annstr := newAnnouncementWriter(stream, prefix, sess.mux.hopID, aim.ExcludeHop, sess.logger)
-
-		sess.mux.serveAnnouncements(annstr)
-
-		// Ensure the announcement writer is closed when done
-		annstr.Close()
+		sess.handleAnnounceStream(stream)
 	case message.StreamTypeSubscribe:
-		var sm message.SubscribeMessage
-		err := sm.Decode(stream)
-		if err != nil {
-			sess.logError("failed to decode SUBSCRIBE message", err)
-			cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeInternal))
-			return
-		}
-
-		// Create a receiveSubscribeStream with draft3 fields decoded from SUBSCRIBE message
-		config := &SubscribeConfig{
-			Priority:   TrackPriority(sm.SubscriberPriority),
-			Ordered:    boolFromWireFlag(sm.SubscriberOrdered),
-			MaxLatency: sm.SubscriberMaxLatency,
-		}
-
-		// Decode 0-sentinel / +1-encoded fields (matching SUBSCRIBE_UPDATE logic)
-		config.StartGroup = groupSequenceFromWire(sm.StartGroup)
-		config.EndGroup = groupSequenceFromWire(sm.EndGroup)
-
-		substr := newReceiveSubscribeStream(SubscribeID(sm.SubscribeID), stream, config)
-
-		track := newTrackWriter(
-			BroadcastPath(sm.BroadcastPath),
-			TrackName(sm.TrackName),
-			substr,
-			// Backpressure: OpenUniStreamSync blocks until the peer grants a uni
-			// stream (MAX_STREAMS) instead of returning a stream-limit error.
-			// Without this, a publisher opening groups faster than the peer
-			// recycles streams hit StreamLimitReachedError and aborted the whole
-			// track, idling the connection (payload-1K/fpg-1 stream-churn repro).
-			// The ctx handed to OpenGroup/OpenGroupAt flows through for cancellation.
-			sess.conn.OpenUniStreamSync,
-			func() { sess.removeTrackWriter(SubscribeID(sm.SubscribeID)) },
-		)
-		sess.addTrackWriter(SubscribeID(sm.SubscribeID), track)
-
-		sess.mux.serveTrack(track)
-
-		// Ensure the track writer is closed when done
-		track.Close()
+		sess.handleSubscribeStream(stream)
 	case message.StreamTypeFetch:
-		var fm message.FetchMessage
-		err := fm.Decode(stream)
-		if err != nil {
-			sess.logError("failed to decode FETCH message", err)
-			cancelStreamWithError(stream, transport.StreamErrorCode(FetchErrorCodeInternal))
-			return
-		}
-
-		handler := sess.fetchHandler
-
-		req := &FetchRequest{
-			BroadcastPath: BroadcastPath(fm.BroadcastPath),
-			TrackName:     TrackName(fm.TrackName),
-			Priority:      TrackPriority(fm.Priority),
-			GroupSequence: GroupSequence(fm.GroupSequence),
-			ctx:           stream.Context(),
-		}
-
-		group := newGroupWriter(stream, req.GroupSequence, nil)
-
-		stop := context.AfterFunc(req.Context(), func() {
-			// Cancel the stream when the context is done
-			group.CancelWrite(ExpiredGroupErrorCode)
-		})
-		defer stop()
-
-		err = safeServeFetch(handler, group, req)
-		if err != nil {
-			sess.logError("fetch handler error", err)
-			cancelStreamWithError(stream, transport.StreamErrorCode(FetchErrorCodeInternal))
-			return
-		}
+		sess.handleFetchStream(stream)
 	case message.StreamTypeProbe:
 		err := sess.handleProbeStream(stream)
 		if err != nil {
@@ -709,6 +624,109 @@ func (sess *Session) processBiStream(stream transport.Stream) {
 	default:
 		sess.logError("unknown stream type", fmt.Errorf("stream type %d", streamType))
 		cancelStreamWithError(stream, transport.StreamErrorCode(InternalSessionErrorCode))
+		return
+	}
+}
+
+// handleAnnounceStream decodes an ANNOUNCE_INTEREST and serves announcements on a
+// new announcement writer backed by the stream.
+func (sess *Session) handleAnnounceStream(stream transport.Stream) {
+	var aim message.AnnounceInterestMessage
+	err := aim.Decode(stream)
+	if err != nil {
+		sess.logError("failed to decode ANNOUNCE_INTEREST message", err)
+		cancelStreamWithError(stream, transport.StreamErrorCode(AnnounceErrorCodeInternal))
+		return
+	}
+
+	prefix := aim.BroadcastPathPrefix
+
+	annstr := newAnnouncementWriter(stream, prefix, sess.mux.hopID, aim.ExcludeHop, sess.logger)
+
+	sess.mux.serveAnnouncements(annstr)
+
+	// Ensure the announcement writer is closed when done
+	annstr.Close()
+}
+
+// handleSubscribeStream decodes a SUBSCRIBE and registers a track writer for the
+// incoming track. Group streams are opened via OpenUniStreamSync so the publisher
+// backpressures on the peer's uni-stream limit instead of aborting (see #211).
+func (sess *Session) handleSubscribeStream(stream transport.Stream) {
+	var sm message.SubscribeMessage
+	err := sm.Decode(stream)
+	if err != nil {
+		sess.logError("failed to decode SUBSCRIBE message", err)
+		cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeInternal))
+		return
+	}
+
+	// Create a receiveSubscribeStream with draft3 fields decoded from SUBSCRIBE message
+	config := &SubscribeConfig{
+		Priority:   TrackPriority(sm.SubscriberPriority),
+		Ordered:    boolFromWireFlag(sm.SubscriberOrdered),
+		MaxLatency: sm.SubscriberMaxLatency,
+	}
+
+	// Decode 0-sentinel / +1-encoded fields (matching SUBSCRIBE_UPDATE logic)
+	config.StartGroup = groupSequenceFromWire(sm.StartGroup)
+	config.EndGroup = groupSequenceFromWire(sm.EndGroup)
+
+	substr := newReceiveSubscribeStream(SubscribeID(sm.SubscribeID), stream, config)
+
+	track := newTrackWriter(
+		BroadcastPath(sm.BroadcastPath),
+		TrackName(sm.TrackName),
+		substr,
+		// Backpressure: OpenUniStreamSync blocks until the peer grants a uni
+		// stream (MAX_STREAMS) instead of returning a stream-limit error.
+		// Without this, a publisher opening groups faster than the peer
+		// recycles streams hit StreamLimitReachedError and aborted the whole
+		// track, idling the connection (payload-1K/fpg-1 stream-churn repro).
+		// The ctx handed to OpenGroup/OpenGroupAt flows through for cancellation.
+		sess.conn.OpenUniStreamSync,
+		func() { sess.removeTrackWriter(SubscribeID(sm.SubscribeID)) },
+	)
+	sess.addTrackWriter(SubscribeID(sm.SubscribeID), track)
+
+	sess.mux.serveTrack(track)
+
+	// Ensure the track writer is closed when done
+	track.Close()
+}
+
+// handleFetchStream decodes a FETCH and dispatches it to the configured fetch handler.
+func (sess *Session) handleFetchStream(stream transport.Stream) {
+	var fm message.FetchMessage
+	err := fm.Decode(stream)
+	if err != nil {
+		sess.logError("failed to decode FETCH message", err)
+		cancelStreamWithError(stream, transport.StreamErrorCode(FetchErrorCodeInternal))
+		return
+	}
+
+	handler := sess.fetchHandler
+
+	req := &FetchRequest{
+		BroadcastPath: BroadcastPath(fm.BroadcastPath),
+		TrackName:     TrackName(fm.TrackName),
+		Priority:      TrackPriority(fm.Priority),
+		GroupSequence: GroupSequence(fm.GroupSequence),
+		ctx:           stream.Context(),
+	}
+
+	group := newGroupWriter(stream, req.GroupSequence, nil)
+
+	stop := context.AfterFunc(req.Context(), func() {
+		// Cancel the stream when the context is done
+		group.CancelWrite(ExpiredGroupErrorCode)
+	})
+	defer stop()
+
+	err = safeServeFetch(handler, group, req)
+	if err != nil {
+		sess.logError("fetch handler error", err)
+		cancelStreamWithError(stream, transport.StreamErrorCode(FetchErrorCodeInternal))
 		return
 	}
 }
