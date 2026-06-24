@@ -428,10 +428,11 @@ func isValidPath(path BroadcastPath) bool {
 }
 
 func isValidPrefix(prefix string) bool {
-	// Optimize: check length first, then chars
+	if len(prefix) == 0 {
+		return false
+	}
 	// Special case: "/" is valid as root prefix
-	n := len(prefix)
-	return n > 0 && prefix[0] == '/' && (n == 1 || prefix[n-1] == '/')
+	return prefix[0] == '/' && (len(prefix) == 1 || prefix[len(prefix)-1] == '/')
 }
 
 // TrackHandler handles a published track.
@@ -495,7 +496,7 @@ func prefixSegments(prefix string) []prefixSegment {
 	return segments
 }
 
-func pathSegments(path BroadcastPath) (prefixSegments []prefixSegment, last string) {
+func pathSegments(path BroadcastPath) ([]prefixSegment, string) {
 	p := string(path)
 	if len(p) <= 1 {
 		if p == "/" {
@@ -504,13 +505,22 @@ func pathSegments(path BroadcastPath) (prefixSegments []prefixSegment, last stri
 		return nil, p
 	}
 
-	segments := strings.Split(p[1:], "/")
+	lastSlashIdx := strings.LastIndexByte(p, '/')
+	if lastSlashIdx <= 0 {
+		return nil, p[1:]
+	}
 
-	if len(segments) == 0 {
-		return nil, p
+	prefix := p[1:lastSlashIdx]
+	last := p[lastSlashIdx+1:]
+
+	n := strings.Count(prefix, "/")
+	if n == 0 {
+		return []prefixSegment{prefix}, last
+	} else if n == 1 {
+		idx := strings.IndexByte(prefix, '/')
+		return []prefixSegment{prefix[:idx], prefix[idx+1:]}, last
 	}
-	if len(segments) == 1 {
-		return nil, segments[0]
-	}
-	return segments[:len(segments)-1], segments[len(segments)-1]
+
+	segments := strings.Split(prefix, "/")
+	return segments, last
 }
