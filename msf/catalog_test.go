@@ -977,6 +977,13 @@ func TestCatalogDelta_MarshalJSON_RoundTrip(t *testing.T) {
 	assert.Equal(t, "video-1080", decoded.CloneTracks[0].ParentName)
 }
 
+func TestCatalogDelta_MarshalJSON_EmptyDelta(t *testing.T) {
+	delta := CatalogDelta{}
+	data, err := json.Marshal(delta)
+	require.NoError(t, err)
+	assert.Equal(t, `{"deltaUpdate":true}`, string(data))
+}
+
 func TestTrackRef_MarshalJSON_RoundTrip(t *testing.T) {
 	ref := TrackRef{
 		Namespace: "live/demo",
@@ -996,8 +1003,8 @@ func TestTrackRef_MarshalJSON_RoundTrip(t *testing.T) {
 
 func TestTrackRef_Clone(t *testing.T) {
 	ref := TrackRef{
-		Namespace:   "live",
-		Name:        "video",
+		Namespace: "live",
+		Name:      "video",
 		ExtraFields: map[string]json.RawMessage{
 			"x":      json.RawMessage(`[1, 2, 3]`),
 			"nilval": nil,
