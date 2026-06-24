@@ -1020,6 +1020,36 @@ func TestTrackRef_Clone(t *testing.T) {
 	assert.NotContains(t, ref.ExtraFields, "y")
 }
 
+func TestTrackRef_ID(t *testing.T) {
+	tests := map[string]struct {
+		ref              TrackRef
+		defaultNamespace string
+		expected         TrackID
+	}{
+		"explicit namespace": {
+			ref:              TrackRef{Namespace: "live", Name: "video"},
+			defaultNamespace: "other",
+			expected:         TrackID{Namespace: "live", Name: "video"},
+		},
+		"inherits default": {
+			ref:              TrackRef{Name: "audio"},
+			defaultNamespace: "live/demo",
+			expected:         TrackID{Namespace: "live/demo", Name: "audio"},
+		},
+		"sentinel when both empty": {
+			ref:              TrackRef{Name: "data"},
+			defaultNamespace: "",
+			expected:         TrackID{Namespace: inheritedNamespaceSentinel, Name: "data"},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.ref.ID(tt.defaultNamespace))
+		})
+	}
+}
+
 func TestTrackRef_effectiveNamespace(t *testing.T) {
 	tests := map[string]struct {
 		ref              TrackRef
