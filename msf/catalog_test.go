@@ -1120,6 +1120,56 @@ func TestCatalogDeltaValidate_EmptyDelta(t *testing.T) {
 	assert.Contains(t, err.Error(), "delta catalog must contain")
 }
 
+
+func TestCatalogDelta_UnmarshalJSON(t *testing.T) {
+	tests := map[string]struct {
+		input       string
+		wantErr     bool
+		errContains string
+		check       func(*testing.T, CatalogDelta)
+	}{
+		"valid base delta": {
+			input: `{"deltaUpdate": true, "addTracks": [{"name": "video", "packaging": "loc", "isLive": true}]}`,
+			wantErr: false,
+			check: func(t *testing.T, d CatalogDelta) {
+				require.Len(t, d.AddTracks, 1)
+				assert.Equal(t, "video", d.AddTracks[0].Name)
+				assert.Empty(t, d.ExtraFields)
+			},
+		},
+		"valid delta with extra fields": {
+			input: `{"deltaUpdate": true, "addTracks": [{"name": "video", "packaging": "loc", "isLive": true}], "custom_field": "custom_value", "another_field": 123}`,
+			wantErr: false,
+			check: func(t *testing.T, d CatalogDelta) {
+				require.Len(t, d.AddTracks, 1)
+				assert.Len(t, d.ExtraFields, 2)
+				assert.Contains(t, d.ExtraFields, "custom_field")
+				assert.Contains(t, d.ExtraFields, "another_field")
+				assert.Equal(t, string(d.ExtraFields["custom_field"]), `"custom_value"`)
+				assert.Equal(t, string(d.ExtraFields["another_field"]), "123")
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			var delta CatalogDelta
+			err := json.Unmarshal([]byte(tc.input), &delta)
+			if tc.wantErr {
+				require.Error(t, err)
+				if tc.errContains != "" {
+					assert.Contains(t, err.Error(), tc.errContains)
+				}
+			} else {
+				require.NoError(t, err)
+				if tc.check != nil {
+					tc.check(t, delta)
+				}
+			}
+		})
+	}
+}
+
 func TestCatalogDelta_UnmarshalJSON_MissingDeltaUpdate(t *testing.T) {
 	_, err := ParseCatalogDelta([]byte(`{"addTracks":[{"name":"video","packaging":"loc","isLive":true}]}`))
 	require.Error(t, err)
