@@ -39,6 +39,9 @@ func (aim *AnnounceInterestMessage) Decode(src io.Reader) error {
 		return err
 	}
 
+	if num > MaxMessageAllocationSize {
+		return ErrMessageTooLarge
+	}
 	b := make([]byte, num)
 
 	_, err = io.ReadFull(src, b)

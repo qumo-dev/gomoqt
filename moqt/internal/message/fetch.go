@@ -38,6 +38,9 @@ func (f *FetchMessage) Decode(src io.Reader) error {
 		return err
 	}
 
+	if size > MaxMessageAllocationSize {
+		return ErrMessageTooLarge
+	}
 	b := make([]byte, size)
 
 	_, err = io.ReadFull(src, b)

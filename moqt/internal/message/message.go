@@ -1,8 +1,13 @@
 package message
 
 import (
+	"errors"
 	"fmt"
 )
+
+const MaxMessageAllocationSize = 50 * 1024 * 1024 // 50MB
+
+var ErrMessageTooLarge = errors.New("message too large")
 
 func VarintLen(i uint64) int {
 	if i <= maxVarInt1 {
