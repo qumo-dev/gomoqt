@@ -20,6 +20,13 @@ func TestLocationJSON(t *testing.T) {
 	assert.Equal(t, location, decoded)
 }
 
+func TestLocation_MarshalJSON(t *testing.T) {
+	loc := Location{GroupID: 42, ObjectID: 100}
+	data, err := loc.MarshalJSON()
+	require.NoError(t, err)
+	assert.Equal(t, []byte(`[42,100]`), data)
+}
+
 func TestLocationJSON_InvalidEntryLength(t *testing.T) {
 	tests := []string{
 		`[1]`,
