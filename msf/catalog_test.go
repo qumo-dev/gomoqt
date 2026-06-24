@@ -1159,6 +1159,24 @@ func TestCatalogDelta_UnmarshalJSON_ExtraFields(t *testing.T) {
 	assert.Contains(t, delta.ExtraFields, "com.example.ext")
 }
 
+
+func TestTrackRef_MarshalJSON_ExtraFields(t *testing.T) {
+	ref := TrackRef{
+		Name: "video",
+		ExtraFields: map[string]json.RawMessage{
+			"customField": json.RawMessage(`"customValue"`),
+		},
+	}
+
+	data, err := json.Marshal(ref)
+	require.NoError(t, err)
+
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	assert.Equal(t, "video", decoded["name"])
+	assert.Equal(t, "customValue", decoded["customField"])
+}
+
 func TestTrackRef_MarshalJSON_NameOnly(t *testing.T) {
 	ref := TrackRef{Name: "video"}
 
