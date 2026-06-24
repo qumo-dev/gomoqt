@@ -16,6 +16,29 @@ func newBenchmarkSendStream(writer io.Writer) *FakeQUICSendStream {
 	return &FakeQUICSendStream{WriteFunc: writer.Write}
 }
 
+// loopReader is an io.Reader that yields src's bytes forever, wrapping around
+// with no allocation and no EOF. It replaces the bytes.Repeat(src, b.N+1)
+// pattern in benchmarks whose hot loop cannot tolerate the per-drain cost of a
+// reader running dry: instead of a b.N-proportional input buffer (which OOMs
+// CI on slow runners and inflates sec/op via GC scan of a huge live heap), the
+// input is a single copy of src, repeated on demand. src must be non-empty.
+type loopReader struct {
+	src []byte
+	off int
+}
+
+func (r *loopReader) Read(p []byte) (int, error) {
+	if len(p) == 0 || len(r.src) == 0 {
+		return 0, nil
+	}
+	n := copy(p, r.src[r.off:])
+	for n < len(p) {
+		n += copy(p[n:], r.src)
+	}
+	r.off = (r.off + n) % len(r.src)
+	return n, nil
+}
+
 // BenchmarkGroupReader_ReadFrame benchmarks reading frames from a group
 func BenchmarkGroupReader_ReadFrame(b *testing.B) {
 	frameSizes := []int{64, 1024, 16384, 65536} // Different frame sizes
@@ -36,9 +59,12 @@ func BenchmarkGroupReader_ReadFrame(b *testing.B) {
 			_ = testFrame.encode(&buf)
 			encodedData := buf.Bytes()
 
-			// Create a repeating reader for the benchmark
-			repeatingData := bytes.Repeat(encodedData, b.N+1)
-			reader := bytes.NewReader(repeatingData)
+			// loopReader yields the encoded frame forever with no allocation
+			// and no EOF, so the hot loop needs neither a b.N-proportional
+			// input buffer (bytes.Repeat(encodedData, b.N+1), which OOMs CI)
+			// nor the stream/groupReader rebuild + mid-loop b.ResetTimer() the
+			// EOF path used (which polluted allocs/op with rebuild allocations).
+			reader := &loopReader{src: encodedData}
 
 			// Wrap the reader to implement ReceiveStream
 			recvStream := newBenchmarkReceiveStream(reader)
@@ -53,15 +79,7 @@ func BenchmarkGroupReader_ReadFrame(b *testing.B) {
 
 			for i := 0; i < b.N; i++ {
 				frame.Reset()
-				err := groupReader.ReadFrame(frame)
-				if err == io.EOF {
-					b.ResetTimer()
-					reader = bytes.NewReader(repeatingData)
-					recvStream = newBenchmarkReceiveStream(reader)
-					groupReader = newGroupReader(GroupSequence(1), recvStream, nil)
-					continue
-				}
-				if err != nil {
+				if err := groupReader.ReadFrame(frame); err != nil {
 					b.Fatalf("ReadFrame failed: %v", err)
 				}
 			}
@@ -118,8 +136,6 @@ func BenchmarkGroupReader_ConcurrentRead(b *testing.B) {
 			_ = testFrame.encode(&buf)
 			encodedData := buf.Bytes()
 
-			repeatingData := bytes.Repeat(encodedData, b.N*conc+1)
-
 			b.ReportAllocs()
 			b.ResetTimer()
 
@@ -130,15 +146,17 @@ func BenchmarkGroupReader_ConcurrentRead(b *testing.B) {
 				go func() {
 					defer wg.Done()
 
-					reader := bytes.NewReader(repeatingData)
+					// Each goroutine gets its own loopReader (one frame,
+					// repeated forever, no allocation, no EOF), replacing the
+					// b.N*conc+1 shared buffer that scaled with b.N and OOM'd CI.
+					reader := &loopReader{src: encodedData}
 					recvStream := newBenchmarkReceiveStream(reader)
 					groupReader := newGroupReader(GroupSequence(1), recvStream, nil)
 					frame := NewFrame(frameSize)
 
 					for i := 0; i < b.N/conc; i++ {
 						frame.Reset()
-						err := groupReader.ReadFrame(frame)
-						if err != nil {
+						if err := groupReader.ReadFrame(frame); err != nil {
 							return
 						}
 					}
@@ -240,12 +258,15 @@ func BenchmarkGroupReader_MemoryAllocation(b *testing.B) {
 	var buf bytes.Buffer
 	_ = testFrame.encode(&buf)
 	encodedData := buf.Bytes()
-	repeatingData := bytes.Repeat(encodedData, b.N+1)
+	// Each iteration reads exactly one frame from a fresh stream, so a single
+	// loopReader (one frame, no EOF) suffices — replacing
+	// bytes.Repeat(encodedData, b.N+1), which allocated a b.N-proportional
+	// buffer whose tail was never read.
 
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		reader := bytes.NewReader(repeatingData)
+		reader := &loopReader{src: encodedData}
 		recvStream := newBenchmarkReceiveStream(reader)
 		groupReader := newGroupReader(GroupSequence(1), recvStream, nil)
 
