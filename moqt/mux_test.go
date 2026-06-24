@@ -139,7 +139,7 @@ func TestMux_Announce_WithNilHandler_ClosesTrack(t *testing.T) {
 	// Now try serveTrack - should call CloseWithError and stream CancelWrite/CancelRead with TrackNotFoundErrorCode
 	mockStream := &FakeQUICStream{}
 
-	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream { return mockStream }(), &SubscribeConfig{}), func() (transport.SendStream, error) {
+	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream { return mockStream }(), &SubscribeConfig{}), func(_ context.Context) (transport.SendStream, error) {
 		return &FakeQUICSendStream{}, nil
 	}, func() {})
 
@@ -162,7 +162,7 @@ func TestMux_ServeTrack_NotFound_ClosesWithError(t *testing.T) {
 
 	mockStream := &FakeQUICStream{}
 
-	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream { return mockStream }(), &SubscribeConfig{}), func() (transport.SendStream, error) {
+	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream { return mockStream }(), &SubscribeConfig{}), func(_ context.Context) (transport.SendStream, error) {
 		return &FakeQUICSendStream{}, nil
 	}, func() {})
 
@@ -685,7 +685,7 @@ func TestNotFound(t *testing.T) {
 				newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream {
 					return &FakeQUICStream{}
 				}(), &SubscribeConfig{}),
-				func() (transport.SendStream, error) {
+				func(_ context.Context) (transport.SendStream, error) {
 					return &FakeQUICSendStream{}, nil
 				}, func() {}),
 			expectPanic: false,
@@ -718,7 +718,7 @@ func TestNotFoundHandler(t *testing.T) {
 				newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream {
 					return &FakeQUICStream{}
 				}(), &SubscribeConfig{}),
-				func() (transport.SendStream, error) {
+				func(_ context.Context) (transport.SendStream, error) {
 					return &FakeQUICSendStream{}, nil
 				}, func() {}),
 			expectPanic: false,
@@ -749,7 +749,7 @@ func TestTrackHandlerFunc(t *testing.T) {
 		newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream {
 			return &FakeQUICStream{}
 		}(), &SubscribeConfig{}),
-		func() (transport.SendStream, error) {
+		func(_ context.Context) (transport.SendStream, error) {
 			return &FakeQUICSendStream{}, nil
 		}, func() {})
 
@@ -771,7 +771,7 @@ func TestTrackHandlerFuncServeTrack(t *testing.T) {
 		newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream {
 			return &FakeQUICStream{}
 		}(), &SubscribeConfig{}),
-		func() (transport.SendStream, error) {
+		func(_ context.Context) (transport.SendStream, error) {
 			return &FakeQUICSendStream{}, nil
 		}, func() {})
 
@@ -1905,7 +1905,7 @@ func TestMux_ServeTrack_ClosesWhenAnnouncementEnds(t *testing.T) {
 	streamCtx := t.Context()
 	mockStream.ParentCtx = streamCtx
 
-	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream { return mockStream }(), &SubscribeConfig{}), func() (transport.SendStream, error) {
+	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream { return mockStream }(), &SubscribeConfig{}), func(_ context.Context) (transport.SendStream, error) {
 		return &FakeQUICSendStream{}, nil
 	}, func() {})
 
@@ -2226,7 +2226,7 @@ func TestMux_Publish_WithNilHandler_ClosesTrack(t *testing.T) {
 	// Serve should close with TrackNotFound
 	mockStream := &FakeQUICStream{}
 
-	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream { return mockStream }(), &SubscribeConfig{}), func() (transport.SendStream, error) {
+	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream { return mockStream }(), &SubscribeConfig{}), func(_ context.Context) (transport.SendStream, error) {
 		return &FakeQUICSendStream{}, nil
 	}, func() {})
 

@@ -218,7 +218,7 @@ func setupBroadcastServerWithFrameSize(b *testing.B, ctx context.Context, frameS
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				gw, err := tw.OpenGroup()
+				gw, err := tw.OpenGroup(ctx)
 				if err != nil {
 					return
 				}

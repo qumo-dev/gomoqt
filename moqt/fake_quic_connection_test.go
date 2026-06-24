@@ -118,14 +118,10 @@ func (m *FakeStreamConn) OpenStreamSync(ctx context.Context) (transport.Stream, 
 	if m.OpenStreamSyncFunc != nil {
 		return m.OpenStreamSyncFunc(ctx)
 	}
-	m.mu.Lock()
-	if m.closeErr != nil {
-		err := m.closeErr
-		m.mu.Unlock()
-		return nil, err
-	}
-	m.mu.Unlock()
-	return nil, nil
+	// No sync-specific behavior configured: model the blocking open as the
+	// non-blocking one. This keeps tests that set OpenStreamFunc working when
+	// production calls OpenStreamSync. OpenStream already handles closeErr.
+	return m.OpenStream()
 }
 
 func (m *FakeStreamConn) OpenUniStreamSync(ctx context.Context) (transport.SendStream, error) {

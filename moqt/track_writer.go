@@ -57,7 +57,7 @@ func newTrackWriter(
 	broadcastPath BroadcastPath,
 	trackName TrackName,
 	subscribeStream *receiveSubscribeStream,
-	openUniStreamFunc func() (transport.SendStream, error),
+	openUniStreamFunc func(context.Context) (transport.SendStream, error),
 	onCloseTrackFunc func(),
 ) *TrackWriter {
 	streamCtx := subscribeStream.stream.Context()
@@ -96,7 +96,7 @@ type TrackWriter struct {
 	// groupSequence is atomically incremented for each OpenGroup call
 	groupSequence atomic.Uint64
 
-	openUniStreamFunc func() (transport.SendStream, error)
+	openUniStreamFunc func(context.Context) (transport.SendStream, error)
 
 	onCloseTrackFunc func()
 
@@ -169,16 +169,25 @@ func (w *TrackWriter) CloseWithError(code SubscribeErrorCode) {
 // OpenGroup opens a new group with an automatically incremented sequence number
 // and returns a GroupWriter to write frames into it.
 // The sequence starts at 1 and increments by 1 for each call.
-func (w *TrackWriter) OpenGroup() (*GroupWriter, error) {
+//
+// The group is opened on a fresh unidirectional QUIC stream. ctx controls
+// cancellation and backpressure: when the peer's concurrent-stream limit
+// (MAX_STREAMS) is reached, OpenGroup blocks until the peer grants a stream or
+// ctx is done, instead of failing. Pass w.Context() to bound the open to the
+// track's lifetime, or a deadline-bearing context to drop a group under
+// pressure rather than wait.
+func (w *TrackWriter) OpenGroup(ctx context.Context) (*GroupWriter, error) {
 	// Atomically increment and get the next sequence
 	seq := GroupSequence(w.groupSequence.Add(1))
-	return w.openGroupWithSequence(seq)
+	return w.openGroupWithSequence(ctx, seq)
 }
 
 // OpenGroupAt opens a new group with the specified sequence number.
 // It advances the internal next-sequence counter to at least seq+1 so that
 // subsequent OpenGroup calls will not produce a duplicate sequence.
-func (w *TrackWriter) OpenGroupAt(seq GroupSequence) (*GroupWriter, error) {
+//
+// ctx controls cancellation and backpressure the same way as OpenGroup.
+func (w *TrackWriter) OpenGroupAt(ctx context.Context, seq GroupSequence) (*GroupWriter, error) {
 	// Advance the internal counter to avoid collisions with subsequent
 	// OpenGroup calls. CAS loop ensures correctness under concurrency.
 	for {
@@ -191,7 +200,7 @@ func (w *TrackWriter) OpenGroupAt(seq GroupSequence) (*GroupWriter, error) {
 			break
 		}
 	}
-	return w.openGroupWithSequence(seq)
+	return w.openGroupWithSequence(ctx, seq)
 }
 
 // SkipGroups skips the next n group sequences without opening them.
@@ -272,7 +281,7 @@ func (w *TrackWriter) Updated() <-chan struct{} {
 }
 
 // openGroupWithSequence is the internal implementation for opening a group with a specific sequence.
-func (w *TrackWriter) openGroupWithSequence(seq GroupSequence) (*GroupWriter, error) {
+func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequence) (*GroupWriter, error) {
 	// Avoid accessing s.ctx directly; it can be nil if the receiveSubscribeStream
 	// has been cleared during Close(). Instead, capture the receiveSubscribeStream
 	// under lock and validate its context below.
@@ -298,7 +307,10 @@ func (w *TrackWriter) openGroupWithSequence(seq GroupSequence) (*GroupWriter, er
 		return nil, err
 	}
 
-	stream, err := w.openUniStreamFunc()
+	mergedCtx, cancel := mergeContexts(ctx, w.Context())
+	defer cancel()
+
+	stream, err := w.openUniStreamFunc(mergedCtx)
 	if err != nil {
 		if appErr, ok := errors.AsType[*transport.ApplicationError](err); ok {
 			sessErr := &SessionError{
@@ -339,4 +351,24 @@ func (w *TrackWriter) openGroupWithSequence(seq GroupSequence) (*GroupWriter, er
 	}
 
 	return newGroupWriter(stream, seq, w.groupManager), nil
+}
+
+// mergeContexts returns a context that is canceled when either ctx1 or ctx2 is done.
+// The returned cancel function must be called to release resources.
+func mergeContexts(ctx1, ctx2 context.Context) (context.Context, context.CancelFunc) {
+	if ctx1.Err() != nil {
+		return ctx1, func() {}
+	}
+	if ctx2.Err() != nil {
+		return ctx2, func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx1)
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-ctx2.Done():
+			cancel()
+		}
+	}()
+	return ctx, cancel
 }

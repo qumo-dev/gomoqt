@@ -8,9 +8,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/quic-go/quic-go"
 	"github.com/qumo-dev/gomoqt/moqt"
+)
+
+const (
+	openTimeout = 1 * time.Second
 )
 
 func main() {
@@ -67,7 +72,9 @@ func main() {
 							}
 
 							go func(gr *moqt.GroupReader) {
-								gw, err := tw.OpenGroup()
+								ctx, cancel := context.WithTimeout(context.Background(), openTimeout)
+								gw, err := tw.OpenGroup(ctx)
+								cancel()
 								if err != nil {
 									slog.Error("failed to open group", "error", err)
 									return

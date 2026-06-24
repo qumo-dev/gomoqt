@@ -33,7 +33,12 @@ jobs:
         run: go test -v ./...
 
       - name: Test with coverage
-        run: go test -coverprofile=coverage.out -covermode=atomic ./moqt/...
+        # Scope to library packages (moqt + transport) so cross-package
+        # execution (e.g. moqt tests exercising moqt/internal/* and transport)
+        # is attributed. cmd/examples/msf mains are excluded — they aren't
+        # unit-tested, so including them reads as uncovered and noises up
+        # codecov/patch without flagging real gaps.
+        run: go test -coverprofile=coverage.out -covermode=atomic -coverpkg=./moqt/...,./transport/... ./moqt/... ./transport/...
 
       - name: Upload coverage report
         uses: codecov/codecov-action@v5

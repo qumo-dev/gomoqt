@@ -90,7 +90,7 @@ func BenchmarkTrackMux_ServeTrack(b *testing.B) {
 	}))
 
 	// Create a test track writer
-	openUniStreamFunc := func() (transport.SendStream, error) {
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		mockSendStream := &FakeQUICSendStream{}
 		return mockSendStream, nil
 	}
@@ -753,7 +753,7 @@ func BenchmarkTrackMux_CPUProfileOptimization(b *testing.B) {
 				trackWriter := &TrackWriter{
 					BroadcastPath: path,
 					TrackName:     TrackName(fmt.Sprintf("track-%d", i)),
-					openUniStreamFunc: func() (transport.SendStream, error) {
+					openUniStreamFunc: func(_ context.Context) (transport.SendStream, error) {
 						mockSendStream := &FakeQUICSendStream{}
 						return mockSendStream, nil
 					},
