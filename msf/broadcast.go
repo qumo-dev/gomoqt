@@ -1,6 +1,7 @@
 package msf
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -228,7 +229,7 @@ func (b *Broadcast) serveCatalogTrack(tw *moqt.TrackWriter) {
 		return
 	}
 
-	group, err := tw.OpenGroup(tw.Context())
+	group, err := tw.OpenGroup(context.Background())
 	if err != nil {
 		tw.CloseWithError(moqt.SubscribeErrorCodeInternal)
 		return

@@ -13,6 +13,11 @@ import (
 	"github.com/qumo-dev/gomoqt/moqt"
 )
 
+const (
+	frameInterval = 100 * time.Millisecond
+	openTimeout   = 100 * time.Millisecond
+)
+
 func main() {
 	server := moqt.Server{
 		Addr: "localhost:4469",
@@ -32,30 +37,40 @@ func main() {
 	handler := &moqt.WebTransportHandler{}
 	http.Handle("/broadcast", handler)
 
-	// Register the broadcast handler with the default mux
 	moqt.PublishFunc(context.Background(), "/server.broadcast", func(tw *moqt.TrackWriter) {
 		frame := moqt.NewFrame(1024)
+		ticker := time.NewTicker(frameInterval)
+		defer ticker.Stop()
+
 		for {
-			time.Sleep(100 * time.Millisecond)
-
-			gw, err := tw.OpenGroup(tw.Context())
-			if err != nil {
-				slog.Error("failed to open group", "error", err)
+			select {
+			case <-tw.Context().Done():
 				return
-			}
+			case <-ticker.C:
+				ctx, cancel := context.WithTimeout(context.Background(), openTimeout)
+				gw, err := tw.OpenGroup(ctx)
+				cancel()
+				if err != nil {
+					slog.Error("failed to open group", "error", err)
+					if tw.Context().Err() != nil {
+						return
+					}
+					continue
+				}
 
-			frame.Reset()
-			frame.Write([]byte("FRAME " + gw.GroupSequence().String()))
-			err = gw.WriteFrame(frame)
-			if err != nil {
-				gw.CancelWrite(moqt.InternalGroupErrorCode) // TODO: Handle error properly
-				slog.Error("failed to write frame", "error", err)
-				return
-			}
+				frame.Reset()
+				frame.Write([]byte("FRAME " + gw.GroupSequence().String()))
+				err = gw.WriteFrame(frame)
+				if err != nil {
+					gw.CancelWrite(moqt.InternalGroupErrorCode) // TODO: Handle error properly
+					slog.Error("failed to write frame", "error", err)
+					return
+				}
 
-			// TODO: Release the frame after writing
-			// This is important to avoid memory leaks
-			gw.Close()
+				// TODO: Release the frame after writing
+				// This is important to avoid memory leaks
+				gw.Close()
+			}
 		}
 	})
 

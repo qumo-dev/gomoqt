@@ -10,6 +10,10 @@ import (
 	"github.com/qumo-dev/gomoqt/moqt"
 )
 
+const (
+	openTimeout = 5 * time.Second
+)
+
 func main() {
 	addr := flag.String("addr", "https://localhost:9000", "server URL for MOQ (https://host:port for WebTransport, moqt://host:port for native QUIC)")
 	flag.Parse()
@@ -148,7 +152,9 @@ func main() {
 		}()
 
 		fmt.Print("Opening group...")
-		group, err := tw.OpenGroup(tw.Context())
+		ctx, cancel := context.WithTimeout(context.Background(), openTimeout)
+		group, err := tw.OpenGroup(ctx)
+		cancel()
 		if err != nil {
 			fmt.Printf("failed\n  Error: %v\n", err)
 			return

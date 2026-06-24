@@ -307,7 +307,10 @@ func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequen
 		return nil, err
 	}
 
-	stream, err := w.openUniStreamFunc(ctx)
+	mergedCtx, cancel := mergeContexts(ctx, w.Context())
+	defer cancel()
+
+	stream, err := w.openUniStreamFunc(mergedCtx)
 	if err != nil {
 		if appErr, ok := errors.AsType[*transport.ApplicationError](err); ok {
 			sessErr := &SessionError{
@@ -348,4 +351,24 @@ func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequen
 	}
 
 	return newGroupWriter(stream, seq, w.groupManager), nil
+}
+
+// mergeContexts returns a context that is canceled when either ctx1 or ctx2 is done.
+// The returned cancel function must be called to release resources.
+func mergeContexts(ctx1, ctx2 context.Context) (context.Context, context.CancelFunc) {
+	if ctx1.Err() != nil {
+		return ctx1, func() {}
+	}
+	if ctx2.Err() != nil {
+		return ctx2, func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx1)
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-ctx2.Done():
+			cancel()
+		}
+	}()
+	return ctx, cancel
 }

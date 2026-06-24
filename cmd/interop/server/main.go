@@ -19,6 +19,10 @@ import (
 	"github.com/qumo-dev/gomoqt/moqt"
 )
 
+const (
+	openTimeout = 5 * time.Second
+)
+
 func main() {
 	addr := flag.String("addr", ":9000", "server address")
 	flag.Parse()
@@ -104,7 +108,9 @@ func runInteropSession(sess *moqt.Session, mux *moqt.TrackMux, serverDone chan s
 	mux.PublishFunc(context.Background(), path, func(tw *moqt.TrackWriter) {
 		fmt.Printf("Serving a track: %s\n", string(path))
 
-		group, err := tw.OpenGroup(tw.Context())
+		ctx, cancel := context.WithTimeout(context.Background(), openTimeout)
+		group, err := tw.OpenGroup(ctx)
+		cancel()
 		if err != nil {
 			fmt.Printf("Opening group... failed\n  Error: %v\n", err)
 			return
