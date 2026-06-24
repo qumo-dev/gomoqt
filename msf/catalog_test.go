@@ -996,8 +996,8 @@ func TestTrackRef_MarshalJSON_RoundTrip(t *testing.T) {
 
 func TestTrackRef_Clone(t *testing.T) {
 	ref := TrackRef{
-		Namespace:   "live",
-		Name:        "video",
+		Namespace: "live",
+		Name:      "video",
 		ExtraFields: map[string]json.RawMessage{
 			"x":      json.RawMessage(`[1, 2, 3]`),
 			"nilval": nil,
@@ -1076,7 +1076,13 @@ func TestTrackClone_MarshalJSON_RoundTrip(t *testing.T) {
 
 func TestTrackClone_Clone(t *testing.T) {
 	original := TrackClone{
-		Track:      Track{Name: "video-720", Codec: "av01"},
+		Track: Track{
+			Name:  "video-720",
+			Codec: "av01",
+			ExtraFields: map[string]json.RawMessage{
+				"x": json.RawMessage(`[1, 2, 3]`),
+			},
+		},
 		ParentName: "video-1080",
 	}
 
@@ -1084,6 +1090,11 @@ func TestTrackClone_Clone(t *testing.T) {
 	assert.Equal(t, "video-720", clone.Name)
 	assert.Equal(t, "video-1080", clone.ParentName)
 	assert.Equal(t, "av01", clone.Codec)
+	assert.Contains(t, clone.ExtraFields, "x")
+
+	// Test byte slice deep copy
+	clone.ExtraFields["x"][1] = '9'
+	assert.Equal(t, byte('1'), original.ExtraFields["x"][1], "original byte slice should not be mutated")
 
 	clone.Name = "mutated"
 	assert.Equal(t, "video-720", original.Name)
