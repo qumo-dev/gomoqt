@@ -36,6 +36,18 @@ func TestLocationJSON_InvalidEntryLength(t *testing.T) {
 	}
 }
 
+func TestMediaTimelineEntry_MarshalJSON(t *testing.T) {
+	entry := MediaTimelineEntry{
+		MediaTime: 2002,
+		Location:  Location{GroupID: 1, ObjectID: 0},
+		Wallclock: 1759924160383,
+	}
+
+	data, err := entry.MarshalJSON()
+	require.NoError(t, err)
+	assert.JSONEq(t, `[2002,[1,0],1759924160383]`, string(data))
+}
+
 func TestMediaTimelineEntryJSON(t *testing.T) {
 	entry := MediaTimelineEntry{
 		MediaTime: 2002,
