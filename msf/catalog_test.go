@@ -1074,6 +1074,28 @@ func TestTrackClone_MarshalJSON_RoundTrip(t *testing.T) {
 	assert.Equal(t, int64(1280), *decoded.Width)
 }
 
+
+func TestTrackClone_MarshalJSON(t *testing.T) {
+	t.Run("with parent name", func(t *testing.T) {
+		clone := TrackClone{
+			Track:      Track{Name: "video-720"},
+			ParentName: "video-1080",
+		}
+		data, err := clone.MarshalJSON()
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"name":"video-720","parentName":"video-1080"}`, string(data))
+	})
+
+	t.Run("without parent name", func(t *testing.T) {
+		clone := TrackClone{
+			Track: Track{Name: "video-720"},
+		}
+		data, err := clone.MarshalJSON()
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"name":"video-720"}`, string(data))
+	})
+}
+
 func TestTrackClone_Clone(t *testing.T) {
 	original := TrackClone{
 		Track:      Track{Name: "video-720", Codec: "av01"},
