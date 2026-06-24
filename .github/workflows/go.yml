@@ -73,39 +73,12 @@ jobs:
           # and the trackReaders map at session.go ~732).
           go test -race -count=1 -timeout=10m ./moqt/...
 
-  # Microbenchmark baseline capture. Runs ONLY on push (main/tags) and manual
-  # dispatch to produce the bench-baseline artifact that the performance-check
-  # label workflow (.github/workflows/benchmark-label.yml) compares PRs against.
-  # Benchmarking a PR is NOT done here -- add the `performance-check` label to a
-  # PR and benchmark-label.yml runs the comparison and posts it as a comment.
-  # Microbenchmarks only (fast, stable signal); the slow broadcast/QUIC
-  # integration suite runs in the benchmark-integration job below.
-  benchmark:
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: "1.26.0"
-
-      - name: Run benchmarks (micro)
-        # Microbenchmarks only: -short skips the slow real-QUIC integration
-        # benchmarks (each calls testing.Short() -> b.Skip). They run in
-        # benchmark-integration below, without -short.
-        # -benchtime=1s gives a stable mean (1x had ~150% CV on micros);
-        # -count=10 gives benchstat enough samples to estimate variance.
-        run: |
-          go test -run='^$' -bench=. -short -benchmem -benchtime=1s -count=10 -timeout=15m ./moqt/... | tee bench-new.txt
-
-      - name: Upload baseline
-        uses: actions/upload-artifact@v4
-        with:
-          name: bench-baseline
-          path: bench-new.txt
-          retention-days: 90
+  # (The per-PR microbenchmark baseline job used to live here, uploading a
+  # bench-baseline artifact. Removed: benchmark-label.yml now runs base and PR
+  # back-to-back in the same job, so no pre-captured baseline is needed -- and a
+  # separately captured baseline was the source of cross-run drift (different
+  # runner/settings/commit). Main-branch microbenchmark trends are still
+  # captured by benchmark-integration below for archival.)
 
   # Slow real-QUIC integration benchmarks. Runs the FULL benchmark suite WITHOUT
   # -short, so the benchmarks that self-skip under testing.Short() actually run

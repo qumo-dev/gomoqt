@@ -1,6 +1,7 @@
 package message
 
 import (
+	"errors"
 	"io"
 	"math"
 )
@@ -123,3 +124,6 @@ func ReadStringArray(b []byte) ([]string, int, error) {
 
 	return arr, total, nil
 }
+
+// ErrMessageTooLarge is returned when a parsed message size exceeds MaxMessageSize.
+var ErrMessageTooLarge = errors.New("message too large")

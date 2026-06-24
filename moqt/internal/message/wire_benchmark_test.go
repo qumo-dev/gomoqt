@@ -20,6 +20,25 @@ func encodeMessage(m interface{ Encode(io.Writer) error }) []byte {
 	return buf.Bytes()
 }
 
+// tile replicates b to fill a ~64 KiB buffer so a decode reader rarely drains
+// during a run. The size is a CONSTANT: unlike bytes.Repeat(b, b.N+1) it does
+// not scale with the iteration count, so it cannot OOM a slow runner or inflate
+// GC pressure as b.N grows (the trap #213 fixed in BenchmarkFrame_Decode). On a
+// rare drain the decode benches rewind with reader.Reset(repeating), which is
+// zero-allocation, so drains never pollute allocs/op and add only negligible
+// overhead relative to a full decode.
+func tile(b []byte) []byte {
+	const budget = 1 << 16 // 64 KiB
+	return bytes.Repeat(b, budget/len(b)+1)
+}
+
+// The *_Encode benchmarks below write to io.Discard rather than a *bytes.Buffer.
+// A bytes.Buffer grows its internal slice on Write, and that growth is counted by
+// -benchmem — previously inflating the reported Encode cost to ~3 allocs/op when
+// Encode's own allocation is only 1 scratch buffer. io.Discard isolates Encode's
+// true allocation. (The encodeMessage helper above still uses bytes.Buffer because
+// it needs the encoded bytes back for the *_Decode benchmarks.)
+
 // --- GroupMessage ---
 
 func BenchmarkGroupMessage_Encode(b *testing.B) {
@@ -32,8 +51,7 @@ func BenchmarkGroupMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -45,7 +63,7 @@ func BenchmarkGroupMessage_Decode(b *testing.B) {
 		GroupSequence: 1 << 28,
 	}
 	encoded := encodeMessage(msg)
-	repeating := bytes.Repeat(encoded, b.N+1)
+	repeating := tile(encoded)
 	reader := bytes.NewReader(repeating)
 
 	var decoded message.GroupMessage
@@ -84,8 +102,7 @@ func BenchmarkSubscribeMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -103,7 +120,7 @@ func BenchmarkSubscribeMessage_Decode(b *testing.B) {
 		EndGroup:             1 << 28,
 	}
 	encoded := encodeMessage(msg)
-	repeating := bytes.Repeat(encoded, b.N+1)
+	repeating := tile(encoded)
 	reader := bytes.NewReader(repeating)
 
 	var decoded message.SubscribeMessage
@@ -142,8 +159,7 @@ func BenchmarkAnnounceMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -161,7 +177,7 @@ func BenchmarkAnnounceMessage_Decode(b *testing.B) {
 		},
 	}
 	encoded := encodeMessage(msg)
-	repeating := bytes.Repeat(encoded, b.N+1)
+	repeating := tile(encoded)
 	reader := bytes.NewReader(repeating)
 
 	var decoded message.AnnounceMessage
@@ -194,8 +210,7 @@ func BenchmarkAnnounceInterestMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -207,7 +222,7 @@ func BenchmarkAnnounceInterestMessage_Decode(b *testing.B) {
 		ExcludeHop:          1 << 28,
 	}
 	encoded := encodeMessage(msg)
-	repeating := bytes.Repeat(encoded, b.N+1)
+	repeating := tile(encoded)
 	reader := bytes.NewReader(repeating)
 
 	var decoded message.AnnounceInterestMessage
@@ -242,8 +257,7 @@ func BenchmarkFetchMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -257,7 +271,7 @@ func BenchmarkFetchMessage_Decode(b *testing.B) {
 		GroupSequence: 1 << 28,
 	}
 	encoded := encodeMessage(msg)
-	repeating := bytes.Repeat(encoded, b.N+1)
+	repeating := tile(encoded)
 	reader := bytes.NewReader(repeating)
 
 	var decoded message.FetchMessage
@@ -293,8 +307,7 @@ func BenchmarkSubscribeOkMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -309,7 +322,7 @@ func BenchmarkSubscribeOkMessage_Decode(b *testing.B) {
 		EndGroup:            1 << 28,
 	}
 	encoded := encodeMessage(msg)
-	repeating := bytes.Repeat(encoded, b.N+1)
+	repeating := tile(encoded)
 	reader := bytes.NewReader(repeating)
 
 	var decoded message.SubscribeOkMessage
@@ -345,8 +358,7 @@ func BenchmarkSubscribeUpdateMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -361,7 +373,7 @@ func BenchmarkSubscribeUpdateMessage_Decode(b *testing.B) {
 		EndGroup:             1 << 28,
 	}
 	encoded := encodeMessage(msg)
-	repeating := bytes.Repeat(encoded, b.N+1)
+	repeating := tile(encoded)
 	reader := bytes.NewReader(repeating)
 
 	var decoded message.SubscribeUpdateMessage
@@ -395,8 +407,7 @@ func BenchmarkSubscribeDropMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -409,7 +420,7 @@ func BenchmarkSubscribeDropMessage_Decode(b *testing.B) {
 		ErrorCode:  1 << 10,
 	}
 	encoded := encodeMessage(msg)
-	repeating := bytes.Repeat(encoded, b.N+1)
+	repeating := tile(encoded)
 	reader := bytes.NewReader(repeating)
 
 	var decoded message.SubscribeDropMessage
@@ -441,8 +452,7 @@ func BenchmarkGoawayMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -453,7 +463,7 @@ func BenchmarkGoawayMessage_Decode(b *testing.B) {
 		NewSessionURI: "https://relay.example.com/eu-west/moqt-session?token=abc123",
 	}
 	encoded := encodeMessage(msg)
-	repeating := bytes.Repeat(encoded, b.N+1)
+	repeating := tile(encoded)
 	reader := bytes.NewReader(repeating)
 
 	var decoded message.GoawayMessage
@@ -486,8 +496,7 @@ func BenchmarkProbeMessage_Encode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		var buf bytes.Buffer
-		if err := msg.Encode(&buf); err != nil {
+		if err := msg.Encode(io.Discard); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -499,7 +508,7 @@ func BenchmarkProbeMessage_Decode(b *testing.B) {
 		RTT:     1 << 10,
 	}
 	encoded := encodeMessage(msg)
-	repeating := bytes.Repeat(encoded, b.N+1)
+	repeating := tile(encoded)
 	reader := bytes.NewReader(repeating)
 
 	var decoded message.ProbeMessage
@@ -531,10 +540,10 @@ var varintMagnitudes = []struct {
 	val  uint64
 }{
 	{"0", 0},
-	{"127", 127},        // maxVarInt1 (1-byte)
-	{"16383", 16383},    // maxVarInt2 (2-byte)
-	{"1<<21", 1 << 21},  // inside 4-byte bucket
-	{"1<<28", 1 << 28},  // inside 4-byte bucket
+	{"127", 127},             // maxVarInt1 (1-byte)
+	{"16383", 16383},         // maxVarInt2 (2-byte)
+	{"1<<21", 1 << 21},       // inside 4-byte bucket
+	{"1<<28", 1 << 28},       // inside 4-byte bucket
 	{"maxUint62", maxUint62}, // maxVarInt8 (8-byte, max valid)
 }
 
@@ -584,9 +593,9 @@ func BenchmarkReadMessageLength(b *testing.B) {
 				n = 8
 			}
 			encoded := make([]byte, 0, n)
-			_, _ = message.WriteMessageLength(encoded, tc.val)
+			encoded, _ = message.WriteMessageLength(encoded, tc.val)
 			// Tile the encoded varint so the reader never drains mid-bench.
-			repeating := bytes.Repeat(encoded, b.N+1)
+			repeating := tile(encoded)
 			reader := bytes.NewReader(repeating)
 
 			b.ReportAllocs()
@@ -618,8 +627,8 @@ func BenchmarkReadMessageLength(b *testing.B) {
 // No validation logic is added here — measurement only.
 func BenchmarkReadMessageLength_MaxUint62_NoBody(b *testing.B) {
 	encoded := make([]byte, 0, 8)
-	_, _ = message.WriteMessageLength(encoded, maxUint62)
-	repeating := bytes.Repeat(encoded, b.N+1)
+	encoded, _ = message.WriteMessageLength(encoded, maxUint62)
+	repeating := tile(encoded)
 	reader := bytes.NewReader(repeating)
 
 	b.ReportAllocs()

@@ -395,6 +395,13 @@ func BenchmarkTrackMux_AllocationPatterns(b *testing.B) {
 	})
 }
 
+// Sinks for the StringOperations routing-parser sub-benches, so the compiler
+// cannot eliminate the real prefixSegments/pathSegments calls.
+var (
+	sinkSegs []prefixSegment
+	sinkLast string
+)
+
 // BenchmarkTrackMux_StringOperations benchmarks string operations impact
 func BenchmarkTrackMux_StringOperations(b *testing.B) {
 	b.Run("path-validation", func(b *testing.B) {
@@ -442,6 +449,46 @@ func BenchmarkTrackMux_StringOperations(b *testing.B) {
 		for i := 0; b.Loop(); i++ {
 			path := paths[i%len(paths)]
 			strings.Split(string(path), "/")
+		}
+	})
+
+	// The two sub-benches below call the REAL routing parsers from mux.go
+	// (the optimized strings.IndexByte path and the production strings.Split
+	// path), not a stand-in. These are the functions #220 targeted; measuring
+	// them directly gives a baseline for future changes to the routing hot path.
+	b.Run("prefixSegments", func(b *testing.B) {
+		// prefixSegments strips [1:len-1], so inputs must be prefix-shaped
+		// (leading + trailing slash).
+		prefixes := []string{
+			"/level1/level2/",
+			"/room/user123/",
+			"/game/match456/audio/",
+		}
+
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for i := 0; b.Loop(); i++ {
+			prefix := prefixes[i%len(prefixes)]
+			sinkSegs = prefixSegments(prefix)
+		}
+	})
+
+	b.Run("pathSegments", func(b *testing.B) {
+		paths := []BroadcastPath{
+			BroadcastPath("/level1/level2/track"),
+			BroadcastPath("/room/user123/video"),
+			BroadcastPath("/game/match456/audio"),
+		}
+
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for i := 0; b.Loop(); i++ {
+			path := paths[i%len(paths)]
+			segs, last := pathSegments(path)
+			sinkSegs = segs
+			sinkLast = last
 		}
 	})
 }

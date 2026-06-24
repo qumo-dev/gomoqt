@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"strings"
 	"sync"
 )
 
@@ -503,26 +504,7 @@ func pathSegments(path BroadcastPath) (prefixSegments []prefixSegment, last stri
 		return nil, p
 	}
 
-	// Count slashes to pre-allocate exact size and avoid allocations
-	str := p[1:] // Skip leading slash
-	slashCount := 0
-	for i := 0; i < len(str); i++ {
-		if str[i] == '/' {
-			slashCount++
-		}
-	}
-
-	// Allocate exact size needed
-	segments := make([]string, 0, slashCount+1)
-	start := 0
-	for i := 0; i < len(str); i++ {
-		if str[i] == '/' {
-			segments = append(segments, str[start:i])
-			start = i + 1
-		}
-	}
-	// Add last segment
-	segments = append(segments, str[start:])
+	segments := strings.Split(p[1:], "/")
 
 	if len(segments) == 0 {
 		return nil, p

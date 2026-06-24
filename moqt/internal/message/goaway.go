@@ -36,6 +36,10 @@ func (gm *GoawayMessage) Decode(src io.Reader) error {
 		return err
 	}
 
+	if num > MaxMessageSize {
+		return ErrMessageTooLarge
+	}
+
 	b := make([]byte, num)
 
 	_, err = io.ReadFull(src, b)

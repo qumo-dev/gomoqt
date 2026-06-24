@@ -1,20 +1,32 @@
 # On-demand micro-benchmark for performance-focused PRs.
 #
 # Triggered when the `performance-check` label is added to a pull request (or by
-# manual dispatch). Runs the moqt microbenchmarks with -benchtime=1s (stable
-# signal; -benchtime=1x gave ~150% CV on microbenchmarks — unusable for
-# benchstat) and compares against the latest baseline captured on main by
-# go.yml's `benchmark` job.
+# manual dispatch). For every Go package the PR touches, it benchmarks BOTH the
+# PR head and the PR's base SHA back-to-back IN THE SAME JOB (same runner, same
+# flags, seconds apart) and compares them with benchstat. The result is posted
+# -- and updated in place -- as a PR comment.
 #
-# The slow broadcast/QUIC integration benchmarks are excluded — each op there is
-# a multi-second aggregate where -benchtime=1x is appropriate, and they are
-# irrelevant to wire-layer micro-PRs. They run on main via go.yml's
-# `benchmark-integration` job.
+# Why base+PR in one job (not a pre-captured baseline artifact): a baseline
+# captured by a separate, earlier run drifts -- different runner hardware/load,
+# different -benchtime/-count, or a stale commit -- which surfaces as spurious
+# uniform "changes" even for code-identical PRs (we saw ~22% on every benchmark
+# for a CI-only PR). Running both sides in the same job eliminates that drift so
+# the diff reflects the code, not the environment. (Same pattern as qumo's
+# .github/workflows/bench.yml.)
 #
-# Allocation metrics (B/op, allocs/op) are deterministic regardless of
-# -benchtime, so the alloc columns are meaningful even before go.yml's baseline
-# is captured at -benchtime=1s. ns/op becomes trustworthy once main's baseline
-# is also -benchtime=1s.
+# Only packages whose *.go changed are benchmarked, so a PR that touches no
+# implementation (docs/CI-only) runs no benchmarks and posts no comment.
+#
+# Turnaround over precision: -benchtime=50ms -count=10. Statistical significance
+# comes from -count (10 samples); -benchtime is kept low because the moqt suite
+# is large and shared-runner wall time is ~2-3x variable, so a higher benchtime
+# blows the timeout (count=4/100ms already timed out on a slow runner). 50ms
+# still runs 10k+ iterations/sample, so per-sample means stay stable. allocs/op
+# and B/op are deterministic regardless of these flags -> the reliable signal;
+# sec/op is a quick indicator (re-run locally with -benchtime=1s -count=10+).
+# count=10: benchstat needs >=6 samples for a CI / meaningful p-values; at
+# count=4 it flags every non-identical median at p=0.029 (spurious "significant"
+# deltas). The slow real-QUIC integration benchmarks self-skip under -short.
 name: Benchmark (performance-check)
 
 on:
@@ -24,97 +36,120 @@ on:
 
 permissions:
   contents: read
-  actions: read
-  pull-requests: write # post the benchstat comparison as a PR comment
+  pull-requests: write # post/update the benchstat comparison as a PR comment
 
 jobs:
   benchmark:
-    # Only run when the performance-check label is added (or on manual dispatch).
     if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'performance-check'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      # Same flags for base and PR so the comparison is like-for-like.
+      BENCH_FLAGS: "-benchtime=50ms -count=10"
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout PR head (full history for base diff + worktree)
+        uses: actions/checkout@v4
         with:
-          # Check out the PR head so the benchmark measures the PR's code.
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ env.HEAD_SHA }}
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
           go-version: "1.26.0"
+          cache: true # reuse the Go build cache -> faster cold compile of base + PR test binaries
 
       - name: Install benchstat
         run: go install golang.org/x/perf/cmd/benchstat@latest
 
-      - name: Download latest baseline artifact
-        id: baseline
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Detect changed Go packages
+        id: changed
         run: |
           set -euo pipefail
-          mkdir -p baseline
-          RUN_ID=$(gh run list \
-            --workflow=go.yml \
-            --branch=main \
-            --status=success \
-            --event=push \
-            --limit=20 \
-            --json databaseId,conclusion \
-            --jq '[.[] | select(.conclusion=="success")] | .[0].databaseId') || true
-          if [ -z "${RUN_ID}" ] || [ "${RUN_ID}" = "null" ]; then
-            echo "No baseline run found; skipping comparison."
-            exit 0
+          # Only benchmark packages whose *.go actually changed; a CI/docs-only
+          # PR then has nothing to compare and posts no benchmark comment.
+          git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" -- '*.go' \
+            | xargs -r -n1 dirname | sort -u > pkgs.txt
+          if [ -s pkgs.txt ]; then
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            echo "Changed Go packages:"
+            cat pkgs.txt
+          else
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "No changed Go packages -- nothing to benchmark."
           fi
-          echo "Using baseline from run ${RUN_ID}"
-          gh run download "${RUN_ID}" --name bench-baseline --dir baseline || true
-          if [ -f baseline/bench-new.txt ]; then
-            mv baseline/bench-new.txt baseline/bench-baseline.txt
-          fi
-          test -f baseline/bench-baseline.txt && echo "have_baseline=true" >> "$GITHUB_OUTPUT" || true
 
-      - name: Run benchmarks (micro)
-        # -short skips the slow real-QUIC integration benchmarks (each calls
-        # testing.Short() -> b.Skip); they are measured by go.yml's
-        # benchmark-integration job (on main, not on PRs).
-        # -benchtime=1s lets Go pick a high iteration count for a stable mean.
+      - name: Checkout base into a worktree
+        if: steps.changed.outputs.any == 'true'
         run: |
-          go test -run='^$' -bench=. -short -benchmem -benchtime=1s -count=10 -timeout=15m ./moqt/... | tee bench-new.txt
+          # Separate worktree so the base and PR source trees don't clobber each
+          # other. The Go module/build caches are global, so both builds reuse them.
+          git worktree add "$RUNNER_TEMP/base" "$BASE_SHA"
+          echo "BASE_DIR=$RUNNER_TEMP/base" >> "$GITHUB_ENV"
 
-      - name: Compare against baseline and build comment
-        if: steps.baseline.outputs.have_baseline == 'true'
+      - name: Run base benchmarks
+        if: steps.changed.outputs.any == 'true'
+        working-directory: ${{ env.BASE_DIR }}
+        run: |
+          : > "$GITHUB_WORKSPACE/base.txt"
+          while IFS= read -r pkg; do
+            [ -d "./$pkg" ] || continue
+            echo "::group::Base benchmark: $pkg"
+            # || true: a build/run failure in one package must not abort the rest.
+            go test -run='^$' -bench=. -short -benchmem $BENCH_FLAGS -timeout=15m "./$pkg" \
+              >> "$GITHUB_WORKSPACE/base.txt" 2>&1 || true
+            echo "::endgroup::"
+          done < "$GITHUB_WORKSPACE/pkgs.txt"
+
+      - name: Run PR benchmarks
+        if: steps.changed.outputs.any == 'true'
+        run: |
+          : > pr.txt
+          while IFS= read -r pkg; do
+            [ -d "./$pkg" ] || continue
+            echo "::group::PR benchmark: $pkg"
+            go test -run='^$' -bench=. -short -benchmem $BENCH_FLAGS -timeout=15m "./$pkg" \
+              >> pr.txt 2>&1 || true
+            echo "::endgroup::"
+          done < pkgs.txt
+
+      - name: Compare and build comment
+        if: steps.changed.outputs.any == 'true'
         continue-on-error: true
         run: |
-          {
-            echo '## 🏎️ Benchmark comparison (main → PR)'
-            echo ''
-            echo '<sub>Triggered by the `performance-check` label. Microbenchmarks only (`-benchtime=1s -count=10`); the slow broadcast/QUIC integration suite is excluded via `-skip`. `↓`/`↑` = significant decrease/increase; `~` = no significant change (p ≥ 0.05).</sub>'
-            echo ''
-            echo '```text'
-            benchstat baseline/bench-baseline.txt bench-new.txt
-            echo '```'
-            echo ''
-            echo '**How to read:** `allocs/op` and `B/op` are deterministic — any delta there is real. `sec/op` deltas flagged `↓`/`↑` are statistically significant (p < 0.05); the `±%` column is run-to-run variance, not the magnitude of the change. Full raw output is in the workflow log and the uploaded `bench-perfcheck-pr-*` artifact.'
-          } > benchstat-comment.md
-          echo '::group::benchstat comparison (main -> PR)'
+          bash .github/scripts/bench-report.sh base.txt pr.txt benchstat-comment.md
+          echo '::group::benchstat comparison (base -> PR)'
           cat benchstat-comment.md
           echo '::endgroup::'
 
-      - name: Post comparison as PR comment
-        if: steps.baseline.outputs.have_baseline == 'true' && github.event_name == 'pull_request'
+      - name: Post or update comment
+        if: steps.changed.outputs.any == 'true' && github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          if [ -s benchstat-comment.md ]; then
-            gh pr comment "$PR" --body-file benchstat-comment.md
+          # Update the existing bench-report comment in place (found by marker)
+          # so re-runs don't stack duplicates; create it on first run.
+          marker="<!-- bench-report -->"
+          comment_id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --paginate --jq ".[] | select(.body | contains(\"$marker\")) | .id" | head -n1)
+          if [ -n "$comment_id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" \
+              -f body="$(cat benchstat-comment.md)" >/dev/null
           else
-            echo "Empty comment body; skipping."
+            gh pr comment "$PR" --body-file benchstat-comment.md
           fi
 
-      - name: Upload PR bench output
+      - name: Upload benchmark output
+        if: always() && steps.changed.outputs.any == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: bench-perfcheck-pr-${{ github.event.pull_request.number || 'manual' }}
-          path: bench-new.txt
+          path: |
+            base.txt
+            pr.txt
+            benchstat-comment.md
+          if-no-files-found: ignore
           retention-days: 30

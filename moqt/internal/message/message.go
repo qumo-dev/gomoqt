@@ -35,3 +35,8 @@ func StringArrayLen(arr []string) int {
 	}
 	return total
 }
+
+// MaxMessageSize is the maximum size of a message payload in bytes (50MB).
+// This limit prevents out-of-memory (OOM) denial-of-service attacks
+// when reading maliciously crafted message length prefixes.
+const MaxMessageSize = 50 * 1024 * 1024

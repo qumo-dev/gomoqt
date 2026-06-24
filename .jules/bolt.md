@@ -1,0 +1,3 @@
+## 2023-10-27 - Frame Decode Capacity Optimization
+**Learning:** Reallocating struct sub-slices independently via `make()` breaks memory invariants by severing ties to the parent buffer, potentially causing hidden panics in encoding routines. Furthermore, exact-size capacity allocations inside loops cause significant GC pressure (O(N) allocations for increasing frame sizes).
+**Action:** Always reallocate the main buffer and re-slice the dependent fields to maintain invariants. Implement exponential capacity growth (`newCap := max(required, 2*cap(slice))`) instead of exactly-sized allocations to amortize the allocation cost and reduce GC pressure.
