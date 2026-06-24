@@ -213,6 +213,56 @@ func TestTrackWriter_Close(t *testing.T) {
 	assert.Nil(t, sender.groupManager, "groupManager should be nil after Close()")
 }
 
+func TestTrackWriter_CloseWithError(t *testing.T) {
+	var canceledGroup bool
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
+		mockSendStream := &FakeQUICSendStream{
+			CancelWriteFunc: func(code transport.StreamErrorCode) {
+				if code == transport.StreamErrorCode(PublishAbortedErrorCode) {
+					canceledGroup = true
+				}
+			},
+		}
+		return mockSendStream, nil
+	}
+
+	var canceledSubscribe bool
+	mockStream := &FakeQUICStream{
+		CancelWriteFunc: func(code transport.StreamErrorCode) {
+			if code == transport.StreamErrorCode(SubscribeErrorCodeInternal) {
+				canceledSubscribe = true
+			}
+		},
+	}
+	substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
+	var onCloseTrackCalled bool
+	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {
+		onCloseTrackCalled = true
+	})
+
+	assert.NotNil(t, sender.groupManager, "groupManager should be initialized")
+
+	// Open a group so there is an active group to be cancelled
+	gw, err := sender.OpenGroup(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, gw)
+
+	// Close with error
+	sender.CloseWithError(SubscribeErrorCodeInternal)
+
+	// Verify that onCloseTrack was called
+	assert.True(t, onCloseTrackCalled, "onCloseTrack should be called")
+
+	// Verify that groupManager is cleared after CloseWithError()
+	assert.Nil(t, sender.groupManager, "groupManager should be nil after CloseWithError()")
+
+	// Verify group was cancelled with PublishAbortedErrorCode
+	assert.True(t, canceledGroup, "active groups should be cancelled with PublishAbortedErrorCode")
+
+	// Verify subscribe stream was cancelled with the passed code
+	assert.True(t, canceledSubscribe, "subscribe stream should be closed with the given error code")
+}
+
 func TestTrackWriter_OpenAfterClose(t *testing.T) {
 	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 		mockSendStream := &FakeQUICSendStream{}
