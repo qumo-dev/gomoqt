@@ -996,8 +996,8 @@ func TestTrackRef_MarshalJSON_RoundTrip(t *testing.T) {
 
 func TestTrackRef_Clone(t *testing.T) {
 	ref := TrackRef{
-		Namespace:   "live",
-		Name:        "video",
+		Namespace: "live",
+		Name:      "video",
 		ExtraFields: map[string]json.RawMessage{
 			"x":      json.RawMessage(`[1, 2, 3]`),
 			"nilval": nil,
@@ -1327,6 +1327,53 @@ func TestCatalogDelta_UnmarshalJSON_FieldErrors(t *testing.T) {
 }
 
 // --- TrackRef.UnmarshalJSON error paths ---
+
+func TestTrackRef_UnmarshalJSON(t *testing.T) {
+	tests := map[string]struct {
+		input    string
+		expected TrackRef
+	}{
+		"empty object": {
+			input: `{}`,
+			expected: TrackRef{
+				ExtraFields: map[string]json.RawMessage{},
+			},
+		},
+		"name only": {
+			input: `{"name":"video"}`,
+			expected: TrackRef{
+				Name:        "video",
+				ExtraFields: map[string]json.RawMessage{},
+			},
+		},
+		"namespace and name": {
+			input: `{"namespace":"live/demo","name":"video"}`,
+			expected: TrackRef{
+				Namespace:   "live/demo",
+				Name:        "video",
+				ExtraFields: map[string]json.RawMessage{},
+			},
+		},
+		"with extra fields": {
+			input: `{"name":"video","extra":"value"}`,
+			expected: TrackRef{
+				Name: "video",
+				ExtraFields: map[string]json.RawMessage{
+					"extra": json.RawMessage(`"value"`),
+				},
+			},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			var ref TrackRef
+			err := json.Unmarshal([]byte(tt.input), &ref)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, ref)
+		})
+	}
+}
 
 func TestTrackRef_UnmarshalJSON_FieldErrors(t *testing.T) {
 	tests := map[string]struct {
