@@ -312,6 +312,10 @@ func TestReadStringArray(t *testing.T) {
 			input:   []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, // 8-byte varint, values > math.MaxInt
 			wantErr: true,
 		},
+		"count exceeds remaining buffer": {
+			input:   []byte{0x05, 0x01}, // count=5 but only 1 byte remains — caught before allocation
+			wantErr: true,
+		},
 	}
 
 	for name, tt := range tests {
