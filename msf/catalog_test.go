@@ -996,8 +996,8 @@ func TestTrackRef_MarshalJSON_RoundTrip(t *testing.T) {
 
 func TestTrackRef_Clone(t *testing.T) {
 	ref := TrackRef{
-		Namespace:   "live",
-		Name:        "video",
+		Namespace: "live",
+		Name:      "video",
 		ExtraFields: map[string]json.RawMessage{
 			"x":      json.RawMessage(`[1, 2, 3]`),
 			"nilval": nil,
@@ -1109,6 +1109,60 @@ func TestTrackClone_Validate(t *testing.T) {
 			problems := tt.clone.Validate("test")
 			require.NotEmpty(t, problems)
 			assert.Contains(t, problems[0], tt.errorMessage)
+		})
+	}
+}
+
+func TestCatalogDeltaValidate_Valid(t *testing.T) {
+	delta := CatalogDelta{
+		AddTracks: []Track{
+			{Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+		},
+	}
+	require.NoError(t, delta.Validate())
+}
+
+func TestCatalogDeltaValidate_Errors(t *testing.T) {
+	tests := map[string]struct {
+		delta        CatalogDelta
+		errorMessage string
+	}{
+		"missing operations": {
+			delta:        CatalogDelta{},
+			errorMessage: "delta catalog must contain addTracks, removeTracks, or cloneTracks",
+		},
+		"add track invalid": {
+			delta: CatalogDelta{
+				AddTracks: []Track{{Packaging: PackagingLOC}}, // missing name
+			},
+			errorMessage: "addTracks[0]: name is required",
+		},
+		"remove track invalid": {
+			delta: CatalogDelta{
+				RemoveTracks: []TrackRef{{Namespace: "ns"}}, // missing name
+			},
+			errorMessage: "removeTracks[0]: name is required",
+		},
+		"clone track invalid": {
+			delta: CatalogDelta{
+				CloneTracks: []TrackClone{{Track: Track{Name: "video"}}}, // missing parentName
+			},
+			errorMessage: "cloneTracks[0]: parentName is required for clone tracks",
+		},
+		"multiple invalid": {
+			delta: CatalogDelta{
+				AddTracks:    []Track{{Packaging: PackagingLOC}}, // missing name
+				RemoveTracks: []TrackRef{{Namespace: "ns"}},      // missing name
+			},
+			errorMessage: "addTracks[0]: name is required",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := tt.delta.Validate()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errorMessage)
 		})
 	}
 }
