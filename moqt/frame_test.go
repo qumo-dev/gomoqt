@@ -303,3 +303,16 @@ func TestFrame_Encode(t *testing.T) {
 		})
 	}
 }
+
+// TestFrame_decode_RejectsOversizedLength ensures Frame.decode rejects a payload
+// length prefix exceeding MaxMessageSize with ErrMessageTooLarge before growing its
+// buffer, preventing an OOM DoS via a maxUint62 payload length.
+func TestFrame_decode_RejectsOversizedLength(t *testing.T) {
+	// Largest value expressible in a QUIC varint (uint62 max), encoded as the
+	// payload length prefix. No payload bytes follow.
+	lengthPrefix, _ := message.WriteMessageLength(nil, 1<<62-1)
+
+	f := NewFrame(0)
+	err := f.decode(bytes.NewReader(lengthPrefix))
+	assert.ErrorIs(t, err, message.ErrMessageTooLarge)
+}

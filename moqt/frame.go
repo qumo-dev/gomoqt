@@ -92,6 +92,13 @@ func (f *Frame) decode(src io.Reader) error {
 		return nil
 	}
 
+	// Cap the allocation derived from the untrusted length prefix to prevent an
+	// OOM DoS: a peer can advertise a maxUint62 payload length and force a
+	// multi-GB buffer allocation before any payload bytes are read.
+	if num > message.MaxMessageSize {
+		return message.ErrMessageTooLarge
+	}
+
 	// Ensure the payload slice has enough capacity
 	if cap(f.body) < int(num) {
 		// Use init to grow the underlying buffer exponentially,
