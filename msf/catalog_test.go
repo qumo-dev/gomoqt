@@ -998,16 +998,26 @@ func TestTrackRef_Clone(t *testing.T) {
 	ref := TrackRef{
 		Namespace:   "live",
 		Name:        "video",
-		ExtraFields: map[string]json.RawMessage{"x": json.RawMessage(`1`)},
+		ExtraFields: map[string]json.RawMessage{
+			"x":      json.RawMessage(`[1, 2, 3]`),
+			"nilval": nil,
+		},
 	}
 
 	clone := ref.Clone()
 	assert.Equal(t, ref.Namespace, clone.Namespace)
 	assert.Equal(t, ref.Name, clone.Name)
 	assert.Contains(t, clone.ExtraFields, "x")
+	assert.Contains(t, clone.ExtraFields, "nilval")
+	assert.Nil(t, clone.ExtraFields["nilval"])
 
-	clone.ExtraFields["x"] = json.RawMessage(`2`)
-	assert.Equal(t, json.RawMessage(`1`), ref.ExtraFields["x"])
+	// Test byte slice deep copy: mutating clone's underlying slice should not affect original
+	clone.ExtraFields["x"][1] = '9'
+	assert.Equal(t, byte('1'), ref.ExtraFields["x"][1], "original byte slice should not be mutated")
+
+	// Test map shallow copy: re-assigning map entry should not affect original
+	clone.ExtraFields["y"] = json.RawMessage(`[4, 5, 6]`)
+	assert.NotContains(t, ref.ExtraFields, "y")
 }
 
 func TestTrackRef_effectiveNamespace(t *testing.T) {
