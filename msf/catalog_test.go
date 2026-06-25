@@ -1549,6 +1549,47 @@ func TestTrackRef_UnmarshalJSON_FieldErrors(t *testing.T) {
 	}
 }
 
+func TestTrackClone_UnmarshalJSON_Success(t *testing.T) {
+	w := int64(1280)
+	tests := map[string]struct {
+		input    string
+		expected TrackClone
+	}{
+		"basic clone": {
+			input: `{"name":"video-720","parentName":"video-1080"}`,
+			expected: TrackClone{
+				Track:      Track{Name: "video-720"},
+				ParentName: "video-1080",
+			},
+		},
+		"with extra fields": {
+			input: `{"name":"video-720","parentName":"video-1080","width":1280}`,
+			expected: TrackClone{
+				Track: Track{
+					Name:  "video-720",
+					Width: &w,
+				},
+				ParentName: "video-1080",
+			},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			var clone TrackClone
+			err := json.Unmarshal([]byte(tt.input), &clone)
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.expected.Name, clone.Name)
+			assert.Equal(t, tt.expected.ParentName, clone.ParentName)
+			if tt.expected.Width != nil {
+				require.NotNil(t, clone.Width)
+				assert.Equal(t, *tt.expected.Width, *clone.Width)
+			}
+		})
+	}
+}
+
 // --- TrackClone.UnmarshalJSON error paths ---
 
 func TestTrackClone_UnmarshalJSON_FieldErrors(t *testing.T) {
