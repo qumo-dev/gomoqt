@@ -1,6 +1,8 @@
 import { assertEquals, assertInstanceOf } from "@std/assert";
 import { WebTransportSession } from "./connection.ts";
 import { StreamConnError } from "./error.ts";
+import { SendStream } from "./send_stream.ts";
+import { ContextCancelledError } from "@okdaichi/golikejs/context";
 
 class FailingMockWebTransport {
 	ready = Promise.resolve();
@@ -210,4 +212,203 @@ Deno.test("WebTransportSession.ready and closed proxy underlying transport promi
 	const closeInfo = await session.closed;
 	assertEquals(closeInfo.closeCode, 0);
 	assertEquals(closeInfo.reason, "closed");
+});
+
+Deno.test("WebTransportSession.openUniStream with a pre-aborted signal does not open a stream", async () => {
+	let createCalled = false;
+	const mock = {
+		incomingBidirectionalStreams: new ReadableStream({ start(_c) {} }),
+		incomingUnidirectionalStreams: new ReadableStream({ start(_c) {} }),
+		ready: Promise.resolve(),
+		closed: Promise.resolve({ closeCode: undefined, reason: undefined }),
+		createUnidirectionalStream() {
+			createCalled = true;
+			return new Promise<WritableStream<Uint8Array>>(() => {});
+		},
+	} as unknown as WebTransport;
+
+	const session = new WebTransportSession(mock);
+	const ac = new AbortController();
+	ac.abort(new Error("nope"));
+	const [stream, err] = await session.openUniStream({ signal: ac.signal });
+	assertEquals(stream, undefined);
+	assertInstanceOf(err, Error);
+	assertEquals((err as Error).message, "nope");
+	assertEquals(createCalled, false);
+});
+
+Deno.test("WebTransportSession.openUniStream happy path with a signal returns a SendStream", async () => {
+	const mock = {
+		incomingBidirectionalStreams: new ReadableStream({ start(_c) {} }),
+		incomingUnidirectionalStreams: new ReadableStream({ start(_c) {} }),
+		ready: Promise.resolve(),
+		closed: Promise.resolve({ closeCode: undefined, reason: undefined }),
+		async createUnidirectionalStream() {
+			return new WritableStream<Uint8Array>();
+		},
+	} as unknown as WebTransport;
+
+	const session = new WebTransportSession(mock);
+	const ac = new AbortController();
+	const [stream, err] = await session.openUniStream({ signal: ac.signal });
+	assertEquals(err, undefined);
+	assertInstanceOf(stream, SendStream);
+});
+
+Deno.test("WebTransportSession.openUniStream abort mid-wait abandons the late-resolving stream", async () => {
+	// A real WritableStream instance (so abandonRawStream's instanceof branch
+	// is taken) with a shadowed abort so the cleanup is observable.
+	let lateAborted = false;
+	const lateStream = new WritableStream<Uint8Array>();
+	Object.defineProperty(lateStream, "abort", {
+		value: (_reason?: unknown) => {
+			lateAborted = true;
+			return Promise.resolve();
+		},
+		configurable: true,
+	});
+
+	let resolveCreate!: (s: WritableStream<Uint8Array>) => void;
+	const createPromise = new Promise<WritableStream<Uint8Array>>((r) => {
+		resolveCreate = r;
+	});
+	const mock = {
+		incomingBidirectionalStreams: new ReadableStream({ start(_c) {} }),
+		incomingUnidirectionalStreams: new ReadableStream({ start(_c) {} }),
+		ready: Promise.resolve(),
+		closed: Promise.resolve({ closeCode: undefined, reason: undefined }),
+		createUnidirectionalStream() {
+			return createPromise;
+		},
+	} as unknown as WebTransport;
+
+	const session = new WebTransportSession(mock);
+	const ac = new AbortController();
+	const openP = session.openUniStream({ signal: ac.signal });
+	ac.abort(new Error("timeout"));
+
+	const [stream, err] = await openP;
+	assertEquals(stream, undefined);
+	assertInstanceOf(err, Error);
+	assertEquals((err as Error).message, "timeout");
+
+	// The WT open may still settle after the abort; the late stream must be
+	// abandoned rather than orphaned.
+	assertEquals(lateAborted, false);
+	resolveCreate(lateStream);
+	await Promise.resolve();
+	await Promise.resolve();
+	assertEquals(lateAborted, true);
+});
+
+Deno.test("WebTransportSession.openStream with a pre-aborted signal does not open a stream", async () => {
+	let createCalled = false;
+	const mock = {
+		incomingBidirectionalStreams: new ReadableStream({ start(_c) {} }),
+		incomingUnidirectionalStreams: new ReadableStream({ start(_c) {} }),
+		ready: Promise.resolve(),
+		closed: Promise.resolve({ closeCode: undefined, reason: undefined }),
+		createBidirectionalStream() {
+			createCalled = true;
+			return new Promise(() => {});
+		},
+	} as unknown as WebTransport;
+
+	const session = new WebTransportSession(mock);
+	const ac = new AbortController();
+	ac.abort(new Error("nope"));
+	const [stream, err] = await session.openStream({ signal: ac.signal });
+	assertEquals(stream, undefined);
+	assertInstanceOf(err, Error);
+	assertEquals((err as Error).message, "nope");
+	assertEquals(createCalled, false);
+});
+
+Deno.test("WebTransportSession.openUniStream pre-aborted with a non-Error reason returns a ContextCancelledError", async () => {
+	const mock = {
+		incomingBidirectionalStreams: new ReadableStream({ start(_c) {} }),
+		incomingUnidirectionalStreams: new ReadableStream({ start(_c) {} }),
+		ready: Promise.resolve(),
+		closed: Promise.resolve({ closeCode: undefined, reason: undefined }),
+		createUnidirectionalStream() {
+			return new Promise<WritableStream<Uint8Array>>(() => {});
+		},
+	} as unknown as WebTransport;
+
+	const session = new WebTransportSession(mock);
+	const ac = new AbortController();
+	// A non-Error reason falls back to ContextCancelledError.
+	ac.abort("a string reason");
+	const [stream, err] = await session.openUniStream({ signal: ac.signal });
+	assertEquals(stream, undefined);
+	assertInstanceOf(err, ContextCancelledError);
+});
+
+Deno.test("WebTransportSession.openStream abort mid-wait abandons the late-resolving bidirectional stream", async () => {
+	let writableAborted = false;
+	let readableCancelled = false;
+	const lateBidi = {
+		writable: {
+			abort: (_reason?: unknown) => {
+				writableAborted = true;
+				return Promise.resolve();
+			},
+		},
+		readable: {
+			cancel: () => {
+				readableCancelled = true;
+				return Promise.resolve();
+			},
+		},
+	};
+
+	let resolveCreate!: (s: unknown) => void;
+	const createPromise = new Promise<unknown>((r) => {
+		resolveCreate = r;
+	});
+	const mock = {
+		incomingBidirectionalStreams: new ReadableStream({ start(_c) {} }),
+		incomingUnidirectionalStreams: new ReadableStream({ start(_c) {} }),
+		ready: Promise.resolve(),
+		closed: Promise.resolve({ closeCode: undefined, reason: undefined }),
+		createBidirectionalStream() {
+			return createPromise;
+		},
+	} as unknown as WebTransport;
+
+	const session = new WebTransportSession(mock);
+	const ac = new AbortController();
+	const openP = session.openStream({ signal: ac.signal });
+	ac.abort(new Error("timeout"));
+
+	const [stream, err] = await openP;
+	assertEquals(stream, undefined);
+	assertInstanceOf(err, Error);
+	assertEquals((err as Error).message, "timeout");
+
+	assertEquals(writableAborted, false);
+	resolveCreate(lateBidi);
+	await Promise.resolve();
+	await Promise.resolve();
+	assertEquals(writableAborted, true);
+	assertEquals(readableCancelled, true);
+});
+
+Deno.test("WebTransportSession.openUniStream with a signal returns an error, never throws, when createUnidirectionalStream rejects", async () => {
+	const mock = {
+		incomingBidirectionalStreams: new ReadableStream({ start(_c) {} }),
+		incomingUnidirectionalStreams: new ReadableStream({ start(_c) {} }),
+		ready: Promise.resolve(),
+		closed: Promise.resolve({ closeCode: undefined, reason: undefined }),
+		createUnidirectionalStream() {
+			return Promise.reject(new Error("stream limit"));
+		},
+	} as unknown as WebTransport;
+
+	const session = new WebTransportSession(mock);
+	const ac = new AbortController(); // not aborted: transport rejection must still be a tuple, not a throw
+	const [stream, err] = await session.openUniStream({ signal: ac.signal });
+	assertEquals(stream, undefined);
+	assertInstanceOf(err, Error);
+	assertEquals((err as Error).message, "stream limit");
 });

@@ -110,7 +110,9 @@ class MockWebTransportSession implements StreamConn {
 		}
 	}
 
-	async openStream(): Promise<[Stream, undefined] | [undefined, Error]> {
+	async openStream(
+		_options?: { signal?: AbortSignal },
+	): Promise<[Stream, undefined] | [undefined, Error]> {
 		if (this.#closed) {
 			return [undefined, new Error("session closed")];
 		}
@@ -148,7 +150,9 @@ class MockWebTransportSession implements StreamConn {
 		return [{ writable, readable }, undefined];
 	}
 
-	async openUniStream(): Promise<[SendStream, undefined] | [undefined, Error]> {
+	async openUniStream(
+		_options?: { signal?: AbortSignal },
+	): Promise<[SendStream, undefined] | [undefined, Error]> {
 		if (this.#closed) {
 			return [undefined, new Error("session closed")];
 		}

@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **moq-web:** `TrackWriter.openGroup`/`openGroupAt` and `StreamConn.openStream`/`openUniStream` now accept an optional `AbortSignal` to cancel or time out stream creation, mirroring Go's `OpenGroup(ctx)` → `openUniStreamFunc(ctx)`. The signal is composed internally with `Promise.race` (golikejs `watchSignal`) against the track context; an aborted open never leaves an orphaned stream. Also fixes a leak where a failed group-header write left the allocated stream half-open (Go always `CancelWrite`s).
 - **moqt:** `BenchmarkEgress_Saturating`, a saturating real-QUIC egress benchmark that drives `GroupWriter.WriteFrame` end-to-end (encode → QUIC stream → UDP). Run in the `benchmark-integration` job, not on PRs.
 
 ### Changed
