@@ -215,6 +215,35 @@ func TestParseCatalogDelta_RoundTrip(t *testing.T) {
 	assert.True(t, *delta.AddTracks[0].IsLive)
 }
 
+func TestParseCatalogDelta_ValidJSON(t *testing.T) {
+	input := []byte(`{
+		"deltaUpdate": true,
+		"addTracks": [
+			{"name": "video", "packaging": "loc", "isLive": true}
+		]
+	}`)
+
+	delta, err := ParseCatalogDelta(input)
+	require.NoError(t, err)
+	require.Len(t, delta.AddTracks, 1)
+	assert.Equal(t, "video", delta.AddTracks[0].Name)
+	assert.Equal(t, PackagingLOC, delta.AddTracks[0].Packaging)
+	require.NotNil(t, delta.AddTracks[0].IsLive)
+	assert.True(t, *delta.AddTracks[0].IsLive)
+}
+
+func TestParseCatalogDelta_InvalidJSON(t *testing.T) {
+	input := []byte(`{
+		"deltaUpdate": true,
+		"addTracks": [
+			{"name": "video", "packaging": "loc", "isLive": true
+		]
+	}`)
+
+	_, err := ParseCatalogDelta(input)
+	require.Error(t, err)
+}
+
 func TestParseCatalogDelta_RejectsIndependentJSON(t *testing.T) {
 	_, err := ParseCatalogDelta([]byte(`{"version": 1, "tracks": [{"name": "video", "packaging": "loc", "isLive": true}]}`))
 	require.Error(t, err)
