@@ -1752,3 +1752,60 @@ func TestBroadcast_SetCatalog_KeepsActiveRemovesStale(t *testing.T) {
 	assert.Len(t, catalog.Tracks, 1)
 	assert.Equal(t, "video", catalog.Tracks[0].Name)
 }
+
+func TestTrackRef_Validate(t *testing.T) {
+	tests := map[string]struct {
+		ref      TrackRef
+		path     string
+		expected []string
+	}{
+		"valid": {
+			ref: TrackRef{
+				Namespace: "foo",
+				Name:      "bar",
+			},
+			path:     "test",
+			expected: nil,
+		},
+		"empty name": {
+			ref: TrackRef{
+				Namespace: "foo",
+				Name:      "",
+			},
+			path:     "test",
+			expected: []string{"test: name is required"},
+		},
+		"extra fields": {
+			ref: TrackRef{
+				Namespace: "foo",
+				Name:      "bar",
+				ExtraFields: map[string]json.RawMessage{
+					"unknown": json.RawMessage(`"value"`),
+				},
+			},
+			path:     "test",
+			expected: []string{"test: remove track entries may contain only name and optional namespace"},
+		},
+		"empty name and extra fields": {
+			ref: TrackRef{
+				Namespace: "foo",
+				Name:      "",
+				ExtraFields: map[string]json.RawMessage{
+					"unknown": json.RawMessage(`"value"`),
+				},
+			},
+			path: "test",
+			expected: []string{
+				"test: name is required",
+				"test: remove track entries may contain only name and optional namespace",
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			problems := tc.ref.Validate(tc.path)
+			assert.Equal(t, tc.expected, problems)
+		})
+	}
+}
