@@ -971,7 +971,6 @@ func TestCatalogDelta_Clone(t *testing.T) {
 	assert.Equal(t, []deltaOperationKind{deltaOperationAdd, deltaOperationRemove, deltaOperationClone}, delta.deltaOpOrder)
 }
 
-
 func TestCatalogDelta_MarshalJSON_RoundTrip(t *testing.T) {
 	generatedAt := int64(42)
 	delta := CatalogDelta{
@@ -1147,7 +1146,6 @@ func TestTrackClone_MarshalJSON_RoundTrip(t *testing.T) {
 	assert.Equal(t, int64(1280), *decoded.Width)
 }
 
-
 func TestTrackClone_MarshalJSON(t *testing.T) {
 	t.Run("with parent name", func(t *testing.T) {
 		clone := TrackClone{
@@ -1291,7 +1289,6 @@ func TestCatalogDeltaValidate_EmptyDelta(t *testing.T) {
 	assert.Contains(t, err.Error(), "delta catalog must contain")
 }
 
-
 func TestCatalogDelta_UnmarshalJSON(t *testing.T) {
 	tests := map[string]struct {
 		input       string
@@ -1300,7 +1297,7 @@ func TestCatalogDelta_UnmarshalJSON(t *testing.T) {
 		check       func(*testing.T, CatalogDelta)
 	}{
 		"valid base delta": {
-			input: `{"deltaUpdate": true, "addTracks": [{"name": "video", "packaging": "loc", "isLive": true}]}`,
+			input:   `{"deltaUpdate": true, "addTracks": [{"name": "video", "packaging": "loc", "isLive": true}]}`,
 			wantErr: false,
 			check: func(t *testing.T, d CatalogDelta) {
 				require.Len(t, d.AddTracks, 1)
@@ -1309,7 +1306,7 @@ func TestCatalogDelta_UnmarshalJSON(t *testing.T) {
 			},
 		},
 		"valid delta with extra fields": {
-			input: `{"deltaUpdate": true, "addTracks": [{"name": "video", "packaging": "loc", "isLive": true}], "custom_field": "custom_value", "another_field": 123}`,
+			input:   `{"deltaUpdate": true, "addTracks": [{"name": "video", "packaging": "loc", "isLive": true}], "custom_field": "custom_value", "another_field": 123}`,
 			wantErr: false,
 			check: func(t *testing.T, d CatalogDelta) {
 				require.Len(t, d.AddTracks, 1)
@@ -1379,7 +1376,6 @@ func TestCatalogDelta_UnmarshalJSON_ExtraFields(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, delta.ExtraFields, "com.example.ext")
 }
-
 
 func TestTrackRef_MarshalJSON_ExtraFields(t *testing.T) {
 	ref := TrackRef{
@@ -1751,6 +1747,23 @@ func TestBroadcast_SetCatalog_KeepsActiveRemovesStale(t *testing.T) {
 	catalog := b.Catalog()
 	assert.Len(t, catalog.Tracks, 1)
 	assert.Equal(t, "video", catalog.Tracks[0].Name)
+}
+
+func TestParseCatalogDeltaString(t *testing.T) {
+	input := `{
+		"deltaUpdate": true,
+		"addTracks": [
+			{"name": "video", "packaging": "loc", "isLive": true}
+		]
+	}`
+
+	delta, err := ParseCatalogDeltaString(input)
+	require.NoError(t, err)
+	require.Len(t, delta.AddTracks, 1)
+	assert.Equal(t, "video", delta.AddTracks[0].Name)
+
+	_, err = ParseCatalogDeltaString(`{"deltaUpdate": "invalid_type"}`)
+	require.Error(t, err)
 }
 
 func TestTrackRef_Validate(t *testing.T) {
