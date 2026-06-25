@@ -480,10 +480,18 @@ func prefixSegments(prefix string) []prefixSegment {
 		return nil
 	}
 
-	// Manual scanning to avoid strings.Split allocation
-	// Need to preserve empty segments to match original behavior
-	str := prefix[1 : len(prefix)-1]        // Skip leading and trailing slashes
-	segments := make([]prefixSegment, 0, 8) // Pre-allocate for typical depth
+	str := prefix[1 : len(prefix)-1] // Skip leading and trailing slashes
+
+	n := strings.Count(str, "/")
+	if n == 0 {
+		return []prefixSegment{str}
+	}
+	if n == 1 {
+		idx := strings.IndexByte(str, '/')
+		return []prefixSegment{str[:idx], str[idx+1:]}
+	}
+
+	segments := make([]prefixSegment, 0, n+1) // Pre-allocate with exact depth
 	start := 0
 	for i := 0; i < len(str); i++ {
 		if str[i] == '/' {
@@ -521,6 +529,15 @@ func pathSegments(path BroadcastPath) ([]prefixSegment, string) {
 		return []prefixSegment{prefix[:idx], prefix[idx+1:]}, last
 	}
 
-	segments := strings.Split(prefix, "/")
+	segments := make([]prefixSegment, 0, n+1)
+	start := 0
+	for i := 0; i < len(prefix); i++ {
+		if prefix[i] == '/' {
+			segments = append(segments, prefix[start:i])
+			start = i + 1
+		}
+	}
+	segments = append(segments, prefix[start:])
+
 	return segments, last
 }
