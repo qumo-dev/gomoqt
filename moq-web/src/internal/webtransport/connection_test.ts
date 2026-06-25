@@ -393,3 +393,22 @@ Deno.test("WebTransportSession.openStream abort mid-wait abandons the late-resol
 	assertEquals(writableAborted, true);
 	assertEquals(readableCancelled, true);
 });
+
+Deno.test("WebTransportSession.openUniStream with a signal returns an error, never throws, when createUnidirectionalStream rejects", async () => {
+	const mock = {
+		incomingBidirectionalStreams: new ReadableStream({ start(_c) {} }),
+		incomingUnidirectionalStreams: new ReadableStream({ start(_c) {} }),
+		ready: Promise.resolve(),
+		closed: Promise.resolve({ closeCode: undefined, reason: undefined }),
+		createUnidirectionalStream() {
+			return Promise.reject(new Error("stream limit"));
+		},
+	} as unknown as WebTransport;
+
+	const session = new WebTransportSession(mock);
+	const ac = new AbortController(); // not aborted: transport rejection must still be a tuple, not a throw
+	const [stream, err] = await session.openUniStream({ signal: ac.signal });
+	assertEquals(stream, undefined);
+	assertInstanceOf(err, Error);
+	assertEquals((err as Error).message, "stream limit");
+});

@@ -74,13 +74,15 @@ export class WebTransportSession implements StreamConn {
 		// later — abandon any late stream so it is never orphaned.
 		const ctx = watchSignal(background(), signal);
 		const createPromise = this.#webtransport.createBidirectionalStream();
-		await Promise.race([createPromise, ctx.done()]);
-		if (ctx.err()) {
-			createPromise.then((late) => abandonRawStream(late)).catch(() => {});
-			return [undefined, ctx.err()!];
-		}
-
+		// Race the open against the signal. Wrapped so that a transport
+		// rejection (before the signal fires) is returned as [undefined, err],
+		// never thrown — matching the no-signal path and the tuple contract.
 		try {
+			await Promise.race([createPromise, ctx.done()]);
+			if (ctx.err()) {
+				createPromise.then((late) => abandonRawStream(late)).catch(() => {});
+				return [undefined, ctx.err()!];
+			}
 			const wtStream = await createPromise;
 			return [new Stream({ stream: wtStream }), undefined];
 		} catch (err) {
@@ -133,13 +135,19 @@ export class WebTransportSession implements StreamConn {
 		// later — abandon any late stream so it is never orphaned.
 		const ctx = watchSignal(background(), signal);
 		const createPromise = this.#webtransport.createUnidirectionalStream();
-		await Promise.race([createPromise, ctx.done()]);
-		if (ctx.err()) {
-			createPromise.then((late) => abandonRawStream(late)).catch(() => {});
-			return [undefined, ctx.err()!];
+		// Race the open against the signal. Wrapped so that a transport
+		// rejection (before the signal fires) is returned as [undefined, err],
+		// never thrown — matching the no-signal path and the tuple contract.
+		try {
+			await Promise.race([createPromise, ctx.done()]);
+			if (ctx.err()) {
+				createPromise.then((late) => abandonRawStream(late)).catch(() => {});
+				return [undefined, ctx.err()!];
+			}
+			return [new SendStream({ stream: await createPromise }), undefined];
+		} catch (e) {
+			return [undefined, e as Error];
 		}
-
-		return [new SendStream({ stream: await createPromise }), undefined];
 	}
 
 	async acceptStream(): Promise<[Stream, undefined] | [undefined, Error]> {
@@ -188,7 +196,7 @@ export class WebTransportSession implements StreamConn {
  * otherwise a ContextCancelledError.
  */
 function abortError(signal: AbortSignal): Error {
-	const reason = (signal as unknown as { reason?: unknown }).reason;
+	const reason = signal.reason;
 	return reason instanceof Error ? reason : new ContextCancelledError();
 }
 

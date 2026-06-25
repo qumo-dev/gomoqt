@@ -128,7 +128,10 @@ export class TrackWriter {
 		signal?: AbortSignal,
 	): Promise<[GroupWriter, undefined] | [undefined, Error]> {
 		// Mirror Go openGroupWithSequence (track_writer.go:298): if the track
-		// context is already done, fail fast without opening a stream.
+		// context is already done, fail fast without opening a stream. This
+		// synchronous check is load-bearing — toAbortSignal(this.context) only
+		// reflects cancellation on a later microtask, so the effective.aborted
+		// check below would not yet see it. Do not remove.
 		if (this.context.err()) {
 			return [undefined, this.context.err()!];
 		}
@@ -150,7 +153,7 @@ export class TrackWriter {
 
 		// §1 Abort before starting: do not open a stream.
 		if (effective.aborted) {
-			const reason = (effective as unknown as { reason?: unknown }).reason;
+			const reason = effective.reason;
 			return [
 				undefined,
 				reason instanceof Error ? reason : new ContextCancelledError(),
