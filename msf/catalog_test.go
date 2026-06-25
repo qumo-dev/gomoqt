@@ -1150,24 +1150,35 @@ func TestTrackClone_Clone(t *testing.T) {
 
 func TestTrackClone_Validate(t *testing.T) {
 	tests := map[string]struct {
-		clone        TrackClone
-		errorMessage string
+		clone          TrackClone
+		expectedErrors []string
 	}{
+		"valid": {
+			clone:          TrackClone{Track: Track{Name: "video-720"}, ParentName: "video-1080"},
+			expectedErrors: nil,
+		},
 		"missing name": {
-			clone:        TrackClone{Track: Track{}, ParentName: "parent"},
-			errorMessage: "name is required",
+			clone:          TrackClone{Track: Track{}, ParentName: "parent"},
+			expectedErrors: []string{"test: name is required"},
 		},
 		"missing parentName": {
-			clone:        TrackClone{Track: Track{Name: "video"}},
-			errorMessage: "parentName is required for clone tracks",
+			clone:          TrackClone{Track: Track{Name: "video"}},
+			expectedErrors: []string{"test: parentName is required for clone tracks"},
+		},
+		"missing both": {
+			clone:          TrackClone{Track: Track{}},
+			expectedErrors: []string{"test: name is required", "test: parentName is required for clone tracks"},
 		},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			problems := tt.clone.Validate("test")
-			require.NotEmpty(t, problems)
-			assert.Contains(t, problems[0], tt.errorMessage)
+			if len(tt.expectedErrors) == 0 {
+				require.Empty(t, problems)
+			} else {
+				require.Equal(t, tt.expectedErrors, problems)
+			}
 		})
 	}
 }
