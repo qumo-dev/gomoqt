@@ -215,6 +215,35 @@ func TestParseCatalogDelta_RoundTrip(t *testing.T) {
 	assert.True(t, *delta.AddTracks[0].IsLive)
 }
 
+func TestParseCatalogDelta_ValidJSON(t *testing.T) {
+	input := []byte(`{
+		"deltaUpdate": true,
+		"addTracks": [
+			{"name": "video", "packaging": "loc", "isLive": true}
+		]
+	}`)
+
+	delta, err := ParseCatalogDelta(input)
+	require.NoError(t, err)
+	require.Len(t, delta.AddTracks, 1)
+	assert.Equal(t, "video", delta.AddTracks[0].Name)
+	assert.Equal(t, PackagingLOC, delta.AddTracks[0].Packaging)
+	require.NotNil(t, delta.AddTracks[0].IsLive)
+	assert.True(t, *delta.AddTracks[0].IsLive)
+}
+
+func TestParseCatalogDelta_InvalidJSON(t *testing.T) {
+	input := []byte(`{
+		"deltaUpdate": true,
+		"addTracks": [
+			{"name": "video", "packaging": "loc", "isLive": true
+		]
+	}`)
+
+	_, err := ParseCatalogDelta(input)
+	require.Error(t, err)
+}
+
 func TestParseCatalogDelta_RejectsIndependentJSON(t *testing.T) {
 	_, err := ParseCatalogDelta([]byte(`{"version": 1, "tracks": [{"name": "video", "packaging": "loc", "isLive": true}]}`))
 	require.Error(t, err)
@@ -906,6 +935,7 @@ func TestTrackDuration_VODRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(data), `"trackDuration":120000`)
 }
+
 func TestCatalogDelta_Clone(t *testing.T) {
 	generatedAt := int64(5000)
 	delta := CatalogDelta{
@@ -916,6 +946,7 @@ func TestCatalogDelta_Clone(t *testing.T) {
 		RemoveTracks:     []TrackRef{{Name: "old", Namespace: "ns"}},
 		CloneTracks:      []TrackClone{{Track: Track{Name: "video-720"}, ParentName: "video-1080"}},
 		ExtraFields:      map[string]json.RawMessage{"ext": json.RawMessage(`1`)},
+		deltaOpOrder:     []deltaOperationKind{deltaOperationAdd, deltaOperationRemove, deltaOperationClone},
 	}
 
 	clone := delta.Clone()
@@ -930,10 +961,14 @@ func TestCatalogDelta_Clone(t *testing.T) {
 	require.Len(t, clone.CloneTracks, 1)
 	assert.Equal(t, "video-720", clone.CloneTracks[0].Name)
 	assert.Contains(t, clone.ExtraFields, "ext")
+	assert.Equal(t, []deltaOperationKind{deltaOperationAdd, deltaOperationRemove, deltaOperationClone}, clone.deltaOpOrder)
 
 	// Mutating clone should not affect original.
 	clone.AddTracks[0].Name = "mutated"
 	assert.Equal(t, "video", delta.AddTracks[0].Name)
+
+	clone.deltaOpOrder[0] = deltaOperationRemove
+	assert.Equal(t, []deltaOperationKind{deltaOperationAdd, deltaOperationRemove, deltaOperationClone}, delta.deltaOpOrder)
 }
 
 func TestCatalogDelta_MarshalJSON_RoundTrip(t *testing.T) {
@@ -977,6 +1012,13 @@ func TestCatalogDelta_MarshalJSON_RoundTrip(t *testing.T) {
 	assert.Equal(t, "video-1080", decoded.CloneTracks[0].ParentName)
 }
 
+func TestCatalogDelta_MarshalJSON_EmptyDelta(t *testing.T) {
+	delta := CatalogDelta{}
+	data, err := json.Marshal(delta)
+	require.NoError(t, err)
+	assert.Equal(t, `{"deltaUpdate":true}`, string(data))
+}
+
 func TestTrackRef_MarshalJSON_RoundTrip(t *testing.T) {
 	ref := TrackRef{
 		Namespace: "live/demo",
@@ -1018,6 +1060,36 @@ func TestTrackRef_Clone(t *testing.T) {
 	// Test map shallow copy: re-assigning map entry should not affect original
 	clone.ExtraFields["y"] = json.RawMessage(`[4, 5, 6]`)
 	assert.NotContains(t, ref.ExtraFields, "y")
+}
+
+func TestTrackRef_ID(t *testing.T) {
+	tests := map[string]struct {
+		ref              TrackRef
+		defaultNamespace string
+		expected         TrackID
+	}{
+		"explicit namespace": {
+			ref:              TrackRef{Namespace: "live", Name: "video"},
+			defaultNamespace: "other",
+			expected:         TrackID{Namespace: "live", Name: "video"},
+		},
+		"inherits default": {
+			ref:              TrackRef{Name: "audio"},
+			defaultNamespace: "live/demo",
+			expected:         TrackID{Namespace: "live/demo", Name: "audio"},
+		},
+		"sentinel when both empty": {
+			ref:              TrackRef{Name: "data"},
+			defaultNamespace: "",
+			expected:         TrackID{Namespace: inheritedNamespaceSentinel, Name: "data"},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.ref.ID(tt.defaultNamespace))
+		})
+	}
 }
 
 func TestTrackRef_effectiveNamespace(t *testing.T) {
@@ -1074,9 +1146,36 @@ func TestTrackClone_MarshalJSON_RoundTrip(t *testing.T) {
 	assert.Equal(t, int64(1280), *decoded.Width)
 }
 
+func TestTrackClone_MarshalJSON(t *testing.T) {
+	t.Run("with parent name", func(t *testing.T) {
+		clone := TrackClone{
+			Track:      Track{Name: "video-720"},
+			ParentName: "video-1080",
+		}
+		data, err := clone.MarshalJSON()
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"name":"video-720","parentName":"video-1080"}`, string(data))
+	})
+
+	t.Run("without parent name", func(t *testing.T) {
+		clone := TrackClone{
+			Track: Track{Name: "video-720"},
+		}
+		data, err := clone.MarshalJSON()
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"name":"video-720"}`, string(data))
+	})
+}
+
 func TestTrackClone_Clone(t *testing.T) {
 	original := TrackClone{
-		Track:      Track{Name: "video-720", Codec: "av01"},
+		Track: Track{
+			Name:  "video-720",
+			Codec: "av01",
+			ExtraFields: map[string]json.RawMessage{
+				"x": json.RawMessage(`[1, 2, 3]`),
+			},
+		},
 		ParentName: "video-1080",
 	}
 
@@ -1084,6 +1183,11 @@ func TestTrackClone_Clone(t *testing.T) {
 	assert.Equal(t, "video-720", clone.Name)
 	assert.Equal(t, "video-1080", clone.ParentName)
 	assert.Equal(t, "av01", clone.Codec)
+	assert.Contains(t, clone.ExtraFields, "x")
+
+	// Test byte slice deep copy
+	clone.ExtraFields["x"][1] = '9'
+	assert.Equal(t, byte('1'), original.ExtraFields["x"][1], "original byte slice should not be mutated")
 
 	clone.Name = "mutated"
 	assert.Equal(t, "video-720", original.Name)
@@ -1091,24 +1195,89 @@ func TestTrackClone_Clone(t *testing.T) {
 
 func TestTrackClone_Validate(t *testing.T) {
 	tests := map[string]struct {
-		clone        TrackClone
-		errorMessage string
+		clone          TrackClone
+		expectedErrors []string
 	}{
+		"valid": {
+			clone:          TrackClone{Track: Track{Name: "video-720"}, ParentName: "video-1080"},
+			expectedErrors: nil,
+		},
 		"missing name": {
-			clone:        TrackClone{Track: Track{}, ParentName: "parent"},
-			errorMessage: "name is required",
+			clone:          TrackClone{Track: Track{}, ParentName: "parent"},
+			expectedErrors: []string{"test: name is required"},
 		},
 		"missing parentName": {
-			clone:        TrackClone{Track: Track{Name: "video"}},
-			errorMessage: "parentName is required for clone tracks",
+			clone:          TrackClone{Track: Track{Name: "video"}},
+			expectedErrors: []string{"test: parentName is required for clone tracks"},
+		},
+		"missing both": {
+			clone:          TrackClone{Track: Track{}},
+			expectedErrors: []string{"test: name is required", "test: parentName is required for clone tracks"},
 		},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			problems := tt.clone.Validate("test")
-			require.NotEmpty(t, problems)
-			assert.Contains(t, problems[0], tt.errorMessage)
+			if len(tt.expectedErrors) == 0 {
+				require.Empty(t, problems)
+			} else {
+				require.Equal(t, tt.expectedErrors, problems)
+			}
+		})
+	}
+}
+
+func TestCatalogDeltaValidate_Valid(t *testing.T) {
+	delta := CatalogDelta{
+		AddTracks: []Track{
+			{Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+		},
+	}
+	require.NoError(t, delta.Validate())
+}
+
+func TestCatalogDeltaValidate_Errors(t *testing.T) {
+	tests := map[string]struct {
+		delta        CatalogDelta
+		errorMessage string
+	}{
+		"missing operations": {
+			delta:        CatalogDelta{},
+			errorMessage: "delta catalog must contain addTracks, removeTracks, or cloneTracks",
+		},
+		"add track invalid": {
+			delta: CatalogDelta{
+				AddTracks: []Track{{Packaging: PackagingLOC}}, // missing name
+			},
+			errorMessage: "addTracks[0]: name is required",
+		},
+		"remove track invalid": {
+			delta: CatalogDelta{
+				RemoveTracks: []TrackRef{{Namespace: "ns"}}, // missing name
+			},
+			errorMessage: "removeTracks[0]: name is required",
+		},
+		"clone track invalid": {
+			delta: CatalogDelta{
+				CloneTracks: []TrackClone{{Track: Track{Name: "video"}}}, // missing parentName
+			},
+			errorMessage: "cloneTracks[0]: parentName is required for clone tracks",
+		},
+		"multiple invalid": {
+			delta: CatalogDelta{
+				AddTracks:    []Track{{Packaging: PackagingLOC}}, // missing name
+				RemoveTracks: []TrackRef{{Namespace: "ns"}},      // missing name
+			},
+			errorMessage: "addTracks[0]: name is required",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := tt.delta.Validate()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errorMessage)
 		})
 	}
 }
@@ -1118,6 +1287,55 @@ func TestCatalogDeltaValidate_EmptyDelta(t *testing.T) {
 	err := delta.Validate()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "delta catalog must contain")
+}
+
+func TestCatalogDelta_UnmarshalJSON(t *testing.T) {
+	tests := map[string]struct {
+		input       string
+		wantErr     bool
+		errContains string
+		check       func(*testing.T, CatalogDelta)
+	}{
+		"valid base delta": {
+			input:   `{"deltaUpdate": true, "addTracks": [{"name": "video", "packaging": "loc", "isLive": true}]}`,
+			wantErr: false,
+			check: func(t *testing.T, d CatalogDelta) {
+				require.Len(t, d.AddTracks, 1)
+				assert.Equal(t, "video", d.AddTracks[0].Name)
+				assert.Empty(t, d.ExtraFields)
+			},
+		},
+		"valid delta with extra fields": {
+			input:   `{"deltaUpdate": true, "addTracks": [{"name": "video", "packaging": "loc", "isLive": true}], "custom_field": "custom_value", "another_field": 123}`,
+			wantErr: false,
+			check: func(t *testing.T, d CatalogDelta) {
+				require.Len(t, d.AddTracks, 1)
+				assert.Len(t, d.ExtraFields, 2)
+				assert.Contains(t, d.ExtraFields, "custom_field")
+				assert.Contains(t, d.ExtraFields, "another_field")
+				assert.Equal(t, string(d.ExtraFields["custom_field"]), `"custom_value"`)
+				assert.Equal(t, string(d.ExtraFields["another_field"]), "123")
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			var delta CatalogDelta
+			err := json.Unmarshal([]byte(tc.input), &delta)
+			if tc.wantErr {
+				require.Error(t, err)
+				if tc.errContains != "" {
+					assert.Contains(t, err.Error(), tc.errContains)
+				}
+			} else {
+				require.NoError(t, err)
+				if tc.check != nil {
+					tc.check(t, delta)
+				}
+			}
+		})
+	}
 }
 
 func TestCatalogDelta_UnmarshalJSON_MissingDeltaUpdate(t *testing.T) {
@@ -1157,6 +1375,23 @@ func TestCatalogDelta_UnmarshalJSON_ExtraFields(t *testing.T) {
 	delta, err := ParseCatalogDeltaString(input)
 	require.NoError(t, err)
 	assert.Contains(t, delta.ExtraFields, "com.example.ext")
+}
+
+func TestTrackRef_MarshalJSON_ExtraFields(t *testing.T) {
+	ref := TrackRef{
+		Name: "video",
+		ExtraFields: map[string]json.RawMessage{
+			"customField": json.RawMessage(`"customValue"`),
+		},
+	}
+
+	data, err := json.Marshal(ref)
+	require.NoError(t, err)
+
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	assert.Equal(t, "video", decoded["name"])
+	assert.Equal(t, "customValue", decoded["customField"])
 }
 
 func TestTrackRef_MarshalJSON_NameOnly(t *testing.T) {
@@ -1328,6 +1563,53 @@ func TestCatalogDelta_UnmarshalJSON_FieldErrors(t *testing.T) {
 
 // --- TrackRef.UnmarshalJSON error paths ---
 
+func TestTrackRef_UnmarshalJSON(t *testing.T) {
+	tests := map[string]struct {
+		input    string
+		expected TrackRef
+	}{
+		"empty object": {
+			input: `{}`,
+			expected: TrackRef{
+				ExtraFields: map[string]json.RawMessage{},
+			},
+		},
+		"name only": {
+			input: `{"name":"video"}`,
+			expected: TrackRef{
+				Name:        "video",
+				ExtraFields: map[string]json.RawMessage{},
+			},
+		},
+		"namespace and name": {
+			input: `{"namespace":"live/demo","name":"video"}`,
+			expected: TrackRef{
+				Namespace:   "live/demo",
+				Name:        "video",
+				ExtraFields: map[string]json.RawMessage{},
+			},
+		},
+		"with extra fields": {
+			input: `{"name":"video","extra":"value"}`,
+			expected: TrackRef{
+				Name: "video",
+				ExtraFields: map[string]json.RawMessage{
+					"extra": json.RawMessage(`"value"`),
+				},
+			},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			var ref TrackRef
+			err := json.Unmarshal([]byte(tt.input), &ref)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, ref)
+		})
+	}
+}
+
 func TestTrackRef_UnmarshalJSON_FieldErrors(t *testing.T) {
 	tests := map[string]struct {
 		input string
@@ -1342,6 +1624,47 @@ func TestTrackRef_UnmarshalJSON_FieldErrors(t *testing.T) {
 			var ref TrackRef
 			err := json.Unmarshal([]byte(tt.input), &ref)
 			require.Error(t, err)
+		})
+	}
+}
+
+func TestTrackClone_UnmarshalJSON_Success(t *testing.T) {
+	w := int64(1280)
+	tests := map[string]struct {
+		input    string
+		expected TrackClone
+	}{
+		"basic clone": {
+			input: `{"name":"video-720","parentName":"video-1080"}`,
+			expected: TrackClone{
+				Track:      Track{Name: "video-720"},
+				ParentName: "video-1080",
+			},
+		},
+		"with extra fields": {
+			input: `{"name":"video-720","parentName":"video-1080","width":1280}`,
+			expected: TrackClone{
+				Track: Track{
+					Name:  "video-720",
+					Width: &w,
+				},
+				ParentName: "video-1080",
+			},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			var clone TrackClone
+			err := json.Unmarshal([]byte(tt.input), &clone)
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.expected.Name, clone.Name)
+			assert.Equal(t, tt.expected.ParentName, clone.ParentName)
+			if tt.expected.Width != nil {
+				require.NotNil(t, clone.Width)
+				assert.Equal(t, *tt.expected.Width, *clone.Width)
+			}
 		})
 	}
 }
@@ -1441,4 +1764,61 @@ func TestParseCatalogDeltaString(t *testing.T) {
 
 	_, err = ParseCatalogDeltaString(`{"deltaUpdate": "invalid_type"}`)
 	require.Error(t, err)
+}
+
+func TestTrackRef_Validate(t *testing.T) {
+	tests := map[string]struct {
+		ref      TrackRef
+		path     string
+		expected []string
+	}{
+		"valid": {
+			ref: TrackRef{
+				Namespace: "foo",
+				Name:      "bar",
+			},
+			path:     "test",
+			expected: nil,
+		},
+		"empty name": {
+			ref: TrackRef{
+				Namespace: "foo",
+				Name:      "",
+			},
+			path:     "test",
+			expected: []string{"test: name is required"},
+		},
+		"extra fields": {
+			ref: TrackRef{
+				Namespace: "foo",
+				Name:      "bar",
+				ExtraFields: map[string]json.RawMessage{
+					"unknown": json.RawMessage(`"value"`),
+				},
+			},
+			path:     "test",
+			expected: []string{"test: remove track entries may contain only name and optional namespace"},
+		},
+		"empty name and extra fields": {
+			ref: TrackRef{
+				Namespace: "foo",
+				Name:      "",
+				ExtraFields: map[string]json.RawMessage{
+					"unknown": json.RawMessage(`"value"`),
+				},
+			},
+			path: "test",
+			expected: []string{
+				"test: name is required",
+				"test: remove track entries may contain only name and optional namespace",
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			problems := tc.ref.Validate(tc.path)
+			assert.Equal(t, tc.expected, problems)
+		})
+	}
 }

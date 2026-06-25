@@ -20,6 +20,13 @@ func TestLocationJSON(t *testing.T) {
 	assert.Equal(t, location, decoded)
 }
 
+func TestLocation_MarshalJSON(t *testing.T) {
+	loc := Location{GroupID: 42, ObjectID: 100}
+	data, err := loc.MarshalJSON()
+	require.NoError(t, err)
+	assert.Equal(t, []byte(`[42,100]`), data)
+}
+
 func TestLocationJSON_InvalidEntryLength(t *testing.T) {
 	tests := []string{
 		`[1]`,
@@ -34,6 +41,18 @@ func TestLocationJSON_InvalidEntryLength(t *testing.T) {
 			assert.Contains(t, err.Error(), "exactly 2 items")
 		})
 	}
+}
+
+func TestMediaTimelineEntry_MarshalJSON(t *testing.T) {
+	entry := MediaTimelineEntry{
+		MediaTime: 2002,
+		Location:  Location{GroupID: 1, ObjectID: 0},
+		Wallclock: 1759924160383,
+	}
+
+	data, err := entry.MarshalJSON()
+	require.NoError(t, err)
+	assert.JSONEq(t, `[2002,[1,0],1759924160383]`, string(data))
 }
 
 func TestMediaTimelineEntryJSON(t *testing.T) {
@@ -270,6 +289,57 @@ func TestMediaTimelineEntry_UnmarshalJSON_FieldErrors(t *testing.T) {
 			var entry MediaTimelineEntry
 			err := json.Unmarshal([]byte(tt.input), &entry)
 			require.Error(t, err)
+		})
+	}
+}
+
+func TestEventTimelineRecord_MarshalJSON(t *testing.T) {
+	tests := map[string]struct {
+		record EventTimelineRecord
+		want   string
+	}{
+		"wallclock": {
+			record: EventTimelineRecord{
+				Wallclock: func() *int64 { v := int64(100); return &v }(),
+				Data:      json.RawMessage(`{"a":1}`),
+			},
+			want: `{"t":100,"data":{"a":1}}`,
+		},
+		"location": {
+			record: EventTimelineRecord{
+				Location: &Location{GroupID: 1, ObjectID: 2},
+				Data:     json.RawMessage(`{"a":1}`),
+			},
+			want: `{"l":[1,2],"data":{"a":1}}`,
+		},
+		"media_time": {
+			record: EventTimelineRecord{
+				MediaTime: func() *int64 { v := int64(200); return &v }(),
+				Data:      json.RawMessage(`{"a":1}`),
+			},
+			want: `{"m":200,"data":{"a":1}}`,
+		},
+		"extra_fields": {
+			record: EventTimelineRecord{
+				Wallclock:   func() *int64 { v := int64(100); return &v }(),
+				Data:        json.RawMessage(`{"a":1}`),
+				ExtraFields: map[string]json.RawMessage{"ext": json.RawMessage(`42`)},
+			},
+			want: `{"t":100,"data":{"a":1},"ext":42}`,
+		},
+		"no_data": {
+			record: EventTimelineRecord{
+				Wallclock: func() *int64 { v := int64(100); return &v }(),
+			},
+			want: `{"t":100}`,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			b, err := tt.record.MarshalJSON()
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.want, string(b))
 		})
 	}
 }
