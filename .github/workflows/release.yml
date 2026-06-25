@@ -1,0 +1,60 @@
+# Creates a GitHub Release when a version tag is pushed.
+#
+# gomoqt is a Go library: the tag itself is the release artifact (consumed via
+# `go get github.com/qumo-dev/gomoqt@vX.Y.Z`), so there is nothing to compile.
+# Release notes come from GitHub's auto-generator (`--generate-notes`), grouped
+# into sections by the label configuration in .github/release.yml.
+#
+# Also runnable via workflow_dispatch (e.g. to re-publish a release or rebuild
+# its notes after fixing .github/release.yml) without re-pushing the tag.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (must already exist, e.g. v0.16.0)'
+        required: true
+
+permissions:
+  contents: write # required to create / edit the release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Publishing release for $tag"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          tag="${{ steps.tag.outputs.tag }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; regenerating notes."
+            gh release edit "$tag" --generate-notes
+          else
+            # --verify-tag fails the job if the tag does not point at a real commit.
+            gh release create "$tag" \
+              --generate-notes \
+              --verify-tag \
+              --title "$tag"
+          fi

@@ -1,0 +1,43 @@
+# Configuration for GitHub's auto-generated release notes.
+#
+# Used by `gh release create --generate-notes` (see .github/workflows/release.yml)
+# and the web UI's "Generate release notes" button. Maps merged-PR labels to
+# release-note sections.
+#
+# The automation bots (bolt, sentinel) are intentionally NOT excluded: real,
+# merged fixes ship through them (e.g. the OOM DoS patch), so hiding their
+# authorship would drop those entries from the notes.
+changelog:
+  exclude:
+    labels:
+      - no-changelog
+      - duplicate
+      - invalid
+      - wontfix
+  categories:
+    - title: 🔒 Security
+      labels:
+        - security
+    - title: 🚀 Features
+      labels:
+        - type:feature
+        - enhancement
+    - title: ⚡ Performance
+      labels:
+        - performance
+        - performance-check
+    - title: 🐛 Bug Fixes
+      labels:
+        - bug
+    - title: 📦 Dependencies
+      labels:
+        - dependencies
+    - title: 📚 Documentation
+      labels:
+        - documentation
+    - title: 🧪 Tests
+      labels:
+        - tests
+    - title: Other Changes
+      labels:
+        - "*"
