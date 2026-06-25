@@ -21,7 +21,7 @@ export class TrackWriter {
 	/** The track name within the broadcast. */
 	trackName: string;
 	#subscribeStream: ReceiveSubscribeStream;
-	#openUniStreamFunc: (signal?: AbortSignal) => Promise<
+	#openUniStreamFunc: (options?: { signal?: AbortSignal }) => Promise<
 		[SendStream, undefined] | [undefined, Error]
 	>;
 	#groups: GroupWriter[] = [];
@@ -31,7 +31,7 @@ export class TrackWriter {
 		broadcastPath: BroadcastPath,
 		trackName: string,
 		subscribeStream: ReceiveSubscribeStream,
-		openUniStreamFunc: (signal?: AbortSignal) => Promise<
+		openUniStreamFunc: (options?: { signal?: AbortSignal }) => Promise<
 			[SendStream, undefined] | [undefined, Error]
 		>,
 	) {
@@ -160,7 +160,7 @@ export class TrackWriter {
 		// Thread the effective signal down to the stream-open, mirroring Go's
 		// openUniStreamFunc(ctx) (track_writer.go:314).
 		let writer: SendStream | undefined;
-		[writer, err] = await this.#openUniStreamFunc(effective);
+		[writer, err] = await this.#openUniStreamFunc({ signal: effective });
 		if (err) {
 			return [undefined, err];
 		}

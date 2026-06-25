@@ -5,8 +5,12 @@ import { StreamConnError, StreamConnErrorInfo } from "./error.ts";
 import { background, ContextCancelledError, watchSignal } from "@okdaichi/golikejs/context";
 
 export interface StreamConn {
-	openStream(signal?: AbortSignal): Promise<[Stream, undefined] | [undefined, Error]>;
-	openUniStream(signal?: AbortSignal): Promise<[SendStream, undefined] | [undefined, Error]>;
+	openStream(
+		options?: { signal?: AbortSignal },
+	): Promise<[Stream, undefined] | [undefined, Error]>;
+	openUniStream(
+		options?: { signal?: AbortSignal },
+	): Promise<[SendStream, undefined] | [undefined, Error]>;
 	acceptStream(): Promise<[Stream, undefined] | [undefined, Error]>;
 	acceptUniStream(): Promise<[ReceiveStream, undefined] | [undefined, Error]>;
 	close(closeInfo?: WebTransportCloseInfo): void;
@@ -46,8 +50,9 @@ export class WebTransportSession implements StreamConn {
 	}
 
 	async openStream(
-		signal?: AbortSignal,
+		options?: { signal?: AbortSignal },
 	): Promise<[Stream, undefined] | [undefined, Error]> {
+		const signal = options?.signal;
 		// §1 Abort before starting: no stream is opened.
 		if (signal?.aborted) {
 			return [undefined, abortError(signal)];
@@ -104,8 +109,9 @@ export class WebTransportSession implements StreamConn {
 	}
 
 	async openUniStream(
-		signal?: AbortSignal,
+		options?: { signal?: AbortSignal },
 	): Promise<[SendStream, undefined] | [undefined, Error]> {
+		const signal = options?.signal;
 		// §1 Abort before starting: no stream is opened.
 		if (signal?.aborted) {
 			return [undefined, abortError(signal)];

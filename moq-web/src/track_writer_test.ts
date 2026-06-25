@@ -179,7 +179,7 @@ Deno.test("TrackWriter", async (t) => {
 			});
 			const rss = new ReceiveSubscribeStream(ctx, stream, subscribe);
 			let openCalled = false;
-			const openUni = async (_signal?: AbortSignal) => {
+			const openUni = async (_options?: { signal?: AbortSignal }) => {
 				openCalled = true;
 				return [new MockSendStream({}), undefined] as [SendStream, undefined];
 			};
@@ -209,8 +209,8 @@ Deno.test("TrackWriter", async (t) => {
 			});
 			const rss = new ReceiveSubscribeStream(ctx, stream, subscribe);
 			let receivedSignal: AbortSignal | undefined;
-			const openUni = async (signal?: AbortSignal) => {
-				receivedSignal = signal;
+			const openUni = async (options?: { signal?: AbortSignal }) => {
+				receivedSignal = options?.signal;
 				return [new MockSendStream({}), undefined] as [SendStream, undefined];
 			};
 			const tw = new TrackWriter("/test", "test", rss, openUni);
@@ -254,7 +254,7 @@ Deno.test("TrackWriter", async (t) => {
 					cancelCalls.push(code);
 				}),
 			});
-			const openUni = async (_signal?: AbortSignal) =>
+			const openUni = async (_options?: { signal?: AbortSignal }) =>
 				[mockSend, undefined] as [SendStream, undefined];
 			const tw = new TrackWriter("/test", "name", rss, openUni);
 
@@ -300,7 +300,7 @@ Deno.test("TrackWriter", async (t) => {
 					cancelCalls.push(code);
 				}),
 			});
-			const openUni = async (_signal?: AbortSignal) =>
+			const openUni = async (_options?: { signal?: AbortSignal }) =>
 				[mockSend, undefined] as [SendStream, undefined];
 			const tw = new TrackWriter("/test", "name", rss, openUni);
 
@@ -325,7 +325,7 @@ Deno.test("TrackWriter", async (t) => {
 			});
 			const rss = new ReceiveSubscribeStream(ctx, stream, subscribe);
 			let openCalled = false;
-			const openUni = async (_signal?: AbortSignal) => {
+			const openUni = async (_options?: { signal?: AbortSignal }) => {
 				openCalled = true;
 				return [new MockSendStream({}), undefined] as [SendStream, undefined];
 			};

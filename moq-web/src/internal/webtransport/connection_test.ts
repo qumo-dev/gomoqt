@@ -230,7 +230,7 @@ Deno.test("WebTransportSession.openUniStream with a pre-aborted signal does not 
 	const session = new WebTransportSession(mock);
 	const ac = new AbortController();
 	ac.abort(new Error("nope"));
-	const [stream, err] = await session.openUniStream(ac.signal);
+	const [stream, err] = await session.openUniStream({ signal: ac.signal });
 	assertEquals(stream, undefined);
 	assertInstanceOf(err, Error);
 	assertEquals((err as Error).message, "nope");
@@ -250,7 +250,7 @@ Deno.test("WebTransportSession.openUniStream happy path with a signal returns a 
 
 	const session = new WebTransportSession(mock);
 	const ac = new AbortController();
-	const [stream, err] = await session.openUniStream(ac.signal);
+	const [stream, err] = await session.openUniStream({ signal: ac.signal });
 	assertEquals(err, undefined);
 	assertInstanceOf(stream, SendStream);
 });
@@ -284,7 +284,7 @@ Deno.test("WebTransportSession.openUniStream abort mid-wait abandons the late-re
 
 	const session = new WebTransportSession(mock);
 	const ac = new AbortController();
-	const openP = session.openUniStream(ac.signal);
+	const openP = session.openUniStream({ signal: ac.signal });
 	ac.abort(new Error("timeout"));
 
 	const [stream, err] = await openP;
@@ -317,7 +317,7 @@ Deno.test("WebTransportSession.openStream with a pre-aborted signal does not ope
 	const session = new WebTransportSession(mock);
 	const ac = new AbortController();
 	ac.abort(new Error("nope"));
-	const [stream, err] = await session.openStream(ac.signal);
+	const [stream, err] = await session.openStream({ signal: ac.signal });
 	assertEquals(stream, undefined);
 	assertInstanceOf(err, Error);
 	assertEquals((err as Error).message, "nope");
@@ -339,7 +339,7 @@ Deno.test("WebTransportSession.openUniStream pre-aborted with a non-Error reason
 	const ac = new AbortController();
 	// A non-Error reason falls back to ContextCancelledError.
 	ac.abort("a string reason");
-	const [stream, err] = await session.openUniStream(ac.signal);
+	const [stream, err] = await session.openUniStream({ signal: ac.signal });
 	assertEquals(stream, undefined);
 	assertInstanceOf(err, ContextCancelledError);
 });
@@ -378,7 +378,7 @@ Deno.test("WebTransportSession.openStream abort mid-wait abandons the late-resol
 
 	const session = new WebTransportSession(mock);
 	const ac = new AbortController();
-	const openP = session.openStream(ac.signal);
+	const openP = session.openStream({ signal: ac.signal });
 	ac.abort(new Error("timeout"));
 
 	const [stream, err] = await openP;
