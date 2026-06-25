@@ -1,6 +1,6 @@
 import { GroupWriter } from "./group_stream.ts";
 import type { Info } from "./info.ts";
-import type { Context } from "@okdaichi/golikejs/context";
+import { type Context, ContextCancelledError, toAbortSignal } from "@okdaichi/golikejs/context";
 import type { ReceiveSubscribeStream, SubscribeDrop, TrackConfig } from "./subscribe_stream.ts";
 import type { SendStream } from "./internal/webtransport/mod.ts";
 import { UniStreamTypes } from "./stream_type.ts";
@@ -21,7 +21,7 @@ export class TrackWriter {
 	/** The track name within the broadcast. */
 	trackName: string;
 	#subscribeStream: ReceiveSubscribeStream;
-	#openUniStreamFunc: () => Promise<
+	#openUniStreamFunc: (signal?: AbortSignal) => Promise<
 		[SendStream, undefined] | [undefined, Error]
 	>;
 	#groups: GroupWriter[] = [];
@@ -31,7 +31,7 @@ export class TrackWriter {
 		broadcastPath: BroadcastPath,
 		trackName: string,
 		subscribeStream: ReceiveSubscribeStream,
-		openUniStreamFunc: () => Promise<
+		openUniStreamFunc: (signal?: AbortSignal) => Promise<
 			[SendStream, undefined] | [undefined, Error]
 		>,
 	) {
@@ -55,22 +55,34 @@ export class TrackWriter {
 
 	/**
 	 * Open a new group with an auto-incremented sequence number.
-	 * @returns A {@link GroupWriter} for writing frames.
+	 *
+	 * The group opens on a fresh unidirectional stream; when the peer's
+	 * concurrent-stream limit is reached this blocks until a stream is granted.
+	 * Pass `options.signal` to cancel or time out the open. If aborted, no group
+	 * stream remains open.
+	 * @param options - Optional cancellation `signal`.
+	 * @returns A {@link GroupWriter} for writing frames, or an error.
 	 */
-	async openGroup(): Promise<[GroupWriter, undefined] | [undefined, Error]> {
+	async openGroup(
+		options?: { signal?: AbortSignal },
+	): Promise<[GroupWriter, undefined] | [undefined, Error]> {
 		this.#groupCount++;
-		return this.#openGroupWithSequence(this.#groupCount);
+		return this.#openGroupWithSequence(this.#groupCount, options?.signal);
 	}
 
 	/**
 	 * Open a new group at a specific sequence number.
 	 * @param seq - The group sequence number.
+	 * @param options - Optional cancellation `signal`.
 	 */
-	async openGroupAt(seq: number): Promise<[GroupWriter, undefined] | [undefined, Error]> {
+	async openGroupAt(
+		seq: number,
+		options?: { signal?: AbortSignal },
+	): Promise<[GroupWriter, undefined] | [undefined, Error]> {
 		if (seq > this.#groupCount) {
 			this.#groupCount = seq;
 		}
-		return this.#openGroupWithSequence(seq);
+		return this.#openGroupWithSequence(seq, options?.signal);
 	}
 
 	/** Advance the group counter by `n` without opening groups. */
@@ -113,21 +125,52 @@ export class TrackWriter {
 
 	async #openGroupWithSequence(
 		seq: number,
+		signal?: AbortSignal,
 	): Promise<[GroupWriter, undefined] | [undefined, Error]> {
+		// Mirror Go openGroupWithSequence (track_writer.go:298): if the track
+		// context is already done, fail fast without opening a stream.
+		if (this.context.err()) {
+			return [undefined, this.context.err()!];
+		}
+
+		// ensureInfo is not raced against the signal (Go passes no ctx here).
 		let err: Error | undefined;
 		err = await this.#subscribeStream.ensureInfo();
 		if (err) {
 			return [undefined, err];
 		}
 
+		// Effective cancellation: the track context OR the caller's signal.
+		// AbortSignal.any composes them; with no caller signal the track context
+		// alone bounds the open (Go's `ctx.Done()==nil → w.Context()`).
+		const trackSignal = toAbortSignal(this.context);
+		const effective: AbortSignal = signal
+			? AbortSignal.any([trackSignal, signal])
+			: trackSignal;
+
+		// §1 Abort before starting: do not open a stream.
+		if (effective.aborted) {
+			const reason = (effective as unknown as { reason?: unknown }).reason;
+			return [
+				undefined,
+				reason instanceof Error ? reason : new ContextCancelledError(),
+			];
+		}
+
+		// Thread the effective signal down to the stream-open, mirroring Go's
+		// openUniStreamFunc(ctx) (track_writer.go:314).
 		let writer: SendStream | undefined;
-		[writer, err] = await this.#openUniStreamFunc();
+		[writer, err] = await this.#openUniStreamFunc(effective);
 		if (err) {
 			return [undefined, err];
 		}
 
+		// §3 A stream is now allocated. Any failure before the group header is
+		// fully written must cancel the stream so it is never left half-open.
+		// (Mirrors Go stream.CancelWrite on encode error; previously leaked.)
 		[, err] = await writeVarint(writer!, UniStreamTypes.GroupStreamType);
 		if (err) {
+			await writer!.cancel(GroupErrorCode.InternalError).catch(() => {});
 			return [undefined, new Error(`Failed to write stream type: ${err}`)];
 		}
 
@@ -137,6 +180,7 @@ export class TrackWriter {
 		});
 		err = await msg.encode(writer!);
 		if (err) {
+			await writer!.cancel(GroupErrorCode.InternalError).catch(() => {});
 			return [undefined, new Error("Failed to create group message")];
 		}
 

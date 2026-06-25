@@ -6,6 +6,7 @@ import { SendStream } from "./internal/webtransport/mod.ts";
 import { MockSendStream, MockStream } from "./mock_stream_test.ts";
 import { ReceiveSubscribeStream } from "./subscribe_stream.ts";
 import { SubscribeMessage } from "./internal/message/mod.ts";
+import { GroupErrorCode } from "./error.ts";
 
 Deno.test("TrackWriter", async (t) => {
 	await t.step(
@@ -162,6 +163,108 @@ Deno.test("TrackWriter", async (t) => {
 			const [group, err] = await tw.openGroup();
 			assertEquals(group, undefined);
 			assertInstanceOf(err, Error);
+		},
+	);
+
+	await t.step(
+		"TrackWriter.openGroup with a pre-aborted signal does not open a stream",
+		async () => {
+			const [ctx] = withCancelCause(background());
+			const stream = new MockStream({});
+			const subscribe = new SubscribeMessage({
+				subscribeId: 99,
+				broadcastPath: "/test",
+				trackName: "test",
+				subscriberPriority: 0,
+			});
+			const rss = new ReceiveSubscribeStream(ctx, stream, subscribe);
+			let openCalled = false;
+			const openUni = async (_signal?: AbortSignal) => {
+				openCalled = true;
+				return [new MockSendStream({}), undefined] as [SendStream, undefined];
+			};
+			const tw = new TrackWriter("/test", "test", rss, openUni);
+
+			const ac = new AbortController();
+			ac.abort(new Error("aborted before start"));
+			const [grp, err] = await tw.openGroup({ signal: ac.signal });
+
+			assertEquals(grp, undefined);
+			assertInstanceOf(err, Error);
+			assertEquals((err as Error).message, "aborted before start");
+			assertEquals(openCalled, false);
+		},
+	);
+
+	await t.step(
+		"TrackWriter.openGroup threads an effective signal to openUniStreamFunc",
+		async () => {
+			const [ctx] = withCancelCause(background());
+			const stream = new MockStream({});
+			const subscribe = new SubscribeMessage({
+				subscribeId: 99,
+				broadcastPath: "/test",
+				trackName: "test",
+				subscriberPriority: 0,
+			});
+			const rss = new ReceiveSubscribeStream(ctx, stream, subscribe);
+			let receivedSignal: AbortSignal | undefined;
+			const openUni = async (signal?: AbortSignal) => {
+				receivedSignal = signal;
+				return [new MockSendStream({}), undefined] as [SendStream, undefined];
+			};
+			const tw = new TrackWriter("/test", "test", rss, openUni);
+
+			const ac = new AbortController();
+			const [grp, err] = await tw.openGroup({ signal: ac.signal });
+			assertEquals(err, undefined);
+			assertEquals(grp !== undefined, true);
+
+			// The signal passed down is the composed effective signal: aborting
+			// the caller's controller is reflected in it.
+			assertEquals(receivedSignal !== undefined, true);
+			assertEquals(receivedSignal!.aborted, false);
+			ac.abort();
+			assertEquals(receivedSignal!.aborted, true);
+		},
+	);
+
+	await t.step(
+		"TrackWriter.openGroup cancels the allocated stream when the header write fails",
+		async () => {
+			const [ctx] = withCancelCause(background());
+			const stream = new MockStream({});
+			const subscribe = new SubscribeMessage({
+				subscribeId: 0,
+				broadcastPath: "/test",
+				trackName: "name",
+				subscriberPriority: 0,
+			});
+			const rss = new ReceiveSubscribeStream(ctx, stream, subscribe);
+
+			const cancelCalls: number[] = [];
+			const mockSend = new MockSendStream({
+				write: spy(async (_p: Uint8Array) =>
+					[0, new Error("group header write failed")] as [
+						number,
+						Error | undefined,
+					]
+				),
+				cancel: spy(async (code: number) => {
+					cancelCalls.push(code);
+				}),
+			});
+			const openUni = async (_signal?: AbortSignal) =>
+				[mockSend, undefined] as [SendStream, undefined];
+			const tw = new TrackWriter("/test", "name", rss, openUni);
+
+			const [group, err] = await tw.openGroup();
+			assertEquals(group, undefined);
+			assertInstanceOf(err, Error);
+			// §3: the allocated stream must be cancelled with InternalError, not
+			// left half-open.
+			assertEquals(cancelCalls.length, 1);
+			assertEquals(cancelCalls[0], GroupErrorCode.InternalError);
 		},
 	);
 });

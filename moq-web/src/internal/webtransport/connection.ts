@@ -2,10 +2,11 @@ import { ReceiveStream } from "./receive_stream.ts";
 import { Stream } from "./stream.ts";
 import { SendStream } from "./send_stream.ts";
 import { StreamConnError, StreamConnErrorInfo } from "./error.ts";
+import { background, ContextCancelledError, watchSignal } from "@okdaichi/golikejs/context";
 
 export interface StreamConn {
-	openStream(): Promise<[Stream, undefined] | [undefined, Error]>;
-	openUniStream(): Promise<[SendStream, undefined] | [undefined, Error]>;
+	openStream(signal?: AbortSignal): Promise<[Stream, undefined] | [undefined, Error]>;
+	openUniStream(signal?: AbortSignal): Promise<[SendStream, undefined] | [undefined, Error]>;
 	acceptStream(): Promise<[Stream, undefined] | [undefined, Error]>;
 	acceptUniStream(): Promise<[ReceiveStream, undefined] | [undefined, Error]>;
 	close(closeInfo?: WebTransportCloseInfo): void;
@@ -44,44 +45,95 @@ export class WebTransportSession implements StreamConn {
 		return this.#webtransport.protocol || "";
 	}
 
-	async openStream(): Promise<[Stream, undefined] | [undefined, Error]> {
+	async openStream(
+		signal?: AbortSignal,
+	): Promise<[Stream, undefined] | [undefined, Error]> {
+		// §1 Abort before starting: no stream is opened.
+		if (signal?.aborted) {
+			return [undefined, abortError(signal)];
+		}
+
+		// Without a signal, preserve the original behavior exactly.
+		if (!signal) {
+			try {
+				const wtStream = await this.#webtransport.createBidirectionalStream();
+				return [new Stream({ stream: wtStream }), undefined];
+			} catch (err) {
+				return await this.#mapOpenStreamError(err);
+			}
+		}
+
+		// Browser WebTransport createBidirectionalStream() accepts no signal, so
+		// cancellation is external. Race the open against the signal, mirroring
+		// Go's ctx.Done(). If the signal wins, the WT promise may still resolve
+		// later — abandon any late stream so it is never orphaned.
+		const ctx = watchSignal(background(), signal);
+		const createPromise = this.#webtransport.createBidirectionalStream();
+		await Promise.race([createPromise, ctx.done()]);
+		if (ctx.err()) {
+			createPromise.then((late) => abandonRawStream(late)).catch(() => {});
+			return [undefined, ctx.err()!];
+		}
+
 		try {
-			const wtStream = await this.#webtransport.createBidirectionalStream();
-			const stream = new Stream({
-				stream: wtStream,
-			});
-			return [stream, undefined];
+			const wtStream = await createPromise;
+			return [new Stream({ stream: wtStream }), undefined];
 		} catch (err) {
-			if (err instanceof Error) {
-				return [undefined, err];
-			}
-			const wtErr = err as WebTransportError;
-			if (wtErr.source === "session") {
-				const info = await this.#webtransport.closed;
-				if (info.closeCode !== undefined && info.reason !== undefined) {
-					return [
-						undefined,
-						new StreamConnError(
-							info as StreamConnErrorInfo,
-							true,
-						),
-					];
-				}
-			}
-			return [undefined, err as Error];
+			return await this.#mapOpenStreamError(err);
 		}
 	}
 
-	async openUniStream(): Promise<[SendStream, undefined] | [undefined, Error]> {
-		try {
-			const wtStream = await this.#webtransport.createUnidirectionalStream();
-			const stream = new SendStream({
-				stream: wtStream,
-			});
-			return [stream, undefined];
-		} catch (e) {
-			return [undefined, e as Error];
+	async #mapOpenStreamError(err: unknown): Promise<[undefined, Error]> {
+		if (err instanceof Error) {
+			return [undefined, err];
 		}
+		const wtErr = err as WebTransportError;
+		if (wtErr.source === "session") {
+			const info = await this.#webtransport.closed;
+			if (info.closeCode !== undefined && info.reason !== undefined) {
+				return [
+					undefined,
+					new StreamConnError(
+						info as StreamConnErrorInfo,
+						true,
+					),
+				];
+			}
+		}
+		return [undefined, err as Error];
+	}
+
+	async openUniStream(
+		signal?: AbortSignal,
+	): Promise<[SendStream, undefined] | [undefined, Error]> {
+		// §1 Abort before starting: no stream is opened.
+		if (signal?.aborted) {
+			return [undefined, abortError(signal)];
+		}
+
+		// Without a signal, preserve the original behavior exactly.
+		if (!signal) {
+			try {
+				const wtStream = await this.#webtransport.createUnidirectionalStream();
+				return [new SendStream({ stream: wtStream }), undefined];
+			} catch (e) {
+				return [undefined, e as Error];
+			}
+		}
+
+		// Browser WebTransport createUnidirectionalStream() accepts no signal, so
+		// cancellation is external. Race the open against the signal, mirroring
+		// Go's ctx.Done(). If the signal wins, the WT promise may still resolve
+		// later — abandon any late stream so it is never orphaned.
+		const ctx = watchSignal(background(), signal);
+		const createPromise = this.#webtransport.createUnidirectionalStream();
+		await Promise.race([createPromise, ctx.done()]);
+		if (ctx.err()) {
+			createPromise.then((late) => abandonRawStream(late)).catch(() => {});
+			return [undefined, ctx.err()!];
+		}
+
+		return [new SendStream({ stream: await createPromise }), undefined];
 	}
 
 	async acceptStream(): Promise<[Stream, undefined] | [undefined, Error]> {
@@ -121,5 +173,37 @@ export class WebTransportSession implements StreamConn {
 
 	get closed(): Promise<WebTransportCloseInfo> {
 		return this.#webtransport.closed;
+	}
+}
+
+/**
+ * Build the error returned when a caller aborts a stream open. Mirrors
+ * golikejs watchSignal's reason extraction: signal.reason when it is an Error,
+ * otherwise a ContextCancelledError.
+ */
+function abortError(signal: AbortSignal): Error {
+	const reason = (signal as unknown as { reason?: unknown }).reason;
+	return reason instanceof Error ? reason : new ContextCancelledError();
+}
+
+/**
+ * Best-effort cleanup of a WebTransport stream that resolves after its open was
+ * already aborted. Aborts (RESET_STREAM) rather than closing, since a clean
+ * close would flush a FIN for a stream nobody wants and may block on flow
+ * control. Never throws — cleanup must not mask the original abort error.
+ */
+function abandonRawStream(
+	stream: WebTransportBidirectionalStream | WritableStream<Uint8Array>,
+): void {
+	try {
+		if (stream instanceof WritableStream) {
+			stream.abort(new ContextCancelledError()).catch(() => {});
+			return;
+		}
+		const bidi = stream as WebTransportBidirectionalStream;
+		bidi.writable.abort(new ContextCancelledError()).catch(() => {});
+		bidi.readable.cancel().catch(() => {});
+	} catch {
+		// Best-effort cleanup of an orphaned allocation.
 	}
 }
