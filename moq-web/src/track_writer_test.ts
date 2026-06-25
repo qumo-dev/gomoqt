@@ -267,4 +267,80 @@ Deno.test("TrackWriter", async (t) => {
 			assertEquals(cancelCalls[0], GroupErrorCode.InternalError);
 		},
 	);
+
+	await t.step(
+		"TrackWriter.openGroup cancels the allocated stream when group message encode fails",
+		async () => {
+			const [ctx] = withCancelCause(background());
+			const stream = new MockStream({});
+			const subscribe = new SubscribeMessage({
+				subscribeId: 0,
+				broadcastPath: "/test",
+				trackName: "name",
+				subscriberPriority: 0,
+			});
+			const rss = new ReceiveSubscribeStream(ctx, stream, subscribe);
+
+			const cancelCalls: number[] = [];
+			let writeCall = 0;
+			const mockSend = new MockSendStream({
+				write: spy(async (p: Uint8Array) => {
+					writeCall++;
+					// Stream-type varint (first write) succeeds; subsequent
+					// writes (GroupMessage encode) fail.
+					if (writeCall >= 2) {
+						return [0, new Error("group message encode failed")] as [
+							number,
+							Error | undefined,
+						];
+					}
+					return [p.length, undefined] as [number, Error | undefined];
+				}),
+				cancel: spy(async (code: number) => {
+					cancelCalls.push(code);
+				}),
+			});
+			const openUni = async (_signal?: AbortSignal) =>
+				[mockSend, undefined] as [SendStream, undefined];
+			const tw = new TrackWriter("/test", "name", rss, openUni);
+
+			const [group, err] = await tw.openGroup();
+			assertEquals(group, undefined);
+			assertInstanceOf(err, Error);
+			assertEquals(cancelCalls.length, 1);
+			assertEquals(cancelCalls[0], GroupErrorCode.InternalError);
+		},
+	);
+
+	await t.step(
+		"TrackWriter.openGroup returns the context error when the track is already cancelled",
+		async () => {
+			const [ctx, cancel] = withCancelCause(background());
+			const stream = new MockStream({});
+			const subscribe = new SubscribeMessage({
+				subscribeId: 99,
+				broadcastPath: "/test",
+				trackName: "test",
+				subscriberPriority: 0,
+			});
+			const rss = new ReceiveSubscribeStream(ctx, stream, subscribe);
+			let openCalled = false;
+			const openUni = async (_signal?: AbortSignal) => {
+				openCalled = true;
+				return [new MockSendStream({}), undefined] as [SendStream, undefined];
+			};
+			const tw = new TrackWriter("/test", "test", rss, openUni);
+
+			cancel(new Error("track closed"));
+			// Parent→child (withCancelCause) cancellation propagates on the
+			// microtask queue; drain it so the track context is observed as
+			// cancelled before openGroup runs.
+			await new Promise((r) => setTimeout(r, 0));
+			const [grp, err] = await tw.openGroup();
+			assertEquals(grp, undefined);
+			assertInstanceOf(err, Error);
+			assertEquals((err as Error).message, "track closed");
+			assertEquals(openCalled, false);
+		},
+	);
 });
