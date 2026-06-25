@@ -214,26 +214,16 @@ func TestTrackWriter_Close(t *testing.T) {
 }
 
 func TestTrackWriter_CloseWithError(t *testing.T) {
-	var canceledGroup bool
+	// Collect the group send streams so we can assert on their cancelled state
+	// via the Structural Fake's recorded fields (no func-field callbacks).
+	var groupStreams []*FakeQUICSendStream
 	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
-		mockSendStream := &FakeQUICSendStream{
-			CancelWriteFunc: func(code transport.StreamErrorCode) {
-				if code == transport.StreamErrorCode(PublishAbortedErrorCode) {
-					canceledGroup = true
-				}
-			},
-		}
-		return mockSendStream, nil
+		stream := &FakeQUICSendStream{}
+		groupStreams = append(groupStreams, stream)
+		return stream, nil
 	}
 
-	var canceledSubscribe bool
-	mockStream := &FakeQUICStream{
-		CancelWriteFunc: func(code transport.StreamErrorCode) {
-			if code == transport.StreamErrorCode(SubscribeErrorCodeInternal) {
-				canceledSubscribe = true
-			}
-		},
-	}
+	mockStream := &FakeQUICStream{}
 	substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 	var onCloseTrackCalled bool
 	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {
@@ -242,25 +232,37 @@ func TestTrackWriter_CloseWithError(t *testing.T) {
 
 	assert.NotNil(t, sender.groupManager, "groupManager should be initialized")
 
-	// Open a group so there is an active group to be cancelled
-	gw, err := sender.OpenGroup(context.Background())
+	// Open groups so there are active groups to be cancelled.
+	_, err := sender.OpenGroup(context.Background())
 	require.NoError(t, err)
-	require.NotNil(t, gw)
+	_, err = sender.OpenGroup(context.Background())
+	require.NoError(t, err)
+	require.Len(t, groupStreams, 2)
 
-	// Close with error
-	sender.CloseWithError(SubscribeErrorCodeInternal)
+	// Close with an error code; the same code propagates to the subscribe stream.
+	const errorCode SubscribeErrorCode = SubscribeErrorCodeInternal
+	sender.CloseWithError(errorCode)
 
-	// Verify that onCloseTrack was called
+	// onCloseTrack fires and groupManager is cleared.
 	assert.True(t, onCloseTrackCalled, "onCloseTrack should be called")
-
-	// Verify that groupManager is cleared after CloseWithError()
 	assert.Nil(t, sender.groupManager, "groupManager should be nil after CloseWithError()")
 
-	// Verify group was cancelled with PublishAbortedErrorCode
-	assert.True(t, canceledGroup, "active groups should be cancelled with PublishAbortedErrorCode")
+	// Active groups are cancelled with PublishAbortedErrorCode.
+	for i, s := range groupStreams {
+		streamErr, ok := s.cancelWriteErr.(*transport.StreamError)
+		require.True(t, ok, "group %d should be cancelled", i)
+		assert.Equal(t, transport.StreamErrorCode(PublishAbortedErrorCode), streamErr.ErrorCode,
+			"group %d should be cancelled with PublishAbortedErrorCode", i)
+	}
 
-	// Verify subscribe stream was cancelled with the passed code
-	assert.True(t, canceledSubscribe, "subscribe stream should be closed with the given error code")
+	// The subscribe stream is cancelled (read and write side) with the passed code.
+	readErr, ok := mockStream.cancelReadErr.(*transport.StreamError)
+	require.True(t, ok, "subscribe stream read side should be cancelled")
+	assert.Equal(t, transport.StreamErrorCode(errorCode), readErr.ErrorCode)
+
+	writeErr, ok := mockStream.cancelWriteErr.(*transport.StreamError)
+	require.True(t, ok, "subscribe stream write side should be cancelled")
+	assert.Equal(t, transport.StreamErrorCode(errorCode), writeErr.ErrorCode)
 }
 
 func TestTrackWriter_OpenAfterClose(t *testing.T) {
