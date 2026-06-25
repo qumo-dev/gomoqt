@@ -935,6 +935,7 @@ func TestTrackDuration_VODRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(data), `"trackDuration":120000`)
 }
+
 func TestCatalogDelta_Clone(t *testing.T) {
 	generatedAt := int64(5000)
 	delta := CatalogDelta{
@@ -945,6 +946,7 @@ func TestCatalogDelta_Clone(t *testing.T) {
 		RemoveTracks:     []TrackRef{{Name: "old", Namespace: "ns"}},
 		CloneTracks:      []TrackClone{{Track: Track{Name: "video-720"}, ParentName: "video-1080"}},
 		ExtraFields:      map[string]json.RawMessage{"ext": json.RawMessage(`1`)},
+		deltaOpOrder:     []deltaOperationKind{deltaOperationAdd, deltaOperationRemove, deltaOperationClone},
 	}
 
 	clone := delta.Clone()
@@ -959,11 +961,16 @@ func TestCatalogDelta_Clone(t *testing.T) {
 	require.Len(t, clone.CloneTracks, 1)
 	assert.Equal(t, "video-720", clone.CloneTracks[0].Name)
 	assert.Contains(t, clone.ExtraFields, "ext")
+	assert.Equal(t, []deltaOperationKind{deltaOperationAdd, deltaOperationRemove, deltaOperationClone}, clone.deltaOpOrder)
 
 	// Mutating clone should not affect original.
 	clone.AddTracks[0].Name = "mutated"
 	assert.Equal(t, "video", delta.AddTracks[0].Name)
+
+	clone.deltaOpOrder[0] = deltaOperationRemove
+	assert.Equal(t, []deltaOperationKind{deltaOperationAdd, deltaOperationRemove, deltaOperationClone}, delta.deltaOpOrder)
 }
+
 
 func TestCatalogDelta_MarshalJSON_RoundTrip(t *testing.T) {
 	generatedAt := int64(42)
