@@ -278,6 +278,12 @@ func TestReadStringArray(t *testing.T) {
 		n        int
 		wantErr  bool
 	}{
+		"oversized array count DoS": {
+			input:    []byte{0x80, 0x01, 0x00, 0x00, 0x01}, // count=65536, but len(b)=1
+			expected: nil,
+			n:        0,
+			wantErr:  true,
+		},
 		"empty array": {
 			input:    []byte{0x00},
 			expected: []string{},
