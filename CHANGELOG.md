@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **moqt:** New benchmark coverage for previously-unbenched routing/path primitives: `BenchmarkPrefixSegments` (the `prefixSegments` sibling of `pathSegments` — rewritten in #253 but, unlike `pathSegments`, had no dedicated benchmark), `BenchmarkBroadcastPath_HasPrefix/GetSuffix/Extension/Equal`, and `BenchmarkVarintLen/StringLen/BytesLen/StringArrayLen` (the message pre-sizing helpers called by every Encode). All report 0 allocs/op except `prefixSegments`, which allocates one segment slice scaling with depth.
+- **moqt:** New benchmark coverage for the SUBSCRIBE control plane and connection lifecycle: `BenchmarkConnManager_AddRemove`/`_Snapshot` (the conn-manager snapshot that scales with connection count on every `Server.Close`/`Shutdown`), and `BenchmarkReceiveSubscribeStream_WriteInfo`/`WriteDrop`, `BenchmarkSendSubscribeStream_UpdateSubscribe`, and `BenchmarkReadSubscribeResponse` (the subscribe-stream glue around message Encode/Decode). These surface per-call allocations the message-level benchmarks do not — the `[]byte{byte(msgType)}` type-prefix writes and the `make([]byte, 1)` response head.
+
+### Changed
+
+- **moqt:** `BenchmarkTrackMux_MemoryUsage` no longer emits a custom `allocs/op` metric computed from a `runtime.MemStats` TotalAlloc diff — it collided with `-benchmem`'s real `allocs/op` under the same label and was dominated by `fmt.Sprintf` allocations inside the timed loop. Paths are now pre-generated outside the loop; `b.ReportAllocs` provides the single, accurate allocs/op and B/op.
+- **moqt:** `BenchmarkSession_ContextCancellation` removed the `time.Sleep(time.Millisecond)` inside its `b.N` loop — it dominated ns/op (wall-clock jitter, not the close path). `Session.CloseWithError` already drains stream-handling goroutines via `wg.Wait()`, so the sleep was redundant.
+- **moqt/internal/message:** `BenchmarkWriteMessageLength` reuses one destination buffer across iterations instead of `make([]byte, 0, n)` per iteration, so the reported allocs/op reflects `WriteMessageLength`'s true cost (0) rather than the harness slice. Uses a constant-capacity destination (matching `BenchmarkWriteVarint`) to avoid an exact-cap escape-analysis artifact on the 1-byte case.
+
+### Removed
+
+- **moqt:** Removed the empty `group_manager.go` — a dead leftover from the refactor that renamed `groupManager` to `groupReaderManager`/`groupWriterManager` (eb00586). It declared nothing; the types live in `group_reader.go`/`group_writer.go`.
+
 ## [v0.16.0] - 2026-06-26
 
 ### Added

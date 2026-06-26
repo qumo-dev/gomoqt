@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
 	"github.com/qumo-dev/gomoqt/transport"
@@ -280,10 +279,10 @@ func BenchmarkSession_ContextCancellation(b *testing.B) {
 		// Cancel context
 		cancel()
 
-		// Close session
+		// CloseWithError blocks on s.wg.Wait(), draining stream-handling
+		// goroutines synchronously, so no ad-hoc sleep is needed. A bare
+		// time.Sleep here previously dominated ns/op and made the result
+		// measure wall-clock jitter rather than the close path.
 		_ = session.CloseWithError(NoError, "benchmark complete")
-
-		// Small delay to allow goroutines to finish
-		time.Sleep(time.Millisecond)
 	}
 }

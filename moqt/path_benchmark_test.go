@@ -230,3 +230,137 @@ func BenchmarkTrackMux_PathTraversal(b *testing.B) {
 		})
 	}
 }
+
+// Sinks prevent the compiler from dead-code-eliminating the inlinable
+// BroadcastPath method calls below — they live in the same package, so the
+// compiler can prove Equal/HasPrefix are pure and drop an unused result.
+var (
+	pathSinkBool bool
+	pathSinkStr  string
+	pathSinkSegs []prefixSegment
+)
+
+// BenchmarkPrefixSegments measures prefixSegments — the sibling of pathSegments
+// (benched above) that splits a slash-bracketed prefix such as "/a/b/c/" into
+// segments. It was rewritten alongside pathSegments in #253 but had no
+// dedicated benchmark, so a regression in the prefix-match path (run on every
+// route lookup) would have been invisible. Inputs mirror pathSegments' depth
+// cases, wrapped in the leading+trailing slashes prefixSegments expects.
+func BenchmarkPrefixSegments(b *testing.B) {
+	testCases := []struct {
+		name   string
+		prefix string
+	}{
+		{"root", "/"},
+		{"single", "/segment/"},
+		{"double", "/segment/path/"},
+		{"triple", "/segment/path/name/"},
+		{"deep-5", "/a/b/c/d/e/"},
+		{"deep-10", "/a/b/c/d/e/f/g/h/i/j/"},
+	}
+
+	for _, tc := range testCases {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				pathSinkSegs = prefixSegments(tc.prefix)
+			}
+		})
+	}
+}
+
+// BenchmarkBroadcastPath_HasPrefix measures prefix matching on the routing
+// path (called during announcement/subscribe matching).
+func BenchmarkBroadcastPath_HasPrefix(b *testing.B) {
+	cases := []struct {
+		name   string
+		path   BroadcastPath
+		prefix string
+	}{
+		{"match-short", "/live", "/li"},
+		{"match-deep", "/live/camera1/track", "/live/camera1"},
+		{"no-match", "/live/camera1", "/vod"},
+	}
+
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				pathSinkBool = tc.path.HasPrefix(tc.prefix)
+			}
+		})
+	}
+}
+
+// BenchmarkBroadcastPath_GetSuffix measures suffix extraction. GetSuffix
+// converts the named type twice (once in HasPrefix, once in TrimPrefix) and
+// returns a substring; this guards both the conversion and the TrimPrefix cost.
+func BenchmarkBroadcastPath_GetSuffix(b *testing.B) {
+	cases := []struct {
+		name   string
+		path   BroadcastPath
+		prefix string
+	}{
+		{"short", "/live", "/li"},
+		{"deep", "/live/camera1/track", "/live/camera1"},
+	}
+
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				pathSinkStr, pathSinkBool = tc.path.GetSuffix(tc.prefix)
+			}
+		})
+	}
+}
+
+// BenchmarkBroadcastPath_Extension measures extension extraction via a reverse
+// scan for '.'.
+func BenchmarkBroadcastPath_Extension(b *testing.B) {
+	paths := []BroadcastPath{
+		"/live/camera1",
+		"/vod/movie.mp4",
+		"/a/b/c/d/e/video.tar.gz",
+	}
+
+	for _, path := range paths {
+		b.Run(string(path), func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				pathSinkStr = path.Extension()
+			}
+		})
+	}
+}
+
+// BenchmarkBroadcastPath_Equal measures path equality — a named-type string
+// compare on the hot routing path. Trivial, but inlinable, so the result is
+// sunk to keep the call live.
+func BenchmarkBroadcastPath_Equal(b *testing.B) {
+	target := BroadcastPath("/live/camera1/track")
+	paths := []BroadcastPath{
+		"/live/camera1/track", // equal
+		"/live/camera1",       // prefix, not equal
+		"/vod/movie",          // unrelated
+	}
+
+	for _, path := range paths {
+		b.Run(string(path), func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				pathSinkBool = path.Equal(target)
+			}
+		})
+	}
+}
