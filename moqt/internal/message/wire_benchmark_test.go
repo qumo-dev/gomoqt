@@ -11,6 +11,10 @@ import (
 // maxUint62 is the largest value encodable in a QUIC varint (62-bit).
 const maxUint62 uint64 = 1<<62 - 1
 
+// sinkWireBytes keeps a returned slice live so the compiler cannot
+// dead-code-eliminate the WriteMessageLength call in BenchmarkWriteMessageLength.
+var sinkWireBytes []byte
+
 // encodeMessage encodes m into a fresh byte slice via its Encode method.
 func encodeMessage(m interface{ Encode(io.Writer) error }) []byte {
 	var buf bytes.Buffer
@@ -550,7 +554,7 @@ var varintMagnitudes = []struct {
 func BenchmarkWriteMessageLength(b *testing.B) {
 	for _, tc := range varintMagnitudes {
 		b.Run(tc.name, func(b *testing.B) {
-			// Pre-sized so the slice only measures the varint write itself.
+			// Determine the encoded width purely for SetBytes.
 			n := 0
 			switch {
 			case tc.val <= 127:
@@ -562,13 +566,23 @@ func BenchmarkWriteMessageLength(b *testing.B) {
 			default:
 				n = 8
 			}
+			// Reuse one constant-capacity destination across iterations (reset
+			// to [:0]), mirroring the internal BenchmarkWriteVarint. The original
+			// allocated a fresh make([]byte, 0, n) each iteration and attributed
+			// that harness slice to WriteMessageLength; reusing the destination
+			// isolates the function's own cost. The capacity is a fixed 8
+			// (covers the widest varint) rather than exactly n: an exact-cap
+			// destination perturbs escape analysis for the 1-byte case under
+			// this external test package and reports a phantom alloc.
+			dst := make([]byte, 0, 8)
+
 			b.ReportAllocs()
 			b.SetBytes(int64(n))
 			b.ResetTimer()
 
-			for i := 0; i < b.N; i++ {
-				dst := make([]byte, 0, n)
-				_, _ = message.WriteMessageLength(dst, tc.val)
+			for b.Loop() {
+				out, _ := message.WriteMessageLength(dst[:0], tc.val)
+				sinkWireBytes = out
 			}
 		})
 	}

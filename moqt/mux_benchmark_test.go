@@ -3,7 +3,6 @@ package moqt
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -321,37 +320,42 @@ func BenchmarkTrackMux_MemoryUsage(b *testing.B) {
 
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("handlers-%d", size), func(b *testing.B) {
-			var m1, m2 runtime.MemStats
+			ctx := context.Background()
+			handler := TrackHandlerFunc(func(tw *TrackWriter) {})
 
-			b.ReportAllocs()
-			runtime.GC()
-			runtime.ReadMemStats(&m1)
-
-			b.ResetTimer()
-
-			for i := range b.N {
-				mux := NewTrackMux(0)
-				ctx := context.Background()
-				handler := TrackHandlerFunc(func(tw *TrackWriter) {})
-
-				// Register many handlers
-				for j := range size {
-					path := BroadcastPath(fmt.Sprintf("/path/%d/%d", i, j))
-					mux.Publish(ctx, path, handler)
-				}
-
-				// Perform some operations to measure realistic memory usage
-				for j := range 100 {
-					lookupPath := BroadcastPath(fmt.Sprintf("/path/%d/%d", i, j%size))
-					mux.TrackHandler(lookupPath)
-				}
+			// The mux is recreated inside the loop, so the iteration index is
+			// irrelevant to path uniqueness: pre-generate one set of paths and
+			// reuse it. This keeps fmt.Sprintf out of the timed loop so string
+			// formatting garbage cannot inflate the reported allocations.
+			regPaths := make([]BroadcastPath, size)
+			for j := range size {
+				regPaths[j] = BroadcastPath("/path/" + formatInt(j))
+			}
+			lookupCount := min(100, size)
+			lookupPaths := make([]BroadcastPath, lookupCount)
+			for j := range lookupPaths {
+				lookupPaths[j] = regPaths[j]
 			}
 
-			b.StopTimer()
-			runtime.GC()
-			runtime.ReadMemStats(&m2)
+			// b.ReportAllocs reports the true allocs/op and B/op via the runtime
+			// allocator accounting. The previous version additionally emitted a
+			// custom metric NAMED "allocs/op" computed from a TotalAlloc (bytes)
+			// diff, which collided with -benchmem's real allocs/op under the
+			// same label and was dominated by in-loop fmt.Sprintf garbage — both
+			// dropped here.
+			b.ReportAllocs()
+			b.ResetTimer()
 
-			b.ReportMetric(float64(m2.TotalAlloc-m1.TotalAlloc)/float64(b.N), "allocs/op")
+			for range b.N {
+				mux := NewTrackMux(0)
+
+				for _, path := range regPaths {
+					mux.Publish(ctx, path, handler)
+				}
+				for _, path := range lookupPaths {
+					mux.TrackHandler(path)
+				}
+			}
 		})
 	}
 }
