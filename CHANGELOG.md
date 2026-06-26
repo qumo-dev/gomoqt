@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **moqt:** New benchmark coverage for previously-unbenched routing/path primitives: `BenchmarkPrefixSegments` (the `prefixSegments` sibling of `pathSegments` — rewritten in #253 but, unlike `pathSegments`, had no dedicated benchmark), `BenchmarkBroadcastPath_HasPrefix/GetSuffix/Extension/Equal`, and `BenchmarkVarintLen/StringLen/BytesLen/StringArrayLen` (the message pre-sizing helpers called by every Encode). All report 0 allocs/op except `prefixSegments`, which allocates one segment slice scaling with depth.
+- **moqt:** New benchmark coverage for the SUBSCRIBE control plane and connection lifecycle: `BenchmarkConnManager_AddRemove`/`_Snapshot` (the conn-manager snapshot that scales with connection count on every `Server.Close`/`Shutdown`), and `BenchmarkReceiveSubscribeStream_WriteInfo`/`WriteDrop`, `BenchmarkSendSubscribeStream_UpdateSubscribe`, and `BenchmarkReadSubscribeResponse` (the subscribe-stream glue around message Encode/Decode). These surface per-call allocations the message-level benchmarks do not — the `[]byte{byte(msgType)}` type-prefix writes and the `make([]byte, 1)` response head.
 
 ### Changed
 
