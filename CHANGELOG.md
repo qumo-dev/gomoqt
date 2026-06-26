@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **moqt:** `BenchmarkSession_ContextCancellation` removed the `time.Sleep(time.Millisecond)` inside its `b.N` loop — it dominated ns/op (wall-clock jitter, not the close path). `Session.CloseWithError` already drains stream-handling goroutines via `wg.Wait()`, so the sleep was redundant.
 - **moqt/internal/message:** `BenchmarkWriteMessageLength` reuses one destination buffer across iterations instead of `make([]byte, 0, n)` per iteration, so the reported allocs/op reflects `WriteMessageLength`'s true cost (0) rather than the harness slice. Uses a constant-capacity destination (matching `BenchmarkWriteVarint`) to avoid an exact-cap escape-analysis artifact on the 1-byte case.
 
+### Removed
+
+- **moqt:** Removed the empty `group_manager.go` — a dead leftover from the refactor that renamed `groupManager` to `groupReaderManager`/`groupWriterManager` (eb00586). It declared nothing; the types live in `group_reader.go`/`group_writer.go`.
+
 ## [v0.16.0] - 2026-06-26
 
 ### Added
