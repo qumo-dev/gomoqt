@@ -74,8 +74,8 @@ func BenchmarkFanOut_SteadyState(b *testing.B) {
 // (time.Since(epoch) — QPC-backed on Windows, NOT wall-clock UnixNano, which
 // ticks coarsely on Windows and quantizes sub-ms latency to 0) into the first 8
 // bytes of every frame so each subscriber can measure one-way publish->deliver
-// latency. The publisher is GATED: after one empty group flushes the lazy
-// SUBSCRIBE_OK, it blocks until all subscribers are parked in AcceptGroup, so no
+// latency. The publisher is GATED: after responding to the SUBSCRIBE via
+// WriteInfo, it blocks until all subscribers are parked in AcceptGroup, so no
 // backlog built during dialing contaminates the latency samples. Reports
 // p50/p95/p99/max plus the spread of
 // per-subscriber medians ("fairness"), which surfaces head-of-line blocking and
@@ -340,9 +340,10 @@ func (c *latencyCollector) collected() []time.Duration {
 }
 
 // setupFanoutLatencyServer mirrors setupSaturatingServer (egress_benchmark_test.go)
-// but (a) GATES the publisher on ready — after opening one empty group to flush
-// the lazy SUBSCRIBE_OK, it blocks until ready is closed, so subscribers connect
-// and park in AcceptGroup before steady frames flow (no dialing-phase backlog) —
+// but (a) GATES the publisher on ready — after responding to the SUBSCRIBE via
+// WriteInfo (flushing the SUBSCRIBE_OK without opening a throwaway group), it
+// blocks until ready is closed, so subscribers connect and park in AcceptGroup
+// before steady frames flow (no dialing-phase backlog) —
 // and (b) stamps an 8-byte big-endian MONOTONIC
 // clock reading (time.Since(epoch)) into the first 8 bytes of every frame. epoch
 // is shared in-process with the subscribers; time.Since uses Go's monotonic clock
@@ -381,12 +382,11 @@ func setupFanoutLatencyServer(tb testing.TB, ctx context.Context, frameSize, fra
 	}
 
 	mux.PublishFunc(ctx, "/server.broadcast", func(tw *TrackWriter) {
-		// The SUBSCRIBE_OK is sent lazily on the first OpenGroup (ensureInfo),
-		// so open and close one EMPTY group now. This completes the subscriber's
-		// Subscribe() handshake during dialing BEFORE the gate blocks it.
-		if gw, err := tw.OpenGroup(ctx); err == nil {
-			_ = gw.Close()
-		} else {
+		// Respond to the SUBSCRIBE explicitly with WriteInfo so the subscriber's
+		// Subscribe() handshake completes during dialing, BEFORE the gate blocks.
+		// (OpenGroup would send this OK lazily via ensureInfo, but WriteInfo avoids
+		// opening a throwaway uni stream + group header just to flush the response.)
+		if err := tw.WriteInfo(PublishInfo{}); err != nil {
 			return
 		}
 
