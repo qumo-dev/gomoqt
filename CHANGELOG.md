@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **moqt:** New benchmark coverage for previously-unbenched routing/path primitives: `BenchmarkPrefixSegments` (the `prefixSegments` sibling of `pathSegments` — rewritten in #253 but, unlike `pathSegments`, had no dedicated benchmark), `BenchmarkBroadcastPath_HasPrefix/GetSuffix/Extension/Equal`, and `BenchmarkVarintLen/StringLen/BytesLen/StringArrayLen` (the message pre-sizing helpers called by every Encode). All report 0 allocs/op except `prefixSegments`, which allocates one segment slice scaling with depth.
+
 ## [v0.16.0] - 2026-06-26
 
 ### Added

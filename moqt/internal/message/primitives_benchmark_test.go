@@ -2,6 +2,7 @@ package message
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -265,5 +266,105 @@ func BenchmarkWriteStringArray(b *testing.B) {
 		out, n := WriteStringArray(dest, arr)
 		sinkInt = n
 		sinkSlice = out
+	}
+}
+
+// --- Length pre-sizing helpers (message.go) ---
+//
+// VarintLen / StringLen / BytesLen / StringArrayLen compute the on-wire byte
+// length of a field and are called by every Encode to pre-size its destination
+// buffer. They had no dedicated benchmark; StringArrayLen in particular scans
+// every element and was behind the +18% WriteStringArray regression in #110 (a
+// redundant length scan), so a regression here must stay visible.
+
+func BenchmarkVarintLen(b *testing.B) {
+	cases := []struct {
+		name string
+		val  uint64
+	}{
+		{"0", 0},
+		{"1-byte-max", 127},
+		{"2-byte-min", 128},
+		{"2-byte-max", 16383},
+		{"4-byte-min", 16384},
+		{"4-byte-mid", 1 << 28},
+		{"8-byte-min", 1 << 32},
+		{"uint62-max", 1<<62 - 1},
+	}
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				sinkInt = VarintLen(tc.val)
+			}
+		})
+	}
+}
+
+func BenchmarkStringLen(b *testing.B) {
+	cases := []struct {
+		name string
+		s    string
+	}{
+		{"empty", ""},
+		{"1", "a"},
+		{"64", strings.Repeat("x", 64)},
+		{"4096", strings.Repeat("x", 4096)},
+	}
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				sinkInt = StringLen(tc.s)
+			}
+		})
+	}
+}
+
+func BenchmarkBytesLen(b *testing.B) {
+	cases := []struct {
+		name string
+		buf  []byte
+	}{
+		{"empty", nil},
+		{"1", []byte{'a'}},
+		{"64", make([]byte, 64)},
+		{"4096", make([]byte, 4096)},
+	}
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				sinkInt = BytesLen(tc.buf)
+			}
+		})
+	}
+}
+
+func BenchmarkStringArrayLen(b *testing.B) {
+	cases := []struct {
+		name string
+		arr  []string
+	}{
+		{"empty", []string{}},
+		{"1", []string{"track"}},
+		{"8-short", []string{"a", "b", "c", "d", "e", "f", "g", "h"}},
+		{"8-long", []string{
+			strings.Repeat("x", 32), strings.Repeat("y", 32), strings.Repeat("z", 32),
+			"w", "w", "w", "w", "w",
+		}},
+		{"64-empty", make([]string, 64)},
+	}
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				sinkInt = StringArrayLen(tc.arr)
+			}
+		})
 	}
 }
