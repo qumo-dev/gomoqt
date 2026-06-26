@@ -1,28 +1,38 @@
 package moqt
 
-// This file holds the two FLAGSHIP system-level benchmarks from the system-suite
-// design: steady-state fan-out and its latency lens. They fill the one gap none
-// of the existing real-QUIC harnesses cover — many LONG-LIVED subscribers on a
-// single published track — and answer the central production question the data
-// plane is already characterized as NOT answering at the per-frame level.
+// This file holds the system-level FAN-OUT benchmark PAIR, which together isolate
+// the two scaling axes of relay fan-out. Both are real-QUIC integration benches
+// (loopback, self-signed TLS, unpaced publisher): excluded from -short and measured
+// in the integration job, mirroring BenchmarkEgress_Saturating. The publisher(s)
+// start ONCE and the subscribers dial ONCE and stay; b.N scales FRAMES DELIVERED
+// (aggregate), not connection cycles.
 //
-// Why this is system-level, not another microbenchmark:
+// TWO REGIMES — keep them distinct in name and reading; they answer different
+// questions:
 //
-//   - BenchmarkBroadcastServer_HighLoad reconnects every client every b.N
-//     iteration, so it measures connection SETUP/TEARDOWN churn, not steady
-//     fan-out (an earlier 17%-decode memprofile artifact came from exactly this
-//     churn). BenchmarkEgress_Saturating is 1 publisher -> 1 subscriber.
-//   - Broadcast.ServeTrack (broadcast.go) invokes the published handler ONCE PER
-//     SUBSCRIBER with a fresh *TrackWriter, so encode cost is O(N) in
-//     subscribers — there is no "encode once, copy to N streams" path. These
-//     benchmarks characterize that scaling: does per-subscriber throughput
-//     degrade and CPU/subscriber rise as N grows?
+//   - ViewerConnections (1 track -> N viewer connections): each "sub" is an
+//     INDEPENDENT QUIC connection (one Dial = one viewer), all subscribing to the
+//     SAME track. This is the broadcast/live model: each viewer pays full
+//     per-connection transport, so the wire carries N copies of the payload and the
+//     ceiling is the unicast UDP send rate. ViewerConnectionsLatency is the latency
+//     lens on this regime.
 //
-// Both benchmarks are real-QUIC integration benches (loopback, self-signed TLS,
-// unpaced publisher): excluded from -short and measured in the integration job,
-// mirroring BenchmarkEgress_Saturating. The publisher is started ONCE and the
-// subscribers dial ONCE and stay; b.N scales FRAMES DELIVERED (aggregate), not
-// connection cycles — the Egress_Saturating discipline, inverted from HighLoad.
+//   - TracksPerConnection (1 connection -> N tracks): ONE QUIC connection
+//     subscribes to N DISTINCT tracks, sharing one congestion controller / ACK path
+//     / packet-header amortization. This isolates per-TRACK cost (per-stream,
+//     per-frame) from per-CONNECTION cost.
+//
+// Comparing the two at the same N answers the central architectural question: is the
+// fan-out cost per-connection (QUIC connection overhead) or per-track (stream/frame
+// work)? If TracksPerConnection throughput stays well above ViewerConnections at the
+// same N, the dominant cost is per-connection.
+//
+// Why system-level, not another microbenchmark: BenchmarkBroadcastServer_HighLoad
+// reconnects every client every b.N iteration, so it measures connection
+// SETUP/TEARDOWN churn, not steady fan-out. BenchmarkEgress_Saturating is 1->1.
+// Broadcast.ServeTrack (broadcast.go) invokes the published handler ONCE PER
+// subscriber, so encode is O(N) in recipients — there is no "encode once, copy to N
+// streams" path.
 
 import (
 	"context"
@@ -43,16 +53,20 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-// BenchmarkFanOut_SteadyState measures 1 unpaced publisher -> N LONG-LIVED
-// subscribers over real loopback QUIC. It reuses setupSaturatingServer verbatim
-// (fpg-256 amortizes OpenGroup), then holds N subscribers for the whole run and
-// reads until b.N frames have been delivered in aggregate.
+// BenchmarkFanOut_ViewerConnections measures the VIEWER-CONNECTIONS fan-out regime:
+// 1 published track -> N INDEPENDENT viewer QUIC connections (the broadcast/live
+// model). Each "sub" is one Dial = one connection = one viewer, all subscribing to
+// the SAME track. It reuses setupSaturatingServer (fpg-256 amortizes OpenGroup),
+// then holds N viewers for the whole run and reads until b.N frames are delivered
+// in aggregate.
 //
-// Reported MB/s (via b.SetBytes) is AGGREGATE across all subscribers; the custom
-// metrics add per-subscriber throughput and resource footprint. The subs-count
-// sweep is the whole point: a flat per-subscriber MB/s as N grows means fan-out
-// is cheap; a collapsing one is the O(N)-encode ceiling.
-func BenchmarkFanOut_SteadyState(b *testing.B) {
+// Reported MB/s (via b.SetBytes) is AGGREGATE; custom metrics add per-viewer
+// throughput and footprint. The viewer-count sweep is the point: a flat per-viewer
+// MB/s as N grows means fan-out is cheap; a collapsing one is the unicast-transport
+// ceiling (each viewer = its own connection = its own copy of the bytes on the
+// wire). Compare against BenchmarkFanOut_TracksPerConnection at the same N to split
+// per-connection from per-track cost.
+func BenchmarkFanOut_ViewerConnections(b *testing.B) {
 	if testing.Short() {
 		b.Skip("real-QUIC integration benchmark; skipped in -short")
 	}
@@ -70,27 +84,27 @@ func BenchmarkFanOut_SteadyState(b *testing.B) {
 	}
 }
 
-// BenchmarkFanOut_Latency stamps an 8-byte big-endian MONOTONIC clock reading
-// (time.Since(epoch) — QPC-backed on Windows, NOT wall-clock UnixNano, which
-// ticks coarsely on Windows and quantizes sub-ms latency to 0) into the first 8
-// bytes of every frame so each subscriber can measure one-way publish->deliver
-// latency. The publisher is GATED: after responding to the SUBSCRIBE via
-// WriteInfo, it blocks until all subscribers are parked in AcceptGroup, so no
-// backlog built during dialing contaminates the latency samples. Reports
-// p50/p95/p99/max plus the spread of
-// per-subscriber medians ("fairness"), which surfaces head-of-line blocking and
-// scheduler unfairness that aggregate throughput hides. Small 1K payload at
-// fpg-256 maximizes frame rate, the regime where latency tails and GC-driven
-// p99 matter most.
+// BenchmarkFanOut_ViewerConnectionsLatency is the latency lens on the
+// ViewerConnections regime. It stamps an 8-byte big-endian MONOTONIC clock reading
+// (time.Since(epoch) — QPC-backed on Windows, NOT wall-clock UnixNano, which ticks
+// coarsely on Windows and quantizes sub-ms latency to 0) into the first 8 bytes of
+// every frame so each viewer measures one-way publish->deliver latency. The
+// publisher is GATED: after responding to the SUBSCRIBE via WriteInfo, it blocks
+// until all viewers are parked in AcceptGroup, so no backlog built during dialing
+// contaminates the latency samples. Reports p50/p95/p99/max plus the spread of
+// per-viewer medians ("fairness"), which surfaces head-of-line blocking and
+// scheduler unfairness that aggregate throughput hides. Small 1K payload at fpg-256
+// maximizes frame rate, the regime where latency tails and GC-driven p99 matter
+// most.
 //
-// Clock caveat: precision is bounded by time.Now() resolution on the HOST, not
-// the wire — e.g. some Windows timer configs resolve time.Now() only to ~0.6ms,
-// so sub-resolution latency quantizes toward 0 (frames read in the same tick as
-// their stamp report ~0). Under load where queueing pushes latency past the tick,
-// p50/p95/p99 and fairness are fully meaningful; on Linux CI time.Now() is
-// sub-us, so even low-load p50 is meaningful there. A p50 near 0 therefore reads
-// as "below clock resolution = effectively instant", not as a defect.
-func BenchmarkFanOut_Latency(b *testing.B) {
+// Clock caveat: precision is bounded by time.Now() resolution on the HOST, not the
+// wire — e.g. some Windows timer configs resolve time.Now() only to ~0.6ms, so
+// sub-resolution latency quantizes toward 0 (frames read in the same tick as their
+// stamp report ~0). Under load where queueing pushes latency past the tick,
+// p50/p95/p99 and fairness are fully meaningful; on Linux CI time.Now() is sub-us,
+// so even low-load p50 is meaningful there. A p50 near 0 therefore reads as "below
+// clock resolution = effectively instant", not as a defect.
+func BenchmarkFanOut_ViewerConnectionsLatency(b *testing.B) {
 	if testing.Short() {
 		b.Skip("real-QUIC integration benchmark; skipped in -short")
 	}
@@ -112,20 +126,39 @@ func BenchmarkFanOut_Latency(b *testing.B) {
 	}
 }
 
-// readFanout dials numSubs long-lived subscribers, runs each in its own goroutine
-// reading until b.N frames are delivered in aggregate, then reports throughput,
-// footprint, and (optionally) latency percentiles. For the latency bench the
-// publisher is gated by release: readFanout launches the readers (they park in
-// AcceptGroup), starts the timer, then closes release so production begins with
-// readers already waiting — no dialing-phase backlog contaminates the samples.
-// epoch is the shared monotonic reference for stamping (unused when latency is
-// false). Setup is excluded by b.ResetTimer; teardown by b.StopTimer.
+// BenchmarkFanOut_TracksPerConnection is the COMPLEMENT to
+// BenchmarkFanOut_ViewerConnections: it dials ONE QUIC connection and subscribes to
+// N DISTINCT tracks over that single session, sweeping N. This isolates the OTHER
+// scaling axis — track-level cost when transport resources (one connection: one
+// congestion controller, one ACK path, one set of packet headers) are SHARED across
+// tracks — vs the viewer-connections regime where each copy pays full
+// per-connection transport. Same 16K/fpg-256 as ViewerConnections for a direct
+// same-N comparison. If TracksPerConnection throughput stays well above
+// ViewerConnections at the same N, the dominant fan-out cost is per-connection; if
+// they track together, it is per-track (per-stream/per-frame).
+func BenchmarkFanOut_TracksPerConnection(b *testing.B) {
+	if testing.Short() {
+		b.Skip("real-QUIC integration benchmark; skipped in -short")
+	}
+	const (
+		frameSize = 16 << 10 // match ViewerConnections for direct comparison
+		fpg       = 256
+	)
+	for _, numTracks := range []int{1, 4, 16} {
+		b.Run(fmt.Sprintf("tracks-%d", numTracks), func(b *testing.B) {
+			ctx := b.Context()
+			srv, addr := setupMultiTrackServer(b, ctx, frameSize, fpg, numTracks)
+			defer closeBroadcastServer(b, srv)
+			readTracksPerConnection(b, addr, numTracks, frameSize)
+		})
+	}
+}
+
+// readFanout is the VIEWER-CONNECTIONS regime: it dials numSubs INDEPENDENT QUIC
+// connections (one viewer each), each subscribing to the SAME single track, then
+// delegates to fanoutReaders. Each "sub" is one Dial = one connection = one viewer.
 func readFanout(b *testing.B, addr string, numSubs, frameSize int, latency bool, epoch time.Time, release chan struct{}) {
 	ctx := b.Context()
-
-	// Dial all subscribers once and keep them for the whole timed run. Done
-	// sequentially before the readers launch so the (expensive)
-	// dial/announce/subscribe handshake is excluded from the measurement.
 	subs := make([]*TrackReader, numSubs)
 	sessions := make([]*Session, numSubs)
 	for i := range numSubs {
@@ -133,7 +166,7 @@ func readFanout(b *testing.B, addr string, numSubs, frameSize int, latency bool,
 		sessions[i] = s
 		subs[i] = tr
 	}
-	defer func() {
+	fanoutReaders(b, subs, frameSize, latency, epoch, release, func() {
 		for _, tr := range subs {
 			if tr != nil {
 				_ = tr.Close()
@@ -144,7 +177,78 @@ func readFanout(b *testing.B, addr string, numSubs, frameSize int, latency bool,
 				_ = s.CloseWithError(NoError, "done")
 			}
 		}
-	}()
+	})
+}
+
+// readTracksPerConnection is the TRACKS-PER-CONNECTION regime: it dials ONE QUIC
+// connection and subscribes to numTracks DISTINCT tracks over that single session
+// (AcceptAnnounce + ReceiveAnnouncement x N + Subscribe x N), then delegates to
+// fanoutReaders. Each "track" is one Subscribe on the shared connection — the
+// contrast axis to readFanout's per-viewer connections.
+func readTracksPerConnection(b *testing.B, addr string, numTracks, frameSize int) {
+	ctx := b.Context()
+
+	client := Dialer{
+		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		TLSConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	// Retry dial until the asynchronously-bound listener is ready (same pattern as
+	// dialAndSubscribe).
+	ready, cancelWait := context.WithTimeout(ctx, 5*time.Second)
+	var sess *Session
+	for {
+		s, derr := client.Dial(ready, addr, nil)
+		if derr == nil {
+			sess = s
+			cancelWait()
+			break
+		}
+		if ready.Err() != nil {
+			cancelWait()
+			b.Fatalf("dial %s: %v (listener not ready or upgrade failed)", addr, derr)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	annRecv, err := sess.AcceptAnnounce("/")
+	if err != nil {
+		b.Fatalf("accept announce: %v", err)
+	}
+	// Subscribe to numTracks distinct tracks over the ONE session.
+	tracks := make([]*TrackReader, numTracks)
+	for i := range numTracks {
+		ann, err := annRecv.ReceiveAnnouncement(ctx)
+		if err != nil {
+			b.Fatalf("receive announcement %d: %v", i, err)
+		}
+		tr, err := sess.Subscribe(ctx, ann.BroadcastPath(), TrackName("index"), nil)
+		if err != nil {
+			b.Fatalf("subscribe %d: %v", i, err)
+		}
+		tracks[i] = tr
+	}
+
+	fanoutReaders(b, tracks, frameSize, false /* latency */, time.Time{}, nil, func() {
+		_ = annRecv.Close()
+		for _, tr := range tracks {
+			if tr != nil {
+				_ = tr.Close()
+			}
+		}
+		_ = sess.CloseWithError(NoError, "done")
+	})
+}
+
+// fanoutReaders is the shared measurement core for both fan-out regimes: it runs
+// one goroutine per TrackReader, reads until b.N frames are delivered in aggregate,
+// then reports throughput, footprint, and (optionally) latency percentiles. The
+// caller supplies the readers (obtained however the regime dictates) and a teardown
+// that closes them and their session(s). For the latency bench release is a gate the
+// caller closes once readers are parked; nil means no gating (throughput benches).
+// epoch is the shared monotonic reference for stamping (unused when latency is
+// false). Setup is excluded by b.ResetTimer; teardown by b.StopTimer.
+func fanoutReaders(b *testing.B, readers []*TrackReader, frameSize int, latency bool, epoch time.Time, release chan struct{}, teardown func()) {
+	numReaders := len(readers)
 
 	b.SetBytes(int64(frameSize))
 	b.ReportAllocs()
@@ -152,21 +256,24 @@ func readFanout(b *testing.B, addr string, numSubs, frameSize int, latency bool,
 	target := int64(b.N)
 	var framesReceived atomic.Int64
 
-	// Per-subscriber latency collectors. Each is single-writer (its subscriber
-	// goroutine), so the write into samples[i] is race-free; the atomic idx
-	// publishes a consistent count that the driver reads after wg.Wait().
+	// Per-reader latency collectors. Each is single-writer (its reader goroutine),
+	// so the write into samples[i] is race-free; the atomic idx publishes a
+	// consistent count that the driver reads after wg.Wait().
 	var collectors []*latencyCollector
 	if latency {
-		collectors = make([]*latencyCollector, numSubs)
+		collectors = make([]*latencyCollector, numReaders)
 	}
 
-	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancel(b.Context())
 	defer cancel()
+	if teardown != nil {
+		defer teardown()
+	}
 
 	// Launch readers BEFORE starting the timer / releasing the gated publisher.
 	var wg sync.WaitGroup
-	wg.Add(numSubs)
-	for i, tr := range subs {
+	wg.Add(numReaders)
+	for i, tr := range readers {
 		var col *latencyCollector
 		if latency {
 			col = newLatencyCollector(fanoutLatencyCap)
@@ -175,7 +282,7 @@ func readFanout(b *testing.B, addr string, numSubs, frameSize int, latency bool,
 		go func(tr *TrackReader, col *latencyCollector) {
 			defer wg.Done()
 			frame := NewFrame(frameSize)
-			// Subscribers self-terminate at the aggregate target, so there is no
+			// Readers self-terminate at the aggregate target, so there is no
 			// detection overshoot: each checks framesReceived before every read.
 			for framesReceived.Load() < target {
 				gr, err := tr.AcceptGroup(runCtx)
@@ -196,7 +303,7 @@ func readFanout(b *testing.B, addr string, numSubs, frameSize int, latency bool,
 							// Monotonic: time.Since uses the same clock the
 							// publisher stamped with (QPC-backed, not wall-clock
 							// UnixNano). Resolution is still bounded by the host
-							// time.Now() tick — see BenchmarkFanOut_Latency.
+							// time.Now() tick — see BenchmarkFanOut_ViewerConnectionsLatency.
 							col.add(time.Since(epoch) - time.Duration(stamp))
 						}
 					}
@@ -205,8 +312,8 @@ func readFanout(b *testing.B, addr string, numSubs, frameSize int, latency bool,
 		}(tr, col)
 	}
 
-	// Stall watchdog: if delivery makes no progress for 2s (e.g. a subscriber
-	// errored before reaching the target), cancel instead of hanging the run.
+	// Stall watchdog: if delivery makes no progress for 2s (e.g. a reader errored
+	// before reaching the target), cancel instead of hanging the run.
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
@@ -242,7 +349,7 @@ func readFanout(b *testing.B, addr string, numSubs, frameSize int, latency bool,
 	delivered := framesReceived.Load()
 	if elapsed > 0 {
 		b.ReportMetric(float64(delivered)/elapsed.Seconds(), "frames/sec")
-		b.ReportMetric(float64(delivered)/float64(numSubs)/elapsed.Seconds(), "frames/sec/sub")
+		b.ReportMetric(float64(delivered)/float64(numReaders)/elapsed.Seconds(), "frames/sec/reader")
 	}
 	b.ReportMetric(float64(runtime.NumGoroutine()), "goroutines")
 
@@ -255,11 +362,11 @@ func readFanout(b *testing.B, addr string, numSubs, frameSize int, latency bool,
 	}
 }
 
-// reportFanoutLatency sorts the merged per-subscriber samples and reports the
-// p50/p95/p99/max one-way latencies plus the spread between the fastest and
-// slowest subscriber medians (fairness). Fractional microseconds keep a sub-us
-// loopback median from flooring to 0; latencyAt clamps any stray non-positive
-// sample to 0 defensively (monotonic stamps should never be negative).
+// reportFanoutLatency sorts the merged per-reader samples and reports the
+// p50/p95/p99/max one-way latencies plus the spread between the fastest and slowest
+// reader medians (fairness). Fractional microseconds keep a sub-us loopback median
+// from flooring to 0; latencyAt clamps any stray non-positive sample to 0
+// defensively (monotonic stamps should never be negative).
 func reportFanoutLatency(b *testing.B, collectors []*latencyCollector) {
 	b.Helper()
 	// Fractional microseconds so a sub-microsecond loopback median does not floor
@@ -268,7 +375,7 @@ func reportFanoutLatency(b *testing.B, collectors []*latencyCollector) {
 	asMicros := func(d time.Duration) float64 { return float64(d.Nanoseconds()) / 1000.0 }
 
 	var all []time.Duration
-	perSubMedians := make([]float64, 0, len(collectors))
+	perReaderMedians := make([]float64, 0, len(collectors))
 	for _, c := range collectors {
 		s := c.collected()
 		if len(s) == 0 {
@@ -276,7 +383,7 @@ func reportFanoutLatency(b *testing.B, collectors []*latencyCollector) {
 		}
 		slices.Sort(s)
 		all = append(all, s...)
-		perSubMedians = append(perSubMedians, asMicros(latencyAt(s, 0.50)))
+		perReaderMedians = append(perReaderMedians, asMicros(latencyAt(s, 0.50)))
 	}
 	if len(all) == 0 {
 		return
@@ -286,9 +393,9 @@ func reportFanoutLatency(b *testing.B, collectors []*latencyCollector) {
 	b.ReportMetric(asMicros(latencyAt(all, 0.95)), "p95-us")
 	b.ReportMetric(asMicros(latencyAt(all, 0.99)), "p99-us")
 	b.ReportMetric(asMicros(latencyAt(all, 1.0)), "max-us")
-	if len(perSubMedians) > 1 {
-		slices.Sort(perSubMedians)
-		b.ReportMetric(perSubMedians[len(perSubMedians)-1]-perSubMedians[0], "fairness-spread-us")
+	if len(perReaderMedians) > 1 {
+		slices.Sort(perReaderMedians)
+		b.ReportMetric(perReaderMedians[len(perReaderMedians)-1]-perReaderMedians[0], "fairness-spread-us")
 	}
 }
 
@@ -311,8 +418,8 @@ func latencyAt(sorted []time.Duration, p float64) time.Duration {
 	return d
 }
 
-// fanoutLatencyCap bounds per-subscriber latency memory. 16K samples/subscriber
-// is far more than p99 needs and keeps a 64-subscriber run under ~8 MB.
+// fanoutLatencyCap bounds per-reader latency memory. 16K samples/reader is far more
+// than p99 needs and keeps a 64-reader run under ~8 MB.
 const fanoutLatencyCap = 1 << 14
 
 type latencyCollector struct {
@@ -342,17 +449,16 @@ func (c *latencyCollector) collected() []time.Duration {
 // setupFanoutLatencyServer mirrors setupSaturatingServer (egress_benchmark_test.go)
 // but (a) GATES the publisher on ready — after responding to the SUBSCRIBE via
 // WriteInfo (flushing the SUBSCRIBE_OK without opening a throwaway group), it
-// blocks until ready is closed, so subscribers connect and park in AcceptGroup
-// before steady frames flow (no dialing-phase backlog) —
-// and (b) stamps an 8-byte big-endian MONOTONIC
-// clock reading (time.Since(epoch)) into the first 8 bytes of every frame. epoch
-// is shared in-process with the subscribers; time.Since uses Go's monotonic clock
-// (QPC-backed on Windows) rather than wall-clock UnixNano. NOTE: on some Windows
-// timer configs time.Now() itself only resolves to ~0.6ms, so even monotonic
-// latency quantizes toward 0 — see the clock caveat on BenchmarkFanOut_Latency.
-// Like setupSaturatingServer
-// the publisher is UNPACED once released; QUIC flow control paces it to the
-// slowest subscriber. frameSize must be >= 8.
+// blocks until ready is closed, so viewers connect and park in AcceptGroup before
+// steady frames flow (no dialing-phase backlog) — and (b) stamps an 8-byte
+// big-endian MONOTONIC clock reading (time.Since(epoch)) into the first 8 bytes of
+// every frame. epoch is shared in-process with the viewers; time.Since uses Go's
+// monotonic clock (QPC-backed on Windows) rather than wall-clock UnixNano. NOTE: on
+// some Windows timer configs time.Now() itself only resolves to ~0.6ms, so even
+// monotonic latency quantizes toward 0 — see the clock caveat on
+// BenchmarkFanOut_ViewerConnectionsLatency. Like setupSaturatingServer the publisher
+// is UNPACED once released; QUIC flow control paces it to the slowest viewer.
+// frameSize must be >= 8.
 func setupFanoutLatencyServer(tb testing.TB, ctx context.Context, frameSize, framesPerGroup int, epoch time.Time, ready <-chan struct{}) (*Server, string) {
 	tb.Helper()
 	if frameSize < 8 {
@@ -382,7 +488,7 @@ func setupFanoutLatencyServer(tb testing.TB, ctx context.Context, frameSize, fra
 	}
 
 	mux.PublishFunc(ctx, "/server.broadcast", func(tw *TrackWriter) {
-		// Respond to the SUBSCRIBE explicitly with WriteInfo so the subscriber's
+		// Respond to the SUBSCRIBE explicitly with WriteInfo so the viewer's
 		// Subscribe() handshake completes during dialing, BEFORE the gate blocks.
 		// (OpenGroup would send this OK lazily via ensureInfo, but WriteInfo avoids
 		// opening a throwaway uni stream + group header just to flush the response.)
@@ -390,8 +496,8 @@ func setupFanoutLatencyServer(tb testing.TB, ctx context.Context, frameSize, fra
 			return
 		}
 
-		// Gate: block until all subscribers are connected and reading, so no
-		// backlog builds during dialing. A closed ready is a no-op receive.
+		// Gate: block until all viewers are connected and reading, so no backlog
+		// builds during dialing. A closed ready is a no-op receive.
 		select {
 		case <-ready:
 		case <-ctx.Done():
@@ -435,4 +541,78 @@ func setupFanoutLatencyServer(tb testing.TB, ctx context.Context, frameSize, fra
 	}()
 
 	return server, "https://" + addr + "/broadcast"
+}
+
+// setupMultiTrackServer starts a real QUIC/WebTransport server that publishes
+// numTracks DISTINCT tracks on one TrackMux (paths /server.t0 .. /server.t{N-1}),
+// each with an UNPACED publisher (no ticker) like setupSaturatingServer. QUIC flow
+// control paces each to its subscriber's drain rate. A single client subscribes to
+// all N tracks over ONE connection (see readTracksPerConnection) — the
+// tracks-per-connection regime. The server config mirrors setupSaturatingServer
+// verbatim; only the per-track publish loop differs.
+func setupMultiTrackServer(tb testing.TB, ctx context.Context, frameSize, framesPerGroup, numTracks int) (*Server, string) {
+	tb.Helper()
+
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		tb.Fatalf("failed to find available port: %v", err)
+	}
+	addr := pc.LocalAddr().String()
+	_ = pc.Close()
+
+	mux := NewTrackMux(0)
+
+	server := &Server{
+		Addr: addr,
+		TLSConfig: &tls.Config{
+			NextProtos:         []string{NextProtoH3, NextProtoMOQ},
+			Certificates:       []tls.Certificate{generateTestCert(tb)},
+			InsecureSkipVerify: true,
+		},
+		QUICConfig: &quic.Config{Allow0RTT: true, EnableDatagrams: true},
+		TrackMux:   mux,
+		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Handler:    HandleFunc(func(sess *Session) { <-sess.Context().Done() }),
+	}
+
+	for t := range numTracks {
+		path := fmt.Sprintf("/server.t%d", t)
+		mux.PublishFunc(ctx, BroadcastPath(path), func(tw *TrackWriter) {
+			frame := NewFrame(frameSize)
+			data := make([]byte, frameSize)
+			for i := range data {
+				data[i] = byte(i % 256)
+			}
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				gw, err := tw.OpenGroup(ctx)
+				if err != nil {
+					return
+				}
+				for i := 0; i < framesPerGroup; i++ {
+					frame.Reset()
+					frame.Write(data)
+					if err := gw.WriteFrame(frame); err != nil {
+						gw.CancelWrite(InternalGroupErrorCode)
+						return
+					}
+				}
+				if err := gw.Close(); err != nil {
+					return
+				}
+			}
+		})
+	}
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, ErrServerClosed) {
+			tb.Logf("server error: %v", err)
+		}
+	}()
+
+	return server, "https://" + addr + "/moqt"
 }
