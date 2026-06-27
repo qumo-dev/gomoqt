@@ -20,7 +20,8 @@ package moqt
 //   - TracksPerConnection (1 connection -> N tracks): ONE QUIC connection
 //     subscribes to N DISTINCT tracks, sharing one congestion controller / ACK path
 //     / packet-header amortization. This isolates per-TRACK cost (per-stream,
-//     per-frame) from per-CONNECTION cost.
+//     per-frame) from per-CONNECTION cost, and reports cross-track fairness WITHIN
+//     that shared congestion-control domain (see reportReaderFairness).
 //
 // Comparing the two at the same N answers the central architectural question: is the
 // fan-out cost per-connection (QUIC connection overhead) or per-track (stream/frame
@@ -136,6 +137,12 @@ func BenchmarkFanOut_ViewerConnectionsLatency(b *testing.B) {
 // same-N comparison. If TracksPerConnection throughput stays well above
 // ViewerConnections at the same N, the dominant fan-out cost is per-connection; if
 // they track together, it is per-track (per-stream/per-frame).
+//
+// Beyond aggregate throughput, this benchmark also reports cross-track throughput
+// FAIRNESS (per-reader min/median/mean/p95/p99/max, Jain's fairness index, and a
+// starved-reader count) — advisory metrics that begin characterizing fairness
+// WITHIN the shared congestion-control domain, the data a future aggregate-vs-shard
+// relay decision would need. See reportReaderFairness.
 func BenchmarkFanOut_TracksPerConnection(b *testing.B) {
 	if testing.Short() {
 		b.Skip("real-QUIC integration benchmark; skipped in -short")
@@ -264,6 +271,10 @@ func fanoutReaders(b *testing.B, readers []*TrackReader, frameSize int, latency 
 		collectors = make([]*latencyCollector, numReaders)
 	}
 
+	// Per-reader frame counters drive the cross-sectional throughput-fairness
+	// metrics. Each is single-writer (its reader goroutine); read after wg.Wait().
+	readerFrames := make([]atomic.Int64, numReaders)
+
 	runCtx, cancel := context.WithCancel(b.Context())
 	defer cancel()
 	if teardown != nil {
@@ -279,7 +290,7 @@ func fanoutReaders(b *testing.B, readers []*TrackReader, frameSize int, latency 
 			col = newLatencyCollector(fanoutLatencyCap)
 			collectors[i] = col
 		}
-		go func(tr *TrackReader, col *latencyCollector) {
+		go func(tr *TrackReader, col *latencyCollector, rf *atomic.Int64) {
 			defer wg.Done()
 			frame := NewFrame(frameSize)
 			// Readers self-terminate at the aggregate target, so there is no
@@ -297,6 +308,7 @@ func fanoutReaders(b *testing.B, readers []*TrackReader, frameSize int, latency 
 						return
 					}
 					framesReceived.Add(1)
+					rf.Add(1)
 					if col != nil {
 						if body := frame.Body(); len(body) >= 8 {
 							stamp := int64(binary.BigEndian.Uint64(body[:8]))
@@ -309,7 +321,7 @@ func fanoutReaders(b *testing.B, readers []*TrackReader, frameSize int, latency 
 					}
 				}
 			}
-		}(tr, col)
+		}(tr, col, &readerFrames[i])
 	}
 
 	// Stall watchdog: if delivery makes no progress for 2s (e.g. a reader errored
@@ -359,6 +371,9 @@ func fanoutReaders(b *testing.B, readers []*TrackReader, frameSize int, latency 
 
 	if latency {
 		reportFanoutLatency(b, collectors)
+	}
+	if elapsed > 0 {
+		reportReaderFairness(b, readerFrames, elapsed, numReaders)
 	}
 }
 
@@ -416,6 +431,78 @@ func latencyAt(sorted []time.Duration, p float64) time.Duration {
 		return 0
 	}
 	return d
+}
+
+// reportReaderFairness reports the cross-sectional distribution of per-reader
+// throughput plus a fairness summary. Each reader's throughput is its total frames
+// delivered over the whole run divided by elapsed (a view ACROSS readers at one
+// point, not an intra-run time-series). For BenchmarkFanOut_TracksPerConnection
+// this is fairness across tracks sharing ONE congestion-control domain — the
+// quantity a future aggregate-vs-shard relay decision would need; for
+// ViewerConnections it is fairness across independent viewer connections. Jain's
+// fairness index is 1.0 when all readers are equal and tends to 1/N as one reader
+// dominates. "starved-readers" counts readers below half the median throughput
+// (advisory threshold). Percentiles are coarse at small N (clamped to the available
+// samples). All fairness metrics are advisory/non-gating.
+func reportReaderFairness(b *testing.B, readerFrames []atomic.Int64, elapsed time.Duration, numReaders int) {
+	b.Helper()
+	if numReaders <= 0 || elapsed <= 0 {
+		return
+	}
+	secs := elapsed.Seconds()
+	fps := make([]float64, numReaders)
+	for i := range numReaders {
+		fps[i] = float64(readerFrames[i].Load()) / secs
+	}
+	sorted := slices.Clone(fps)
+	slices.Sort(sorted)
+
+	var sum, sumSq float64
+	for _, v := range fps {
+		sum += v
+		sumSq += v * v
+	}
+	mean := sum / float64(numReaders)
+	median := quantileF64(sorted, 0.50)
+
+	b.ReportMetric(sorted[0], "reader-fps-min")
+	b.ReportMetric(median, "reader-fps-median")
+	b.ReportMetric(mean, "reader-fps-mean")
+	b.ReportMetric(quantileF64(sorted, 0.95), "reader-fps-p95")
+	b.ReportMetric(quantileF64(sorted, 0.99), "reader-fps-p99")
+	b.ReportMetric(sorted[len(sorted)-1], "reader-fps-max")
+
+	// Jain's fairness index over per-reader throughput: 1.0 = perfectly fair.
+	var jain float64
+	if sumSq > 0 {
+		jain = (sum * sum) / (float64(numReaders) * sumSq)
+	}
+	b.ReportMetric(jain, "jain-fairness")
+
+	// Advisory starvation: readers below half the median throughput.
+	threshold := median * 0.5
+	var starved int
+	for _, v := range fps {
+		if v < threshold {
+			starved++
+		}
+	}
+	b.ReportMetric(float64(starved), "starved-readers")
+}
+
+// quantileF64 returns the p-quantile (0..1) of an already-sorted float64 slice.
+func quantileF64(sorted []float64, p float64) float64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	idx := int(float64(len(sorted)-1) * p)
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(sorted) {
+		idx = len(sorted) - 1
+	}
+	return sorted[idx]
 }
 
 // fanoutLatencyCap bounds per-reader latency memory. 16K samples/reader is far more
