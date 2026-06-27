@@ -157,11 +157,12 @@ func BenchmarkFanOut_TracksPerConnection(b *testing.B) {
 	// subscribes' OKs (the subscribe handshake timed out at ~21 tracks ungated);
 	// gating fixes that and measures STEADY-STATE track fan-out. tracks-64 is held
 	// back: its STEADY-STATE delivery is fair and fast (Jain 1.000, ~5300 fps
-	// aggregate measured directly), but its first-run ns/op is dominated by ~10-12s
-	// of variable teardown/cleanup overhead for 64 tracks (setup, read-loop, and
-	// session-teardown all time fast) — the measurement is polluted, not the
-	// delivery. Investigate server.Close/conn-cleanup for many tracks before
-	// tracks-64 joins the sweep.
+	// aggregate measured directly), but its first-run ns/op carries ~10-12s of
+	// variable overhead whose source is UNIDENTIFIED: setup, read-loop,
+	// session-teardown, AND server.Close all measure fast (server.Close was timed
+	// directly at <=0.7ms for 64 tracks in a focused test — exonerated). It is NOT
+	// a production server.Close problem; the measurement is polluted, not the
+	// delivery.
 	for _, numTracks := range []int{1, 4, 16} {
 		b.Run(fmt.Sprintf("tracks-%d", numTracks), func(b *testing.B) {
 			ctx := b.Context()
