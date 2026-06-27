@@ -151,18 +151,21 @@ func BenchmarkFanOut_TracksPerConnection(b *testing.B) {
 		frameSize = 16 << 10 // match ViewerConnections for direct comparison
 		fpg       = 256
 	)
-	// NOTE: tracks-64 was tried and REMOVED — it deterministically fails: the
-	// ~21st Subscribe handshake on a single connection times out (even at
-	// -benchtime=1x), so a connection cannot reach 64 concurrent tracks. That is a
-	// real aggregate-vs-shard ceiling (~20 tracks/conn), not a CI artifact, but a
-	// known-red benchmark must not live in the sweep. Investigate the limit
-	// (stream/flow-control cap vs handshake starvation) before raising the sweep.
+	// The publishers are GATED (see setupMultiTrackServer): they WriteInfo to flush
+	// each SUBSCRIBE_OK, then block until all N tracks are subscribed before
+	// blasting. Without the gate, already-blasting publishers starve later
+	// subscribes' OKs (the subscribe handshake timed out at ~21 tracks ungated);
+	// gating fixes that and measures STEADY-STATE track fan-out. tracks-64 is held
+	// back: once gated it subscribes fine and runs fairly when WARM (Jain 1.000),
+	// but its COLD first run stalls (~1 frame/30s) — a separate flake to debug
+	// before it joins the sweep.
 	for _, numTracks := range []int{1, 4, 16} {
 		b.Run(fmt.Sprintf("tracks-%d", numTracks), func(b *testing.B) {
 			ctx := b.Context()
-			srv, addr := setupMultiTrackServer(b, ctx, frameSize, fpg, numTracks)
+			ready := make(chan struct{})
+			srv, addr := setupMultiTrackServer(b, ctx, frameSize, fpg, numTracks, ready)
 			defer closeBroadcastServer(b, srv)
-			readTracksPerConnection(b, addr, numTracks, frameSize)
+			readTracksPerConnection(b, addr, numTracks, frameSize, ready)
 		})
 	}
 }
@@ -197,8 +200,10 @@ func readFanout(b *testing.B, addr string, numSubs, frameSize int, latency bool,
 // connection and subscribes to numTracks DISTINCT tracks over that single session
 // (AcceptAnnounce + ReceiveAnnouncement x N + Subscribe x N), then delegates to
 // fanoutReaders. Each "track" is one Subscribe on the shared connection — the
-// contrast axis to readFanout's per-viewer connections.
-func readTracksPerConnection(b *testing.B, addr string, numTracks, frameSize int) {
+// contrast axis to readFanout's per-viewer connections. ready is the publisher
+// gate, passed through to fanoutReaders as its release (closed once readers are
+// parked) so all N subscribes complete before any publisher blasts.
+func readTracksPerConnection(b *testing.B, addr string, numTracks, frameSize int, ready chan struct{}) {
 	ctx := b.Context()
 
 	client := Dialer{
@@ -207,16 +212,16 @@ func readTracksPerConnection(b *testing.B, addr string, numTracks, frameSize int
 	}
 	// Retry dial until the asynchronously-bound listener is ready (same pattern as
 	// dialAndSubscribe).
-	ready, cancelWait := context.WithTimeout(ctx, 5*time.Second)
+	dialCtx, cancelWait := context.WithTimeout(ctx, 5*time.Second)
 	var sess *Session
 	for {
-		s, derr := client.Dial(ready, addr, nil)
+		s, derr := client.Dial(dialCtx, addr, nil)
 		if derr == nil {
 			sess = s
 			cancelWait()
 			break
 		}
-		if ready.Err() != nil {
+		if dialCtx.Err() != nil {
 			cancelWait()
 			b.Fatalf("dial %s: %v (listener not ready or upgrade failed)", addr, derr)
 		}
@@ -241,7 +246,7 @@ func readTracksPerConnection(b *testing.B, addr string, numTracks, frameSize int
 		tracks[i] = tr
 	}
 
-	fanoutReaders(b, tracks, frameSize, false /* latency */, time.Time{}, nil, func() {
+	fanoutReaders(b, tracks, frameSize, false /* latency */, time.Time{}, ready, func() {
 		_ = annRecv.Close()
 		for _, tr := range tracks {
 			if tr != nil {
@@ -642,8 +647,12 @@ func setupFanoutLatencyServer(tb testing.TB, ctx context.Context, frameSize, fra
 // control paces each to its subscriber's drain rate. A single client subscribes to
 // all N tracks over ONE connection (see readTracksPerConnection) — the
 // tracks-per-connection regime. The server config mirrors setupSaturatingServer
-// verbatim; only the per-track publish loop differs.
-func setupMultiTrackServer(tb testing.TB, ctx context.Context, frameSize, framesPerGroup, numTracks int) (*Server, string) {
+// verbatim; only the per-track publish loop differs. Each publisher is GATED on
+// ready: it WriteInfos to flush the SUBSCRIBE_OK, then blocks until ready is
+// closed (by fanoutReaders, once readers are parked) before blasting. Without the
+// gate, already-blasting publishers starve later subscribes' OKs and the handshake
+// times out (~21 tracks ungated); with it the sweep measures steady-state fan-out.
+func setupMultiTrackServer(tb testing.TB, ctx context.Context, frameSize, framesPerGroup, numTracks int, ready <-chan struct{}) (*Server, string) {
 	tb.Helper()
 
 	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
@@ -671,6 +680,20 @@ func setupMultiTrackServer(tb testing.TB, ctx context.Context, frameSize, frames
 	for t := range numTracks {
 		path := fmt.Sprintf("/server.t%d", t)
 		mux.PublishFunc(ctx, BroadcastPath(path), func(tw *TrackWriter) {
+			// Flush the SUBSCRIBE_OK (sent lazily on first OpenGroup via
+			// ensureInfo) with WriteInfo so the subscribe handshake completes
+			// during setup, BEFORE the gate blocks production.
+			if err := tw.WriteInfo(PublishInfo{}); err != nil {
+				return
+			}
+			// Gate: block until all tracks are subscribed (ready closed by
+			// fanoutReaders once readers are parked). Without this, already-
+			// blasting publishers starve later subscribes' OKs.
+			select {
+			case <-ready:
+			case <-ctx.Done():
+				return
+			}
 			frame := NewFrame(frameSize)
 			data := make([]byte, frameSize)
 			for i := range data {
