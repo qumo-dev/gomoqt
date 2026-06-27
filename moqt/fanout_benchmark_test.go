@@ -156,9 +156,12 @@ func BenchmarkFanOut_TracksPerConnection(b *testing.B) {
 	// blasting. Without the gate, already-blasting publishers starve later
 	// subscribes' OKs (the subscribe handshake timed out at ~21 tracks ungated);
 	// gating fixes that and measures STEADY-STATE track fan-out. tracks-64 is held
-	// back: once gated it subscribes fine and runs fairly when WARM (Jain 1.000),
-	// but its COLD first run stalls (~1 frame/30s) — a separate flake to debug
-	// before it joins the sweep.
+	// back: its STEADY-STATE delivery is fair and fast (Jain 1.000, ~5300 fps
+	// aggregate measured directly), but its first-run ns/op is dominated by ~10-12s
+	// of variable teardown/cleanup overhead for 64 tracks (setup, read-loop, and
+	// session-teardown all time fast) — the measurement is polluted, not the
+	// delivery. Investigate server.Close/conn-cleanup for many tracks before
+	// tracks-64 joins the sweep.
 	for _, numTracks := range []int{1, 4, 16} {
 		b.Run(fmt.Sprintf("tracks-%d", numTracks), func(b *testing.B) {
 			ctx := b.Context()
@@ -335,11 +338,17 @@ func fanoutReaders(b *testing.B, readers []*TrackReader, frameSize int, latency 
 		}(tr, col, &readerFrames[i])
 	}
 
-	// Stall watchdog: if delivery makes no progress for 2s (e.g. a reader errored
-	// before reaching the target), cancel instead of hanging the run.
+	// Stall watchdog: cancel instead of hanging if delivery stalls. The check is
+	// RATE-based, not just zero-progress: a trickle (a few frames/window) would
+	// never trip a ==last check and the run would report garbage at a trickle
+	// rate. Track the best per-window progress; cancel when a window collapses to
+	// <10% of best (covers zero progress too). The first window establishes the
+	// baseline so cold-start ramp doesn't false-trip.
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
+		var best int64
+		warmed := false
 		last := framesReceived.Load()
 		for {
 			select {
@@ -350,12 +359,18 @@ func fanoutReaders(b *testing.B, readers []*TrackReader, frameSize int, latency 
 				if cur >= target {
 					return
 				}
-				if cur == last {
-					b.Logf("fanout: delivery stalled at %d/%d frames; cancelling", cur, target)
+				delta := cur - last
+				last = cur
+				if delta > best {
+					best = delta
+					warmed = true
+					continue
+				}
+				if !warmed || delta*10 < best {
+					b.Logf("fanout: delivery stalled at %d/%d frames (window=%d best=%d); cancelling", cur, target, delta, best)
 					cancel()
 					return
 				}
-				last = cur
 			}
 		}
 	}()
