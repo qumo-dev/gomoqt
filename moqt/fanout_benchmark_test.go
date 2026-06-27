@@ -151,7 +151,7 @@ func BenchmarkFanOut_TracksPerConnection(b *testing.B) {
 		frameSize = 16 << 10 // match ViewerConnections for direct comparison
 		fpg       = 256
 	)
-	for _, numTracks := range []int{1, 4, 16} {
+	for _, numTracks := range []int{1, 4, 16, 64} {
 		b.Run(fmt.Sprintf("tracks-%d", numTracks), func(b *testing.B) {
 			ctx := b.Context()
 			srv, addr := setupMultiTrackServer(b, ctx, frameSize, fpg, numTracks)
