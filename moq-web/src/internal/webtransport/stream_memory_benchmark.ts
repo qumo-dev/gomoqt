@@ -25,7 +25,7 @@ function createMockReadableStream(chunks: Uint8Array[]): ReadableStream<Uint8Arr
 	return new ReadableStream<Uint8Array>({
 		pull(controller) {
 			if (index < chunks.length) {
-				controller.enqueue(chunks[index++]);
+				controller.enqueue(chunks[index++]!);
 			} else {
 				controller.close();
 			}
@@ -41,7 +41,7 @@ Deno.bench({
 		// Simulate: WebTransport sends 16KB chunk, we read 64 bytes
 		const largeChunk = new Uint8Array(16384);
 		const stream = createMockReadableStream([largeChunk]);
-		const reader = new ReceiveStream({ stream, streamId: 1n });
+		const reader = new ReceiveStream({ stream });
 
 		// Read only 64 bytes - rest stays in buffer
 		const buf = new Uint8Array(64);
@@ -58,7 +58,7 @@ Deno.bench({
 		// After optimization: buffer resets to new Uint8Array(0) when exhausted
 		const largeChunk = new Uint8Array(16384);
 		const stream = createMockReadableStream([largeChunk]);
-		const reader = new ReceiveStream({ stream, streamId: 1n });
+		const reader = new ReceiveStream({ stream });
 
 		// Read only 64 bytes
 		const buf = new Uint8Array(64);
@@ -77,7 +77,7 @@ Deno.bench({
 	fn: async () => {
 		const chunk = new Uint8Array(1024);
 		const stream = createMockReadableStream([chunk]);
-		const reader = new ReceiveStream({ stream, streamId: 1n });
+		const reader = new ReceiveStream({ stream });
 
 		// Read entire chunk
 		const buf = new Uint8Array(1024);
@@ -93,7 +93,7 @@ Deno.bench({
 	fn: async () => {
 		const largeChunk = new Uint8Array(4096);
 		const stream = createMockReadableStream([largeChunk]);
-		const reader = new ReceiveStream({ stream, streamId: 1n });
+		const reader = new ReceiveStream({ stream });
 
 		// Simulate reading varint (1-8 bytes) + small header
 		for (let i = 0; i < 10; i++) {
@@ -177,7 +177,7 @@ Deno.bench({
 	baseline: true,
 	fn: async () => {
 		const stream = createMockWritableStream();
-		const writer = new SendStream({ stream, streamId: 1n });
+		const writer = new SendStream({ stream });
 
 		const data = new Uint8Array(1024);
 		await writer.write(data);
@@ -189,7 +189,7 @@ Deno.bench({
 	group: "sendstream-write",
 	fn: async () => {
 		const stream = createMockWritableStream();
-		const writer = new SendStream({ stream, streamId: 1n });
+		const writer = new SendStream({ stream });
 
 		// Simulate: varint length + data
 		const header = new Uint8Array(8);
@@ -204,7 +204,7 @@ Deno.bench({
 	group: "sendstream-write",
 	fn: async () => {
 		const stream = createMockWritableStream();
-		const writer = new SendStream({ stream, streamId: 1n });
+		const writer = new SendStream({ stream });
 
 		// Combine into single write
 		const combined = new Uint8Array(1032);
