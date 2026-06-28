@@ -133,9 +133,13 @@ func runInteropSession(sess *moqt.Session, mux *moqt.TrackMux, serverDone chan s
 		}
 	})
 
+	timer1 := time.NewTimer(5 * time.Second)
 	select {
 	case <-doneCh:
-	case <-time.After(5 * time.Second):
+		if !timer1.Stop() {
+			<-timer1.C
+		}
+	case <-timer1.C:
 		fmt.Println("publish handler did not complete in time; continuing")
 	}
 
@@ -207,10 +211,14 @@ func runInteropSession(sess *moqt.Session, mux *moqt.TrackMux, serverDone chan s
 	}
 
 	// Wait for the session to close (client disconnects after receiving GOAWAY).
+	timer2 := time.NewTimer(10 * time.Second)
 	select {
 	case <-sess.Context().Done():
+		if !timer2.Stop() {
+			<-timer2.C
+		}
 		fmt.Println("Session closed after GOAWAY")
-	case <-time.After(10 * time.Second):
+	case <-timer2.C:
 		fmt.Println("Timed out waiting for session close after GOAWAY")
 	}
 }
