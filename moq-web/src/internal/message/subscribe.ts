@@ -1,6 +1,6 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
 import {
-	encodeMessage,
+	MessageEncoder,
 	parseString,
 	parseUint8,
 	parseVarint,
@@ -44,7 +44,7 @@ export class SubscribeMessage {
 	 * Encodes the message to the writer.
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
-		return encodeMessage(w, (e) => {
+		return MessageEncoder.encode(w, (e) => {
 			e.varint(this.subscribeId);
 			e.string(this.broadcastPath);
 			e.string(this.trackName);

@@ -1,5 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { encodeMessage, parseVarint, readFull, readVarint } from "./message.ts";
+import { MessageEncoder, parseVarint, readFull, readVarint } from "./message.ts";
 
 export interface ProbeMessageInit {
 	bitrate?: number;
@@ -16,7 +16,7 @@ export class ProbeMessage {
 	}
 
 	async encode(w: Writer): Promise<Error | undefined> {
-		return encodeMessage(w, (e) => {
+		return MessageEncoder.encode(w, (e) => {
 			e.varint(this.bitrate);
 			e.varint(this.rtt);
 		});

@@ -1,5 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { encodeMessage, parseString, readFull, readVarint } from "./message.ts";
+import { MessageEncoder, parseString, readFull, readVarint } from "./message.ts";
 
 export interface GoawayMessageInit {
 	newSessionURI?: string;
@@ -13,7 +13,7 @@ export class GoawayMessage {
 	}
 
 	async encode(w: Writer): Promise<Error | undefined> {
-		return encodeMessage(w, (e) => {
+		return MessageEncoder.encode(w, (e) => {
 			e.string(this.newSessionURI);
 		});
 	}

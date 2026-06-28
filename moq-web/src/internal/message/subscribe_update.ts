@@ -1,5 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { encodeMessage, parseUint8, parseVarint, readFull, readVarint } from "./message.ts";
+import { MessageEncoder, parseUint8, parseVarint, readFull, readVarint } from "./message.ts";
 
 export interface SubscribeUpdateMessageInit {
 	subscriberPriority?: number;
@@ -28,7 +28,7 @@ export class SubscribeUpdateMessage {
 	 * Encodes the message to the writer.
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
-		return encodeMessage(w, (e) => {
+		return MessageEncoder.encode(w, (e) => {
 			e.uint8(this.subscriberPriority);
 			e.uint8(this.subscriberOrdered);
 			e.varint(this.subscriberMaxLatency);

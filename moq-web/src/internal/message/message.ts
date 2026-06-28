@@ -497,27 +497,27 @@ export class MessageEncoder {
 		putVarint(this.#buf, start, bodyLen);
 		return this.#buf.subarray(start, this.#pos);
 	}
-}
 
-/**
- * Builds a message body with a {@link MessageEncoder}, frames it, and writes it
- * in a single `Writer.write`. Every message `encode` delegates here, so the
- * encode error contract lives in one place: a `build` that throws (e.g. an
- * out-of-range varint) is returned as an `Error` rather than rejecting.
- */
-export async function encodeMessage(
-	w: Writer,
-	build: (e: MessageEncoder) => void,
-): Promise<Error | undefined> {
-	let buf: Uint8Array;
-	try {
-		const e = new MessageEncoder();
-		build(e);
-		buf = e.frame();
-	} catch (err) {
-		return err as Error;
+	/**
+	 * Builds a message body with `build`, frames it, and writes it in a single
+	 * `Writer.write`. Every message `encode` delegates here, so the encode error
+	 * contract lives in one place: a `build` that throws (e.g. an out-of-range
+	 * varint) is returned as an `Error` rather than rejecting.
+	 */
+	static async encode(
+		w: Writer,
+		build: (e: MessageEncoder) => void,
+	): Promise<Error | undefined> {
+		let buf: Uint8Array;
+		try {
+			const e = new MessageEncoder();
+			build(e);
+			buf = e.frame();
+		} catch (err) {
+			return err as Error;
+		}
+
+		const [, err] = await w.write(buf);
+		return err;
 	}
-
-	const [, err] = await w.write(buf);
-	return err;
 }

@@ -1,5 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { encodeMessage, parseStringArray, readFull, readVarint } from "./message.ts";
+import { MessageEncoder, parseStringArray, readFull, readVarint } from "./message.ts";
 
 export interface AnnounceInitMessageInit {
 	suffixes?: string[];
@@ -16,7 +16,7 @@ export class AnnounceInitMessage {
 	 * Encodes the message to the writer.
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
-		return encodeMessage(w, (e) => {
+		return MessageEncoder.encode(w, (e) => {
 			e.stringArray(this.suffixes);
 		});
 	}
