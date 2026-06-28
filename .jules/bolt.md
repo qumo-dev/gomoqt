@@ -4,3 +4,7 @@
 ## 2024-06-25 - Exact pre-allocation over fixed bounds
 **Learning:** For variable depth path splitting (e.g. prefix arrays), pre-calculating the exact number of segments via `strings.Count(str, "/")` and allocating the slice exactly (`make([]T, 0, n)`) is measurably faster than fixed pre-allocation (e.g., `make([]T, 0, 8)`). Removing the final `strings.Split` allocation in the `pathSegments` function further reduces GC pressure.
 **Action:** Always count known delimiters in small string parsing rather than falling back to `strings.Split` or using arbitrary fixed pre-allocations when generating slices in hot paths.
+## Repeated Regex Compilation
+
+**Learning:** Move `regexp.MustCompile` calls out of functions into package-level variables. `regexp.Regexp` objects are safe for concurrent use by multiple goroutines. This avoids significant CPU and allocation overhead from recompiling the regex on every function call.
+**Impact:** Local benchmark showed an improvement from ~6775 ns/op (33 allocs) to ~564 ns/op (2 allocs) when moved to the package level.

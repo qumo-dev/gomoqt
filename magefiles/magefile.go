@@ -15,6 +15,11 @@ import (
 	"github.com/magefile/mage/sh"
 )
 
+var (
+	goVersionRe   = regexp.MustCompile(`go version go([0-9]+)\.([0-9]+)`)
+	denoVersionRe = regexp.MustCompile(`^(deno|v8|typescript)\s+([^\s]+)`)
+)
+
 // ======================================
 // SETUP
 // ======================================
@@ -87,8 +92,7 @@ func goVersion() error {
 		minor: 22,
 	}
 
-	re := regexp.MustCompile(`go version go([0-9]+)\.([0-9]+)`)
-	matches := re.FindStringSubmatch(version)
+	matches := goVersionRe.FindStringSubmatch(version)
 	if len(matches) > 2 {
 		major, _ := strconv.Atoi(matches[1])
 		minor, _ := strconv.Atoi(matches[2])
@@ -133,11 +137,10 @@ func denoVersion() error {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 
 	// Extract versions using regex
-	re := regexp.MustCompile(`^(deno|v8|typescript)\s+([^\s]+)`)
 	versions := map[string]string{}
 
 	for _, line := range lines {
-		if match := re.FindStringSubmatch(line); match != nil {
+		if match := denoVersionRe.FindStringSubmatch(line); match != nil {
 			versions[match[1]] = match[2]
 		}
 	}
