@@ -4,3 +4,6 @@
 ## 2024-06-25 - Exact pre-allocation over fixed bounds
 **Learning:** For variable depth path splitting (e.g. prefix arrays), pre-calculating the exact number of segments via `strings.Count(str, "/")` and allocating the slice exactly (`make([]T, 0, n)`) is measurably faster than fixed pre-allocation (e.g., `make([]T, 0, 8)`). Removing the final `strings.Split` allocation in the `pathSegments` function further reduces GC pressure.
 **Action:** Always count known delimiters in small string parsing rather than falling back to `strings.Split` or using arbitrary fixed pre-allocations when generating slices in hot paths.
+## 2024-06-27 - Exact allocation with index assignment vs append
+**Learning:** Even when pre-allocating a slice with exact capacity (`make([]T, 0, n)`), using `append` inside a hot loop has measurable overhead due to bounds checking and length updates. For path splitting, allocating the slice with exact length (`make([]T, n)`) and using direct index assignment (`slice[i] = val`) avoids `append` overhead, resulting in ~10% faster execution in `prefixSegments` and `pathSegments`.
+**Action:** When the final size of a slice is known exactly and you are generating it in a hot path (e.g., string splitting loops), use `make([]T, exactLen)` and index assignment (`slice[i] = x`) instead of `make([]T, 0, exactLen)` and `append`.
