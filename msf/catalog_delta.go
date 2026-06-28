@@ -72,14 +72,29 @@ func (d CatalogDelta) Validate() error {
 	if len(d.AddTracks) == 0 && len(d.RemoveTracks) == 0 && len(d.CloneTracks) == 0 {
 		problems = append(problems, "delta catalog must contain addTracks, removeTracks, or cloneTracks")
 	}
-	for i, track := range d.AddTracks {
-		problems = append(problems, track.validate(fmt.Sprintf("addTracks[%d]", i))...)
+	for i := range d.AddTracks {
+		if errs := d.AddTracks[i].validate(""); len(errs) > 0 {
+			prefix := "addTracks[" + itoa(i) + "]: "
+			for _, err := range errs {
+				problems = append(problems, prefix+err)
+			}
+		}
 	}
-	for i, track := range d.RemoveTracks {
-		problems = append(problems, track.Validate(fmt.Sprintf("removeTracks[%d]", i))...)
+	for i := range d.RemoveTracks {
+		if errs := d.RemoveTracks[i].Validate(""); len(errs) > 0 {
+			prefix := "removeTracks[" + itoa(i) + "]: "
+			for _, err := range errs {
+				problems = append(problems, prefix+err)
+			}
+		}
 	}
-	for i, track := range d.CloneTracks {
-		problems = append(problems, track.Validate(fmt.Sprintf("cloneTracks[%d]", i))...)
+	for i := range d.CloneTracks {
+		if errs := d.CloneTracks[i].Validate(""); len(errs) > 0 {
+			prefix := "cloneTracks[" + itoa(i) + "]: "
+			for _, err := range errs {
+				problems = append(problems, prefix+err)
+			}
+		}
 	}
 
 	return newValidationError(problems)
@@ -241,11 +256,15 @@ func (r TrackRef) effectiveNamespace(defaultNamespace string) string {
 // Validate checks whether the reference is valid for a removeTracks entry.
 func (r TrackRef) Validate(path string) []string {
 	var problems []string
+	prefix := ""
+	if path != "" {
+		prefix = path + ": "
+	}
 	if r.Name == "" {
-		problems = append(problems, path+": name is required")
+		problems = append(problems, prefix+"name is required")
 	}
 	if len(r.ExtraFields) > 0 {
-		problems = append(problems, path+": remove track entries may contain only name and optional namespace")
+		problems = append(problems, prefix+"remove track entries may contain only name and optional namespace")
 	}
 	return problems
 }
@@ -302,11 +321,15 @@ func (c TrackClone) Clone() TrackClone {
 // Validate checks whether the cloneTracks entry is valid.
 func (c TrackClone) Validate(path string) []string {
 	var problems []string
+	prefix := ""
+	if path != "" {
+		prefix = path + ": "
+	}
 	if c.Name == "" {
-		problems = append(problems, path+": name is required")
+		problems = append(problems, prefix+"name is required")
 	}
 	if c.ParentName == "" {
-		problems = append(problems, path+": parentName is required for clone tracks")
+		problems = append(problems, prefix+"parentName is required for clone tracks")
 	}
 	return problems
 }

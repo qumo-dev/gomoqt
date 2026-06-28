@@ -240,8 +240,13 @@ func (c Catalog) Validate() error {
 	if c.Version == 0 {
 		problems = append(problems, "catalog version is required")
 	}
-	for i, track := range c.Tracks {
-		problems = append(problems, track.validate(fmt.Sprintf("tracks[%d]", i))...)
+	for i := range c.Tracks {
+		if errs := c.Tracks[i].validate(""); len(errs) > 0 {
+			prefix := "tracks[" + itoa(i) + "]: "
+			for _, err := range errs {
+				problems = append(problems, prefix+err)
+			}
+		}
 	}
 	seen := make(map[TrackID]struct{}, len(c.Tracks))
 	for i, track := range c.Tracks {
@@ -513,48 +518,52 @@ func (t Track) effectiveNamespace(defaultNamespace string) string {
 // validate checks track-level constraints for either an independent catalog or addTracks entry.
 func (t Track) validate(path string) []string {
 	var problems []string
+	prefix := ""
+	if path != "" {
+		prefix = path + ": "
+	}
 	if t.Name == "" {
-		problems = append(problems, path+": name is required")
+		problems = append(problems, prefix+"name is required")
 	}
 
 	if t.Packaging == "" {
-		problems = append(problems, path+": packaging is required")
+		problems = append(problems, prefix+"packaging is required")
 	}
 	if t.TrackDuration != nil && t.IsLive != nil && *t.IsLive {
-		problems = append(problems, path+": trackDuration must not be present when isLive is true")
+		problems = append(problems, prefix+"trackDuration must not be present when isLive is true")
 	}
 
 	switch t.Packaging {
 	case PackagingEventTimeline:
 		if t.EventType == "" {
-			problems = append(problems, path+": eventType is required for eventtimeline tracks")
+			problems = append(problems, prefix+"eventType is required for eventtimeline tracks")
 		}
 		if t.MimeType != "application/json" {
-			problems = append(problems, path+": eventtimeline tracks must use mimeType application/json")
+			problems = append(problems, prefix+"eventtimeline tracks must use mimeType application/json")
 		}
 		if len(t.Depends) == 0 {
-			problems = append(problems, path+": eventtimeline tracks must declare depends")
+			problems = append(problems, prefix+"eventtimeline tracks must declare depends")
 		}
 	case PackagingMediaTimeline:
 		if t.EventType != "" {
-			problems = append(problems, path+": eventType must not be set for mediatimeline tracks")
+			problems = append(problems, prefix+"eventType must not be set for mediatimeline tracks")
 		}
 		if t.MimeType != "application/json" {
-			problems = append(problems, path+": mediatimeline tracks must use mimeType application/json")
+			problems = append(problems, prefix+"mediatimeline tracks must use mimeType application/json")
 		}
 		if len(t.Depends) == 0 {
-			problems = append(problems, path+": mediatimeline tracks must declare depends")
+			problems = append(problems, prefix+"mediatimeline tracks must declare depends")
 		}
 	case PackagingLOC:
 		if t.EventType != "" {
-			problems = append(problems, path+": eventType must not be set for loc tracks")
+			problems = append(problems, prefix+"eventType must not be set for loc tracks")
 		}
 		if t.IsLive == nil {
-			problems = append(problems, path+": isLive is required for loc tracks")
+			problems = append(problems, prefix+"isLive is required for loc tracks")
 		}
 	default:
 		if t.EventType != "" {
-			problems = append(problems, path+": eventType must only be set for eventtimeline tracks")
+			problems = append(problems, prefix+"eventType must only be set for eventtimeline tracks")
 		}
 	}
 
@@ -1054,4 +1063,13 @@ func cloneBoolPtr(in *bool) *bool {
 	}
 	value := *in
 	return &value
+}
+
+// itoa is a simple allocation-free integer to string conversion for small integers.
+func itoa(i int) string {
+	if i >= 0 && i < 10 {
+		return string(byte('0' + i))
+	}
+	// Fallback for larger numbers
+	return fmt.Sprint(i)
 }
