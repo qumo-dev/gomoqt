@@ -4,3 +4,6 @@
 ## 2024-06-25 - Exact pre-allocation over fixed bounds
 **Learning:** For variable depth path splitting (e.g. prefix arrays), pre-calculating the exact number of segments via `strings.Count(str, "/")` and allocating the slice exactly (`make([]T, 0, n)`) is measurably faster than fixed pre-allocation (e.g., `make([]T, 0, 8)`). Removing the final `strings.Split` allocation in the `pathSegments` function further reduces GC pressure.
 **Action:** Always count known delimiters in small string parsing rather than falling back to `strings.Split` or using arbitrary fixed pre-allocations when generating slices in hot paths.
+## 2026-06-28 - Slice Allocation Optimization
+**Learning:** In Go performance optimizations, when generating slices from string splitting, using `strings.Count` to pre-calculate the exact required size, allocating the slice with exact length (e.g., `make([]T, count)`), and using direct index assignments (`slice[i] = val`) instead of allocating capacity (`make([]T, 0, count)`) and using `append()` is measurably faster. It avoids append bounds-checking overhead.
+**Action:** Use `strings.Count()` to calculate exact length and direct index assignments when parsing bounded strings into slices in hot paths.

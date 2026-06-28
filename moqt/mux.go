@@ -491,16 +491,18 @@ func prefixSegments(prefix string) []prefixSegment {
 		return []prefixSegment{str[:idx], str[idx+1:]}
 	}
 
-	segments := make([]prefixSegment, 0, n+1) // Pre-allocate with exact depth
+	segments := make([]prefixSegment, n+1) // Pre-allocate with exact depth and use index assignment
 	start := 0
+	idx := 0
 	for i := 0; i < len(str); i++ {
 		if str[i] == '/' {
-			segments = append(segments, str[start:i]) // Include empty strings
+			segments[idx] = str[start:i] // Include empty strings
 			start = i + 1
+			idx++
 		}
 	}
 	// Add last segment (always, even if empty)
-	segments = append(segments, str[start:])
+	segments[idx] = str[start:]
 	return segments
 }
 
@@ -529,15 +531,17 @@ func pathSegments(path BroadcastPath) ([]prefixSegment, string) {
 		return []prefixSegment{prefix[:idx], prefix[idx+1:]}, last
 	}
 
-	segments := make([]prefixSegment, 0, n+1)
+	segments := make([]prefixSegment, n+1)
 	start := 0
+	idx := 0
 	for i := 0; i < len(prefix); i++ {
 		if prefix[i] == '/' {
-			segments = append(segments, prefix[start:i])
+			segments[idx] = prefix[start:i]
 			start = i + 1
+			idx++
 		}
 	}
-	segments = append(segments, prefix[start:])
+	segments[idx] = prefix[start:]
 
 	return segments, last
 }
