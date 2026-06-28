@@ -1,12 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import {
-	MessageEncoder,
-	parseString,
-	parseUint8,
-	parseVarint,
-	readFull,
-	readVarint,
-} from "./message.ts";
+import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
 
 export interface FetchMessageInit {
 	broadcastPath?: string;
@@ -48,29 +41,14 @@ export class FetchMessage {
 		[, err] = await readFull(r, buf);
 		if (err) return err;
 
-		let offset = 0;
+		const d = new MessageDecoder(buf);
 
-		[this.broadcastPath, offset] = (() => {
-			const [str, n] = parseString(buf, offset);
-			return [str, offset + n];
-		})();
+		this.broadcastPath = d.string();
+		this.trackName = d.string();
+		this.priority = d.uint8();
+		this.groupSequence = d.varint();
 
-		[this.trackName, offset] = (() => {
-			const [str, n] = parseString(buf, offset);
-			return [str, offset + n];
-		})();
-
-		[this.priority, offset] = (() => {
-			const [val, n] = parseUint8(buf, offset);
-			return [val, offset + n];
-		})();
-
-		[this.groupSequence, offset] = (() => {
-			const [val, n] = parseVarint(buf, offset);
-			return [val, offset + n];
-		})();
-
-		if (offset !== msgLen) {
+		if (!d.eof()) {
 			return new Error("message length mismatch");
 		}
 

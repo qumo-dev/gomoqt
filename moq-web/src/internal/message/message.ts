@@ -521,3 +521,61 @@ export class MessageEncoder {
 		return err;
 	}
 }
+
+/**
+ * Reads a message body sequentially from a buffer, owning the current offset so
+ * callers read fields in order without threading it by hand. The synchronous
+ * mirror of {@link MessageEncoder}: a message `decode` does the async work
+ * (read the length prefix, read the body into one buffer), then walks the body
+ * with a `MessageDecoder`. Each method delegates to the matching pure `parse*`
+ * helper and advances the offset.
+ */
+export class MessageDecoder {
+	#buf: Uint8Array;
+	#offset: number = 0;
+
+	constructor(buf: Uint8Array) {
+		this.#buf = buf;
+	}
+
+	varint(): number {
+		const [v, n] = parseVarint(this.#buf, this.#offset);
+		this.#offset += n;
+		return v;
+	}
+
+	uint8(): number {
+		const [v, n] = parseUint8(this.#buf, this.#offset);
+		this.#offset += n;
+		return v;
+	}
+
+	string(): string {
+		const [v, n] = parseString(this.#buf, this.#offset);
+		this.#offset += n;
+		return v;
+	}
+
+	stringArray(): string[] {
+		const [v, n] = parseStringArray(this.#buf, this.#offset);
+		this.#offset += n;
+		return v;
+	}
+
+	/** Reads `length` raw bytes (no length prefix) as a view into the buffer. */
+	bytes(length: number): Uint8Array {
+		const out = this.#buf.subarray(this.#offset, this.#offset + length);
+		this.#offset += length;
+		return out;
+	}
+
+	/** Number of bytes left between the cursor and the end of the buffer. */
+	remaining(): number {
+		return this.#buf.length - this.#offset;
+	}
+
+	/** Whether the cursor has consumed the whole buffer. */
+	eof(): boolean {
+		return this.#offset >= this.#buf.length;
+	}
+}

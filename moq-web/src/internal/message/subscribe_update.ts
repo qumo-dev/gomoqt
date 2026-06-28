@@ -1,5 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { MessageEncoder, parseUint8, parseVarint, readFull, readVarint } from "./message.ts";
+import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
 
 export interface SubscribeUpdateMessageInit {
 	subscriberPriority?: number;
@@ -51,32 +51,13 @@ export class SubscribeUpdateMessage {
 		[, err] = await readFull(r, buf);
 		if (err) return err;
 
-		let offset = 0;
+		const d = new MessageDecoder(buf);
 
-		[this.subscriberPriority, offset] = (() => {
-			const [val, n] = parseUint8(buf, offset);
-			return [val, offset + n];
-		})();
-
-		[this.subscriberOrdered, offset] = (() => {
-			const [val, n] = parseUint8(buf, offset);
-			return [val, offset + n];
-		})();
-
-		[this.subscriberMaxLatency, offset] = (() => {
-			const [val, n] = parseVarint(buf, offset);
-			return [val, offset + n];
-		})();
-
-		[this.startGroup, offset] = (() => {
-			const [val, n] = parseVarint(buf, offset);
-			return [val, offset + n];
-		})();
-
-		[this.endGroup, offset] = (() => {
-			const [val, n] = parseVarint(buf, offset);
-			return [val, offset + n];
-		})();
+		this.subscriberPriority = d.uint8();
+		this.subscriberOrdered = d.uint8();
+		this.subscriberMaxLatency = d.varint();
+		this.startGroup = d.varint();
+		this.endGroup = d.varint();
 
 		return undefined;
 	}

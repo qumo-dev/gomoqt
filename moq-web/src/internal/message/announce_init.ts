@@ -1,5 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { MessageEncoder, parseStringArray, readFull, readVarint } from "./message.ts";
+import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
 
 export interface AnnounceInitMessageInit {
 	suffixes?: string[];
@@ -32,7 +32,8 @@ export class AnnounceInitMessage {
 		const [, err2] = await readFull(r, buf);
 		if (err2) return err2;
 
-		[this.suffixes] = parseStringArray(buf, 0);
+		const d = new MessageDecoder(buf);
+		this.suffixes = d.stringArray();
 
 		return undefined;
 	}

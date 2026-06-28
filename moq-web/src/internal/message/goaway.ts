@@ -1,5 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { MessageEncoder, parseString, readFull, readVarint } from "./message.ts";
+import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
 
 export interface GoawayMessageInit {
 	newSessionURI?: string;
@@ -26,7 +26,8 @@ export class GoawayMessage {
 		const [, err2] = await readFull(r, buf);
 		if (err2) return err2;
 
-		[this.newSessionURI] = parseString(buf, 0);
+		const d = new MessageDecoder(buf);
+		this.newSessionURI = d.string();
 
 		return undefined;
 	}

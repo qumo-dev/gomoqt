@@ -1,5 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { MessageEncoder, parseString, parseVarint, readFull, readVarint } from "./message.ts";
+import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
 
 export interface AnnounceMessageInit {
 	suffix?: string;
@@ -47,26 +47,17 @@ export class AnnounceMessage {
 		[, err] = await readFull(r, buf);
 		if (err) return err;
 
-		let offset = 0;
+		const d = new MessageDecoder(buf);
 
 		// Read AnnounceStatus as varint
-		const [status, n1] = parseVarint(buf, offset);
-		this.active = status === 1;
-		offset += n1;
+		this.active = d.varint() === 1;
 
-		[this.suffix, offset] = (() => {
-			const [val, n] = parseString(buf, offset);
-			return [val, offset + n];
-		})();
+		this.suffix = d.string();
 
-		const [hopCount, n2] = parseVarint(buf, offset);
-		offset += n2;
-
+		const hopCount = d.varint();
 		this.hopIDs = [];
 		for (let i = 0; i < hopCount; i++) {
-			const [id, n] = parseVarint(buf, offset);
-			this.hopIDs.push(id);
-			offset += n;
+			this.hopIDs.push(d.varint());
 		}
 
 		return undefined;

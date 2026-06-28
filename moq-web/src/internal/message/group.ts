@@ -1,5 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { MessageEncoder, parseVarint, readFull, readVarint } from "./message.ts";
+import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
 
 export interface GroupMessageInit {
 	subscribeId?: number;
@@ -36,14 +36,9 @@ export class GroupMessage {
 		const [, err2] = await readFull(r, buf);
 		if (err2) return err2;
 
-		let offset = 0;
-
-		[this.subscribeId, offset] = (() => {
-			const [val, n] = parseVarint(buf, offset);
-			return [val, offset + n];
-		})();
-
-		[this.sequence] = parseVarint(buf, offset);
+		const d = new MessageDecoder(buf);
+		this.subscribeId = d.varint();
+		this.sequence = d.varint();
 
 		return undefined;
 	}

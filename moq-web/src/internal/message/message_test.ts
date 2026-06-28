@@ -2,6 +2,7 @@ import { assertEquals, assertThrows } from "@std/assert";
 import { spy } from "@std/testing/mock";
 import {
 	MAX_BYTES_LENGTH,
+	MessageDecoder,
 	MessageEncoder,
 	parseBytes,
 	parseString,
@@ -624,4 +625,34 @@ Deno.test("message encode surfaces an invalid-value error", async () => {
 	// and return the error rather than rejecting.
 	const err = await new GroupMessage({ sequence: -1 }).encode(writer);
 	assertEquals(err instanceof Error, true);
+});
+
+Deno.test("MessageDecoder", async (t) => {
+	await t.step("reads fields in order, mirroring MessageEncoder", () => {
+		const e = new MessageEncoder();
+		e.varint(7);
+		e.uint8(0xab);
+		e.string("/live/alice");
+		e.stringArray(["/a", "/b"]);
+		// frame() prepends the body-length varint; read the body after it.
+		const framed = e.frame();
+		const [, n0] = parseVarint(framed, 0);
+
+		const d = new MessageDecoder(framed.subarray(n0));
+		assertEquals(d.varint(), 7);
+		assertEquals(d.uint8(), 0xab);
+		assertEquals(d.string(), "/live/alice");
+		assertEquals(d.stringArray(), ["/a", "/b"]);
+		assertEquals(d.remaining(), 0);
+		assertEquals(d.eof(), true);
+	});
+
+	await t.step("bytes(length) reads raw bytes and advances the cursor", () => {
+		const d = new MessageDecoder(new Uint8Array([1, 2, 3, 4, 5]));
+		assertEquals([...d.bytes(2)], [1, 2]);
+		assertEquals(d.remaining(), 3);
+		assertEquals(d.eof(), false);
+		assertEquals([...d.bytes(3)], [3, 4, 5]);
+		assertEquals(d.eof(), true);
+	});
 });

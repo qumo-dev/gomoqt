@@ -1,12 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import {
-	MessageEncoder,
-	parseString,
-	parseUint8,
-	parseVarint,
-	readFull,
-	readVarint,
-} from "./message.ts";
+import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
 
 export interface SubscribeMessageInit {
 	subscribeId?: number;
@@ -73,47 +66,16 @@ export class SubscribeMessage {
 		if (err) return err;
 
 		// Parse fields from the buffer
-		let offset = 0;
+		const d = new MessageDecoder(buf);
 
-		[this.subscribeId, offset] = (() => {
-			const [val, n] = parseVarint(buf, offset);
-			return [val, offset + n];
-		})();
-
-		[this.broadcastPath, offset] = (() => {
-			const [val, n] = parseString(buf, offset);
-			return [val, offset + n];
-		})();
-
-		[this.trackName, offset] = (() => {
-			const [val, n] = parseString(buf, offset);
-			return [val, offset + n];
-		})();
-
-		[this.subscriberPriority, offset] = (() => {
-			const [val, n] = parseUint8(buf, offset);
-			return [val, offset + n];
-		})();
-
-		[this.subscriberOrdered, offset] = (() => {
-			const [val, n] = parseUint8(buf, offset);
-			return [val, offset + n];
-		})();
-
-		[this.subscriberMaxLatency, offset] = (() => {
-			const [val, n] = parseVarint(buf, offset);
-			return [val, offset + n];
-		})();
-
-		[this.startGroup, offset] = (() => {
-			const [val, n] = parseVarint(buf, offset);
-			return [val, offset + n];
-		})();
-
-		[this.endGroup, offset] = (() => {
-			const [val, n] = parseVarint(buf, offset);
-			return [val, offset + n];
-		})();
+		this.subscribeId = d.varint();
+		this.broadcastPath = d.string();
+		this.trackName = d.string();
+		this.subscriberPriority = d.uint8();
+		this.subscriberOrdered = d.uint8();
+		this.subscriberMaxLatency = d.varint();
+		this.startGroup = d.varint();
+		this.endGroup = d.varint();
 
 		return undefined;
 	}

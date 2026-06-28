@@ -1,5 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { MessageEncoder, parseVarint, readFull, readVarint } from "./message.ts";
+import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
 
 export interface ProbeMessageInit {
 	bitrate?: number;
@@ -30,17 +30,12 @@ export class ProbeMessage {
 		const [, err2] = await readFull(r, buf);
 		if (err2) return err2;
 
-		let offset = 0;
+		const d = new MessageDecoder(buf);
 
-		const [bitrate, n1] = parseVarint(buf, offset);
-		this.bitrate = bitrate;
-		offset += n1;
+		this.bitrate = d.varint();
+		this.rtt = d.varint();
 
-		const [rtt, n2] = parseVarint(buf, offset);
-		this.rtt = rtt;
-		offset += n2;
-
-		if (offset !== buf.length) {
+		if (!d.eof()) {
 			return new Error("ProbeMessage: unexpected trailing bytes");
 		}
 
