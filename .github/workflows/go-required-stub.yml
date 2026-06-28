@@ -1,39 +1,61 @@
 # Companion stub for `go.yml`.
 #
-# `go.yml` is path-filtered to Go sources (`**.go`, `go.mod`, `go.sum`,
-# `magefiles/**`, `.github/workflows/go.yml`), so on a PR that touches no Go
-# files it never runs. But the repository ruleset marks `build` and `race`
-# (its two jobs) as *required* status checks — and GitHub does NOT auto-pass a
-# required check whose workflow was skipped by a path filter. The result is a
-# TS-/docs-only PR that is permanently "BLOCKED" waiting on `build`/`race` that
-# can never report.
+# `go.yml` is path-filtered to Go sources, so on a PR that touches no Go files
+# it never runs. But the repository ruleset marks `build` and `race` (its two
+# jobs) as *required* status checks, and GitHub does NOT auto-pass a required
+# check whose workflow was skipped by a path filter — so a TS-/docs-only PR sits
+# permanently "BLOCKED" on `build`/`race` that can never report.
 #
-# This stub reports those same two check contexts as passing for exactly the
-# PRs where `go.yml` does not run. The `paths-ignore` list is the complement of
-# `go.yml`'s `paths`: when every changed file is a Go path this stub is skipped
-# (the real `go.yml` runs and gates); otherwise it runs and satisfies the rule.
-# The job IDs MUST stay `build`/`race` so the reported check contexts match the
-# ones the ruleset requires.
+# This stub always runs and detects whether the PR touches Go sources:
+#   - no Go files  -> the `build`/`race` jobs run and pass, satisfying the rule;
+#   - Go files     -> they are skipped, so the real `go.yml` jobs are the only
+#                     `build`/`race` checks and remain the gate.
+# Skipping (rather than the earlier `paths-ignore`, which still ran and reported
+# success on a *mixed* Go+non-Go PR) means the stub never double-reports a
+# passing `build`/`race` alongside a failing real one. The job IDs MUST stay
+# `build`/`race` so the reported check contexts match the ones the ruleset wants.
 name: Go (required stub)
 
 on:
-  pull_request:
-    paths-ignore:
-      - "**.go"
-      - "go.mod"
-      - "go.sum"
-      - "magefiles/**"
-      - ".github/workflows/go.yml"
+  pull_request: {}
 
 permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # Same set as go.yml's `paths`: **.go, go.mod, go.sum, magefiles/**,
+          # .github/workflows/go.yml.
+          if git diff --name-only "$BASE" "$HEAD" \
+            | grep -qE '\.go$|^go\.(mod|sum)$|^magefiles/|^\.github/workflows/go\.yml$'; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: changes
+    if: needs.changes.outputs.go == 'false'
     runs-on: ubuntu-latest
     steps:
       - run: echo "No Go files changed in this PR — 'build' is not required here."
+
   race:
+    needs: changes
+    if: needs.changes.outputs.go == 'false'
     runs-on: ubuntu-latest
     steps:
       - run: echo "No Go files changed in this PR — 'race' is not required here."
