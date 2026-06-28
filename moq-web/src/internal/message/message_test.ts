@@ -1,11 +1,13 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { spy } from "@std/testing/mock";
 import {
 	MAX_BYTES_LENGTH,
+	MessageEncoder,
 	parseBytes,
 	parseString,
 	parseStringArray,
 	parseVarint,
+	putVarint,
 	readBytes,
 	readFull,
 	readString,
@@ -16,6 +18,8 @@ import {
 	writeStringArray,
 	writeVarint,
 } from "./message.ts";
+import { GroupMessage } from "./group.ts";
+import type { Writer } from "@okdaichi/golikejs/io";
 import { EOFError } from "@okdaichi/golikejs/io";
 import { Buffer } from "@okdaichi/golikejs/bytes";
 
@@ -531,4 +535,93 @@ Deno.test("message utilities", async (t) => {
 			assertEquals(err !== undefined, true);
 		},
 	);
+});
+
+Deno.test("putVarint", async (t) => {
+	await t.step("encodes each varint width round-trip", () => {
+		for (const v of [0, 63, 64, 16383, 16384, 1073741823, 2 ** 40]) {
+			const buf = new Uint8Array(8);
+			const n = putVarint(buf, 0, v);
+			const [got, read] = parseVarint(buf, 0);
+			assertEquals(got, v);
+			assertEquals(read, n);
+		}
+	});
+
+	await t.step("throws on a negative value", () => {
+		assertThrows(() => putVarint(new Uint8Array(8), 0, -1));
+	});
+
+	await t.step("throws on an out-of-range value", () => {
+		assertThrows(() => putVarint(new Uint8Array(8), 0, Number.MAX_VALUE));
+	});
+});
+
+Deno.test("MessageEncoder", async (t) => {
+	await t.step("frames body with a varint length prefix", () => {
+		const e = new MessageEncoder();
+		e.varint(7);
+		e.varint(300); // 2-byte varint
+		const out = e.frame();
+
+		const [bodyLen, n0] = parseVarint(out, 0);
+		assertEquals(bodyLen, out.length - n0);
+		const [a, na] = parseVarint(out, n0);
+		assertEquals(a, 7);
+		const [b] = parseVarint(out, n0 + na);
+		assertEquals(b, 300);
+	});
+
+	await t.step("round-trips a multi-byte UTF-8 string", () => {
+		const e = new MessageEncoder();
+		const s = "café—🎬/track";
+		e.string(s);
+		const out = e.frame();
+		const [, n0] = parseVarint(out, 0);
+		const [got] = parseString(out, n0);
+		assertEquals(got, s);
+	});
+
+	await t.step("grows beyond the initial capacity", () => {
+		const e = new MessageEncoder(8); // tiny hint forces a grow
+		const big = "x".repeat(500);
+		e.string(big);
+		const out = e.frame();
+		const [, n0] = parseVarint(out, 0);
+		const [got] = parseString(out, n0);
+		assertEquals(got, big);
+	});
+
+	await t.step("encodes a value requiring an 8-byte varint", () => {
+		const e = new MessageEncoder();
+		const v = 2 ** 40;
+		e.varint(v);
+		const out = e.frame();
+		const [, n0] = parseVarint(out, 0);
+		const [got] = parseVarint(out, n0);
+		assertEquals(got, v);
+	});
+
+	await t.step("round-trips uint8 and a string array", () => {
+		const e = new MessageEncoder();
+		e.uint8(0xff);
+		e.stringArray(["/a", "/bb", "/ccc"]);
+		const out = e.frame();
+		let off = parseVarint(out, 0)[1]; // skip body-length prefix
+		const [u, nu] = [out[off]!, 1];
+		assertEquals(u, 0xff);
+		off += nu;
+		const [arr] = parseStringArray(out, off);
+		assertEquals(arr, ["/a", "/bb", "/ccc"]);
+	});
+});
+
+Deno.test("message encode surfaces an invalid-value error", async () => {
+	const writer: Writer = {
+		write: async (p: Uint8Array): Promise<[number, Error | undefined]> => [p.length, undefined],
+	};
+	// A negative field makes MessageEncoder.varint throw; encode must catch it
+	// and return the error rather than rejecting.
+	const err = await new GroupMessage({ sequence: -1 }).encode(writer);
+	assertEquals(err instanceof Error, true);
 });
