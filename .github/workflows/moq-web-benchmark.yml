@@ -1,0 +1,136 @@
+# On-demand Deno (moq-web) micro-benchmark for performance-focused PRs.
+#
+# Triggered when the `ts-performance-check` label is added to a pull request (or
+# by manual dispatch). It runs the moq-web `deno bench` suite for BOTH the PR head
+# and the PR's base SHA back-to-back IN THE SAME JOB (same runner, same flags,
+# seconds apart) and posts a markdown comparison as a PR comment.
+#
+# Why base+PR in one job (not a pre-captured baseline): a baseline captured by a
+# separate, earlier run drifts -- different runner hardware/load or a stale commit
+# -- which surfaces as spurious uniform "changes" even for code-identical PRs.
+# Running both sides in the same job eliminates that drift. (Same pattern as the
+# Go `benchmark-label.yml`.)
+#
+# The job only runs when moq-web/** actually changed, so a Go-only or docs/CI-only
+# PR runs no benchmarks and posts no comment.
+#
+# `deno bench` has no benchstat equivalent and its sec/op is shared-runner
+# wall-time, so the comparison treats sec/op as a directional signal (±10% band).
+# allocs/B are not reported by deno bench; re-run locally to confirm a delta.
+name: Moq Web Benchmark (ts-performance-check)
+
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pull-requests: write # post/update the comparison as a PR comment
+
+jobs:
+  benchmark:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'ts-performance-check'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Checkout PR head (full history for base diff + worktree)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.HEAD_SHA }}
+          fetch-depth: 0
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v2.x
+
+      - name: Detect moq-web changes
+        id: changed
+        run: |
+          set -euo pipefail
+          # Only run when moq-web sources changed; a Go-only or docs/CI-only PR
+          # then has nothing to benchmark and posts no comment.
+          if git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" -- 'moq-web/**' | grep -q .; then
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            echo "moq-web changed -- running benchmarks."
+          else
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "No moq-web changes -- nothing to benchmark."
+          fi
+
+      - name: Run PR benchmarks
+        if: steps.changed.outputs.any == 'true'
+        working-directory: ./moq-web
+        run: |
+          set -euo pipefail
+          # Explicit file list (the suite uses *_benchmark.ts, not Deno's default
+          # *_bench.ts glob, so we don't rely on a bench-config block being present
+          # on either side).
+          files=$(find src -name '*_benchmark.ts' | sort)
+          echo "Benchmark files (PR):"; echo "$files"
+          deno bench --allow-all --json $files > "$GITHUB_WORKSPACE/pr.json"
+
+      - name: Checkout base into a worktree
+        if: steps.changed.outputs.any == 'true'
+        run: |
+          # Separate worktree so base and PR trees don't clobber each other.
+          git worktree add "$RUNNER_TEMP/base" "$BASE_SHA"
+          echo "BASE_DIR=$RUNNER_TEMP/base" >> "$GITHUB_ENV"
+
+      - name: Run base benchmarks
+        if: steps.changed.outputs.any == 'true'
+        working-directory: ${{ env.BASE_DIR }}/moq-web
+        run: |
+          set -euo pipefail
+          # Base is immutable history: a benchmark file that doesn't exist or no
+          # longer compiles there must not fail the job, so --no-check + tolerate
+          # an empty set (everything then shows as "new" in the report).
+          files=$(find src -name '*_benchmark.ts' | sort || true)
+          if [ -z "$files" ]; then
+            echo "No benchmark files on base -- emitting empty result set."
+            echo '{"benches":[]}' > "$GITHUB_WORKSPACE/base.json"
+          else
+            echo "Benchmark files (base):"; echo "$files"
+            deno bench --allow-all --no-check --json $files > "$GITHUB_WORKSPACE/base.json" || \
+              echo '{"benches":[]}' > "$GITHUB_WORKSPACE/base.json"
+          fi
+
+      - name: Build comparison comment
+        if: steps.changed.outputs.any == 'true'
+        run: |
+          deno run --allow-read --allow-write \
+            .github/scripts/deno-bench-report.ts base.json pr.json ts-bench-comment.md
+
+      - name: Post or update comment
+        if: steps.changed.outputs.any == 'true' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          # Update the existing comment in place (found by marker) so re-runs
+          # don't stack duplicates; create it on first run.
+          marker="<!-- ts-bench-report -->"
+          comment_id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --paginate --jq ".[] | select(.body | contains(\"$marker\")) | .id" | head -n1)
+          if [ -n "$comment_id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" \
+              -f body="$(cat ts-bench-comment.md)" >/dev/null
+          else
+            gh pr comment "$PR" --body-file ts-bench-comment.md
+          fi
+
+      - name: Upload benchmark output
+        if: always() && steps.changed.outputs.any == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ts-bench-perfcheck-pr-${{ github.event.pull_request.number || 'manual' }}
+          path: |
+            base.json
+            pr.json
+            ts-bench-comment.md
+          if-no-files-found: ignore
+          retention-days: 30
