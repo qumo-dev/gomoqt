@@ -1,0 +1,39 @@
+# Companion stub for `go.yml`.
+#
+# `go.yml` is path-filtered to Go sources (`**.go`, `go.mod`, `go.sum`,
+# `magefiles/**`, `.github/workflows/go.yml`), so on a PR that touches no Go
+# files it never runs. But the repository ruleset marks `build` and `race`
+# (its two jobs) as *required* status checks — and GitHub does NOT auto-pass a
+# required check whose workflow was skipped by a path filter. The result is a
+# TS-/docs-only PR that is permanently "BLOCKED" waiting on `build`/`race` that
+# can never report.
+#
+# This stub reports those same two check contexts as passing for exactly the
+# PRs where `go.yml` does not run. The `paths-ignore` list is the complement of
+# `go.yml`'s `paths`: when every changed file is a Go path this stub is skipped
+# (the real `go.yml` runs and gates); otherwise it runs and satisfies the rule.
+# The job IDs MUST stay `build`/`race` so the reported check contexts match the
+# ones the ruleset requires.
+name: Go (required stub)
+
+on:
+  pull_request:
+    paths-ignore:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "magefiles/**"
+      - ".github/workflows/go.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "No Go files changed in this PR — 'build' is not required here."
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "No Go files changed in this PR — 'race' is not required here."
