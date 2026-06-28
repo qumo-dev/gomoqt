@@ -495,9 +495,11 @@ func (s *Server) Close() error {
 			_ = s.WebTransportServer.Close()
 			close(done)
 		}()
+		timer := time.NewTimer(100 * time.Millisecond)
 		select {
 		case <-done:
-		case <-time.After(100 * time.Millisecond):
+			timer.Stop()
+		case <-timer.C:
 			// timed out waiting for Close; proceed
 		}
 	}
@@ -555,9 +557,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 			_ = s.WebTransportServer.Close()
 			close(done)
 		}()
+		timer := time.NewTimer(100 * time.Millisecond)
 		select {
 		case <-done:
-		case <-time.After(100 * time.Millisecond):
+			timer.Stop()
+		case <-timer.C:
 			// timed out waiting for Close; proceed
 		}
 	}
