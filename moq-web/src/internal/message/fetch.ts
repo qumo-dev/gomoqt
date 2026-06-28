@@ -1,6 +1,6 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
 import {
-	MessageEncoder,
+	encodeMessage,
 	parseString,
 	parseUint8,
 	parseVarint,
@@ -29,20 +29,12 @@ export class FetchMessage {
 	}
 
 	async encode(w: Writer): Promise<Error | undefined> {
-		let buf: Uint8Array;
-		try {
-			const e = new MessageEncoder();
+		return encodeMessage(w, (e) => {
 			e.string(this.broadcastPath);
 			e.string(this.trackName);
 			e.uint8(this.priority);
 			e.varint(this.groupSequence);
-			buf = e.frame();
-		} catch (err) {
-			return err as Error;
-		}
-
-		const [, err] = await w.write(buf);
-		return err;
+		});
 	}
 
 	async decode(r: Reader): Promise<Error | undefined> {

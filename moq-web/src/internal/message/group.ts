@@ -1,5 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { MessageEncoder, parseVarint, readFull, readVarint } from "./message.ts";
+import { encodeMessage, parseVarint, readFull, readVarint } from "./message.ts";
 
 export interface GroupMessageInit {
 	subscribeId?: number;
@@ -19,18 +19,10 @@ export class GroupMessage {
 	 * Encodes the message to the writer.
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
-		let buf: Uint8Array;
-		try {
-			const e = new MessageEncoder();
+		return encodeMessage(w, (e) => {
 			e.varint(this.subscribeId);
 			e.varint(this.sequence);
-			buf = e.frame();
-		} catch (err) {
-			return err as Error;
-		}
-
-		const [, err] = await w.write(buf);
-		return err;
+		});
 	}
 
 	/**

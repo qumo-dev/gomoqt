@@ -1,5 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { MessageEncoder, parseString, parseVarint, readFull, readVarint } from "./message.ts";
+import { encodeMessage, parseString, parseVarint, readFull, readVarint } from "./message.ts";
 
 export interface AnnounceMessageInit {
 	suffix?: string;
@@ -22,9 +22,7 @@ export class AnnounceMessage {
 	 * Encodes the message to the writer.
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
-		let buf: Uint8Array;
-		try {
-			const e = new MessageEncoder();
+		return encodeMessage(w, (e) => {
 			// AnnounceStatus as varint: 0x0 (ENDED) or 0x1 (ACTIVE)
 			e.varint(this.active ? 1 : 0);
 			e.string(this.suffix);
@@ -32,13 +30,7 @@ export class AnnounceMessage {
 			for (const id of this.hopIDs) {
 				e.varint(id);
 			}
-			buf = e.frame();
-		} catch (err) {
-			return err as Error;
-		}
-
-		const [, err] = await w.write(buf);
-		return err;
+		});
 	}
 
 	/**

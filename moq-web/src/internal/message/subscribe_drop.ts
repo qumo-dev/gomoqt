@@ -1,5 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { MessageEncoder, parseVarint, readFull, readVarint } from "./message.ts";
+import { encodeMessage, parseVarint, readFull, readVarint } from "./message.ts";
 
 export interface SubscribeDropMessageInit {
 	startGroup?: number;
@@ -22,19 +22,11 @@ export class SubscribeDropMessage {
 	 * Encodes the message to the writer.
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
-		let buf: Uint8Array;
-		try {
-			const e = new MessageEncoder();
+		return encodeMessage(w, (e) => {
 			e.varint(this.startGroup);
 			e.varint(this.endGroup);
 			e.varint(this.errorCode);
-			buf = e.frame();
-		} catch (err) {
-			return err as Error;
-		}
-
-		const [, err] = await w.write(buf);
-		return err;
+		});
 	}
 
 	/**
