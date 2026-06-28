@@ -1,15 +1,11 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
 import {
+	MessageEncoder,
 	parseString,
 	parseUint8,
 	parseVarint,
 	readFull,
 	readVarint,
-	stringLen,
-	varintLen,
-	writeString,
-	writeUint8,
-	writeVarint,
 } from "./message.ts";
 
 export interface FetchMessageInit {
@@ -32,35 +28,21 @@ export class FetchMessage {
 		this.groupSequence = init.groupSequence ?? 0;
 	}
 
-	get len(): number {
-		return (
-			stringLen(this.broadcastPath) +
-			stringLen(this.trackName) +
-			1 + // priority (uint8)
-			varintLen(this.groupSequence)
-		);
-	}
-
 	async encode(w: Writer): Promise<Error | undefined> {
-		const msgLen = this.len;
-		let err: Error | undefined;
+		let buf: Uint8Array;
+		try {
+			const e = new MessageEncoder();
+			e.string(this.broadcastPath);
+			e.string(this.trackName);
+			e.uint8(this.priority);
+			e.varint(this.groupSequence);
+			buf = e.frame();
+		} catch (err) {
+			return err as Error;
+		}
 
-		[, err] = await writeVarint(w, msgLen);
-		if (err) return err;
-
-		[, err] = await writeString(w, this.broadcastPath);
-		if (err) return err;
-
-		[, err] = await writeString(w, this.trackName);
-		if (err) return err;
-
-		[, err] = await writeUint8(w, this.priority);
-		if (err) return err;
-
-		[, err] = await writeVarint(w, this.groupSequence);
-		if (err) return err;
-
-		return undefined;
+		const [, err] = await w.write(buf);
+		return err;
 	}
 
 	async decode(r: Reader): Promise<Error | undefined> {

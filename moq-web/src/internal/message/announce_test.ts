@@ -96,44 +96,4 @@ Deno.test("AnnounceMessage - encode/decode roundtrip - multiple scenarios", asyn
 			assertEquals(err instanceof Error, true);
 		},
 	);
-
-	await t.step(
-		"encode should return error when writeVarint fails for status",
-		async () => {
-			let callCount = 0;
-			const mockWriter: Writer = {
-				async write(p: Uint8Array): Promise<[number, Error | undefined]> {
-					callCount++;
-					if (callCount > 1) {
-						return [0, new Error("Write failed")];
-					}
-					return [p.length, undefined];
-				},
-			};
-
-			const message = new AnnounceMessage({ suffix: "test", active: true });
-			const err = await message.encode(mockWriter);
-			assertEquals(err instanceof Error, true);
-		},
-	);
-
-	await t.step(
-		"encode should return error when writeString fails for suffix",
-		async () => {
-			let callCount = 0;
-			const mockWriter: Writer = {
-				async write(p: Uint8Array): Promise<[number, Error | undefined]> {
-					callCount++;
-					if (callCount > 2) {
-						return [0, new Error("Write failed")];
-					}
-					return [p.length, undefined];
-				},
-			};
-
-			const message = new AnnounceMessage({ suffix: "test", active: true });
-			const err = await message.encode(mockWriter);
-			assertEquals(err instanceof Error, true);
-		},
-	);
 });

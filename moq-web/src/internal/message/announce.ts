@@ -1,14 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import {
-	parseString,
-	parseVarint,
-	readFull,
-	readVarint,
-	stringLen,
-	varintLen,
-	writeString,
-	writeVarint,
-} from "./message.ts";
+import { MessageEncoder, parseString, parseVarint, readFull, readVarint } from "./message.ts";
 
 export interface AnnounceMessageInit {
 	suffix?: string;
@@ -28,44 +19,26 @@ export class AnnounceMessage {
 	}
 
 	/**
-	 * Returns the length of the message body (excluding the length prefix).
-	 */
-	get len(): number {
-		let l = varintLen(this.active ? 1 : 0) +
-			stringLen(this.suffix) +
-			varintLen(this.hopIDs.length);
-		for (const id of this.hopIDs) {
-			l += varintLen(id);
-		}
-		return l;
-	}
-
-	/**
 	 * Encodes the message to the writer.
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
-		const msgLen = this.len;
-		let err: Error | undefined;
-
-		[, err] = await writeVarint(w, msgLen);
-		if (err) return err;
-
-		// Write AnnounceStatus as varint: 0x0 (ENDED) or 0x1 (ACTIVE)
-		[, err] = await writeVarint(w, this.active ? 1 : 0);
-		if (err) return err;
-
-		[, err] = await writeString(w, this.suffix);
-		if (err) return err;
-
-		[, err] = await writeVarint(w, this.hopIDs.length);
-		if (err) return err;
-
-		for (const id of this.hopIDs) {
-			[, err] = await writeVarint(w, id);
-			if (err) return err;
+		let buf: Uint8Array;
+		try {
+			const e = new MessageEncoder();
+			// AnnounceStatus as varint: 0x0 (ENDED) or 0x1 (ACTIVE)
+			e.varint(this.active ? 1 : 0);
+			e.string(this.suffix);
+			e.varint(this.hopIDs.length);
+			for (const id of this.hopIDs) {
+				e.varint(id);
+			}
+			buf = e.frame();
+		} catch (err) {
+			return err as Error;
 		}
 
-		return undefined;
+		const [, err] = await w.write(buf);
+		return err;
 	}
 
 	/**

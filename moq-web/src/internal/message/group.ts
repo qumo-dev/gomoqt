@@ -1,5 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { parseVarint, readFull, readVarint, varintLen, writeVarint } from "./message.ts";
+import { MessageEncoder, parseVarint, readFull, readVarint } from "./message.ts";
 
 export interface GroupMessageInit {
 	subscribeId?: number;
@@ -16,29 +16,21 @@ export class GroupMessage {
 	}
 
 	/**
-	 * Returns the length of the message body (excluding the length prefix).
-	 */
-	get len(): number {
-		return varintLen(this.subscribeId) + varintLen(this.sequence);
-	}
-
-	/**
 	 * Encodes the message to the writer.
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
-		const msgLen = this.len;
-		let err: Error | undefined;
+		let buf: Uint8Array;
+		try {
+			const e = new MessageEncoder();
+			e.varint(this.subscribeId);
+			e.varint(this.sequence);
+			buf = e.frame();
+		} catch (err) {
+			return err as Error;
+		}
 
-		[, err] = await writeVarint(w, msgLen);
-		if (err) return err;
-
-		[, err] = await writeVarint(w, this.subscribeId);
-		if (err) return err;
-
-		[, err] = await writeVarint(w, this.sequence);
-		if (err) return err;
-
-		return undefined;
+		const [, err] = await w.write(buf);
+		return err;
 	}
 
 	/**

@@ -1,5 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { parseVarint, readFull, readVarint, varintLen, writeVarint } from "./message.ts";
+import { MessageEncoder, parseVarint, readFull, readVarint } from "./message.ts";
 
 export interface SubscribeDropMessageInit {
 	startGroup?: number;
@@ -19,36 +19,22 @@ export class SubscribeDropMessage {
 	}
 
 	/**
-	 * Returns the length of the message body (excluding the length prefix).
-	 */
-	get len(): number {
-		return (
-			varintLen(this.startGroup) +
-			varintLen(this.endGroup) +
-			varintLen(this.errorCode)
-		);
-	}
-
-	/**
 	 * Encodes the message to the writer.
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
-		const msgLen = this.len;
-		let err: Error | undefined;
+		let buf: Uint8Array;
+		try {
+			const e = new MessageEncoder();
+			e.varint(this.startGroup);
+			e.varint(this.endGroup);
+			e.varint(this.errorCode);
+			buf = e.frame();
+		} catch (err) {
+			return err as Error;
+		}
 
-		[, err] = await writeVarint(w, msgLen);
-		if (err) return err;
-
-		[, err] = await writeVarint(w, this.startGroup);
-		if (err) return err;
-
-		[, err] = await writeVarint(w, this.endGroup);
-		if (err) return err;
-
-		[, err] = await writeVarint(w, this.errorCode);
-		if (err) return err;
-
-		return undefined;
+		const [, err] = await w.write(buf);
+		return err;
 	}
 
 	/**

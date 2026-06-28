@@ -92,24 +92,4 @@ Deno.test("AnnounceInitMessage", async (t) => {
 			assertEquals(err instanceof Error, true);
 		},
 	);
-
-	await t.step(
-		"encode should return error when writeStringArray fails",
-		async () => {
-			let callCount = 0;
-			const mockWriter: Writer = {
-				async write(p: Uint8Array): Promise<[number, Error | undefined]> {
-					callCount++;
-					if (callCount > 1) {
-						return [0, new Error("Write failed")];
-					}
-					return [p.length, undefined];
-				},
-			};
-
-			const message = new AnnounceInitMessage({ suffixes: ["test"] });
-			const err = await message.encode(mockWriter);
-			assertEquals(err instanceof Error, true);
-		},
-	);
 });

@@ -1,13 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import {
-	parseStringArray,
-	readFull,
-	readVarint,
-	stringLen,
-	varintLen,
-	writeStringArray,
-	writeVarint,
-} from "./message.ts";
+import { MessageEncoder, parseStringArray, readFull, readVarint } from "./message.ts";
 
 export interface AnnounceInitMessageInit {
 	suffixes?: string[];
@@ -21,30 +13,20 @@ export class AnnounceInitMessage {
 	}
 
 	/**
-	 * Returns the length of the message body (excluding the length prefix).
-	 */
-	get len(): number {
-		let len = varintLen(this.suffixes.length);
-		for (const suffix of this.suffixes) {
-			len += stringLen(suffix);
-		}
-		return len;
-	}
-
-	/**
 	 * Encodes the message to the writer.
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
-		const msgLen = this.len;
-		let err: Error | undefined;
+		let buf: Uint8Array;
+		try {
+			const e = new MessageEncoder();
+			e.stringArray(this.suffixes);
+			buf = e.frame();
+		} catch (err) {
+			return err as Error;
+		}
 
-		[, err] = await writeVarint(w, msgLen);
-		if (err) return err;
-
-		[, err] = await writeStringArray(w, this.suffixes);
-		if (err) return err;
-
-		return undefined;
+		const [, err] = await w.write(buf);
+		return err;
 	}
 
 	/**

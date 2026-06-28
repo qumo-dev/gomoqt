@@ -366,3 +366,135 @@ export function parseStringArray(
 	}
 	return [arr, total];
 }
+
+// ============================================================
+// Synchronous buffer encoding (mirror of the parse* readers).
+//
+// The async write* helpers above allocate a fresh Uint8Array per call and issue
+// one `Writer.write` per field. `MessageEncoder` instead serializes a whole
+// message body into a single growable buffer with sync writes, so a message
+// encodes with one allocation and one `Writer.write` (see each message's
+// `encode`). It also encodes strings to UTF-8 exactly once — unlike the
+// `stringLen`-based sizing, which counts UTF-16 units.
+// ============================================================
+
+const utf8Encoder = new TextEncoder();
+
+/**
+ * Writes `num` as a QUIC varint into `buf` at `offset`.
+ * Returns the offset just past the written bytes.
+ * Throws on a negative or out-of-range value (matching {@link writeVarint}).
+ */
+export function putVarint(
+	buf: Uint8Array,
+	offset: number,
+	num: number,
+): number {
+	if (num < 0) {
+		throw new Error("Varint cannot be negative");
+	}
+	if (!Number.isFinite(num) || num > MAX_VARINT8) {
+		throw new RangeError("Value exceeds maximum varint size");
+	}
+
+	if (num <= MAX_VARINT1) {
+		buf[offset] = num;
+		return offset + 1;
+	} else if (num <= MAX_VARINT2) {
+		buf[offset] = (num >> 8) | 0x40;
+		buf[offset + 1] = num & 0xff;
+		return offset + 2;
+	} else if (num <= MAX_VARINT4) {
+		buf[offset] = (num >> 24) | 0x80;
+		buf[offset + 1] = (num >> 16) & 0xff;
+		buf[offset + 2] = (num >> 8) & 0xff;
+		buf[offset + 3] = num & 0xff;
+		return offset + 4;
+	} else {
+		// JavaScript bitwise operations are limited to 32 bits,
+		// so use division for shifts exceeding 32 bits.
+		buf[offset] = Math.floor(num / 0x100000000000000) | 0xc0;
+		buf[offset + 1] = Math.floor(num / 0x1000000000000) & 0xff;
+		buf[offset + 2] = Math.floor(num / 0x10000000000) & 0xff;
+		buf[offset + 3] = Math.floor(num / 0x100000000) & 0xff;
+		buf[offset + 4] = Math.floor(num / 0x1000000) & 0xff;
+		buf[offset + 5] = Math.floor(num / 0x10000) & 0xff;
+		buf[offset + 6] = Math.floor(num / 0x100) & 0xff;
+		buf[offset + 7] = num & 0xff;
+		return offset + 8;
+	}
+}
+
+/**
+ * Accumulates a message body into a single growable buffer, then frames it with
+ * a varint length prefix via {@link frame}. One allocation (plus occasional
+ * doublings) and one `Writer.write` per message, instead of one of each per
+ * field.
+ */
+export class MessageEncoder {
+	// Reserve the maximum varint width (8 bytes) at the front so the body-length
+	// prefix can be written in place by `frame()` with no extra copy.
+	static readonly #PREFIX = 8;
+
+	#buf: Uint8Array;
+	#pos: number = MessageEncoder.#PREFIX;
+
+	constructor(sizeHint: number = 64) {
+		this.#buf = new Uint8Array(MessageEncoder.#PREFIX + sizeHint);
+	}
+
+	#ensure(extra: number): void {
+		const need = this.#pos + extra;
+		if (need <= this.#buf.length) {
+			return;
+		}
+		let cap = this.#buf.length * 2;
+		while (cap < need) {
+			cap *= 2;
+		}
+		const grown = new Uint8Array(cap);
+		grown.set(this.#buf.subarray(0, this.#pos));
+		this.#buf = grown;
+	}
+
+	varint(num: number): void {
+		this.#ensure(8); // maximum varint width
+		this.#pos = putVarint(this.#buf, this.#pos, num);
+	}
+
+	uint8(v: number): void {
+		this.#ensure(1);
+		this.#buf[this.#pos++] = v & 0xff;
+	}
+
+	bytes(data: Uint8Array): void {
+		this.varint(data.length);
+		this.#ensure(data.length);
+		this.#buf.set(data, this.#pos);
+		this.#pos += data.length;
+	}
+
+	string(str: string): void {
+		this.bytes(utf8Encoder.encode(str));
+	}
+
+	stringArray(arr: string[]): void {
+		this.varint(arr.length);
+		for (const str of arr) {
+			this.string(str);
+		}
+	}
+
+	/**
+	 * Returns the encoded message: a varint length prefix followed by the body.
+	 * The result is a view into the internal buffer — write it before reusing or
+	 * discarding the encoder.
+	 */
+	frame(): Uint8Array {
+		const bodyLen = this.#pos - MessageEncoder.#PREFIX;
+		const width = varintLen(bodyLen);
+		const start = MessageEncoder.#PREFIX - width;
+		putVarint(this.#buf, start, bodyLen);
+		return this.#buf.subarray(start, this.#pos);
+	}
+}

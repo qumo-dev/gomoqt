@@ -1,15 +1,11 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
 import {
+	MessageEncoder,
 	parseString,
 	parseUint8,
 	parseVarint,
 	readFull,
 	readVarint,
-	stringLen,
-	varintLen,
-	writeString,
-	writeUint8,
-	writeVarint,
 } from "./message.ts";
 
 export interface SubscribeMessageInit {
@@ -45,56 +41,27 @@ export class SubscribeMessage {
 	}
 
 	/**
-	 * Returns the length of the message body (excluding the length prefix).
-	 */
-	get len(): number {
-		return (
-			varintLen(this.subscribeId) +
-			stringLen(this.broadcastPath) +
-			stringLen(this.trackName) +
-			1 + // subscriberPriority (uint8)
-			1 + // subscriberOrdered (uint8)
-			varintLen(this.subscriberMaxLatency) +
-			varintLen(this.startGroup) +
-			varintLen(this.endGroup)
-		);
-	}
-
-	/**
 	 * Encodes the message to the writer.
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
-		const msgLen = this.len;
-		let err: Error | undefined;
+		let buf: Uint8Array;
+		try {
+			const e = new MessageEncoder();
+			e.varint(this.subscribeId);
+			e.string(this.broadcastPath);
+			e.string(this.trackName);
+			e.uint8(this.subscriberPriority);
+			e.uint8(this.subscriberOrdered);
+			e.varint(this.subscriberMaxLatency);
+			e.varint(this.startGroup);
+			e.varint(this.endGroup);
+			buf = e.frame();
+		} catch (err) {
+			return err as Error;
+		}
 
-		[, err] = await writeVarint(w, msgLen);
-		if (err) return err;
-
-		[, err] = await writeVarint(w, this.subscribeId);
-		if (err) return err;
-
-		[, err] = await writeString(w, this.broadcastPath);
-		if (err) return err;
-
-		[, err] = await writeString(w, this.trackName);
-		if (err) return err;
-
-		[, err] = await writeUint8(w, this.subscriberPriority);
-		if (err) return err;
-
-		[, err] = await writeUint8(w, this.subscriberOrdered);
-		if (err) return err;
-
-		[, err] = await writeVarint(w, this.subscriberMaxLatency);
-		if (err) return err;
-
-		[, err] = await writeVarint(w, this.startGroup);
-		if (err) return err;
-
-		[, err] = await writeVarint(w, this.endGroup);
-		if (err) return err;
-
-		return undefined;
+		const [, err] = await w.write(buf);
+		return err;
 	}
 
 	/**

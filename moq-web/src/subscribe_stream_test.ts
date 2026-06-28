@@ -276,12 +276,12 @@ Deno.test("ReceiveSubscribeStream writeInfo sends SUBSCRIBE_OK on every call", a
 	});
 	const rss = new ReceiveSubscribeStream(ctx, s, subscribe);
 
-	// Each writeInfo call should send a SUBSCRIBE_OK (1 type byte + 6 encode writes = 7 each)
+	// Each writeInfo call should send a SUBSCRIBE_OK (1 type byte + 1 encode write = 2 each)
 	await rss.writeInfo();
 	await rss.writeInfo();
 	await rss.writeInfo();
 
-	assertEquals(writtenData.length, 21);
+	assertEquals(writtenData.length, 6);
 });
 
 Deno.test("ReceiveSubscribeStream ensureInfo is only executed once even with concurrent calls", async () => {
@@ -318,6 +318,6 @@ Deno.test("ReceiveSubscribeStream ensureInfo is only executed once even with con
 	for (const r of results) {
 		assertEquals(r, undefined);
 	}
-	// Only one SUBSCRIBE_OK should be written (1 type byte + 6 encode writes = 7)
-	assertEquals(writtenData.length, 7);
+	// Only one SUBSCRIBE_OK should be written (1 type byte + 1 encode write = 2)
+	assertEquals(writtenData.length, 2);
 });

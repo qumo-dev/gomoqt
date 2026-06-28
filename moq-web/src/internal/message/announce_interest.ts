@@ -1,14 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import {
-	parseString,
-	parseVarint,
-	readFull,
-	readVarint,
-	stringLen,
-	varintLen,
-	writeString,
-	writeVarint,
-} from "./message.ts";
+import { MessageEncoder, parseString, parseVarint, readFull, readVarint } from "./message.ts";
 
 export interface AnnounceInterestMessageInit {
 	prefix?: string;
@@ -25,29 +16,21 @@ export class AnnounceInterestMessage {
 	}
 
 	/**
-	 * Returns the length of the message body (excluding the length prefix).
-	 */
-	get len(): number {
-		return stringLen(this.prefix) + varintLen(this.excludeHop);
-	}
-
-	/**
 	 * Encodes the message to the writer.
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
-		const msgLen = this.len;
-		let err: Error | undefined;
+		let buf: Uint8Array;
+		try {
+			const e = new MessageEncoder();
+			e.string(this.prefix);
+			e.varint(this.excludeHop);
+			buf = e.frame();
+		} catch (err) {
+			return err as Error;
+		}
 
-		[, err] = await writeVarint(w, msgLen);
-		if (err) return err;
-
-		[, err] = await writeString(w, this.prefix);
-		if (err) return err;
-
-		[, err] = await writeVarint(w, this.excludeHop);
-		if (err) return err;
-
-		return undefined;
+		const [, err] = await w.write(buf);
+		return err;
 	}
 
 	/**
