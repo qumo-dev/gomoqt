@@ -175,19 +175,23 @@ func main() {
 	})
 
 	// Wait for the handler to cleanup
+	timer := time.NewTimer(5 * time.Second)
 	select {
 	case <-doneCh:
+		timer.Stop()
 		// Handler completed normally
-	case <-time.After(5 * time.Second):
+	case <-timer.C:
 		fmt.Println("publish handler did not complete in time")
 	}
 
 	// Wait for GOAWAY from server
 	fmt.Print("Waiting for GOAWAY...")
+	goawayTimer := time.NewTimer(10 * time.Second)
 	select {
 	case uri := <-goawayCh:
+		goawayTimer.Stop()
 		fmt.Printf("ok (newSessionURI: %s)\n", uri)
-	case <-time.After(10 * time.Second):
+	case <-goawayTimer.C:
 		fmt.Println("failed (timed out)")
 	}
 }
