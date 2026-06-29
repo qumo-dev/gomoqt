@@ -10,6 +10,17 @@ import { ByteSink, ByteSinkFunc, ByteSource, Frame } from "./frame.ts";
 import { EOFError } from "@okdaichi/golikejs/io";
 
 /**
+ * Maximum frame payload size accepted by {@link GroupReader.readFrame} (50 MB).
+ *
+ * `readFrame` allocates a buffer sized by a varint length prefix taken straight
+ * from the peer, so an unbounded length is an out-of-memory denial-of-service
+ * vector: one packet can ask for a multi-gigabyte allocation. Lengths above
+ * this limit are rejected before allocating. Mirrors the Go implementation's
+ * `message.MaxMessageSize` (`moqt/frame.go`).
+ */
+export const MAX_FRAME_SIZE = 50 * 1024 * 1024;
+
+/**
  * Writes frames to a single group within a track.
  *
  * Obtained from {@link TrackWriter.openGroup}. Each frame is length-prefixed
@@ -122,6 +133,14 @@ export class GroupReader {
 		// and break out of their read loops (see `frames()` below).
 		if (err1) {
 			return err1;
+		}
+
+		// Reject an oversized length before allocating — guards against an
+		// out-of-memory DoS from an untrusted peer (see {@link MAX_FRAME_SIZE}).
+		if (len > MAX_FRAME_SIZE) {
+			return new Error(
+				`moq: frame length ${len} exceeds maximum ${MAX_FRAME_SIZE}`,
+			);
 		}
 
 		try {
