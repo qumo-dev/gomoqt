@@ -71,6 +71,21 @@ export interface SessionStats {
 	bytesReceived: number;
 }
 
+/**
+ * Why a {@link Session} closed, in MOQ terms (not the underlying transport's
+ * close object). Resolved by {@link Session.closed}.
+ */
+export interface MOQCloseInfo {
+	/**
+	 * The MOQ {@link SessionErrorCode}: `NoError` (0) on a graceful close,
+	 * the application code on {@link Session.closeWithError}, or a best-effort
+	 * code for a peer/transport-initiated close.
+	 */
+	code: SessionErrorCode;
+	/** A short MOQ-side description of the close. */
+	reason: string;
+}
+
 /** Options for constructing a {@link Session}. */
 export interface SessionInit {
 	/** The underlying WebTransport (or compatible) stream connection. */
@@ -100,14 +115,16 @@ export class Session {
 	/** Resolves when the underlying transport is ready. */
 	readonly ready: Promise<void>;
 	/**
-	 * Resolves when the session terminates — whether via {@link close},
-	 * {@link closeWithError}, a peer-initiated close, or the underlying
-	 * transport dropping. Never rejects.
+	 * Resolves with a MOQ-level {@link MOQCloseInfo} when the session
+	 * terminates — whether via {@link close}, {@link closeWithError}, a
+	 * peer-initiated close, or the transport dropping. Never rejects.
 	 *
-	 * Mirrors Go's `Session.Context().Done()` and WebTransport's `closed`,
-	 * giving consumers a single primitive to await for reconnect/cleanup.
+	 * Mirrors Go's `Session.Context().Done()`, giving consumers a single
+	 * primitive to await for reconnect/cleanup. The underlying transport's
+	 * raw close object is intentionally not exposed.
 	 */
-	readonly closed: Promise<void>;
+	readonly closed: Promise<MOQCloseInfo>;
+	#resolveClosed!: (info: MOQCloseInfo) => void;
 	#webtransport: StreamConn;
 	#ctx: Context;
 	#cancelFunc: CancelCauseFunc;
@@ -149,34 +166,38 @@ export class Session {
 		const [ctx, cancel] = withCancelCause(background());
 		this.#ctx = ctx;
 		this.#cancelFunc = cancel;
-		this.closed = this.#ctx.done();
+		this.closed = new Promise<MOQCloseInfo>((resolve) => {
+			this.#resolveClosed = resolve;
+		});
 		this.ready = this.#setup();
 
-		this.#webtransport.closed
-			.then((info) => {
-				if (this.#ctx.err()) {
-					return;
-				}
-
-				if (info.closeCode === undefined && info.reason === undefined) {
-					cancel(new Error("webtransport: connection closed unexpectedly"));
-					return;
-				}
-
+		// Cancel the session context on an involuntary (peer/transport) close
+		// and resolve `closed` with a MOQ-level description. A local close()/
+		// closeWithError() resolves `closed` first, so its info wins; a later
+		// resolve here is a no-op.
+		const onTransportClosed = (info: WebTransportCloseInfo): void => {
+			const unexpected = info.closeCode === undefined && info.reason === undefined;
+			if (!this.#ctx.err()) {
 				cancel(
-					new StreamConnError(
-						info as StreamConnErrorInfo,
-						true,
-					),
+					unexpected
+						? new Error("webtransport: connection closed unexpectedly")
+						: new StreamConnError(info as StreamConnErrorInfo, true),
 				);
-			})
-			.catch((info) => {
-				if (this.#ctx.err()) {
-					return;
-				}
-
-				cancel(new Error(String(info)));
+			}
+			this.#resolveClosed({
+				code: unexpected ? SessionErrorCode.InternalError : (info.closeCode ?? 0),
+				reason: unexpected ? "connection closed unexpectedly" : "session closed",
 			});
+		};
+		this.#webtransport.closed.then(onTransportClosed, (reason) => {
+			if (!this.#ctx.err()) {
+				cancel(new Error(String(reason)));
+			}
+			this.#resolveClosed({
+				code: SessionErrorCode.InternalError,
+				reason: "connection closed unexpectedly",
+			});
+		});
 	}
 
 	async #setup(): Promise<void> {
@@ -788,6 +809,7 @@ export class Session {
 
 		// Cancel context first to signal shutdown to all listeners
 		this.#cancelFunc(new Error("session closing"));
+		this.#resolveClosed({ code: SessionErrorCode.NoError, reason: "No Error" });
 
 		this.#webtransport.close({
 			closeCode: 0x0, // Normal closure
@@ -824,6 +846,7 @@ export class Session {
 
 		// Cancel context first to signal shutdown to all listeners
 		this.#cancelFunc(new Error(message));
+		this.#resolveClosed({ code, reason: message });
 
 		this.#webtransport.close({
 			closeCode: code,
