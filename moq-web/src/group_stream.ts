@@ -6,7 +6,7 @@ import type { GroupMessage } from "./internal/message/mod.ts";
 import { readFull, readVarint, writeVarint } from "./internal/message/mod.ts";
 import { GroupErrorCode } from "./error.ts";
 import { GroupSequence } from "./alias.ts";
-import { ByteSink, ByteSinkFunc, ByteSource, Frame } from "./frame.ts";
+import { BytesBuffer, ByteSink, ByteSinkFunc, ByteSource, Frame } from "./frame.ts";
 import { EOFError } from "@okdaichi/golikejs/io";
 
 /**
@@ -144,6 +144,18 @@ export class GroupReader {
 		}
 
 		try {
+			// Fast path: a BytesBuffer (Frame) sink can be filled in place, so
+			// read straight into its buffer instead of allocating a temporary and
+			// copying it back in via write(). This is the `frames()` loop's case.
+			if (sink instanceof BytesBuffer) {
+				const dst = sink.reserve(len);
+				const [, err2] = await readFull(this.#reader, dst);
+				if (err2) {
+					return err2;
+				}
+				return undefined;
+			}
+
 			// Create a buffer for reading
 			const buf = new Uint8Array(len);
 

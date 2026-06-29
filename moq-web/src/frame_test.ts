@@ -1,5 +1,25 @@
 import { assertEquals, assertThrows } from "@std/assert";
-import { Frame } from "./frame.ts";
+import { BytesBuffer, Frame } from "./frame.ts";
+
+Deno.test("frame - BytesBuffer.reserve", async (t) => {
+	await t.step("returns a writable view and sets length (no grow)", () => {
+		const b = new BytesBuffer(new ArrayBuffer(8));
+		const dst = b.reserve(4);
+		assertEquals(dst.byteLength, 4);
+		dst.set([1, 2, 3, 4]);
+		assertEquals(b.byteLength, 4);
+		assertEquals([...b.bytes], [1, 2, 3, 4]);
+	});
+
+	await t.step("grows when capacity is insufficient", () => {
+		const b = new BytesBuffer(new ArrayBuffer(2)); // smaller than requested
+		const dst = b.reserve(5);
+		assertEquals(dst.byteLength, 5);
+		dst.set([9, 8, 7, 6, 5]);
+		assertEquals(b.byteLength, 5);
+		assertEquals([...b.bytes], [9, 8, 7, 6, 5]);
+	});
+});
 
 Deno.test("frame - BytesFrame basic operations", async (t) => {
 	await t.step("byteLength reports correctly", () => {
