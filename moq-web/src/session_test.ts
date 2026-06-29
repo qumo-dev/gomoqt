@@ -295,20 +295,20 @@ Deno.test({
 			assertEquals(raced, sentinel);
 
 			await session.close();
-			// Resolves (does not reject) after close(); a hang fails the test.
-			await session.closed;
+			// Resolves (does not reject) with the MOQ-level close info.
+			assertEquals(await session.closed, { code: 0, reason: "No Error" });
 		});
 
-		await t.step("closed resolves after closeWithError()", async () => {
+		await t.step("closed resolves with the closeWithError info", async () => {
 			const mock = new MockWebTransportSession({});
 			const session = new Session({ transport: mock });
 			await session.ready;
 
 			await session.closeWithError(1, "boom");
-			await session.closed;
+			assertEquals(await session.closed, { code: 1, reason: "boom" });
 		});
 
-		await t.step("closed resolves when the transport drops", async () => {
+		await t.step("closed resolves with a MOQ info on transport drop", async () => {
 			let dropTransport!: (info: WebTransportCloseInfo) => void;
 			const closedPromise = new Promise<WebTransportCloseInfo>((r) => {
 				dropTransport = r;
@@ -318,8 +318,9 @@ Deno.test({
 			await session.ready;
 
 			// Simulate an involuntary transport close (no local close() call).
+			// The transport's raw reason is not surfaced — only the MOQ code.
 			dropTransport({ closeCode: 1, reason: "connection lost" });
-			await session.closed;
+			assertEquals(await session.closed, { code: 1, reason: "session closed" });
 		});
 
 		await t.step(
