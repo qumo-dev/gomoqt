@@ -2,6 +2,7 @@ package moqt
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -73,6 +74,30 @@ func BenchmarkBroadcastPath_String(b *testing.B) {
 
 			for i := 0; i < b.N; i++ {
 				_ = string(path)
+			}
+		})
+	}
+}
+
+// BenchmarkGroupSequence_String benchmarks GroupSequence string conversion,
+// which the optimized path renders via strconv.FormatUint instead of
+// fmt.Sprintf. Sequence numbers span the varint width range so the formatting
+// cost is measured across short and long decimal renderings.
+func BenchmarkGroupSequence_String(b *testing.B) {
+	seqs := []GroupSequence{
+		1,
+		1 << 16,
+		1 << 32,
+		MaxGroupSequence,
+	}
+
+	for _, seq := range seqs {
+		b.Run(strconv.FormatUint(uint64(seq), 10), func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				pathSinkStr = seq.String()
 			}
 		})
 	}
