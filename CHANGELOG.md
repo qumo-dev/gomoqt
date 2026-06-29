@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+> **TS release — `@qumo/moq` v0.16.1 (JSR, 2026-06-30).** Patch bump of the TypeScript (`moq-web`) package only. The Go module (`moqt`) is unchanged and **not** re-released; the `moqt` entries below remain unreleased. This JSR release publishes every `moq-web` entry below (the `### Added`, `### Changed`, and `### Fixed (Security)` bullets) — notably `Session.closed`/`MOQCloseInfo`, the message-codec `MessageEncoder`/`MessageDecoder`, and the `GroupReader.readFrame` buffer-reuse + `MAX_FRAME_SIZE` OOM guard.
+
 ### Added
 
 - **moqt:** New benchmark coverage for previously-unbenched routing/path primitives: `BenchmarkPrefixSegments` (the `prefixSegments` sibling of `pathSegments` — rewritten in #253 but, unlike `pathSegments`, had no dedicated benchmark), `BenchmarkBroadcastPath_HasPrefix/GetSuffix/Extension/Equal`, and `BenchmarkVarintLen/StringLen/BytesLen/StringArrayLen` (the message pre-sizing helpers called by every Encode). All report 0 allocs/op except `prefixSegments`, which allocates one segment slice scaling with depth.
