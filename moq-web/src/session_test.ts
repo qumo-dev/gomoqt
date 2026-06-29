@@ -281,6 +281,47 @@ Deno.test({
 			await session.close();
 		});
 
+		await t.step("closed stays pending until close()", async () => {
+			const mock = new MockWebTransportSession({});
+			const session = new Session({ transport: mock });
+			await session.ready;
+
+			// closed must not resolve while the session is live.
+			const sentinel = Symbol("pending");
+			const raced = await Promise.race([
+				session.closed.then(() => "closed" as const),
+				new Promise<typeof sentinel>((r) => setTimeout(() => r(sentinel), 0)),
+			]);
+			assertEquals(raced, sentinel);
+
+			await session.close();
+			// Resolves (does not reject) after close(); a hang fails the test.
+			await session.closed;
+		});
+
+		await t.step("closed resolves after closeWithError()", async () => {
+			const mock = new MockWebTransportSession({});
+			const session = new Session({ transport: mock });
+			await session.ready;
+
+			await session.closeWithError(1, "boom");
+			await session.closed;
+		});
+
+		await t.step("closed resolves when the transport drops", async () => {
+			let dropTransport!: (info: WebTransportCloseInfo) => void;
+			const closedPromise = new Promise<WebTransportCloseInfo>((r) => {
+				dropTransport = r;
+			});
+			const mock = new MockWebTransportSession({ closedPromise });
+			const session = new Session({ transport: mock });
+			await session.ready;
+
+			// Simulate an involuntary transport close (no local close() call).
+			dropTransport({ closeCode: 1, reason: "connection lost" });
+			await session.closed;
+		});
+
 		await t.step(
 			"constructor starts without session setup handshake",
 			async () => {
