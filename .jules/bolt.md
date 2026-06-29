@@ -4,3 +4,7 @@
 ## 2024-06-25 - Exact pre-allocation over fixed bounds
 **Learning:** For variable depth path splitting (e.g. prefix arrays), pre-calculating the exact number of segments via `strings.Count(str, "/")` and allocating the slice exactly (`make([]T, 0, n)`) is measurably faster than fixed pre-allocation (e.g., `make([]T, 0, 8)`). Removing the final `strings.Split` allocation in the `pathSegments` function further reduces GC pressure.
 **Action:** Always count known delimiters in small string parsing rather than falling back to `strings.Split` or using arbitrary fixed pre-allocations when generating slices in hot paths.
+
+## 2024-05-18 - Optimize BroadcastPath String Operations
+**Learning:** For strongly typed strings wrapping byte slices/strings (e.g. `BroadcastPath string`), standard library functions like `strings.HasPrefix` and `strings.TrimPrefix` can be slower than direct slice-based equality checks (`string(bc[:len(prefix)]) == prefix`) or manual slicing (`string(bc[len(prefix):])`) due to overhead. Replacing `strings.LastIndex` with `strings.LastIndexByte` for single characters like `.` is also faster.
+**Action:** When implementing basic prefix/suffix string matching on hot paths, prioritize direct byte slicing and `IndexByte`/`LastIndexByte` over more generic `strings` package functions to minimize overhead.
