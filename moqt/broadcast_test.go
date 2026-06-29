@@ -29,38 +29,6 @@ func TestBroadcastRegisterAndServeTrack(t *testing.T) {
 	}
 }
 
-func TestBroadcastRegisterRejectsInvalidInput(t *testing.T) {
-	tests := map[string]struct {
-		name         TrackName
-		handler      TrackHandler
-		errorMessage string
-	}{
-		"empty track name": {
-			name:         "",
-			handler:      TrackHandlerFunc(func(*TrackWriter) {}),
-			errorMessage: "track name is required",
-		},
-		"nil handler": {
-			name:         "video",
-			handler:      nil,
-			errorMessage: "track handler cannot be nil",
-		},
-		"typed nil handler func": {
-			name:         "video",
-			handler:      TrackHandlerFunc(nil),
-			errorMessage: "track handler function cannot be nil",
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			broadcast := NewBroadcast()
-			err := broadcast.Register(tt.name, tt.handler)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), tt.errorMessage)
-		})
-	}
-}
 
 func TestBroadcastRemoveClosesActiveTracks(t *testing.T) {
 	broadcast := NewBroadcast()
@@ -289,8 +257,72 @@ func TestBroadcastClose_MultipleHandlers(t *testing.T) {
 	assert.Equal(t, reflect.ValueOf(NotFoundTrackHandler).Pointer(), reflect.ValueOf(broadcast.Handler("audio")).Pointer())
 }
 
-func TestBroadcastRegisterOnNilBroadcast(t *testing.T) {
-	var broadcast *Broadcast
-	err := broadcast.Register("video", TrackHandlerFunc(func(tw *TrackWriter) {}))
-	assert.Error(t, err)
+
+func TestBroadcast_Register(t *testing.T) {
+	dummyHandler := TrackHandlerFunc(func(*TrackWriter) {})
+
+	tests := []struct {
+		name         string
+		broadcast    *Broadcast
+		trackName    TrackName
+		handler      TrackHandler
+		wantErr      string
+	}{
+		{
+			name:      "valid registration",
+			broadcast: NewBroadcast(),
+			trackName: "video",
+			handler:   dummyHandler,
+			wantErr:   "",
+		},
+		{
+			name:      "valid registration zero value",
+			broadcast: &Broadcast{},
+			trackName: "video",
+			handler:   dummyHandler,
+			wantErr:   "",
+		},
+		{
+			name:      "nil broadcast",
+			broadcast: nil,
+			trackName: "video",
+			handler:   dummyHandler,
+			wantErr:   "moqt: nil broadcast",
+		},
+		{
+			name:      "empty track name",
+			broadcast: NewBroadcast(),
+			trackName: "",
+			handler:   dummyHandler,
+			wantErr:   "moqt: track name is required",
+		},
+		{
+			name:      "nil handler",
+			broadcast: NewBroadcast(),
+			trackName: "video",
+			handler:   nil,
+			wantErr:   "moqt: track handler cannot be nil",
+		},
+		{
+			name:      "typed nil handler func",
+			broadcast: NewBroadcast(),
+			trackName: "video",
+			handler:   TrackHandlerFunc(nil),
+			wantErr:   "moqt: track handler function cannot be nil",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.broadcast.Register(tt.trackName, tt.handler)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+			} else {
+				require.NoError(t, err)
+				assert.NotNil(t, tt.broadcast.trackHandlers)
+				assert.Contains(t, tt.broadcast.trackHandlers, tt.trackName)
+			}
+		})
+	}
 }
