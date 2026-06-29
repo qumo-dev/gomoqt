@@ -1,4 +1,4 @@
-import { assertEquals, assertThrows } from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { spy } from "@std/testing/mock";
 import {
 	MAX_BYTES_LENGTH,
@@ -617,14 +617,14 @@ Deno.test("MessageEncoder", async (t) => {
 	});
 });
 
-Deno.test("message encode surfaces an invalid-value error", async () => {
+Deno.test("message encode rejects on an invalid field value", async () => {
 	const writer: Writer = {
 		write: async (p: Uint8Array): Promise<[number, Error | undefined]> => [p.length, undefined],
 	};
-	// A negative field makes MessageEncoder.varint throw; encode must catch it
-	// and return the error rather than rejecting.
-	const err = await new GroupMessage({ sequence: -1 }).encode(writer);
-	assertEquals(err instanceof Error, true);
+	// A negative field makes MessageEncoder.varint throw. encode builds inline
+	// with no try/catch, so it fails fast (rejects) on this programmer error
+	// rather than returning it — a real write failure is still returned.
+	await assertRejects(() => new GroupMessage({ sequence: -1 }).encode(writer));
 });
 
 Deno.test("MessageDecoder", async (t) => {

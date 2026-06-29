@@ -16,10 +16,11 @@ export class ProbeMessage {
 	}
 
 	async encode(w: Writer): Promise<Error | undefined> {
-		return MessageEncoder.encode(w, (e) => {
-			e.varint(this.bitrate);
-			e.varint(this.rtt);
-		});
+		const e = new MessageEncoder();
+		e.varint(this.bitrate);
+		e.varint(this.rtt);
+		const [, err] = await w.write(e.frame());
+		return err;
 	}
 
 	async decode(r: Reader): Promise<Error | undefined> {

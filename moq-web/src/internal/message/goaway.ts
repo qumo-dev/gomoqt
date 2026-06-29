@@ -13,9 +13,10 @@ export class GoawayMessage {
 	}
 
 	async encode(w: Writer): Promise<Error | undefined> {
-		return MessageEncoder.encode(w, (e) => {
-			e.string(this.newSessionURI);
-		});
+		const e = new MessageEncoder();
+		e.string(this.newSessionURI);
+		const [, err] = await w.write(e.frame());
+		return err;
 	}
 
 	async decode(r: Reader): Promise<Error | undefined> {

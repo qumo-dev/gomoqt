@@ -22,11 +22,12 @@ export class SubscribeDropMessage {
 	 * Encodes the message to the writer.
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
-		return MessageEncoder.encode(w, (e) => {
-			e.varint(this.startGroup);
-			e.varint(this.endGroup);
-			e.varint(this.errorCode);
-		});
+		const e = new MessageEncoder();
+		e.varint(this.startGroup);
+		e.varint(this.endGroup);
+		e.varint(this.errorCode);
+		const [, err] = await w.write(e.frame());
+		return err;
 	}
 
 	/**

@@ -28,13 +28,14 @@ export class SubscribeUpdateMessage {
 	 * Encodes the message to the writer.
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
-		return MessageEncoder.encode(w, (e) => {
-			e.uint8(this.subscriberPriority);
-			e.uint8(this.subscriberOrdered);
-			e.varint(this.subscriberMaxLatency);
-			e.varint(this.startGroup);
-			e.varint(this.endGroup);
-		});
+		const e = new MessageEncoder();
+		e.uint8(this.subscriberPriority);
+		e.uint8(this.subscriberOrdered);
+		e.varint(this.subscriberMaxLatency);
+		e.varint(this.startGroup);
+		e.varint(this.endGroup);
+		const [, err] = await w.write(e.frame());
+		return err;
 	}
 
 	/**

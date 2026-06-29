@@ -16,9 +16,10 @@ export class AnnounceInitMessage {
 	 * Encodes the message to the writer.
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
-		return MessageEncoder.encode(w, (e) => {
-			e.stringArray(this.suffixes);
-		});
+		const e = new MessageEncoder();
+		e.stringArray(this.suffixes);
+		const [, err] = await w.write(e.frame());
+		return err;
 	}
 
 	/**

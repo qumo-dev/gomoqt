@@ -22,15 +22,16 @@ export class AnnounceMessage {
 	 * Encodes the message to the writer.
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
-		return MessageEncoder.encode(w, (e) => {
-			// AnnounceStatus as varint: 0x0 (ENDED) or 0x1 (ACTIVE)
-			e.varint(this.active ? 1 : 0);
-			e.string(this.suffix);
-			e.varint(this.hopIDs.length);
-			for (const id of this.hopIDs) {
-				e.varint(id);
-			}
-		});
+		const e = new MessageEncoder();
+		// AnnounceStatus as varint: 0x0 (ENDED) or 0x1 (ACTIVE)
+		e.varint(this.active ? 1 : 0);
+		e.string(this.suffix);
+		e.varint(this.hopIDs.length);
+		for (const id of this.hopIDs) {
+			e.varint(id);
+		}
+		const [, err] = await w.write(e.frame());
+		return err;
 	}
 
 	/**

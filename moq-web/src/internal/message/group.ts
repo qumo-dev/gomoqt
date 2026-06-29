@@ -19,10 +19,11 @@ export class GroupMessage {
 	 * Encodes the message to the writer.
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
-		return MessageEncoder.encode(w, (e) => {
-			e.varint(this.subscribeId);
-			e.varint(this.sequence);
-		});
+		const e = new MessageEncoder();
+		e.varint(this.subscribeId);
+		e.varint(this.sequence);
+		const [, err] = await w.write(e.frame());
+		return err;
 	}
 
 	/**

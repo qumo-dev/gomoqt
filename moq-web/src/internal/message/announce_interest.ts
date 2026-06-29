@@ -19,10 +19,11 @@ export class AnnounceInterestMessage {
 	 * Encodes the message to the writer.
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
-		return MessageEncoder.encode(w, (e) => {
-			e.string(this.prefix);
-			e.varint(this.excludeHop);
-		});
+		const e = new MessageEncoder();
+		e.string(this.prefix);
+		e.varint(this.excludeHop);
+		const [, err] = await w.write(e.frame());
+		return err;
 	}
 
 	/**
