@@ -65,24 +65,4 @@ Deno.test("GoawayMessage - encode/decode roundtrip - multiple scenarios", async 
 			assertEquals(err instanceof Error, true);
 		},
 	);
-
-	await t.step(
-		"encode should return error when writeString fails",
-		async () => {
-			let callCount = 0;
-			const mockWriter: Writer = {
-				async write(p: Uint8Array): Promise<[number, Error | undefined]> {
-					callCount++;
-					if (callCount > 1) {
-						return [0, new Error("Write failed on string")];
-					}
-					return [p.length, undefined];
-				},
-			};
-
-			const message = new GoawayMessage({ newSessionURI: "https://example.com" });
-			const err = await message.encode(mockWriter);
-			assertEquals(err instanceof Error, true);
-		},
-	);
 });

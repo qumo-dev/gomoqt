@@ -1,5 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { parseVarint, readFull, readVarint, varintLen, writeVarint } from "./message.ts";
+import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
 
 export interface ProbeMessageInit {
 	bitrate?: number;
@@ -15,24 +15,12 @@ export class ProbeMessage {
 		this.rtt = init.rtt ?? 0;
 	}
 
-	get len(): number {
-		return varintLen(this.bitrate) + varintLen(this.rtt);
-	}
-
 	async encode(w: Writer): Promise<Error | undefined> {
-		const msgLen = this.len;
-		let err: Error | undefined;
-
-		[, err] = await writeVarint(w, msgLen);
-		if (err) return err;
-
-		[, err] = await writeVarint(w, this.bitrate);
-		if (err) return err;
-
-		[, err] = await writeVarint(w, this.rtt);
-		if (err) return err;
-
-		return undefined;
+		const e = new MessageEncoder();
+		e.varint(this.bitrate);
+		e.varint(this.rtt);
+		const [, err] = await w.write(e.frame());
+		return err;
 	}
 
 	async decode(r: Reader): Promise<Error | undefined> {
@@ -43,17 +31,12 @@ export class ProbeMessage {
 		const [, err2] = await readFull(r, buf);
 		if (err2) return err2;
 
-		let offset = 0;
+		const d = new MessageDecoder(buf);
 
-		const [bitrate, n1] = parseVarint(buf, offset);
-		this.bitrate = bitrate;
-		offset += n1;
+		this.bitrate = d.varint();
+		this.rtt = d.varint();
 
-		const [rtt, n2] = parseVarint(buf, offset);
-		this.rtt = rtt;
-		offset += n2;
-
-		if (offset !== buf.length) {
+		if (!d.eof()) {
 			return new Error("ProbeMessage: unexpected trailing bytes");
 		}
 

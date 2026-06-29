@@ -85,24 +85,4 @@ Deno.test("AnnounceInterestMessage - encode/decode roundtrip - multiple scenario
 			assertEquals(err instanceof Error, true);
 		},
 	);
-
-	await t.step(
-		"encode should return error when writeString fails",
-		async () => {
-			let callCount = 0;
-			const mockWriter: Writer = {
-				async write(p: Uint8Array): Promise<[number, Error | undefined]> {
-					callCount++;
-					if (callCount > 1) {
-						return [0, new Error("Write failed on string")];
-					}
-					return [p.length, undefined];
-				},
-			};
-
-			const message = new AnnounceInterestMessage({ prefix: "test" });
-			const err = await message.encode(mockWriter);
-			assertEquals(err instanceof Error, true);
-		},
-	);
 });
