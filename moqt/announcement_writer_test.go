@@ -479,20 +479,47 @@ func TestAnnouncementWriter_CloseWithError(t *testing.T) {
 
 		for name, tt := range tests {
 			t.Run(name, func(t *testing.T) {
-				aw := newTestAnnouncementWriter(t)
+				var cancelReadCalled, cancelWriteCalled bool
+				var readErrCode, writeErrCode transport.StreamErrorCode
+
+				aw := newTestAnnouncementWriter(t, func(fqs *FakeQUICStream) {
+					fqs.CancelReadFunc = func(code transport.StreamErrorCode) {
+						cancelReadCalled = true
+						readErrCode = code
+					}
+					fqs.CancelWriteFunc = func(code transport.StreamErrorCode) {
+						cancelWriteCalled = true
+						writeErrCode = code
+					}
+				})
 
 				err := aw.CloseWithError(tt.errorCode)
 
 				assert.NoError(t, err)
 				assert.Nil(t, aw.actives)
 				assert.NotNil(t, aw.initDone)
-
+				assert.True(t, cancelReadCalled, "CancelRead should be called")
+				assert.True(t, cancelWriteCalled, "CancelWrite should be called")
+				assert.Equal(t, transport.StreamErrorCode(tt.errorCode), readErrCode)
+				assert.Equal(t, transport.StreamErrorCode(tt.errorCode), writeErrCode)
 			})
 		}
 	})
 
 	t.Run("closes with error and active announcements", func(t *testing.T) {
-		aw := newTestAnnouncementWriter(t)
+		var cancelReadCalled, cancelWriteCalled bool
+		var readErrCode, writeErrCode transport.StreamErrorCode
+
+		aw := newTestAnnouncementWriter(t, func(fqs *FakeQUICStream) {
+			fqs.CancelReadFunc = func(code transport.StreamErrorCode) {
+				cancelReadCalled = true
+				readErrCode = code
+			}
+			fqs.CancelWriteFunc = func(code transport.StreamErrorCode) {
+				cancelWriteCalled = true
+				writeErrCode = code
+			}
+		})
 
 		// Initialize the AnnouncementWriter first
 		err := aw.init(map[*Announcement]struct{}{})
@@ -512,7 +539,10 @@ func TestAnnouncementWriter_CloseWithError(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.Nil(t, aw.actives)
-
+		assert.True(t, cancelReadCalled, "CancelRead should be called")
+		assert.True(t, cancelWriteCalled, "CancelWrite should be called")
+		assert.Equal(t, transport.StreamErrorCode(AnnounceErrorCodeInternal), readErrCode)
+		assert.Equal(t, transport.StreamErrorCode(AnnounceErrorCodeInternal), writeErrCode)
 	})
 }
 
