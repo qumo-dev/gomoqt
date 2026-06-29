@@ -111,7 +111,11 @@ func ReadStringArray(b []byte) ([]string, int, error) {
 
 	b = b[total:]
 
-	arr := make([]string, 0, count)
+	allocCap := count
+	if count > uint64(len(b)) {
+		allocCap = uint64(len(b))
+	}
+	arr := make([]string, 0, allocCap)
 	for range count {
 		str, n, err := ReadString(b)
 		if err != nil {
