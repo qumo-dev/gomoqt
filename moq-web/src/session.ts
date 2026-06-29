@@ -99,6 +99,15 @@ export interface SessionInit {
 export class Session {
 	/** Resolves when the underlying transport is ready. */
 	readonly ready: Promise<void>;
+	/**
+	 * Resolves when the session terminates — whether via {@link close},
+	 * {@link closeWithError}, a peer-initiated close, or the underlying
+	 * transport dropping. Never rejects.
+	 *
+	 * Mirrors Go's `Session.Context().Done()` and WebTransport's `closed`,
+	 * giving consumers a single primitive to await for reconnect/cleanup.
+	 */
+	readonly closed: Promise<void>;
 	#webtransport: StreamConn;
 	#ctx: Context;
 	#cancelFunc: CancelCauseFunc;
@@ -140,6 +149,7 @@ export class Session {
 		const [ctx, cancel] = withCancelCause(background());
 		this.#ctx = ctx;
 		this.#cancelFunc = cancel;
+		this.closed = this.#ctx.done();
 		this.ready = this.#setup();
 
 		this.#webtransport.closed
