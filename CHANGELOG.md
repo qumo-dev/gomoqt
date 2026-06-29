@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **moqt:** Removed the empty `group_manager.go` — a dead leftover from the refactor that renamed `groupManager` to `groupReaderManager`/`groupWriterManager` (eb00586). It declared nothing; the types live in `group_reader.go`/`group_writer.go`.
 
+### Fixed
+
+- **Security (moq-web):** `GroupReader.readFrame` now rejects a frame whose varint length prefix exceeds `MAX_FRAME_SIZE` (50 MB) before allocating, closing an out-of-memory denial-of-service vector — the buffer was sized straight from an untrusted peer's length, so a single packet could request a multi-gigabyte allocation. Mirrors the Go implementation's `message.MaxMessageSize` guard (`moqt/frame.go`).
+
 ## [v0.16.0] - 2026-06-26
 
 ### Added

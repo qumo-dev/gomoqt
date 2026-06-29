@@ -1,6 +1,6 @@
 import { assertEquals, assertInstanceOf } from "@std/assert";
 import { spy } from "@std/testing/mock";
-import { GroupReader, GroupWriter } from "./group_stream.ts";
+import { GroupReader, GroupWriter, MAX_FRAME_SIZE } from "./group_stream.ts";
 import { GroupMessage, writeVarint } from "./internal/message/mod.ts";
 import { Buffer } from "@okdaichi/golikejs/bytes";
 import { Frame } from "./frame.ts";
@@ -242,6 +242,32 @@ Deno.test("GroupReader", async (t) => {
 		const fr = new Frame(new ArrayBuffer(1));
 		const errRes = await gr.readFrame(fr);
 		assertInstanceOf(errRes, Error);
+	});
+
+	await t.step("readFrame rejects a frame larger than MAX_FRAME_SIZE", async () => {
+		// A length one byte over the limit is rejected before any allocation, so
+		// the stream needs only the length prefix (no payload follows).
+		const lenBuf = Buffer.make(8);
+		await writeVarint(lenBuf, MAX_FRAME_SIZE + 1);
+		const lenBytes = new Uint8Array(lenBuf.bytes());
+
+		const readable = new ReadableStream<Uint8Array>({
+			start(c) {
+				c.enqueue(lenBytes);
+				c.close();
+			},
+		});
+
+		const reader = new ReceiveStream({ stream: readable });
+		const gr = new GroupReader(
+			background(),
+			reader,
+			new GroupMessage({ sequence: 1 }),
+		);
+
+		const err = await gr.readFrame(new Frame(new ArrayBuffer(0)));
+		assertInstanceOf(err, Error);
+		assertEquals(err.message.includes("exceeds maximum"), true);
 	});
 
 	await t.step(
