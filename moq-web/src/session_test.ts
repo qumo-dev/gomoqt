@@ -12,6 +12,7 @@ import {
 	writeVarint,
 } from "./internal/message/mod.ts";
 import { BiStreamTypes, UniStreamTypes } from "./stream_type.ts";
+import { SessionErrorCode } from "./error.ts";
 import { TrackMux } from "./track_mux.ts";
 import type { TrackPrefix } from "./track_prefix.ts";
 import { Writer } from "@okdaichi/golikejs/io";
@@ -321,6 +322,40 @@ Deno.test({
 			// The transport's raw reason is not surfaced — only the MOQ code.
 			dropTransport({ closeCode: 1, reason: "connection lost" });
 			assertEquals(await session.closed, { code: 1, reason: "session closed" });
+		});
+
+		await t.step("closed reports an unexpected transport close", async () => {
+			let dropTransport!: (info: WebTransportCloseInfo) => void;
+			const closedPromise = new Promise<WebTransportCloseInfo>((r) => {
+				dropTransport = r;
+			});
+			const mock = new MockWebTransportSession({ closedPromise });
+			const session = new Session({ transport: mock });
+			await session.ready;
+
+			// No close code or reason → treated as an unexpected drop.
+			dropTransport({ closeCode: undefined, reason: undefined });
+			assertEquals(await session.closed, {
+				code: SessionErrorCode.InternalError,
+				reason: "connection closed unexpectedly",
+			});
+		});
+
+		await t.step("closed reports a rejected transport closed", async () => {
+			let failTransport!: (reason: unknown) => void;
+			const closedPromise = new Promise<WebTransportCloseInfo>((_, reject) => {
+				failTransport = reject;
+			});
+			const mock = new MockWebTransportSession({ closedPromise });
+			const session = new Session({ transport: mock });
+			await session.ready;
+
+			// The underlying `closed` promise rejecting must still resolve ours.
+			failTransport(new Error("transport error"));
+			assertEquals(await session.closed, {
+				code: SessionErrorCode.InternalError,
+				reason: "connection closed unexpectedly",
+			});
 		});
 
 		await t.step(
