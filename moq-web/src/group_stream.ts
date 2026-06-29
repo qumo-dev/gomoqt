@@ -124,6 +124,13 @@ export class GroupReader {
 	 * Read a single frame into a sink.
 	 * @param sink - A {@link ByteSink}, {@link ByteSinkFunc}, or callback receiving the raw bytes.
 	 * @returns `undefined` on success, {@link EOFError} at end-of-stream, or another Error.
+	 *
+	 * Not safe to call concurrently on the same reader — frames are read
+	 * sequentially from one stream, so callers must await each read before the
+	 * next (as {@link frames} does). When `sink` is a {@link Frame}/`BytesBuffer`,
+	 * the frame is filled in place and its buffer is reused across reads: copy
+	 * `frame.bytes` if you need it past the next read, and treat the frame's
+	 * contents as undefined when this returns an error.
 	 */
 	async readFrame(sink: ByteSink | ByteSinkFunc): Promise<Error | undefined> {
 		// Read length prefix as varint

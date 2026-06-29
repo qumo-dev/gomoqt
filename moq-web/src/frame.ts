@@ -67,6 +67,11 @@ export class BytesBuffer implements ByteSource, ByteSink {
 	 * allocating a temporary and copying it back in via {@link write}. Sets the
 	 * logical length to `len`; the caller is expected to fill the whole view
 	 * before the data is read back.
+	 *
+	 * The returned view aliases the internal buffer, which is reused across
+	 * calls — copy the bytes out if you need to retain them past the next
+	 * `reserve`/`write`. If the fill is abandoned partway (e.g. a failed read),
+	 * the logical length still reflects `len` but the contents are undefined.
 	 */
 	reserve(len: number): Uint8Array {
 		if (this.#buf.byteLength < len) {
