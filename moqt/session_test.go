@@ -38,6 +38,54 @@ func newTestSessionWithConn(tb testing.TB, opts ...func(*FakeStreamConn)) (*Sess
 	return session, conn
 }
 
+// TestSession_CloseWithError_PropagatesToGroupReads is a regression test for
+// qumo #205: closing a Session with an in-flight group read must cascade
+// CancelRead onto the group stream so a consumer parked in GroupReader.ReadFrame
+// (e.g. `for frame := range gr.Frames(buf)`) unblocks immediately, instead of
+// relying on connection-close to propagate into the blocked read.
+func TestSession_CloseWithError_PropagatesToGroupReads(t *testing.T) {
+	conn := &FakeStreamConn{}
+	session := newTestSession(conn)
+
+	// A track reader with an accepted, in-progress group owned by this session.
+	receiver, _ := newTestTrackReader(t)
+	var canceled atomic.Bool
+	groupStream := blockingReceiveStream(&canceled)
+	receiver.enqueueGroup(GroupSequence(1), groupStream)
+	gr, err := receiver.AcceptGroup(context.Background())
+	require.NoError(t, err)
+	session.addTrackReader(SubscribeID(1), receiver)
+
+	// Park a consumer on the group read.
+	readDone := make(chan error, 1)
+	go func() {
+		readDone <- gr.ReadFrame(NewFrame(0))
+	}()
+
+	// CloseWithError must return (not hang) and must cancel the group read.
+	closeDone := make(chan struct{})
+	go func() {
+		_ = session.CloseWithError(NoError, "")
+		close(closeDone)
+	}()
+	select {
+	case <-closeDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("CloseWithError hung; group cancel did not propagate")
+	}
+
+	assert.True(t, canceled.Load(), "session close should cascade CancelRead to the group stream")
+	select {
+	case err := <-readDone:
+		assert.Error(t, err, "parked group read should unblock on session close")
+	case <-time.After(2 * time.Second):
+		t.Fatal("parked ReadFrame did not unblock after CloseWithError")
+	}
+
+	// The owned session context is canceled after close.
+	assert.NotNil(t, session.Context().Err(), "Session.Context() should be canceled after close")
+}
+
 type noStatsConn struct{}
 
 func (noStatsConn) AcceptStream(context.Context) (transport.Stream, error) { return nil, io.EOF }

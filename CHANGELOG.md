@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **moqt:** `Session.CloseWithError` now makes teardown cancellation gomoqt-owned rather than dependent on the transport propagating connection-close into blocked stream reads. It cancels the session's own context (so `AcceptStream`/`OpenUniStream` calls return) and cascades `CancelRead`/`CancelWrite` onto every outstanding group stream before `wg.Wait()`. Both transports guarantee `CancelRead`/`CancelWrite` unblocks an in-flight `Read`/`Write` immediately, so a goroutine parked in `GroupReader.ReadFrame` (a consumer's `for frame := range gr.Frames(buf)`) or a publisher parked in a group `Write` exits deterministically on close. This is gomoqt-side hardening on top of the transport fix: qumo #205's *root* cause was `webtransport-go`'s `handleSessionGoneError` self-removal deadlock, fixed upstream in #267 and pulled in by the `webtransport-go` v0.11.0 bump in v0.16.1; this change ensures the teardown wait drains regardless of how (or whether) the transport surfaces the close to a blocked read.
+- **moqt:** `TrackReader.Close` and `CloseWithError` now cancel already-accepted (in-progress) group reads, not just queued ones. The `dequeued` field that was meant to track accepted groups for cancellation was never populated — `AcceptGroup` didn't add to it — so an accepted `GroupReader` was tracked nowhere and a consumer parked in its `ReadFrame` was not unblocked when the track was closed. Cancel now routes through the already-maintained `groupReaderManager` active-group set; the dead `dequeued` field is removed.
+
 ## [v0.16.1] - 2026-07-01
 
 > **Dual release.** `v0.16.1` ships both packages at the same version: the Go module (`moqt`, consumed via `go get github.com/qumo-dev/gomoqt@v0.16.1`) and the TypeScript package (`@qumo/moq` on JSR). The `moq-web` bullets below were published via the JSR release; the `moqt` and `deps` bullets ship via this Go tag — notably the `webtransport-go` → `v0.11.0-okdaichi.1` bump (which brings upstream #267, the transport-layer fix for the qumo #205 close-cancellation stall) and the accumulated `moqt` benchmark / dead-code / security work.

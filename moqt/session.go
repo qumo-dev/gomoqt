@@ -25,6 +25,7 @@ const (
 // announcements for a single peer connection.
 type Session struct {
 	ctx    context.Context // Context for the session
+	cancel context.CancelFunc
 	config *Config
 
 	wg sync.WaitGroup // WaitGroup for session cleanup
@@ -77,8 +78,15 @@ func newSession(
 	}
 
 	connCtx := conn.Context()
+	// Derive an owned, independently-cancelable context from the connection's
+	// so Session.CloseWithError can cancel in-flight AcceptStream/OpenUniStream
+	// calls and signal handlers without waiting for connection-close to
+	// propagate through the transport (which is unreliable on some transports;
+	// see qumo #205).
+	ctx, cancel := context.WithCancel(connCtx)
 	sess := &Session{
-		ctx:             connCtx,
+		ctx:             ctx,
+		cancel:          cancel,
 		config:          config.Clone(),
 		conn:            conn,
 		mux:             mux,
@@ -181,6 +189,14 @@ func (s *Session) Stats() SessionStats {
 }
 
 // CloseWithError closes the session with an error code and message.
+//
+// It cascades cancellation to every Track and Group before waiting for in-flight
+// stream handlers to finish: each reader's outstanding group reads and each
+// writer's outstanding group writes are canceled (CancelRead/CancelWrite), which
+// the transport guarantees unblocks an in-flight Read/Write immediately. This
+// makes the teardown wait drain deterministically regardless of whether the
+// connection-close propagates into blocked stream reads on the underlying
+// transport (see qumo #205).
 func (s *Session) CloseWithError(code SessionErrorCode, msg string) error {
 	if s.terminating() {
 		return nil
@@ -196,6 +212,13 @@ func (s *Session) CloseWithError(code SessionErrorCode, msg string) error {
 		s.connManager = nil
 		defer connManager.removeConn(s.conn)
 	}
+
+	// Cancel the session context and cascade CancelRead/CancelWrite onto every
+	// in-flight group stream first, so parked stream-handler goroutines
+	// (processBiStream/processUniStream and any ServeTrack they invoked) unblock
+	// before we join them via wg.Wait below.
+	s.cancel()
+	s.cancelAllTracks()
 
 	err := s.conn.CloseWithError(transport.ConnErrorCode(code), msg)
 	if err != nil {
@@ -215,6 +238,32 @@ func (s *Session) CloseWithError(code SessionErrorCode, msg string) error {
 	close(s.probeTargetsCh)
 
 	return nil
+}
+
+// cancelAllTracks cancels every outstanding group read on each TrackReader and
+// every outstanding group write on each TrackWriter. It snapshots the track
+// maps under their locks and then cancels without holding them, so it cannot
+// deadlock with a handler that holds a track lock.
+func (s *Session) cancelAllTracks() {
+	s.trackReaderMapLocker.RLock()
+	readers := make([]*TrackReader, 0, len(s.trackReaders))
+	for _, r := range s.trackReaders {
+		readers = append(readers, r)
+	}
+	s.trackReaderMapLocker.RUnlock()
+	for _, r := range readers {
+		r.cancelGroupReads(SubscribeCanceledErrorCode)
+	}
+
+	s.trackWriterMapLocker.RLock()
+	writers := make([]*TrackWriter, 0, len(s.trackWriters))
+	for _, w := range s.trackWriters {
+		writers = append(writers, w)
+	}
+	s.trackWriterMapLocker.RUnlock()
+	for _, w := range writers {
+		w.cancelActiveGroups()
+	}
 }
 
 // Subscribe sends SUBSCRIBE and waits for SUBSCRIBE_OK.
