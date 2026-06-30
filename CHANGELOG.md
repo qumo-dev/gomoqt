@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-> **TS release — `@qumo/moq` v0.16.1 (JSR, 2026-06-30).** Patch bump of the TypeScript (`moq-web`) package only. The Go module (`moqt`) is unchanged and **not** re-released; the `moqt` entries below remain unreleased. This JSR release publishes every `moq-web` entry below (the `### Added`, `### Changed`, and `### Fixed (Security)` bullets) — notably `Session.closed`/`MOQCloseInfo`, the message-codec `MessageEncoder`/`MessageDecoder`, and the `GroupReader.readFrame` buffer-reuse + `MAX_FRAME_SIZE` OOM guard.
+## [v0.16.1] - 2026-07-01
+
+> **Dual release.** `v0.16.1` ships both packages at the same version: the Go module (`moqt`, consumed via `go get github.com/qumo-dev/gomoqt@v0.16.1`) and the TypeScript package (`@qumo/moq` on JSR). The `moq-web` bullets below were published via the JSR release; the `moqt` and `deps` bullets ship via this Go tag — notably the `webtransport-go` → `v0.11.0-okdaichi.1` bump (which brings upstream #267, the transport-layer fix for the qumo #205 close-cancellation stall) and the accumulated `moqt` benchmark / dead-code / security work.
 
 ### Added
 
