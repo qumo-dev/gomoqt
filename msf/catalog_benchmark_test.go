@@ -2,8 +2,6 @@ package msf
 
 import "testing"
 
-func boolPtrBench(b bool) *bool { return &b }
-
 // BenchmarkCatalog_Validate measures the happy-path (no errors) cost of
 // Catalog.Validate, where per-track fmt.Sprintf prefix formatting is paid on
 // every iteration regardless of whether problems exist.
@@ -12,9 +10,9 @@ func BenchmarkCatalog_Validate(b *testing.B) {
 		Version:          1,
 		DefaultNamespace: "live/demo",
 		Tracks: []Track{
-			{Name: "video", Packaging: PackagingLOC, IsLive: boolPtrBench(true)},
-			{Name: "audio", Packaging: PackagingLOC, IsLive: boolPtrBench(true)},
-			{Name: "text", Packaging: PackagingLOC, IsLive: boolPtrBench(false)},
+			{Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+			{Name: "audio", Packaging: PackagingLOC, IsLive: new(true)},
+			{Name: "text", Packaging: PackagingLOC, IsLive: new(false)},
 		},
 	}
 	b.ReportAllocs()
@@ -29,8 +27,8 @@ func BenchmarkCatalog_Validate(b *testing.B) {
 func BenchmarkCatalogDelta_Validate(b *testing.B) {
 	delta := CatalogDelta{
 		AddTracks: []Track{
-			{Name: "video", Packaging: PackagingLOC, IsLive: boolPtrBench(true)},
-			{Name: "audio", Packaging: PackagingLOC, IsLive: boolPtrBench(false)},
+			{Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+			{Name: "audio", Packaging: PackagingLOC, IsLive: new(false)},
 		},
 		RemoveTracks: []TrackRef{{Name: "old"}},
 	}
