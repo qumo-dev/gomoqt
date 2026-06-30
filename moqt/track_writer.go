@@ -103,6 +103,34 @@ type TrackWriter struct {
 	ctx context.Context
 }
 
+// cancelActiveGroups cancels every active group write without touching the
+// subscribe stream. Session.CloseWithError uses it during teardown to unblock a
+// publisher parked in a group Write (e.g. a ServeTrack handler), mirroring
+// TrackReader.cancelGroupReads on the receive side. It is safe to call
+// concurrently with OpenGroup/Close, which also nil out groupManager under w.mu.
+func (w *TrackWriter) cancelActiveGroups() {
+	w.mu.Lock()
+	gm := w.groupManager
+	w.groupManager = nil
+	w.mu.Unlock()
+	if gm == nil {
+		return
+	}
+
+	gm.mu.Lock()
+	groups := make([]*GroupWriter, 0, len(gm.activeGroups))
+	for g := range gm.activeGroups {
+		groups = append(groups, g)
+	}
+	gm.closed = true
+	gm.activeGroups = nil
+	gm.mu.Unlock()
+
+	for _, g := range groups {
+		g.CancelWrite(PublishAbortedErrorCode)
+	}
+}
+
 // Close stops publishing and cancels active groups.
 func (w *TrackWriter) Close() error {
 	// Take the write lock to ensure Close is exclusive with OpenGroup calls.
