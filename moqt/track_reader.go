@@ -37,6 +37,37 @@ func (m *groupReaderManager) removeGroup(group *GroupReader) {
 	delete(m.activeGroups, group)
 }
 
+// cancelAll cancels every tracked (accepted) GroupReader's read and drops them
+// from the manager. It is the lever Session.CloseWithError uses to unblock a
+// consumer parked in GroupReader.ReadFrame on close: CancelRead makes the
+// stream's in-flight Read return a StreamError immediately (quic-go/webtransport
+// guarantee this), so frame.decode returns and the draining goroutine exits
+// without depending on connection-close propagation.
+func (m *groupReaderManager) cancelAll(code GroupErrorCode) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return
+	}
+	m.closed = true
+	groups := make([]*GroupReader, 0, len(m.activeGroups))
+	for g := range m.activeGroups {
+		groups = append(groups, g)
+	}
+	m.activeGroups = nil
+	m.mu.Unlock()
+
+	errCode := transport.StreamErrorCode(code)
+	for _, g := range groups {
+		// Cancel the read directly rather than via g.CancelRead so we control
+		// the code; g.CancelRead would also re-enter removeGroup (a no-op now).
+		g.stream.CancelRead(errCode)
+	}
+}
+
 func newTrackReader(path BroadcastPath, name TrackName, subscribeStream *sendSubscribeStream, onCloseFunc func()) *TrackReader {
 	track := &TrackReader{
 		BroadcastPath:       path,
@@ -47,7 +78,6 @@ func newTrackReader(path BroadcastPath, name TrackName, subscribeStream *sendSub
 			sequence GroupSequence
 			stream   transport.ReceiveStream
 		}, 0, 1<<3),
-		dequeued:     make(map[*GroupReader]struct{}),
 		groupManager: newGroupReaderManager(),
 		onCloseFunc:  onCloseFunc,
 		ctx:          context.WithValue(subscribeStream.stream.Context(), biStreamTypeCtxKey, message.StreamTypeSubscribe),
@@ -76,8 +106,6 @@ type TrackReader struct {
 	}
 	queuedCh chan struct{}
 	trackMu  sync.Mutex
-
-	dequeued map[*GroupReader]struct{}
 
 	groupManager *groupReaderManager
 	onCloseFunc  func()
@@ -174,29 +202,39 @@ func (r *TrackReader) Context() context.Context {
 	return r.ctx
 }
 
+// cancelGroupReads cancels every outstanding group read — both queued (not yet
+// accepted) and accepted (tracked by the groupManager) — so any goroutine parked
+// in GroupReader.ReadFrame unblocks immediately via the stream's StreamError.
+//
+// It does not touch the subscribe stream. Session.CloseWithError uses it during
+// teardown, where the connection is already gone and the goal is to unblock
+// in-flight reads rather than negotiate a graceful unsubscribe. Any group stream
+// enqueued concurrently after queueing is cleared self-cancels in enqueueGroup.
+func (r *TrackReader) cancelGroupReads(code GroupErrorCode) {
+	r.trackMu.Lock()
+	queued := r.queueing
+	r.queueing = nil
+	r.trackMu.Unlock()
+
+	errCode := transport.StreamErrorCode(code)
+	for _, entry := range queued {
+		entry.stream.CancelRead(errCode)
+	}
+
+	r.groupManager.cancelAll(code)
+}
+
 // Close cancels queued groups, closes the queued channel, and terminates
 // the subscription stream gracefully.
 func (r *TrackReader) Close() error {
+	r.cancelGroupReads(SubscribeCanceledErrorCode)
+
 	r.trackMu.Lock()
-	defer r.trackMu.Unlock()
-
-	// Cancel all pending groups first
-	errCode := transport.StreamErrorCode(SubscribeCanceledErrorCode)
-	for _, entry := range r.queueing {
-		entry.stream.CancelRead(errCode)
-	}
-	r.queueing = nil
-
-	// Cancel all dequeued groups
-	for stream := range r.dequeued {
-		stream.CancelRead(SubscribeCanceledErrorCode)
-	}
-	r.dequeued = nil
-
 	if r.queuedCh != nil {
 		close(r.queuedCh)
 		r.queuedCh = nil
 	}
+	r.trackMu.Unlock()
 
 	r.onCloseFunc()
 
@@ -205,26 +243,14 @@ func (r *TrackReader) Close() error {
 
 // CloseWithError cancels the subscription with the provided SubscribeErrorCode and terminates the subscription.
 func (r *TrackReader) CloseWithError(code SubscribeErrorCode) {
+	r.cancelGroupReads(SubscribeCanceledErrorCode)
+
 	r.trackMu.Lock()
-	defer r.trackMu.Unlock()
-
-	// Cancel all pending groups first
-	errCode := transport.StreamErrorCode(code)
-	for _, entry := range r.queueing {
-		entry.stream.CancelRead(errCode)
-	}
-	r.queueing = nil
-
-	// Cancel all dequeued groups
-	for stream := range r.dequeued {
-		stream.CancelRead(SubscribeCanceledErrorCode)
-	}
-	r.dequeued = nil
-
 	if r.queuedCh != nil {
 		close(r.queuedCh)
 		r.queuedCh = nil
 	}
+	r.trackMu.Unlock()
 
 	r.onCloseFunc()
 

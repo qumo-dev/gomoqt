@@ -3,10 +3,12 @@ package moqt
 import (
 	"bytes"
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
+	"github.com/qumo-dev/gomoqt/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,6 +20,59 @@ func newTestTrackReader(tb testing.TB) (*TrackReader, *FakeQUICStream) {
 	substr := newTestSendSubscribeStreamFromStream(mockStream, &SubscribeConfig{})
 	receiver := newTrackReader("/test", "video", substr, func() {})
 	return receiver, mockStream
+}
+
+// blockingReceiveStream is a FakeQUICReceiveStream whose Read blocks until
+// CancelRead is invoked, then returns a *transport.StreamError — modeling the
+// quic-go/webtransport guarantee that CancelRead unblocks an in-flight Read.
+func blockingReceiveStream(canceled *atomic.Bool) *FakeQUICReceiveStream {
+	release := make(chan struct{})
+	return &FakeQUICReceiveStream{
+		ReadFunc: func(p []byte) (int, error) {
+			<-release
+			return 0, &transport.StreamError{ErrorCode: transport.StreamErrorCode(SubscribeCanceledErrorCode)}
+		},
+		CancelReadFunc: func(code transport.StreamErrorCode) {
+			canceled.Store(true)
+			select {
+			case <-release:
+			default:
+				close(release)
+			}
+		},
+	}
+}
+
+// TestTrackReader_Close_CancelsAcceptedGroup is a regression test for the dead
+// `dequeued` tracking: an already-accepted GroupReader was tracked nowhere, so
+// Close could not cancel it and a consumer parked in ReadFrame blocked forever.
+// It must now be canceled via the groupManager.
+func TestTrackReader_Close_CancelsAcceptedGroup(t *testing.T) {
+	receiver, _ := newTestTrackReader(t)
+
+	var canceled atomic.Bool
+	groupStream := blockingReceiveStream(&canceled)
+
+	receiver.enqueueGroup(GroupSequence(1), groupStream)
+
+	gr, err := receiver.AcceptGroup(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, gr)
+
+	readDone := make(chan error, 1)
+	go func() {
+		readDone <- gr.ReadFrame(NewFrame(0))
+	}()
+
+	require.NoError(t, receiver.Close())
+
+	assert.True(t, canceled.Load(), "accepted group stream should be canceled on Close")
+	select {
+	case err := <-readDone:
+		assert.Error(t, err, "parked ReadFrame should unblock after Close")
+	case <-time.After(2 * time.Second):
+		t.Fatal("ReadFrame did not unblock after Close (deadlock regression)")
+	}
 }
 
 func TestNewTrackReader(t *testing.T) {
@@ -32,7 +87,7 @@ func TestNewTrackReader(t *testing.T) {
 	assert.Equal(t, PublishInfo{}, substr.ReadInfo(), "sendSubscribeStream should return the Info passed at construction")
 	assert.NotNil(t, receiver.queueing, "queue should be initialized")
 	assert.NotNil(t, receiver.queuedCh, "queuedCh should be initialized")
-	assert.NotNil(t, receiver.dequeued, "dequeued should be initialized")
+	assert.NotNil(t, receiver.groupManager, "groupManager should be initialized")
 }
 
 func TestTrackReader_AcceptGroup(t *testing.T) {
