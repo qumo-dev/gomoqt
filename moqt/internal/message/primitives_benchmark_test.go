@@ -52,10 +52,10 @@ func BenchmarkReadVarint(b *testing.B) {
 		name string
 		val  uint64
 	}{
-		{"1byte", maxVarInt1},     // top-2-bits 0b00
-		{"2byte", maxVarInt2},     // top-2-bits 0b01
-		{"4byte", maxVarInt4},     // top-2-bits 0b10
-		{"8byte", maxVarInt8},     // top-2-bits 0b11
+		{"1byte", maxVarInt1}, // top-2-bits 0b00
+		{"2byte", maxVarInt2}, // top-2-bits 0b01
+		{"4byte", maxVarInt4}, // top-2-bits 0b10
+		{"8byte", maxVarInt8}, // top-2-bits 0b11
 	}
 	for _, w := range widths {
 		b.Run(w.name, func(b *testing.B) {

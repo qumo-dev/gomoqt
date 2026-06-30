@@ -1,7 +1,7 @@
 {
 	"$schema": "https://deno.land/x/deno/cli/schemas/config-file.v1.json",
 	"name": "@qumo/moq",
-	"version": "0.16.0",
+	"version": "0.16.1",
 	"exports": {
 		".": "./src/mod.ts",
 		"./msf": "./src/msf/mod.ts"
@@ -38,6 +38,7 @@
 		"fmt": "deno fmt",
 		"fmt:check": "deno fmt --check",
 		"lint": "deno lint",
+		"bench": "deno bench --allow-all",
 		"check": "deno check src/**/*.ts",
 		"interop": "deno run --allow-run --allow-read --allow-net cli/interop/run_secure.ts",
 		"interop:insecure": "deno run --unstable-net --allow-all --unsafely-ignore-certificate-errors cli/interop/main.ts"
@@ -70,5 +71,8 @@
 	],
 	"test": {
 		"include": ["src/**/*_test.ts"]
+	},
+	"bench": {
+		"include": ["src/**/*_benchmark.ts"]
 	}
 }

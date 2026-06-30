@@ -1,16 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import {
-	parseString,
-	parseUint8,
-	parseVarint,
-	readFull,
-	readVarint,
-	stringLen,
-	varintLen,
-	writeString,
-	writeUint8,
-	writeVarint,
-} from "./message.ts";
+import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
 
 export interface FetchMessageInit {
 	broadcastPath?: string;
@@ -32,35 +21,14 @@ export class FetchMessage {
 		this.groupSequence = init.groupSequence ?? 0;
 	}
 
-	get len(): number {
-		return (
-			stringLen(this.broadcastPath) +
-			stringLen(this.trackName) +
-			1 + // priority (uint8)
-			varintLen(this.groupSequence)
-		);
-	}
-
 	async encode(w: Writer): Promise<Error | undefined> {
-		const msgLen = this.len;
-		let err: Error | undefined;
-
-		[, err] = await writeVarint(w, msgLen);
-		if (err) return err;
-
-		[, err] = await writeString(w, this.broadcastPath);
-		if (err) return err;
-
-		[, err] = await writeString(w, this.trackName);
-		if (err) return err;
-
-		[, err] = await writeUint8(w, this.priority);
-		if (err) return err;
-
-		[, err] = await writeVarint(w, this.groupSequence);
-		if (err) return err;
-
-		return undefined;
+		const e = new MessageEncoder();
+		e.string(this.broadcastPath);
+		e.string(this.trackName);
+		e.uint8(this.priority);
+		e.varint(this.groupSequence);
+		const [, err] = await w.write(e.frame());
+		return err;
 	}
 
 	async decode(r: Reader): Promise<Error | undefined> {
@@ -74,29 +42,14 @@ export class FetchMessage {
 		[, err] = await readFull(r, buf);
 		if (err) return err;
 
-		let offset = 0;
+		const d = new MessageDecoder(buf);
 
-		[this.broadcastPath, offset] = (() => {
-			const [str, n] = parseString(buf, offset);
-			return [str, offset + n];
-		})();
+		this.broadcastPath = d.string();
+		this.trackName = d.string();
+		this.priority = d.uint8();
+		this.groupSequence = d.varint();
 
-		[this.trackName, offset] = (() => {
-			const [str, n] = parseString(buf, offset);
-			return [str, offset + n];
-		})();
-
-		[this.priority, offset] = (() => {
-			const [val, n] = parseUint8(buf, offset);
-			return [val, offset + n];
-		})();
-
-		[this.groupSequence, offset] = (() => {
-			const [val, n] = parseVarint(buf, offset);
-			return [val, offset + n];
-		})();
-
-		if (offset !== msgLen) {
+		if (!d.eof()) {
 			return new Error("message length mismatch");
 		}
 

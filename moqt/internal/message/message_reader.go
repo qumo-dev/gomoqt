@@ -52,21 +52,19 @@ func ReadMessageLength(r io.Reader) (uint64, error) {
 	}
 
 	// Fallback for readers that are not io.ByteReader.
-	firstByte := make([]byte, 1)
-	_, err := io.ReadFull(r, firstByte)
+	var buf [8]byte
+	_, err := io.ReadFull(r, buf[:1])
 	if err != nil {
 		return 0, err
 	}
-	l := 1 << ((firstByte[0] & 0xc0) >> 6)
-	buf := make([]byte, l)
-	buf[0] = firstByte[0]
+	l := 1 << ((buf[0] & 0xc0) >> 6)
 	if l > 1 {
-		_, err = io.ReadFull(r, buf[1:])
+		_, err = io.ReadFull(r, buf[1:l])
 		if err != nil {
 			return 0, err
 		}
 	}
-	val, _, err := ReadVarint(buf)
+	val, _, err := ReadVarint(buf[:l])
 	return val, err
 }
 
@@ -111,7 +109,11 @@ func ReadStringArray(b []byte) ([]string, int, error) {
 
 	b = b[total:]
 
-	arr := make([]string, 0, count)
+	allocCap := count
+	if count > uint64(len(b)) {
+		allocCap = uint64(len(b))
+	}
+	arr := make([]string, 0, allocCap)
 	for range count {
 		str, n, err := ReadString(b)
 		if err != nil {

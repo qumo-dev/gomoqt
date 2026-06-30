@@ -4,9 +4,13 @@
 ## 2024-06-25 - Exact pre-allocation over fixed bounds
 **Learning:** For variable depth path splitting (e.g. prefix arrays), pre-calculating the exact number of segments via `strings.Count(str, "/")` and allocating the slice exactly (`make([]T, 0, n)`) is measurably faster than fixed pre-allocation (e.g., `make([]T, 0, 8)`). Removing the final `strings.Split` allocation in the `pathSegments` function further reduces GC pressure.
 **Action:** Always count known delimiters in small string parsing rather than falling back to `strings.Split` or using arbitrary fixed pre-allocations when generating slices in hot paths.
-## 2023-10-25 - Defer String Formatting in Validation Loops
+## 2026-07-01 - Defer String Formatting in Validation Loops
 
-**What:** Deferred string formatting (`fmt.Sprintf` and concatenation) in MSF catalog validation loops, moving the prefix generation only to code paths where errors actually occur.
-**Why:** Unnecessary string formatting and concatenations inside `for` loops (like constructing `addTracks[%d]`) were allocating strings and executing formatting logic on every iteration, even when no validation errors existed, causing unnecessary GC pressure on the "happy path".
-**Impact:** Reduced `CatalogDelta.Validate()` execution time by roughly 66% (from ~3300 ns/op to ~1050 ns/op) and allocations from 16 to 10.
-**Measurement:** Go benchmarks.
+**What:** Deferred string formatting (`fmt.Sprintf` and concatenation) in MSF catalog validation loops, moving the per-entry prefix generation onto the error path only.
+**Why:** `fmt.Sprintf("tracks[%d]", i)` ran on every iteration regardless of whether problems existed, allocating on the happy path.
+**Impact (measured, `-benchtime=1s -count=10`, benchstat vs main):** `Catalog_Validate` -57% (430->184 ns/op), `CatalogDelta_Validate` -88% (265->32 ns/op); both 3->0 allocs/op, 48->0 B/op (p=0.000).
+**Measurement:** Go benchmarks (`msf/catalog_benchmark_test.go`).
+## 2024-05-19 - Safe Varint Decoding Optimization
+**Learning:** In Go, fallback paths (like non-`io.ByteReader` readers) in hot decoding loops shouldn't use dynamic slice allocations (e.g., `make([]byte, size)`) if the maximum size is small and fixed (like an 8-byte varint). Replacing `make()` with a local fixed-size array (e.g., `var buf [8]byte`) and slicing it `buf[:size]` entirely eliminates heap allocations.
+**Action:** When parsing small, bounded objects like varints from an `io.Reader`, use stack-allocated arrays and take their slices (`buf[:length]`) instead of dynamically allocating slices with `make()`.
+

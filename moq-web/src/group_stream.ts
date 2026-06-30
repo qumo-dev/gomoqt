@@ -6,8 +6,19 @@ import type { GroupMessage } from "./internal/message/mod.ts";
 import { readFull, readVarint, writeVarint } from "./internal/message/mod.ts";
 import { GroupErrorCode } from "./error.ts";
 import { GroupSequence } from "./alias.ts";
-import { ByteSink, ByteSinkFunc, ByteSource, Frame } from "./frame.ts";
+import { BytesBuffer, ByteSink, ByteSinkFunc, ByteSource, Frame } from "./frame.ts";
 import { EOFError } from "@okdaichi/golikejs/io";
+
+/**
+ * Maximum frame payload size accepted by {@link GroupReader.readFrame} (50 MB).
+ *
+ * `readFrame` allocates a buffer sized by a varint length prefix taken straight
+ * from the peer, so an unbounded length is an out-of-memory denial-of-service
+ * vector: one packet can ask for a multi-gigabyte allocation. Lengths above
+ * this limit are rejected before allocating. Mirrors the Go implementation's
+ * `message.MaxMessageSize` (`moqt/frame.go`).
+ */
+export const MAX_FRAME_SIZE = 50 * 1024 * 1024;
 
 /**
  * Writes frames to a single group within a track.
@@ -113,6 +124,13 @@ export class GroupReader {
 	 * Read a single frame into a sink.
 	 * @param sink - A {@link ByteSink}, {@link ByteSinkFunc}, or callback receiving the raw bytes.
 	 * @returns `undefined` on success, {@link EOFError} at end-of-stream, or another Error.
+	 *
+	 * Not safe to call concurrently on the same reader — frames are read
+	 * sequentially from one stream, so callers must await each read before the
+	 * next (as {@link frames} does). When `sink` is a {@link Frame}/`BytesBuffer`,
+	 * the frame is filled in place and its buffer is reused across reads: copy
+	 * `frame.bytes` if you need it past the next read, and treat the frame's
+	 * contents as undefined when this returns an error.
 	 */
 	async readFrame(sink: ByteSink | ByteSinkFunc): Promise<Error | undefined> {
 		// Read length prefix as varint
@@ -124,7 +142,27 @@ export class GroupReader {
 			return err1;
 		}
 
+		// Reject an oversized length before allocating — guards against an
+		// out-of-memory DoS from an untrusted peer (see {@link MAX_FRAME_SIZE}).
+		if (len > MAX_FRAME_SIZE) {
+			return new Error(
+				`moq: frame length ${len} exceeds maximum ${MAX_FRAME_SIZE}`,
+			);
+		}
+
 		try {
+			// Fast path: a BytesBuffer (Frame) sink can be filled in place, so
+			// read straight into its buffer instead of allocating a temporary and
+			// copying it back in via write(). This is the `frames()` loop's case.
+			if (sink instanceof BytesBuffer) {
+				const dst = sink.reserve(len);
+				const [, err2] = await readFull(this.#reader, dst);
+				if (err2) {
+					return err2;
+				}
+				return undefined;
+			}
+
 			// Create a buffer for reading
 			const buf = new Uint8Array(len);
 

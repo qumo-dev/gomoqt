@@ -1,6 +1,6 @@
 package moqt
 
-import "fmt"
+import "strconv"
 
 const (
 	// MinGroupSequence is the smallest valid sequence number for a group.
@@ -14,7 +14,7 @@ type GroupSequence uint64
 
 // String returns the string representation of the group sequence number.
 func (gs GroupSequence) String() string {
-	return fmt.Sprintf("%d", gs)
+	return strconv.FormatUint(uint64(gs), 10)
 }
 
 // Next returns the next sequence number in the group sequence.

@@ -1,14 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import {
-	parseString,
-	parseVarint,
-	readFull,
-	readVarint,
-	stringLen,
-	varintLen,
-	writeString,
-	writeVarint,
-} from "./message.ts";
+import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
 
 export interface AnnounceMessageInit {
 	suffix?: string;
@@ -28,44 +19,19 @@ export class AnnounceMessage {
 	}
 
 	/**
-	 * Returns the length of the message body (excluding the length prefix).
-	 */
-	get len(): number {
-		let l = varintLen(this.active ? 1 : 0) +
-			stringLen(this.suffix) +
-			varintLen(this.hopIDs.length);
-		for (const id of this.hopIDs) {
-			l += varintLen(id);
-		}
-		return l;
-	}
-
-	/**
 	 * Encodes the message to the writer.
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
-		const msgLen = this.len;
-		let err: Error | undefined;
-
-		[, err] = await writeVarint(w, msgLen);
-		if (err) return err;
-
-		// Write AnnounceStatus as varint: 0x0 (ENDED) or 0x1 (ACTIVE)
-		[, err] = await writeVarint(w, this.active ? 1 : 0);
-		if (err) return err;
-
-		[, err] = await writeString(w, this.suffix);
-		if (err) return err;
-
-		[, err] = await writeVarint(w, this.hopIDs.length);
-		if (err) return err;
-
+		const e = new MessageEncoder();
+		// AnnounceStatus as varint: 0x0 (ENDED) or 0x1 (ACTIVE)
+		e.varint(this.active ? 1 : 0);
+		e.string(this.suffix);
+		e.varint(this.hopIDs.length);
 		for (const id of this.hopIDs) {
-			[, err] = await writeVarint(w, id);
-			if (err) return err;
+			e.varint(id);
 		}
-
-		return undefined;
+		const [, err] = await w.write(e.frame());
+		return err;
 	}
 
 	/**
@@ -82,26 +48,17 @@ export class AnnounceMessage {
 		[, err] = await readFull(r, buf);
 		if (err) return err;
 
-		let offset = 0;
+		const d = new MessageDecoder(buf);
 
 		// Read AnnounceStatus as varint
-		const [status, n1] = parseVarint(buf, offset);
-		this.active = status === 1;
-		offset += n1;
+		this.active = d.varint() === 1;
 
-		[this.suffix, offset] = (() => {
-			const [val, n] = parseString(buf, offset);
-			return [val, offset + n];
-		})();
+		this.suffix = d.string();
 
-		const [hopCount, n2] = parseVarint(buf, offset);
-		offset += n2;
-
+		const hopCount = d.varint();
 		this.hopIDs = [];
 		for (let i = 0; i < hopCount; i++) {
-			const [id, n] = parseVarint(buf, offset);
-			this.hopIDs.push(id);
-			offset += n;
+			this.hopIDs.push(d.varint());
 		}
 
 		return undefined;

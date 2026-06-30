@@ -89,13 +89,17 @@ func (am *AnnounceMessage) Decode(src io.Reader) error {
 	}
 	b = b[n:]
 
-	am.HopIDs = make([]uint64, hopCount)
-	for i := range hopCount {
+	allocCap := hopCount
+	if hopCount > uint64(len(b)) {
+		allocCap = uint64(len(b))
+	}
+	am.HopIDs = make([]uint64, 0, allocCap)
+	for range hopCount {
 		num, n, err = ReadVarint(b)
 		if err != nil {
 			return err
 		}
-		am.HopIDs[i] = num
+		am.HopIDs = append(am.HopIDs, num)
 		b = b[n:]
 	}
 
