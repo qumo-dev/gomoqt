@@ -14,3 +14,9 @@
 **Learning:** In Go, fallback paths (like non-`io.ByteReader` readers) in hot decoding loops shouldn't use dynamic slice allocations (e.g., `make([]byte, size)`) if the maximum size is small and fixed (like an 8-byte varint). Replacing `make()` with a local fixed-size array (e.g., `var buf [8]byte`) and slicing it `buf[:size]` entirely eliminates heap allocations.
 **Action:** When parsing small, bounded objects like varints from an `io.Reader`, use stack-allocated arrays and take their slices (`buf[:length]`) instead of dynamically allocating slices with `make()`.
 
+## 2024-11-20 - Exact pre-allocation over fixed bounds
+**Learning:** For variable depth path splitting (e.g. prefix arrays), pre-calculating the exact number of segments via `strings.Count(str, "/")` and allocating the slice exactly (`make([]T, 0, n)`) is measurably faster than fixed pre-allocation (e.g., `make([]T, 0, 8)`). Removing the final `strings.Split` allocation in the `pathSegments` function further reduces GC pressure.
+**Action:** Always count known delimiters in small string parsing rather than falling back to `strings.Split` or using arbitrary fixed pre-allocations when generating slices in hot paths.
+## 2026-07-01 - Avoid standard library for string operations
+**Learning:** In Go performance optimizations, when operating on string types or wrappers (e.g., `type MyString string`), direct slice-based equality checks (e.g., `string(s[:len(prefix)]) == prefix`) and manual slicing are measurably faster than using standard library functions like `strings.HasPrefix` and `strings.TrimPrefix` due to reduced overhead. Similarly, prefer `strings.LastIndexByte` over `strings.LastIndex` for single-character lookups.
+**Action:** Always replace function calls like `strings.HasPrefix` or `strings.TrimPrefix` with manual string comparison operations when optimizing hot path performance.
