@@ -258,6 +258,74 @@ func TestBroadcastClose_MultipleHandlers(t *testing.T) {
 }
 
 
+func TestBroadcast_Remove(t *testing.T) {
+	dummyHandler := TrackHandlerFunc(func(*TrackWriter) {})
+
+	tests := []struct {
+		name      string
+		broadcast *Broadcast
+		setup     func(*Broadcast)
+		trackName TrackName
+		want      bool
+	}{
+		{
+			name:      "nil broadcast",
+			broadcast: nil,
+			setup:     func(*Broadcast) {},
+			trackName: "video",
+			want:      false,
+		},
+		{
+			name:      "empty track name",
+			broadcast: NewBroadcast(),
+			setup:     func(*Broadcast) {},
+			trackName: "",
+			want:      false,
+		},
+		{
+			name:      "track not found",
+			broadcast: NewBroadcast(),
+			setup:     func(*Broadcast) {},
+			trackName: "audio",
+			want:      false,
+		},
+		{
+			name:      "track removed successfully",
+			broadcast: NewBroadcast(),
+			setup: func(b *Broadcast) {
+				_ = b.Register("video", dummyHandler)
+			},
+			trackName: "video",
+			want:      true,
+		},
+		{
+			name:      "multiple removes of same track",
+			broadcast: NewBroadcast(),
+			setup: func(b *Broadcast) {
+				_ = b.Register("video", dummyHandler)
+				b.Remove("video")
+			},
+			trackName: "video",
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.setup != nil {
+				tt.setup(tt.broadcast)
+			}
+			got := tt.broadcast.Remove(tt.trackName)
+			assert.Equal(t, tt.want, got)
+
+			if tt.broadcast != nil && got {
+				// Verify it's actually removed
+				assert.Equal(t, reflect.ValueOf(NotFoundTrackHandler).Pointer(), reflect.ValueOf(tt.broadcast.Handler(tt.trackName)).Pointer())
+			}
+		})
+	}
+}
+
 func TestBroadcast_Register(t *testing.T) {
 	dummyHandler := TrackHandlerFunc(func(*TrackWriter) {})
 
