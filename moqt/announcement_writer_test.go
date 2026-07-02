@@ -986,11 +986,45 @@ func TestAnnouncementWriter_MultipleClose(t *testing.T) {
 }
 
 func TestAnnouncementWriter_Context(t *testing.T) {
-	aw := newTestAnnouncementWriter(t)
+	tests := map[string]struct {
+		setup func() *AnnouncementWriter
+		check func(*testing.T, context.Context)
+	}{
+		"nil receiver": {
+			setup: func() *AnnouncementWriter {
+				return nil
+			},
+			check: func(t *testing.T, ctx context.Context) {
+				assert.NotNil(t, ctx)
+				assert.ErrorIs(t, ctx.Err(), context.Canceled)
+			},
+		},
+		"nil context": {
+			setup: func() *AnnouncementWriter {
+				return &AnnouncementWriter{}
+			},
+			check: func(t *testing.T, ctx context.Context) {
+				assert.NotNil(t, ctx)
+				assert.ErrorIs(t, ctx.Err(), context.Canceled)
+			},
+		},
+		"valid context": {
+			setup: func() *AnnouncementWriter {
+				return &AnnouncementWriter{ctx: context.Background()}
+			},
+			check: func(t *testing.T, ctx context.Context) {
+				assert.NotNil(t, ctx)
+				assert.NoError(t, ctx.Err())
+			},
+		},
+	}
 
-	assert.NotNil(t, aw.Context())
-	assert.NoError(t, aw.Context().Err())
-
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			aw := tt.setup()
+			tt.check(t, aw.Context())
+		})
+	}
 }
 
 func TestAnnouncementWriter_StressTest_HeavyConcurrentAccess(t *testing.T) {
