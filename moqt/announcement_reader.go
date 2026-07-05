@@ -31,7 +31,16 @@ func newAnnouncementReader(stream transport.Stream, prefix prefix, initSuffixes 
 
 	// Receive announcements in a separate goroutine
 	go func() {
-		var am message.AnnounceMessage
+		// The publisher sends ANNOUNCE_OK exactly once before any
+		// ANNOUNCE_BROADCAST. Its Hop ID is the implicit trailing entry of
+		// every broadcast's Hop ID list on this stream.
+		var okMsg message.AnnounceOkMessage
+		if err := okMsg.Decode(ar.stream); err != nil {
+			return
+		}
+		peerHopID := okMsg.HopID
+
+		var am message.AnnounceBroadcastMessage
 		var err error
 
 		for {
@@ -45,32 +54,28 @@ func newAnnouncementReader(stream transport.Stream, prefix prefix, initSuffixes 
 			case message.ACTIVE:
 				{
 					suffix := am.BroadcastPathSuffix
-					var shouldClose bool
-					// Mutate maps under lock
+					// Mutate maps under lock. An active for an already-active
+					// path atomically replaces the prior advertisement.
 					func() {
 						ar.announcementsMu.Lock()
 						defer func() {
 							ar.announcementsMu.Unlock()
 						}()
 						old, ok := ar.actives[suffix]
-						if !ok || !old.IsActive() {
-							ann, _ := NewAnnouncement(ar.ctx, BroadcastPath(ar.prefix+suffix))
-							ann.hopIDs = am.HopIDs
-							ar.actives[suffix] = ann
-							ar.pendings = append(ar.pendings, ann)
-							select {
-							case ar.announcedCh <- struct{}{}:
-							default:
-							}
-							return
+						if ok && old.IsActive() {
+							old.end()
 						}
-						shouldClose = true
+						ann, _ := NewAnnouncement(ar.ctx, BroadcastPath(ar.prefix+suffix))
+						// Reconstruct the full hop path: the broadcast's Hop ID
+						// list plus the peer's implicit ANNOUNCE_OK Hop ID.
+						ann.hopIDs = appendHopID(am.HopIDs, peerHopID)
+						ar.actives[suffix] = ann
+						ar.pendings = append(ar.pendings, ann)
+						select {
+						case ar.announcedCh <- struct{}{}:
+						default:
+						}
 					}()
-
-					if shouldClose {
-						ar.CloseWithError(AnnounceErrorCodeDuplicated)
-						return
-					}
 				}
 			case message.ENDED:
 				{
@@ -91,6 +96,8 @@ func newAnnouncementReader(stream transport.Stream, prefix prefix, initSuffixes 
 					if handled {
 						continue
 					}
+					// An ended for a path that is not currently active is a
+					// protocol violation; reset the stream.
 					ar.CloseWithError(AnnounceErrorCodeDuplicated)
 					return
 				}
@@ -102,6 +109,19 @@ func newAnnouncementReader(stream transport.Stream, prefix prefix, initSuffixes 
 	}()
 
 	return ar
+}
+
+// appendHopID appends the peer's ANNOUNCE_OK Hop ID to a broadcast's Hop ID
+// list, reconstructing the full hop path. A peer Hop ID of 0 means the peer
+// does not participate in hop tracking and is not appended.
+func appendHopID(hopIDs []uint64, peerHopID uint64) []uint64 {
+	if peerHopID == 0 {
+		return hopIDs
+	}
+	result := make([]uint64, len(hopIDs)+1)
+	copy(result, hopIDs)
+	result[len(hopIDs)] = peerHopID
+	return result
 }
 
 // AnnouncementReader receives and manages broadcast announcements for a prefix from

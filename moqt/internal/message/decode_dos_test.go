@@ -19,8 +19,8 @@ func TestDecode_RejectsOversizedLength(t *testing.T) {
 	lengthPrefix, _ := message.WriteMessageLength(nil, 1<<62-1)
 
 	decoders := map[string]interface{ Decode(io.Reader) error }{
-		"AnnounceMessage":         &message.AnnounceMessage{},
-		"AnnounceInterestMessage": &message.AnnounceInterestMessage{},
+		"AnnounceBroadcastMessage":         &message.AnnounceBroadcastMessage{},
+		"AnnounceRequestMessage": &message.AnnounceRequestMessage{},
 		"FetchMessage":            &message.FetchMessage{},
 		"GoawayMessage":           &message.GoawayMessage{},
 		"GroupMessage":            &message.GroupMessage{},
@@ -40,12 +40,12 @@ func TestDecode_RejectsOversizedLength(t *testing.T) {
 }
 
 func TestDecode_RejectsOversizedArrayCount(t *testing.T) {
-	// 1. AnnounceMessage HopIDs
+	// 1. AnnounceBroadcastMessage HopIDs
 	// Create a payload with a large hop count but no actual hop ID bytes
 	b := make([]byte, 0, 8)
 	b, _ = message.WriteVarint(b, 1000000) // HopCount = 1,000,000
 
-	// Create an AnnounceMessage with proper length prefix and structure
+	// Create an AnnounceBroadcastMessage with proper length prefix and structure
 	payload := make([]byte, 0, 64)
 	payload, _ = message.WriteVarint(payload, uint64(message.ACTIVE)) // AnnounceStatus
 	payload, _ = message.WriteString(payload, "test")                 // BroadcastPathSuffix
@@ -56,7 +56,7 @@ func TestDecode_RejectsOversizedArrayCount(t *testing.T) {
 	full, _ = message.WriteMessageLength(full, msgLen)
 	full = append(full, payload...)
 
-	am := &message.AnnounceMessage{}
+	am := &message.AnnounceBroadcastMessage{}
 	err := am.Decode(bytes.NewReader(full))
 	assert.ErrorIs(t, err, io.EOF) // Should fail with EOF reading first missing HopID, NOT OOM crash
 

@@ -104,6 +104,8 @@ type TrackWriter struct {
 }
 
 // Close stops publishing and cancels active groups.
+// It sends SUBSCRIBE_END with the last opened group sequence before closing
+// the subscribe stream, signaling that no further groups will be produced.
 func (w *TrackWriter) Close() error {
 	// Take the write lock to ensure Close is exclusive with OpenGroup calls.
 	// This prevents OpenGroup from running concurrently with Close and
@@ -133,6 +135,11 @@ func (w *TrackWriter) Close() error {
 	if w.subscribeStream == nil {
 		return nil
 	}
+
+	// Signal that no group after the last opened sequence will be produced.
+	// When no groups were opened, this is a SUBSCRIBE_END without a
+	// preceding SUBSCRIBE_OK (a track that ended with no matching groups).
+	_ = w.subscribeStream.writeEnd(GroupSequence(w.groupSequence.Load()))
 
 	return w.subscribeStream.close()
 }
@@ -212,10 +219,6 @@ func (w *TrackWriter) SkipGroups(n uint64) {
 
 func (w *TrackWriter) Context() context.Context {
 	return w.ctx
-}
-
-func (w *TrackWriter) WriteInfo(info PublishInfo) error {
-	return w.subscribeStream.writeInfo(info)
 }
 
 // DropGroups sends a SUBSCRIBE_DROP message for an explicit inclusive range.
@@ -300,9 +303,8 @@ func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequen
 	}
 
 	// Ensure the first SUBSCRIBE_OK has been sent before opening a group.
-	err := w.subscribeStream.ensureInfo(PublishInfo{
-		StartGroup: seq,
-	})
+	// The first opened group resolves the subscription's absolute start.
+	err := w.subscribeStream.ensureOk(seq)
 	if err != nil {
 		return nil, err
 	}

@@ -10,8 +10,8 @@ type SubscribeUpdateMessage struct {
 	SubscriberPriority   uint8
 	SubscriberOrdered    uint8
 	SubscriberMaxLatency uint64
-	StartGroup           uint64
-	EndGroup             uint64
+	GroupStart           uint64
+	GroupEnd             uint64
 }
 
 func (su SubscribeUpdateMessage) Len() int {
@@ -20,8 +20,8 @@ func (su SubscribeUpdateMessage) Len() int {
 	l += 1 // SubscriberPriority (uint8)
 	l += 1 // SubscriberOrdered (uint8)
 	l += VarintLen(su.SubscriberMaxLatency)
-	l += VarintLen(su.StartGroup)
-	l += VarintLen(su.EndGroup)
+	l += VarintLen(su.GroupStart)
+	l += VarintLen(su.GroupEnd)
 
 	return l
 }
@@ -34,8 +34,8 @@ func (su SubscribeUpdateMessage) Encode(w io.Writer) error {
 	p = append(p, su.SubscriberPriority)
 	p = append(p, su.SubscriberOrdered)
 	p, _ = WriteVarint(p, su.SubscriberMaxLatency)
-	p, _ = WriteVarint(p, su.StartGroup)
-	p, _ = WriteVarint(p, su.EndGroup)
+	p, _ = WriteVarint(p, su.GroupStart)
+	p, _ = WriteVarint(p, su.GroupEnd)
 
 	_, err := w.Write(p)
 
@@ -77,14 +77,14 @@ func (sum *SubscribeUpdateMessage) Decode(src io.Reader) error {
 	if err != nil {
 		return err
 	}
-	sum.StartGroup = num
+	sum.GroupStart = num
 	b = b[n:]
 
 	num, n, err = ReadVarint(b)
 	if err != nil {
 		return err
 	}
-	sum.EndGroup = num
+	sum.GroupEnd = num
 	b = b[n:]
 
 	if len(b) != 0 {

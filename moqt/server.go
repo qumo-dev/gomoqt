@@ -327,7 +327,12 @@ func (u *WebTransportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		manager = v.(*connManager)
 	}
 
-	sess := newSession(conn, u.TrackMux, manager, u.Config, u.FetchHandler, nil, u.Logger)
+	role := sessionRole{
+		isClient:      false,
+		hasRequestURI: true,
+		requestPath:   r.URL.Path,
+	}
+	sess := newSession(conn, u.TrackMux, manager, u.Config, u.FetchHandler, nil, u.Logger, role)
 	// Ensure the session is cleaned up (conn removed from the manager) when
 	// the Handler returns, even if it did not call CloseWithError itself (e.g.
 	// the peer closed the connection). Idempotent.
@@ -356,7 +361,11 @@ func (f HandleFunc) ServeMOQ(sess *Session) {
 
 func (s *Server) handleNativeQUIC(conn StreamConn) error {
 	if s.Handler != nil {
-		sess := newSession(conn, s.TrackMux, s.connManager, s.Config, s.FetchHandler, nil, s.Logger)
+		role := sessionRole{
+			isClient:      false,
+			hasRequestURI: false,
+		}
+		sess := newSession(conn, s.TrackMux, s.connManager, s.Config, s.FetchHandler, nil, s.Logger, role)
 		// Clean up the session when the Handler returns (idempotent if the
 		// Handler already closed it), so the conn is removed from the manager.
 		defer sess.CloseWithError(NoError, "session ended")

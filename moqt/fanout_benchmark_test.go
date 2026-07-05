@@ -606,7 +606,7 @@ func setupFanoutLatencyServer(tb testing.TB, ctx context.Context, frameSize, fra
 		// Subscribe() handshake completes during dialing, BEFORE the gate blocks.
 		// (OpenGroup would send this OK lazily via ensureInfo, but WriteInfo avoids
 		// opening a throwaway uni stream + group header just to flush the response.)
-		if err := tw.WriteInfo(PublishInfo{}); err != nil {
+		if err := tw.subscribeStream.ensureOk(1); err != nil {
 			return
 		}
 
@@ -699,7 +699,7 @@ func setupMultiTrackServer(tb testing.TB, ctx context.Context, frameSize, frames
 			// Flush the SUBSCRIBE_OK (sent lazily on first OpenGroup via
 			// ensureInfo) with WriteInfo so the subscribe handshake completes
 			// during setup, BEFORE the gate blocks production.
-			if err := tw.WriteInfo(PublishInfo{}); err != nil {
+			if err := tw.subscribeStream.ensureOk(1); err != nil {
 				return
 			}
 			// Gate: block until all tracks are subscribed (ready closed by

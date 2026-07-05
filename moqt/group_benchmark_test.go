@@ -56,7 +56,7 @@ func BenchmarkGroupReader_ReadFrame(b *testing.B) {
 			testFrame.Write(frameData)
 
 			var buf bytes.Buffer
-			_ = testFrame.encode(&buf)
+			_ = testFrame.encode(&buf, 0)
 			encodedData := buf.Bytes()
 
 			// loopReader yields the encoded frame forever with no allocation
@@ -133,7 +133,7 @@ func BenchmarkGroupReader_ConcurrentRead(b *testing.B) {
 			testFrame.Write(frameData)
 
 			var buf bytes.Buffer
-			_ = testFrame.encode(&buf)
+			_ = testFrame.encode(&buf, 0)
 			encodedData := buf.Bytes()
 
 			b.ReportAllocs()
@@ -227,7 +227,7 @@ func BenchmarkFrame_EncodeDecodeCycle(b *testing.B) {
 				writeFrame.Write(frameData)
 
 				var buf bytes.Buffer
-				err := writeFrame.encode(&buf)
+				err := writeFrame.encode(&buf, 0)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -256,7 +256,7 @@ func BenchmarkGroupReader_MemoryAllocation(b *testing.B) {
 	testFrame.Write(frameData)
 
 	var buf bytes.Buffer
-	_ = testFrame.encode(&buf)
+	_ = testFrame.encode(&buf, 0)
 	encodedData := buf.Bytes()
 	// Each iteration reads exactly one frame from a fresh stream, so a single
 	// loopReader (one frame, no EOF) suffices — replacing

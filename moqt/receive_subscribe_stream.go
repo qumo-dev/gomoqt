@@ -30,8 +30,8 @@ func newReceiveSubscribeStream(id SubscribeID, stream transport.Stream, config *
 				Priority:   TrackPriority(updateMsg.SubscriberPriority),
 				Ordered:    boolFromWireFlag(updateMsg.SubscriberOrdered),
 				MaxLatency: updateMsg.SubscriberMaxLatency,
-				StartGroup: groupSequenceFromWire(updateMsg.StartGroup),
-				EndGroup:   groupSequenceFromWire(updateMsg.EndGroup),
+				StartGroup: groupSequenceFromWire(updateMsg.GroupStart),
+				EndGroup:   groupSequenceFromWire(updateMsg.GroupEnd),
 			}
 
 			substr.mu.Lock()
@@ -58,19 +58,22 @@ type receiveSubscribeStream struct {
 	config          *SubscribeConfig
 	updatedCh       chan struct{}
 	responseStarted bool
+	endSent         bool
 }
 
 func (substr *receiveSubscribeStream) SubscribeID() SubscribeID {
 	return substr.subscribeID
 }
 
-func (substr *receiveSubscribeStream) ensureInfo(info PublishInfo) error {
+// ensureOk sends SUBSCRIBE_OK with the resolved start group exactly once.
+// Subsequent calls are no-ops.
+func (substr *receiveSubscribeStream) ensureOk(group GroupSequence) error {
 	substr.mu.Lock()
 	if substr.responseStarted {
 		substr.mu.Unlock()
 		return nil
 	}
-	err := substr.writeInfoLocked(info)
+	err := substr.writeOkLocked(group)
 	substr.mu.Unlock()
 
 	if err != nil {
@@ -80,31 +83,16 @@ func (substr *receiveSubscribeStream) ensureInfo(info PublishInfo) error {
 	return err
 }
 
-func (substr *receiveSubscribeStream) writeInfo(info PublishInfo) error {
-	substr.mu.Lock()
-	err := substr.writeInfoLocked(info)
-	substr.mu.Unlock()
-
-	if err != nil {
-		_ = substr.closeWithError(SubscribeErrorCodeInternal)
-	}
-
-	return err
-}
-
-func (substr *receiveSubscribeStream) writeInfoLocked(info PublishInfo) error {
+// writeOkLocked writes the type tag and SUBSCRIBE_OK message.
+// Caller MUST hold substr.mu.
+func (substr *receiveSubscribeStream) writeOkLocked(group GroupSequence) error {
 	if _, err := substr.stream.Write([]byte{byte(message.MessageTypeSubscribeOk)}); err != nil {
 		return err
 	}
 
 	err := message.SubscribeOkMessage{
-		PublisherPriority:   uint8(info.Priority),
-		PublisherOrdered:    boolToWireFlag(info.Ordered),
-		PublisherMaxLatency: info.MaxLatency,
-		StartGroup:          groupSequenceToWire(info.StartGroup),
-		EndGroup:            groupSequenceToWire(info.EndGroup),
+		Group: uint64(group),
 	}.Encode(substr.stream)
-
 	if err != nil {
 		return err
 	}
@@ -114,24 +102,53 @@ func (substr *receiveSubscribeStream) writeInfoLocked(info PublishInfo) error {
 	return nil
 }
 
+// writeEnd sends SUBSCRIBE_END with the last group that may be delivered.
+// Per moq-lite-05, SUBSCRIBE_END without a preceding SUBSCRIBE_OK signals a
+// track that ended with no matching groups.
+func (substr *receiveSubscribeStream) writeEnd(group GroupSequence) error {
+	substr.mu.Lock()
+	defer substr.mu.Unlock()
+
+	if substr.endSent {
+		return nil
+	}
+
+	if _, err := substr.stream.Write([]byte{byte(message.MessageTypeSubscribeEnd)}); err != nil {
+		return err
+	}
+
+	err := message.SubscribeEndMessage{
+		Group: uint64(group),
+	}.Encode(substr.stream)
+	if err != nil {
+		return err
+	}
+
+	substr.endSent = true
+
+	return nil
+}
+
 func (substr *receiveSubscribeStream) writeDrop(drop SubscribeDrop) error {
 	substr.mu.Lock()
 	defer substr.mu.Unlock()
 
 	if !substr.responseStarted {
-		err := substr.writeInfoLocked(PublishInfo{})
-		if err != nil {
-			return err
-		}
+		// A leading range is dropped implicitly by SUBSCRIBE_OK: resolving
+		// the start group past the dropped range makes an explicit
+		// SUBSCRIBE_DROP unnecessary.
+		return substr.writeOkLocked(drop.EndGroup.Next())
 	}
 
 	if _, err := substr.stream.Write([]byte{byte(message.MessageTypeSubscribeDrop)}); err != nil {
 		return err
 	}
 
+	// SUBSCRIBE_DROP carries plain absolute sequences, not the +1 form
+	// used by SUBSCRIBE.
 	err := message.SubscribeDropMessage{
-		StartGroup: groupSequenceToWire(drop.StartGroup),
-		EndGroup:   groupSequenceToWire(drop.EndGroup),
+		GroupStart: uint64(drop.StartGroup),
+		GroupEnd:   uint64(drop.EndGroup),
 		ErrorCode:  uint64(drop.ErrorCode),
 	}.Encode(substr.stream)
 	if err != nil {

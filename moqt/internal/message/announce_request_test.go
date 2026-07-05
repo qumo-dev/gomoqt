@@ -9,31 +9,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAnnounceInterestMessage_EncodeDecode(t *testing.T) {
+func TestAnnounceRequestMessage_EncodeDecode(t *testing.T) {
 	tests := map[string]struct {
-		input   message.AnnounceInterestMessage
+		input   message.AnnounceRequestMessage
 		wantErr bool
 	}{
 		"valid message": {
-			input: message.AnnounceInterestMessage{
+			input: message.AnnounceRequestMessage{
 				BroadcastPathPrefix: "part1/part2",
 				ExcludeHop:          0,
 			},
 		},
 		"empty prefix": {
-			input: message.AnnounceInterestMessage{
+			input: message.AnnounceRequestMessage{
 				BroadcastPathPrefix: "",
 				ExcludeHop:          0,
 			},
 		},
 		"with exclude hop": {
-			input: message.AnnounceInterestMessage{
+			input: message.AnnounceRequestMessage{
 				BroadcastPathPrefix: "path",
 				ExcludeHop:          42,
 			},
 		},
 		"long path": {
-			input: message.AnnounceInterestMessage{
+			input: message.AnnounceRequestMessage{
 				BroadcastPathPrefix: "very/long/path/with/many/segments",
 				ExcludeHop:          12345,
 			},
@@ -51,7 +51,7 @@ func TestAnnounceInterestMessage_EncodeDecode(t *testing.T) {
 			}
 			require.NoError(t, err)
 
-			var decoded message.AnnounceInterestMessage
+			var decoded message.AnnounceRequestMessage
 			err = decoded.Decode(&buf)
 			require.NoError(t, err)
 
@@ -60,16 +60,16 @@ func TestAnnounceInterestMessage_EncodeDecode(t *testing.T) {
 	}
 }
 
-func TestAnnounceInterestMessage_DecodeErrors(t *testing.T) {
+func TestAnnounceRequestMessage_DecodeErrors(t *testing.T) {
 	t.Run("read message length error", func(t *testing.T) {
-		var aim message.AnnounceInterestMessage
+		var aim message.AnnounceRequestMessage
 		src := bytes.NewReader([]byte{})
 		err := aim.Decode(src)
 		assert.Error(t, err)
 	})
 
 	t.Run("read full error", func(t *testing.T) {
-		var aim message.AnnounceInterestMessage
+		var aim message.AnnounceRequestMessage
 		var buf bytes.Buffer
 		buf.WriteByte(0x80 | 10)
 		buf.WriteByte(0x00)
@@ -79,7 +79,7 @@ func TestAnnounceInterestMessage_DecodeErrors(t *testing.T) {
 	})
 
 	t.Run("read string error", func(t *testing.T) {
-		var aim message.AnnounceInterestMessage
+		var aim message.AnnounceRequestMessage
 		var buf bytes.Buffer
 		buf.WriteByte(0x80 | 1)
 		buf.WriteByte(0x00)

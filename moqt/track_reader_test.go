@@ -28,8 +28,6 @@ func TestNewTrackReader(t *testing.T) {
 	assert.NotNil(t, receiver, "newTrackReader should not return nil")
 	assert.Equal(t, BroadcastPath("/test"), receiver.BroadcastPath)
 	assert.Equal(t, TrackName("video"), receiver.TrackName)
-	// Verify info propagation
-	assert.Equal(t, PublishInfo{}, substr.ReadInfo(), "sendSubscribeStream should return the Info passed at construction")
 	assert.NotNil(t, receiver.queueing, "queue should be initialized")
 	assert.NotNil(t, receiver.queuedCh, "queuedCh should be initialized")
 	assert.NotNil(t, receiver.dequeued, "dequeued should be initialized")
@@ -154,8 +152,8 @@ func TestTrackReader_AcceptDrop(t *testing.T) {
 	var buf bytes.Buffer
 	_, _ = buf.Write([]byte{byte(message.MessageTypeSubscribeDrop)})
 	require.NoError(t, (message.SubscribeDropMessage{
-		StartGroup: 11,
-		EndGroup:   21,
+		GroupStart: 11,
+		GroupEnd:   21,
 		ErrorCode:  3,
 	}).Encode(&buf))
 
@@ -174,8 +172,8 @@ func TestTrackReader_AcceptDrop(t *testing.T) {
 	drop, err := receiver.acceptDrop(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, SubscribeDrop{
-		StartGroup: 10,
-		EndGroup:   20,
+		StartGroup: 11,
+		EndGroup:   21,
 		ErrorCode:  3,
 	}, drop)
 }
@@ -206,8 +204,8 @@ func TestTrackReader_Drops(t *testing.T) {
 	// Write a SUBSCRIBE_DROP response (readSubscribeResponses returns after one drop)
 	_, _ = buf.Write([]byte{byte(message.MessageTypeSubscribeDrop)})
 	require.NoError(t, (message.SubscribeDropMessage{
-		StartGroup: 11, // wire value 11 → groupSequenceFromWire → GroupSequence(10)
-		EndGroup:   21, // wire value 21 → groupSequenceFromWire → GroupSequence(20)
+		GroupStart: 11, // plain absolute sequence per draft-05
+		GroupEnd:   21,
 		ErrorCode:  3,
 	}).Encode(&buf))
 
@@ -229,8 +227,8 @@ func TestTrackReader_Drops(t *testing.T) {
 	}
 
 	require.Len(t, drops, 1)
-	assert.Equal(t, GroupSequence(10), drops[0].StartGroup)
-	assert.Equal(t, GroupSequence(20), drops[0].EndGroup)
+	assert.Equal(t, GroupSequence(11), drops[0].StartGroup)
+	assert.Equal(t, GroupSequence(21), drops[0].EndGroup)
 	assert.Equal(t, SubscribeErrorCode(3), drops[0].ErrorCode)
 }
 

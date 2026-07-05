@@ -6,11 +6,22 @@ import (
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
 )
 
+// frameHeaderSize reserves room in the frame buffer for the wire prefix:
+// a Timestamp Delta varint (up to 8 bytes) followed by a Message Length
+// varint (up to 8 bytes).
+const frameHeaderSize = 16
+
 // Frame represents a MOQ frame.
 // It provides methods to build, read, and encode MOQ payloads.
 type Frame struct {
+	// Timestamp is the frame's presentation timestamp, expressed in the
+	// track's Timescale (units per second, carried in TRACK_INFO).
+	// It is encoded on the wire as a zigzag delta from the previous frame
+	// on the same group stream; the first frame is delta-encoded from 0.
+	Timestamp uint64
+
 	buf    []byte
-	header [8]byte
+	header [frameHeaderSize]byte
 	body   []byte
 }
 
@@ -35,8 +46,8 @@ func (f *Frame) Body() []byte {
 }
 
 func (f *Frame) init(cap int) {
-	f.buf = make([]byte, 8+cap)
-	body := f.buf[8:8]
+	f.buf = make([]byte, frameHeaderSize+cap)
+	body := f.buf[frameHeaderSize:frameHeaderSize]
 	if f.body != nil {
 		body = body[:len(f.body)]
 		copy(body, f.body)
@@ -66,21 +77,33 @@ func (f *Frame) Cap() int {
 	return cap(f.body)
 }
 
-// encode writes the frame in MOQ format: varint length followed by payload.
-// The length is encoded into the header buffer to minimize allocations.
-func (f *Frame) encode(w io.Writer) error {
+// encode writes the frame in MOQ format: zigzag timestamp delta relative to
+// prevTimestamp, varint length, then payload. The prefix is encoded into the
+// header area of the frame buffer to minimize allocations and writes.
+func (f *Frame) encode(w io.Writer, prevTimestamp uint64) error {
+	delta := message.ZigzagEncode(int64(f.Timestamp) - int64(prevTimestamp))
 	l := uint64(len(f.body))
-	header, _ := message.WriteMessageLength(f.header[:0], l)
-	start := 8 - len(header)
-	copy(f.buf[start:], header)
-	end := 8 + len(f.body)
+
+	prefix, _ := message.WriteVarint(f.header[:0], delta)
+	prefix, _ = message.WriteMessageLength(prefix, l)
+
+	start := frameHeaderSize - len(prefix)
+	copy(f.buf[start:], prefix)
+	end := frameHeaderSize + len(f.body)
 	_, err := w.Write(f.buf[start:end])
 	return err
 }
 
-// decode reads a MOQ frame from the reader, updating the payload.
-// The payload buffer is reused or reallocated as needed.
-func (f *Frame) decode(src io.Reader) error {
+// decode reads a MOQ frame from the reader, updating the timestamp and payload.
+// prevTimestamp is the previous frame's timestamp on the same stream (0 for the
+// first frame). The payload buffer is reused or reallocated as needed.
+func (f *Frame) decode(src io.Reader, prevTimestamp uint64) error {
+	delta, err := message.ReadMessageLength(src)
+	if err != nil {
+		return err
+	}
+	f.Timestamp = uint64(int64(prevTimestamp) + message.ZigzagDecode(delta))
+
 	num, err := message.ReadMessageLength(src)
 	if err != nil {
 		return err
@@ -116,6 +139,7 @@ func (f *Frame) decode(src io.Reader) error {
 // The cloned frame is completely independent from the original.
 func (f *Frame) Clone() *Frame {
 	clone := NewFrame(f.Cap())
+	clone.Timestamp = f.Timestamp
 	clone.append(f.Body())
 	return clone
 }

@@ -48,7 +48,9 @@ func TestAnnouncementReader_ReceiveAnnouncement(t *testing.T) {
 		"success_with_valid_announcement": {
 			receiveAnnounceStream: func() *AnnouncementReader {
 				buf := bytes.NewBuffer(nil)
-				err := message.AnnounceMessage{
+				// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
+				require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
+				err := message.AnnounceBroadcastMessage{
 					BroadcastPathSuffix: "valid_announcement",
 					AnnounceStatus:      message.ACTIVE,
 				}.Encode(buf)
@@ -258,8 +260,10 @@ func TestAnnouncementReader_AnnouncementTracking(t *testing.T) {
 func TestAnnouncementReader_ConcurrentAccess(t *testing.T) {
 	// Create multiple messages
 	buf := bytes.NewBuffer(nil)
+	// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
+	require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
 	for i := range 5 {
-		err := message.AnnounceMessage{
+		err := message.AnnounceBroadcastMessage{
 			BroadcastPathSuffix: fmt.Sprintf("/stream%d", i),
 			AnnounceStatus:      message.ACTIVE,
 		}.Encode(buf)
@@ -406,7 +410,9 @@ func TestAnnouncementReader_InvalidMessage(t *testing.T) {
 func TestAnnouncementReader_ActiveThenEnded(t *testing.T) {
 	// Test scenario: stream becomes active then ended
 	buf := bytes.NewBuffer(nil)
-	messages := []message.AnnounceMessage{
+	// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
+	require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
+	messages := []message.AnnounceBroadcastMessage{
 		{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ACTIVE},
 		{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ENDED},
 	}
@@ -464,7 +470,9 @@ func TestAnnouncementReader_ActiveThenEnded(t *testing.T) {
 func TestAnnouncementReader_MultipleActiveStreams(t *testing.T) {
 	// Test scenario: multiple streams become active
 	buf := bytes.NewBuffer(nil)
-	messages := []message.AnnounceMessage{
+	// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
+	require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
+	messages := []message.AnnounceBroadcastMessage{
 		{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ACTIVE},
 		{BroadcastPathSuffix: "stream2", AnnounceStatus: message.ACTIVE},
 	}
@@ -533,7 +541,9 @@ func TestAnnouncementReader_MultipleActiveStreams(t *testing.T) {
 func TestAnnouncementReader_DuplicateActiveError(t *testing.T) {
 	// Test scenario: duplicate ACTIVE message should cause error
 	buf := bytes.NewBuffer(nil)
-	messages := []message.AnnounceMessage{
+	// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
+	require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
+	messages := []message.AnnounceBroadcastMessage{
 		{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ACTIVE},
 		{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ACTIVE}, // Duplicate
 	}
@@ -576,7 +586,9 @@ func TestAnnouncementReader_DuplicateActiveError(t *testing.T) {
 func TestAnnouncementReader_EndNonExistentStreamError(t *testing.T) {
 	// Test scenario: ENDED message for non-existent stream should cause error
 	buf := bytes.NewBuffer(nil)
-	messages := []message.AnnounceMessage{
+	// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
+	require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
+	messages := []message.AnnounceBroadcastMessage{
 		{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ENDED}, // End without ACTIVE
 	}
 	for _, msg := range messages {
@@ -618,7 +630,9 @@ func TestAnnouncementReader_EndNonExistentStreamError(t *testing.T) {
 func TestAnnouncementReader_NotifyChannel(t *testing.T) {
 	// Create a message
 	buf := bytes.NewBuffer(nil)
-	err := message.AnnounceMessage{
+	// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
+	require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
+	err := message.AnnounceBroadcastMessage{
 		BroadcastPathSuffix: "test_stream",
 		AnnounceStatus:      message.ACTIVE}.Encode(buf)
 	require.NoError(t, err)
@@ -722,7 +736,9 @@ func TestAnnouncementReader_BoundaryValues(t *testing.T) {
 
 			// Create message with the test suffix
 			buf := bytes.NewBuffer(nil)
-			err := message.AnnounceMessage{
+			// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
+			require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
+			err := message.AnnounceBroadcastMessage{
 				BroadcastPathSuffix: tt.suffix,
 				AnnounceStatus:      message.ACTIVE}.Encode(buf)
 			require.NoError(t, err)

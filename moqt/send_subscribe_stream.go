@@ -25,7 +25,13 @@ type sendSubscribeStream struct {
 
 	config *SubscribeConfig
 
-	info PublishInfo
+	// resolvedStart is the absolute start group from SUBSCRIBE_OK.
+	resolvedStart GroupSequence
+	okReceived    bool
+
+	// endGroup is the last group that may be delivered, from SUBSCRIBE_END.
+	endGroup GroupSequence
+	ended    bool
 
 	mu sync.Mutex
 
@@ -35,63 +41,71 @@ type sendSubscribeStream struct {
 	id SubscribeID
 }
 
+// readSubscribeResponses consumes SUBSCRIBE_END and SUBSCRIBE_DROP messages
+// from the publisher until the stream ends.
 func (substr *sendSubscribeStream) readSubscribeResponses() {
 	for {
-		ok, drop, err := readSubscribeResponse(substr.stream)
+		resp, err := readSubscribeResponse(substr.stream)
 		if err != nil {
 			return
 		}
 
-		if ok != nil {
-			substr.updateInfo(PublishInfo{
-				Priority:   TrackPriority(ok.PublisherPriority),
-				Ordered:    boolFromWireFlag(ok.PublisherOrdered),
-				MaxLatency: ok.PublisherMaxLatency,
-				StartGroup: groupSequenceFromWire(ok.StartGroup),
-				EndGroup:   groupSequenceFromWire(ok.EndGroup),
-			})
-			continue
-		}
-
-		if drop != nil {
+		switch {
+		case resp.ok != nil:
+			// SUBSCRIBE_OK carries a plain absolute sequence.
+			substr.setResolvedStart(GroupSequence(resp.ok.Group))
+		case resp.end != nil:
+			substr.setEnd(GroupSequence(resp.end.Group))
+		case resp.drop != nil:
 			substr.appendDrop(SubscribeDrop{
-				StartGroup: groupSequenceFromWire(drop.StartGroup),
-				EndGroup:   groupSequenceFromWire(drop.EndGroup),
-				ErrorCode:  SubscribeErrorCode(drop.ErrorCode),
+				StartGroup: GroupSequence(resp.drop.GroupStart),
+				EndGroup:   GroupSequence(resp.drop.GroupEnd),
+				ErrorCode:  SubscribeErrorCode(resp.drop.ErrorCode),
 			})
-			return
 		}
 	}
 }
 
-func readSubscribeResponse(stream io.Reader) (*message.SubscribeOkMessage, *message.SubscribeDropMessage, error) {
+// subscribeResponse holds one decoded publisher message from the Subscribe
+// Stream; exactly one field is non-nil.
+type subscribeResponse struct {
+	ok   *message.SubscribeOkMessage
+	end  *message.SubscribeEndMessage
+	drop *message.SubscribeDropMessage
+}
+
+func readSubscribeResponse(stream io.Reader) (subscribeResponse, error) {
 	head := make([]byte, 1)
 	if _, err := io.ReadFull(stream, head); err != nil {
-		return nil, nil, err
+		return subscribeResponse{}, err
 	}
 
 	msgType, _, err := message.ReadVarint(head)
 	if err != nil {
-		return nil, nil, err
+		return subscribeResponse{}, err
 	}
 
 	switch msgType {
-	case 0x0:
+	case message.MessageTypeSubscribeOk:
 		var msg message.SubscribeOkMessage
-		err := msg.Decode(stream)
-		if err != nil {
-			return nil, nil, err
+		if err := msg.Decode(stream); err != nil {
+			return subscribeResponse{}, err
 		}
-		return &msg, nil, nil
-	case 0x1:
+		return subscribeResponse{ok: &msg}, nil
+	case message.MessageTypeSubscribeEnd:
+		var msg message.SubscribeEndMessage
+		if err := msg.Decode(stream); err != nil {
+			return subscribeResponse{}, err
+		}
+		return subscribeResponse{end: &msg}, nil
+	case message.MessageTypeSubscribeDrop:
 		var msg message.SubscribeDropMessage
-		err := msg.Decode(stream)
-		if err != nil {
-			return nil, nil, err
+		if err := msg.Decode(stream); err != nil {
+			return subscribeResponse{}, err
 		}
-		return nil, &msg, nil
+		return subscribeResponse{drop: &msg}, nil
 	default:
-		return nil, nil, fmt.Errorf("unexpected SUBSCRIBE response type: %d", msgType)
+		return subscribeResponse{}, fmt.Errorf("unexpected SUBSCRIBE response type: %d", msgType)
 	}
 }
 
@@ -106,11 +120,20 @@ func (substr *sendSubscribeStream) TrackConfig() *SubscribeConfig {
 	return substr.config
 }
 
-func (substr *sendSubscribeStream) updateInfo(newInfo PublishInfo) {
+func (substr *sendSubscribeStream) setResolvedStart(seq GroupSequence) {
 	substr.mu.Lock()
 	defer substr.mu.Unlock()
 
-	substr.info = newInfo
+	substr.resolvedStart = seq
+	substr.okReceived = true
+}
+
+func (substr *sendSubscribeStream) setEnd(seq GroupSequence) {
+	substr.mu.Lock()
+	defer substr.mu.Unlock()
+
+	substr.endGroup = seq
+	substr.ended = true
 }
 
 func (substr *sendSubscribeStream) updateSubscribe(newConfig *SubscribeConfig) error {
@@ -122,16 +145,16 @@ func (substr *sendSubscribeStream) updateSubscribe(newConfig *SubscribeConfig) e
 	// Send the message first before updating config
 	ordered := boolToWireFlag(newConfig.Ordered)
 
-	startGroup := groupSequenceToWire(newConfig.StartGroup)
+	groupStart := groupSequenceToWire(newConfig.StartGroup)
 
-	endGroup := groupSequenceToWire(newConfig.EndGroup)
+	groupEnd := groupSequenceToWire(newConfig.EndGroup)
 
 	sum := message.SubscribeUpdateMessage{
 		SubscriberPriority:   uint8(newConfig.Priority),
 		SubscriberOrdered:    ordered,
 		SubscriberMaxLatency: newConfig.MaxLatency,
-		StartGroup:           startGroup,
-		EndGroup:             endGroup,
+		GroupStart:           groupStart,
+		GroupEnd:             groupEnd,
 	}
 	err := sum.Encode(substr.stream)
 	if err != nil {
@@ -167,10 +190,6 @@ func (substr *sendSubscribeStream) pendingDrops() []SubscribeDrop {
 	drops := substr.drops
 	substr.drops = nil
 	return drops
-}
-
-func (substr *sendSubscribeStream) ReadInfo() PublishInfo {
-	return substr.info
 }
 
 func (substr *sendSubscribeStream) close() error {

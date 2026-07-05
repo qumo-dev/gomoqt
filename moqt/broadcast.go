@@ -32,7 +32,16 @@ func (b *Broadcast) initLocked() {
 // Register associates a TrackHandler with the named track. Replacing an
 // existing handler closes any active TrackWriter values served by the previous
 // handler so it can shut down promptly.
+// The track is served with default publisher properties; use RegisterWithInfo
+// to declare explicit properties (priority, ordering, retention, timescale).
 func (b *Broadcast) Register(name TrackName, handler TrackHandler) error {
+	return b.RegisterWithInfo(name, PublishInfo{}, handler)
+}
+
+// RegisterWithInfo associates a TrackHandler with the named track along with
+// the track's immutable publisher properties, served to subscribers via
+// TRACK_INFO. A zero Timescale is treated as DefaultTimescale.
+func (b *Broadcast) RegisterWithInfo(name TrackName, info PublishInfo, handler TrackHandler) error {
 	if b == nil {
 		return fmt.Errorf("moqt: nil broadcast")
 	}
@@ -44,6 +53,7 @@ func (b *Broadcast) Register(name TrackName, handler TrackHandler) error {
 	}
 
 	entry := newTrackHandlerEntry(handler)
+	entry.info = info
 
 	b.mu.Lock()
 	b.initLocked()
@@ -126,6 +136,23 @@ func (b *Broadcast) ServeTrack(tw *TrackWriter) {
 	b.Handler(tw.TrackName).ServeTrack(tw)
 }
 
+// TrackInfo implements TrackInfoProvider by returning the publisher
+// properties registered for the named track.
+func (b *Broadcast) TrackInfo(name TrackName) (PublishInfo, bool) {
+	if b == nil || name == "" {
+		return PublishInfo{}, false
+	}
+
+	b.mu.RLock()
+	entry, ok := b.trackHandlers[name]
+	b.mu.RUnlock()
+	if !ok {
+		return PublishInfo{}, false
+	}
+
+	return entry.info, true
+}
+
 func validateTrackHandler(handler TrackHandler) error {
 	if handler == nil {
 		return fmt.Errorf("moqt: track handler cannot be nil")
@@ -140,6 +167,7 @@ type trackHandlerEntry struct {
 	mu sync.Mutex
 
 	handler TrackHandler
+	info    PublishInfo
 	active  map[*TrackWriter]struct{}
 	stopped bool
 }

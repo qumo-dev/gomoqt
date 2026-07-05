@@ -491,21 +491,13 @@ func TestTrackWriter_DropGroups(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, byte(message.MessageTypeSubscribeOk), okType)
 
+	// A drop before any response resolves the start group past the dropped
+	// range via SUBSCRIBE_OK; no explicit SUBSCRIBE_DROP is sent for a
+	// leading range.
 	var okMsg message.SubscribeOkMessage
 	require.NoError(t, okMsg.Decode(buf))
-	assert.Equal(t, uint64(0), okMsg.StartGroup)
-	assert.Equal(t, uint64(0), okMsg.EndGroup)
-
-	// Read type prefix for SUBSCRIBE_DROP
-	dropType, err := buf.ReadByte()
-	require.NoError(t, err)
-	assert.Equal(t, byte(message.MessageTypeSubscribeDrop), dropType)
-
-	var dropMsg message.SubscribeDropMessage
-	require.NoError(t, dropMsg.Decode(buf))
-	assert.Equal(t, uint64(3), dropMsg.StartGroup)
-	assert.Equal(t, uint64(5), dropMsg.EndGroup)
-	assert.Equal(t, uint64(SubscribeErrorCodeInternal), dropMsg.ErrorCode)
+	assert.Equal(t, uint64(5), okMsg.Group)
+	assert.Zero(t, buf.Len(), "no SUBSCRIBE_DROP should follow for a leading range")
 }
 
 func TestTrackWriter_DropNextGroups(t *testing.T) {
@@ -529,16 +521,18 @@ func TestTrackWriter_DropNextGroups(t *testing.T) {
 
 	var okMsg message.SubscribeOkMessage
 	require.NoError(t, okMsg.Decode(buf))
+	assert.Equal(t, uint64(1), okMsg.Group)
 
 	// Read type prefix for SUBSCRIBE_DROP
 	dropType, err := buf.ReadByte()
 	require.NoError(t, err)
 	assert.Equal(t, byte(message.MessageTypeSubscribeDrop), dropType)
 
+	// SUBSCRIBE_DROP carries plain absolute sequences.
 	var dropMsg message.SubscribeDropMessage
 	require.NoError(t, dropMsg.Decode(buf))
-	assert.Equal(t, uint64(3), dropMsg.StartGroup)
-	assert.Equal(t, uint64(5), dropMsg.EndGroup)
+	assert.Equal(t, uint64(2), dropMsg.GroupStart)
+	assert.Equal(t, uint64(4), dropMsg.GroupEnd)
 }
 
 func TestTrackWriter_OpenGroupAt(t *testing.T) {
@@ -600,30 +594,22 @@ func TestTrackWriter_OpenGroupAt_AdvancesCounter(t *testing.T) {
 	assert.Equal(t, GroupSequence(102), g5.GroupSequence())
 }
 
-func TestTrackWriter_WriteInfo(t *testing.T) {
+func TestTrackWriter_FirstOpenGroupSendsSubscribeOk(t *testing.T) {
 	sender, buf := newTrackWriterDropTestSender(t)
 
-	info := PublishInfo{
-		Priority:   5,
-		Ordered:    true,
-		MaxLatency: 100,
-		StartGroup: 1,
-		EndGroup:   10,
-	}
-
-	err := sender.WriteInfo(info)
+	group, err := sender.OpenGroup(context.Background())
 	require.NoError(t, err)
+	require.Equal(t, GroupSequence(1), group.GroupSequence())
 
-	// Read SUBSCRIBE_OK from buffer
+	// Read SUBSCRIBE_OK from buffer: the first opened group resolves the
+	// subscription's absolute start group.
 	okType, err := buf.ReadByte()
 	require.NoError(t, err)
 	assert.Equal(t, byte(message.MessageTypeSubscribeOk), okType)
 
 	var okMsg message.SubscribeOkMessage
 	require.NoError(t, okMsg.Decode(buf))
-	assert.Equal(t, uint8(5), okMsg.PublisherPriority)
-	assert.Equal(t, uint8(1), okMsg.PublisherOrdered)
-	assert.Equal(t, uint64(100), okMsg.PublisherMaxLatency)
+	assert.Equal(t, uint64(1), okMsg.Group)
 }
 
 func TestTrackWriter_Updated(t *testing.T) {

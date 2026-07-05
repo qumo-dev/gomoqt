@@ -17,6 +17,10 @@ var (
 
 	// ErrServerClosed is returned when the server has been closed.
 	ErrServerClosed = errors.New("moqt: server closed")
+
+	// ErrProbeNotSupported is returned by Session.Probe when the peer did
+	// not advertise the Probe capability in its SETUP message.
+	ErrProbeNotSupported = errors.New("moqt: peer does not support probing")
 )
 
 /*
