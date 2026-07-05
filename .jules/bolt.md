@@ -14,3 +14,6 @@
 **Learning:** In Go, fallback paths (like non-`io.ByteReader` readers) in hot decoding loops shouldn't use dynamic slice allocations (e.g., `make([]byte, size)`) if the maximum size is small and fixed (like an 8-byte varint). Replacing `make()` with a local fixed-size array (e.g., `var buf [8]byte`) and slicing it `buf[:size]` entirely eliminates heap allocations.
 **Action:** When parsing small, bounded objects like varints from an `io.Reader`, use stack-allocated arrays and take their slices (`buf[:length]`) instead of dynamically allocating slices with `make()`.
 
+## 2024-07-05 - Optimize custom string type method operations
+**Learning:** For custom string types like `BroadcastPath`, direct slice-based equality checks (e.g., `string(s[:len(prefix)]) == prefix`) and manual slicing are measurably faster than using standard library functions like `strings.HasPrefix` and `strings.TrimPrefix` due to reduced overhead. Furthermore, `strings.LastIndexByte` provides significant performance improvements over `strings.LastIndex` when searching for single characters.
+**Action:** When working on performance-critical string path structures or custom wrappers, use manual slicing and byte-level string functions instead of higher-level `strings` package counterparts to minimize allocation and function call overheads.
