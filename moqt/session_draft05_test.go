@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
@@ -301,27 +302,38 @@ func TestSession_HandleSetupStream_MalformedSetup(t *testing.T) {
 
 // TestSession_Probe_WaitPeerSetup_SessionCanceled covers the waitPeerSetup
 // session-cancellation branch: Probe blocks on peer SETUP, the session is
-// closed concurrently, and Probe returns an error.
+// closed concurrently, and Probe returns an error. Uses testing/synctest so
+// the "Probe is parked in waitPeerSetup before Close runs" ordering is
+// deterministic (no ad-hoc sleep).
 func TestSession_Probe_WaitPeerSetup_SessionCanceled(t *testing.T) {
-	conn := &FakeStreamConn{}
-	// noStatsConn-style: peer SETUP never arrives (no uni stream fed), and
-	// localProbeLevel is irrelevant since we never get that far.
-	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionRole{})
+	synctest.Test(t, func(t *testing.T) {
+		// FakeStreamConn.Context() is cancellable (via CloseWithError), so
+		// sess.ctx cancels on close and waitPeerSetup unblocks. Peer SETUP is
+		// never delivered, so waitPeerSetup blocks until that cancellation.
+		conn := &FakeStreamConn{}
+		sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionRole{})
 
-	probeErr := make(chan error, 1)
-	go func() {
-		_, err := sess.Probe(1)
-		probeErr <- err
-	}()
+		probeErr := make(chan error, 1)
+		go func() {
+			_, err := sess.Probe(1)
+			probeErr <- err
+		}()
 
-	// Give Probe time to enter waitPeerSetup, then terminate the session.
-	time.Sleep(20 * time.Millisecond)
-	require.NoError(t, sess.CloseWithError(NoError, ""))
+		// Wait until Probe is parked in waitPeerSetup and all other session
+		// goroutines are idle.
+		synctest.Wait()
 
-	select {
-	case err := <-probeErr:
-		assert.Error(t, err)
-	case <-time.After(time.Second):
-		t.Fatal("Probe did not return after session close")
-	}
+		go func() {
+			_ = sess.CloseWithError(NoError, "")
+		}()
+		// Close cancels sess.ctx; waitPeerSetup unblocks via <-sess.ctx.Done().
+		synctest.Wait()
+
+		select {
+		case err := <-probeErr:
+			assert.Error(t, err)
+		default:
+			t.Fatal("Probe did not return after session close")
+		}
+	})
 }
