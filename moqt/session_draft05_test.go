@@ -245,3 +245,83 @@ func TestSession_TrackInfo_StreamTypeEncodeError(t *testing.T) {
 	_, err := sess.TrackInfo(context.Background(), "/p", "t")
 	assert.Error(t, err)
 }
+
+// TestSession_TrackInfo_OpenStreamApplicationError covers the ApplicationError
+// branch: OpenStreamSync returns *transport.ApplicationError → *SessionError.
+func TestSession_TrackInfo_OpenStreamApplicationError(t *testing.T) {
+	appErr := &transport.ApplicationError{
+		ErrorCode:    transport.ApplicationErrorCode(InternalSessionErrorCode),
+		ErrorMessage: "application error",
+	}
+	conn := &FakeStreamConn{}
+	conn.OpenStreamSyncFunc = func(context.Context) (transport.Stream, error) { return nil, appErr }
+	sess := newTestSession(conn)
+	defer sess.CloseWithError(NoError, "")
+
+	_, err := sess.TrackInfo(context.Background(), "/p", "t")
+	var sessErr *SessionError
+	require.ErrorAs(t, err, &sessErr)
+}
+
+// TestSession_TrackInfo_WithDeadline covers the SetReadDeadline branch.
+func TestSession_TrackInfo_WithDeadline(t *testing.T) {
+	var response bytes.Buffer
+	require.NoError(t, (&message.TrackInfoMessage{Timescale: 1000}).Encode(&response))
+	stream := &FakeQUICStream{ReadFunc: response.Read}
+	conn := &FakeStreamConn{}
+	conn.OpenStreamFunc = func() (transport.Stream, error) { return stream, nil }
+	sess := newTestSession(conn)
+	defer sess.CloseWithError(NoError, "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	info, err := sess.TrackInfo(ctx, "/p", "t")
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1000), info.Timescale)
+}
+
+// TestSession_HandleSetupStream_MalformedSetup covers the decode-error →
+// protocol-violation branch.
+func TestSession_HandleSetupStream_MalformedSetup(t *testing.T) {
+	conn := &FakeStreamConn{}
+	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionRole{isClient: false, hasRequestURI: true})
+	// one mark: the setup goroutine closes the session; defer keeps it tidy.
+	defer sess.CloseWithError(NoError, "")
+
+	// Garbage that cannot parse as a SETUP message body.
+	stream := &FakeQUICReceiveStream{ReadFunc: bytes.NewReader([]byte{0x05, 0x00}).Read}
+	sess.handleSetupStream(stream)
+
+	select {
+	case <-conn.Context().Done():
+	case <-time.After(time.Second):
+		t.Fatal("malformed SETUP did not terminate the session")
+	}
+}
+
+// TestSession_Probe_WaitPeerSetup_SessionCanceled covers the waitPeerSetup
+// session-cancellation branch: Probe blocks on peer SETUP, the session is
+// closed concurrently, and Probe returns an error.
+func TestSession_Probe_WaitPeerSetup_SessionCanceled(t *testing.T) {
+	conn := &FakeStreamConn{}
+	// noStatsConn-style: peer SETUP never arrives (no uni stream fed), and
+	// localProbeLevel is irrelevant since we never get that far.
+	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionRole{})
+
+	probeErr := make(chan error, 1)
+	go func() {
+		_, err := sess.Probe(1)
+		probeErr <- err
+	}()
+
+	// Give Probe time to enter waitPeerSetup, then terminate the session.
+	time.Sleep(20 * time.Millisecond)
+	require.NoError(t, sess.CloseWithError(NoError, ""))
+
+	select {
+	case err := <-probeErr:
+		assert.Error(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("Probe did not return after session close")
+	}
+}
