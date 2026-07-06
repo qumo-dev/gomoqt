@@ -279,9 +279,16 @@ export class Session {
 	}
 
 	async #handleSetupStream(stream: ReceiveStream): Promise<void> {
+		// A protocol violation terminates the session. closeWithError joins the
+		// listen loops (via #wg), and this handler runs inside one of them, so
+		// the close must be fire-and-forget — awaiting it would deadlock.
+		const violate = (reason: string): void => {
+			this.closeWithError(SessionErrorCode.ProtocolViolation, reason).catch(() => {});
+		};
+
 		if (this.#peerSetupReceived) {
 			// A second Setup Stream is a protocol violation.
-			await this.closeWithError(SessionErrorCode.ProtocolViolation, "duplicate setup stream");
+			violate("duplicate setup stream");
 			return;
 		}
 		this.#peerSetupReceived = true;
@@ -289,19 +296,13 @@ export class Session {
 		const sm = new SetupMessage({});
 		const err = await sm.decode(stream);
 		if (err) {
-			await this.closeWithError(
-				SessionErrorCode.ProtocolViolation,
-				"malformed SETUP message",
-			);
+			violate("malformed SETUP message");
 			return;
 		}
 
 		// A server MUST NOT send a Path parameter.
 		if (sm.path() !== undefined) {
-			await this.closeWithError(
-				SessionErrorCode.ProtocolViolation,
-				"server sent Path parameter",
-			);
+			violate("server sent Path parameter");
 			return;
 		}
 
