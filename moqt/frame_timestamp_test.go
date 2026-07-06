@@ -52,3 +52,30 @@ func TestFrame_Clone_CopiesTimestamp(t *testing.T) {
 	assert.Equal(t, frame.Timestamp, clone.Timestamp)
 	assert.Equal(t, frame.Body(), clone.Body())
 }
+
+func TestFrame_Encode_RejectsOutOfRangeTimestamp(t *testing.T) {
+	// A timestamp whose delta from prevTimestamp exceeds the 62-bit varint
+	// range (reachable on a relay via uint64->int64 wraparound) must return
+	// ErrTimestampOutOfRange instead of panicking inside WriteVarint.
+	tests := map[string]struct {
+		ts        uint64
+	}{
+		"large positive delta": {ts: uint64(1<<63 - 1)},
+		"wraparound negative":  {ts: 1}, // prev=1<<63-1 makes delta hugely negative
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			f := NewFrame(0)
+			f.Timestamp = tt.ts
+			var buf bytes.Buffer
+
+			prev := uint64(0)
+			if name == "wraparound negative" {
+				prev = uint64(1<<63 - 1)
+			}
+			err := f.encode(&buf, prev)
+			assert.ErrorIs(t, err, ErrTimestampOutOfRange)
+		})
+	}
+}

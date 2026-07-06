@@ -107,6 +107,7 @@ func TestSendSubscribeStream_ReadSubscribeResponses_EndAndDrop(t *testing.T) {
 
 	assert.True(t, substr.okReceived, "OK should mark okReceived")
 	assert.Equal(t, GroupSequence(5), substr.resolvedStart)
+	assert.Equal(t, GroupSequence(5), substr.resolvedStartGroup(), "getter mirrors field")
 	assert.True(t, substr.hasEnded(), "END should mark ended")
 	assert.Equal(t, GroupSequence(11), substr.endGroup)
 
