@@ -718,7 +718,7 @@ func (sess *Session) Probe(targetBitrate uint64) (<-chan ProbeResult, error) {
 		probeStream = stream
 	}
 
-	// Send PROBE with the new target bitrate. Per draft4 the subscriber MAY send
+	// Send PROBE with the new target bitrate. Per moq-lite-05 the subscriber MAY send
 	// additional PROBE messages on the same stream to update the target.
 	err := message.ProbeMessage{
 		Bitrate: targetBitrate,
@@ -845,7 +845,7 @@ func (sess *Session) handleSubscribeStream(stream transport.Stream) {
 		return
 	}
 
-	// Create a receiveSubscribeStream with draft3 fields decoded from SUBSCRIBE message
+	// Create a receiveSubscribeStream with fields decoded from SUBSCRIBE message
 	config := &SubscribeConfig{
 		Priority:   TrackPriority(sm.SubscriberPriority),
 		Ordered:    boolFromWireFlag(sm.SubscriberOrdered),

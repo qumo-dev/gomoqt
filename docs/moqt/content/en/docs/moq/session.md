@@ -35,7 +35,7 @@ After a session is established, you can retrieve connection metadata via `Connec
 
 ```go
     state := sess.ConnectionState()
-    fmt.Println("Protocol version:", state.Version) // e.g., "moq-lite-04"
+    fmt.Println("Protocol version:", state.Version) // e.g., "moq-lite-05"
     fmt.Println("TLS state:", state.TLS)
 ```
 
@@ -43,7 +43,7 @@ The `ConnectionState` struct contains:
 
 | Field     | Type                      | Description                                 |
 |-----------|---------------------------|---------------------------------------------|
-| `Version` | `string`                  | The negotiated MOQ protocol version (e.g., `"moq-lite-04"`) |
+| `Version` | `string`                  | The negotiated MOQ protocol version (e.g., `"moq-lite-05"`) |
 | `TLS`     | `*tls.ConnectionState`     | TLS connection state when available          |
 
 ## Connection Statistics

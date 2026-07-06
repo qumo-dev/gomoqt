@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **moqt / moq-web:** Upgraded the protocol from `moq-lite-04` to **`moq-lite-05`** (ALPN / WebTransport protocol token `moq-lite-05`). This is a breaking wire-protocol change; draft-04 peers cannot interoperate. Highlights ([draft changelog](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-05.html)):
+  - **Setup Stream (uni `0x1`) + SETUP message.** Each endpoint advertises optional capabilities at session start. The Probe parameter gates the Probe Stream in both directions (`Session.Probe` returns `ErrProbeNotSupported` / an error when the peer advertised no capability; an unadvertised incoming Probe Stream is reset). The Path parameter carries the request path on native QUIC — `Dialer.DialQUIC` now takes a `path` argument and the server exposes it via `Session.Path(ctx)`.
+  - **Announce:** `ANNOUNCE_INTEREST` → `ANNOUNCE_REQUEST`, `ANNOUNCE` → `ANNOUNCE_BROADCAST`, and a new `ANNOUNCE_OK` (publisher Hop ID + initial active count) sent before any broadcast. A duplicate `active` announcement now atomically replaces the prior one instead of being a protocol error. Hop tracking is wire-complete; non-relay endpoints send 0.
+  - **Subscribe:** `SUBSCRIBE_OK` is trimmed to the resolved absolute start group (type `0x0`); a new `SUBSCRIBE_END` (type `0x1`) signals no further groups (sent by `TrackWriter.Close`); `SUBSCRIBE_DROP` moves to type `0x2` and carries plain absolute sequences. `TrackWriter.WriteInfo` is removed — `SUBSCRIBE_OK` is sent automatically when the first group opens.
+  - **Track Stream (bidi `0x6`).** A track's immutable publisher properties (priority, ordering, max latency, **mandatory Timescale**) moved out of `SUBSCRIBE_OK` into `TRACK_INFO`, fetched on demand via `Session.TrackInfo(ctx, path, name)` (Go) / `Session.trackInfo(path, name)` (TS). Publishers declare them via `Broadcast.RegisterWithInfo` / `registerWithInfo` (zero Timescale defaults to 1000); handlers without explicit info are served defaults. `PublishInfo` / `Info` now model TRACK_INFO.
+  - **Frame timestamps.** Every FRAME carries a zigzag-encoded timestamp delta in the track's Timescale. Go: `Frame.Timestamp uint64` field; TS: `Frame.timestamp`, `GroupWriter.writeFrame(src, timestamp?)` and timestamps populated on read.
+- **moq-web:** `AnnouncementReader.receive` no longer crashes with a `Mutex: unlock of unlocked mutex` when it has to skip an announcement that ended while queued (surfaced by the draft-05 announcement-replacement semantics); it now simply waits for the next queued announcement.
+
+### Removed
+
+- **moq-web:** The unused `AnnounceInitMessage` (`ANNOUNCE_INIT`) codec.
+
+> **Not yet implemented from draft-05:** QUIC datagram delivery for groups, and the Qmux transport bindings (TCP/TLS, WebSocket). See SPECIFICATION.md.
+
 ## [v0.16.1] - 2026-07-01
 
 > **Dual release.** `v0.16.1` ships both packages at the same version: the Go module (`moqt`, consumed via `go get github.com/qumo-dev/gomoqt@v0.16.1`) and the TypeScript package (`@qumo/moq` on JSR). The `moq-web` bullets below were published via the JSR release; the `moqt` and `deps` bullets ship via this Go tag — notably the `webtransport-go` → `v0.11.0-okdaichi.1` bump (which brings upstream #267, the transport-layer fix for the qumo #205 close-cancellation stall) and the accumulated `moqt` benchmark / dead-code / security work.

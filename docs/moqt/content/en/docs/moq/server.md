@@ -6,7 +6,7 @@ weight: 2
 `moqt.Server` manages server-side operations for the MoQ protocol. It listens for incoming QUIC connections, dispatches them based on ALPN negotiation, and manages their lifecycle.
 
 The server uses ALPN (Application-Layer Protocol Negotiation) to determine the transport:
-- `moq-lite-04` (`moqt.NextProtoMOQ`) — Native QUIC, dispatched to `Server.Handler`
+- `moq-lite-05` (`moqt.NextProtoMOQ`) — Native QUIC, dispatched to `Server.Handler`
 - `h3` (`moqt.NextProtoH3`) — WebTransport via HTTP/3, dispatched to `Server.WebTransportServer`
 
 {{% details title="Overview" closed="true" %}}
@@ -127,13 +127,13 @@ type WebTransportServer interface {
 `ServeQUICConn` detects the negotiated ALPN protocol and dispatches the connection accordingly:
 
 ```go
-    // Native QUIC (moq-lite-04) → Server.Handler.ServeMOQ(sess)
+    // Native QUIC (moq-lite-05) → Server.Handler.ServeMOQ(sess)
     // HTTP/3 (h3)               → Server.WebTransportServer.ServeQUICConn(conn)
 ```
 
 ### Native QUIC Handler
 
-For native QUIC connections (ALPN `moq-lite-04`), the `Handler` field receives a `*moqt.Session` directly:
+For native QUIC connections (ALPN `moq-lite-05`), the `Handler` field receives a `*moqt.Session` directly:
 
 ```go
 type Handler interface {

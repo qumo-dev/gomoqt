@@ -132,4 +132,4 @@ You can also use transport-specific methods directly:
 > Ensure that the `mux` is properly configured for your use case to avoid unexpected behavior.
 
 > [!NOTE] Note: ALPN Negotiation
-> For native QUIC connections, the dialer automatically sets the ALPN token to `moq-lite-04` (`moqt.NextProtoMOQ`) if `TLSConfig.NextProtos` is not configured.
+> For native QUIC connections, the dialer automatically sets the ALPN token to `moq-lite-05` (`moqt.NextProtoMOQ`) if `TLSConfig.NextProtos` is not configured.
