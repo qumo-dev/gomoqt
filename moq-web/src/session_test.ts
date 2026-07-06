@@ -88,7 +88,7 @@ async function peerSetupUniStream(
 	return { type: UniStreamTypes.SetupStreamType, data };
 }
 
-class MockWebTransportSession implements StreamConn {
+export class MockWebTransportSession implements StreamConn {
 	#openStreamResponses: Uint8Array[];
 	#openStreamIndex = 0;
 	#openStreamWrittenData: Uint8Array[][] = [];
