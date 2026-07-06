@@ -2,19 +2,19 @@ import type { Reader, Writer } from "@okdaichi/golikejs/io";
 import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
 
 export interface SubscribeDropMessageInit {
-	startGroup?: number;
-	endGroup?: number;
+	groupStart?: number;
+	groupEnd?: number;
 	errorCode?: number;
 }
 
 export class SubscribeDropMessage {
-	startGroup: number;
-	endGroup: number;
+	groupStart: number;
+	groupEnd: number;
 	errorCode: number;
 
 	constructor(init: SubscribeDropMessageInit = {}) {
-		this.startGroup = init.startGroup ?? 0;
-		this.endGroup = init.endGroup ?? 0;
+		this.groupStart = init.groupStart ?? 0;
+		this.groupEnd = init.groupEnd ?? 0;
 		this.errorCode = init.errorCode ?? 0;
 	}
 
@@ -23,8 +23,8 @@ export class SubscribeDropMessage {
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
 		const e = new MessageEncoder();
-		e.varint(this.startGroup);
-		e.varint(this.endGroup);
+		e.varint(this.groupStart);
+		e.varint(this.groupEnd);
 		e.varint(this.errorCode);
 		const [, err] = await w.write(e.frame());
 		return err;
@@ -43,8 +43,8 @@ export class SubscribeDropMessage {
 
 		const d = new MessageDecoder(buf);
 
-		this.startGroup = d.varint();
-		this.endGroup = d.varint();
+		this.groupStart = d.varint();
+		this.groupEnd = d.varint();
 		this.errorCode = d.varint();
 
 		return undefined;

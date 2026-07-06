@@ -1,5 +1,6 @@
 import { SubscribeErrorCode } from "./error.ts";
-import type { TrackHandler } from "./track_mux.ts";
+import type { Info } from "./info.ts";
+import type { TrackHandler, TrackInfoProvider } from "./track_mux.ts";
 import type { TrackWriter } from "./track_writer.ts";
 
 /**
@@ -8,10 +9,27 @@ import type { TrackWriter } from "./track_writer.ts";
  * Registers named {@link TrackHandler}s and dispatches incoming
  * subscriptions by track name.
  */
-export class Broadcast implements TrackHandler {
+export class Broadcast implements TrackHandler, TrackInfoProvider {
 	#trackHandlers = new Map<string, TrackHandlerEntry>();
 
+	/**
+	 * Register a handler with default publisher properties. Use
+	 * {@link registerWithInfo} to declare explicit properties.
+	 */
 	async register(name: string, handler: TrackHandler): Promise<void> {
+		await this.registerWithInfo(name, undefined, handler);
+	}
+
+	/**
+	 * Register a handler along with the track's immutable publisher
+	 * properties, served to subscribers via TRACK_INFO. A zero timescale is
+	 * treated as the default (1000).
+	 */
+	async registerWithInfo(
+		name: string,
+		info: Info | undefined,
+		handler: TrackHandler,
+	): Promise<void> {
 		if (name === "") {
 			throw new Error("moq: track name is required");
 		}
@@ -19,13 +37,22 @@ export class Broadcast implements TrackHandler {
 			throw new Error("moq: track handler cannot be nil");
 		}
 
-		const entry = new TrackHandlerEntry(handler);
+		const entry = new TrackHandlerEntry(handler, info);
 		const previous = this.#trackHandlers.get(name);
 		this.#trackHandlers.set(name, entry);
 
 		if (previous) {
 			await previous.close();
 		}
+	}
+
+	/** Implements {@link TrackInfoProvider} for registered tracks. */
+	trackInfo(name: string): Info | undefined {
+		const entry = this.#trackHandlers.get(name);
+		if (!entry) {
+			return undefined;
+		}
+		return entry.info ?? { priority: 0, ordered: false, maxLatency: 0, timescale: 0 };
 	}
 
 	async remove(name: string): Promise<boolean> {
@@ -70,11 +97,13 @@ export async function NotFound(trackWriter: TrackWriter): Promise<void> {
 
 class TrackHandlerEntry implements TrackHandler {
 	#handler: TrackHandler;
+	readonly info?: Info;
 	#active = new Set<TrackWriter>();
 	#stopped = false;
 
-	constructor(handler: TrackHandler) {
+	constructor(handler: TrackHandler, info?: Info) {
 		this.#handler = handler;
+		this.info = info;
 	}
 
 	async serveTrack(trackWriter: TrackWriter): Promise<void> {

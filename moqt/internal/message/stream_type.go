@@ -11,9 +11,11 @@ const (
 	StreamTypeFetch     StreamType = 0x3
 	StreamTypeProbe     StreamType = 0x4
 	StreamTypeGoaway    StreamType = 0x5
+	StreamTypeTrack     StreamType = 0x6
 
 	// Uni-directional Stream Types
 	StreamTypeGroup StreamType = 0x0
+	StreamTypeSetup StreamType = 0x1
 )
 
 type StreamType byte

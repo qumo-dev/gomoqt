@@ -68,7 +68,7 @@ Deno.test("SendSubscribeStream closeWithError cancels stream", async () => {
 	assertEquals(cancelCalls.length, 1);
 });
 
-Deno.test("ReceiveSubscribeStream writeInfo sends SUBSCRIBE_OK and prevents double write", async () => {
+Deno.test("ReceiveSubscribeStream writeOk sends SUBSCRIBE_OK and prevents double write", async () => {
 	const [ctx] = withCancelCause(background());
 	const writtenData: Uint8Array[] = [];
 	const mockWritable = new MockSendStream({
@@ -89,13 +89,13 @@ Deno.test("ReceiveSubscribeStream writeInfo sends SUBSCRIBE_OK and prevents doub
 		subscriberPriority: 0,
 	});
 	const rss = new ReceiveSubscribeStream(ctx, s, subscribe);
-	const err = await rss.writeInfo();
+	const err = await rss.writeOk(1);
 	assertEquals(err, undefined);
-	const err2 = await rss.writeInfo();
+	const err2 = await rss.writeOk(1);
 	assertEquals(err2, undefined);
 });
 
-Deno.test("ReceiveSubscribeStream writeInfo returns error when context canceled", async () => {
+Deno.test("ReceiveSubscribeStream writeOk returns error when context canceled", async () => {
 	const [ctx, cancel] = withCancelCause(background());
 	const mockWritable = new MockSendStream({});
 	const mockReadable = new MockReceiveStream({});
@@ -112,7 +112,7 @@ Deno.test("ReceiveSubscribeStream writeInfo returns error when context canceled"
 	const rss = new ReceiveSubscribeStream(ctx, s, subscribe);
 	cancel(new Error("canceled"));
 	await new Promise((r) => setTimeout(r, 0));
-	const err = await rss.writeInfo();
+	const err = await rss.writeOk(1);
 	assertEquals(err?.message, "canceled");
 });
 
@@ -254,7 +254,7 @@ Deno.test("ReceiveSubscribeStream closeWithError cancels streams and broadcasts 
 	assertEquals(readableCancelCalls.length >= 0, true);
 });
 
-Deno.test("ReceiveSubscribeStream writeInfo sends SUBSCRIBE_OK on every call", async () => {
+Deno.test("ReceiveSubscribeStream writeOk sends SUBSCRIBE_OK on every call", async () => {
 	const [ctx] = withCancelCause(background());
 	const writtenData: Uint8Array[] = [];
 	const mockWritable = new MockSendStream({
@@ -276,15 +276,15 @@ Deno.test("ReceiveSubscribeStream writeInfo sends SUBSCRIBE_OK on every call", a
 	});
 	const rss = new ReceiveSubscribeStream(ctx, s, subscribe);
 
-	// Each writeInfo call should send a SUBSCRIBE_OK (1 type byte + 1 encode write = 2 each)
-	await rss.writeInfo();
-	await rss.writeInfo();
-	await rss.writeInfo();
+	// Each writeOk call should send a SUBSCRIBE_OK (1 type byte + 1 encode write = 2 each)
+	await rss.writeOk(1);
+	await rss.writeOk(1);
+	await rss.writeOk(1);
 
 	assertEquals(writtenData.length, 6);
 });
 
-Deno.test("ReceiveSubscribeStream ensureInfo is only executed once even with concurrent calls", async () => {
+Deno.test("ReceiveSubscribeStream ensureOk is only executed once even with concurrent calls", async () => {
 	const [ctx] = withCancelCause(background());
 	const writtenData: Uint8Array[] = [];
 	const mockWritable = new MockSendStream({
@@ -308,11 +308,11 @@ Deno.test("ReceiveSubscribeStream ensureInfo is only executed once even with con
 	});
 	const rss = new ReceiveSubscribeStream(ctx, s, subscribe);
 
-	// Call ensureInfo concurrently
+	// Call ensureOk concurrently
 	const results = await Promise.all([
-		rss.ensureInfo(),
-		rss.ensureInfo(),
-		rss.ensureInfo(),
+		rss.ensureOk(1),
+		rss.ensureOk(1),
+		rss.ensureOk(1),
 	]);
 	// All should be undefined (no error)
 	for (const r of results) {

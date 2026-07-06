@@ -1,12 +1,15 @@
 import {
-	AnnounceInterestMessage,
+	AnnounceRequestMessage,
 	FetchMessage,
 	GoawayMessage,
 	GroupMessage,
+	ProbeLevels,
 	ProbeMessage,
 	readVarint,
+	SetupMessage,
 	SubscribeMessage,
-	SubscribeOkMessage,
+	TrackInfoMessage,
+	TrackMessage,
 	writeVarint,
 } from "./internal/message/mod.ts";
 import { EOFError } from "@okdaichi/golikejs/io";
@@ -22,7 +25,11 @@ import { background, withCancelCause } from "@okdaichi/golikejs/context";
 import type { CancelCauseFunc, Context } from "@okdaichi/golikejs/context";
 import { AnnouncementReader, AnnouncementWriter } from "./announce_stream.ts";
 import type { TrackPrefix } from "./track_prefix.ts";
-import { ReceiveSubscribeStream, SendSubscribeStream } from "./subscribe_stream.ts";
+import {
+	readSubscribeResponse,
+	ReceiveSubscribeStream,
+	SendSubscribeStream,
+} from "./subscribe_stream.ts";
 import type { TrackConfig } from "./subscribe_stream.ts";
 import { type BroadcastPath, validateBroadcastPath } from "./broadcast_path.ts";
 import { TrackReader } from "./track_reader.ts";
@@ -35,10 +42,17 @@ import { Queue } from "./internal/queue.ts";
 import type { SubscribeID, TrackName } from "./alias.ts";
 import { FetchRequest } from "./fetch.ts";
 import type { FetchHandler } from "./fetch.ts";
-import { FetchErrorCode, GroupErrorCode, ProbeErrorCode, SessionErrorCode } from "./error.ts";
+import {
+	FetchErrorCode,
+	GroupErrorCode,
+	ProbeErrorCode,
+	SessionErrorCode,
+	SubscribeErrorCode,
+} from "./error.ts";
 import type { MoqOptions } from "./options.ts";
 import { defaultProbeIntervalMs, defaultProbeMaxAgeMs, defaultProbeMaxDelta } from "./options.ts";
 import { ProbeResult } from "./probe.ts";
+import { DEFAULT_TIMESCALE, type Info } from "./info.ts";
 
 function cancelStreamWithError(stream: Stream, code: number): void {
 	stream.readable.cancel(code).catch(() => {});
@@ -151,6 +165,14 @@ export class Session {
 
 	#bitrateTracker: BitrateTracker;
 
+	// The Probe capability level advertised in our SETUP.
+	#localProbeLevel: number = ProbeLevels.None;
+	// Resolves once the peer's SETUP message has been processed.
+	#peerSetup: Promise<void>;
+	#resolvePeerSetup!: () => void;
+	#peerSetupReceived: boolean = false;
+	#peerProbeLevel: number = ProbeLevels.None;
+
 	constructor(options: SessionInit) {
 		this.#webtransport = options.transport;
 		this.mux = options.mux ?? DefaultTrackMux;
@@ -166,6 +188,9 @@ export class Session {
 		const [ctx, cancel] = withCancelCause(background());
 		this.#ctx = ctx;
 		this.#cancelFunc = cancel;
+		this.#peerSetup = new Promise<void>((resolve) => {
+			this.#resolvePeerSetup = resolve;
+		});
 		this.closed = new Promise<MOQCloseInfo>((resolve) => {
 			this.#resolveClosed = resolve;
 		});
@@ -208,13 +233,81 @@ export class Session {
 		if (transport.getStats) {
 			const stats = await transport.getStats();
 			this.#bitrateTracker.init(stats, Date.now());
+			// The bitrate tracker can measure and report the current sending
+			// rate, so advertise the Report capability in SETUP.
+			this.#localProbeLevel = ProbeLevels.Report;
 		}
 
 		// Start listening for incoming streams
 		this.#wg.push(this.#listenBiStreams());
 		this.#wg.push(this.#listenUniStreams());
 
+		// Advertise capabilities on the mandatory Setup Stream. WebTransport
+		// carries the request path in its handshake URI, so no Path parameter.
+		this.#wg.push(this.#openSetupStream());
+
 		return;
+	}
+
+	async #openSetupStream(): Promise<void> {
+		const [stream, openErr] = await this.#webtransport.openUniStream();
+		if (openErr) {
+			console.error("moq: failed to open setup stream:", openErr);
+			return;
+		}
+
+		const [, typeErr] = await writeVarint(stream, UniStreamTypes.SetupStreamType);
+		if (typeErr) {
+			console.error("moq: failed to write setup stream type:", typeErr);
+			await stream.cancel(SessionErrorCode.InternalError).catch(() => {});
+			return;
+		}
+
+		const sm = new SetupMessage({});
+		if (this.#localProbeLevel !== ProbeLevels.None) {
+			sm.addProbe(this.#localProbeLevel);
+		}
+		const err = await sm.encode(stream);
+		if (err) {
+			console.error("moq: failed to send SETUP message:", err);
+			await stream.cancel(SessionErrorCode.InternalError).catch(() => {});
+			return;
+		}
+
+		// The opener sends a single SETUP message and immediately FINs.
+		await stream.close().catch(() => {});
+	}
+
+	async #handleSetupStream(stream: ReceiveStream): Promise<void> {
+		// A protocol violation terminates the session. closeWithError joins the
+		// listen loops (via #wg), and this handler runs inside one of them, so
+		// the close must be fire-and-forget — awaiting it would deadlock.
+		const violate = (reason: string): void => {
+			this.closeWithError(SessionErrorCode.ProtocolViolation, reason).catch(() => {});
+		};
+
+		if (this.#peerSetupReceived) {
+			// A second Setup Stream is a protocol violation.
+			violate("duplicate setup stream");
+			return;
+		}
+		this.#peerSetupReceived = true;
+
+		const sm = new SetupMessage({});
+		const err = await sm.decode(stream);
+		if (err) {
+			violate("malformed SETUP message");
+			return;
+		}
+
+		// A server MUST NOT send a Path parameter.
+		if (sm.path() !== undefined) {
+			violate("server sent Path parameter");
+			return;
+		}
+
+		this.#peerProbeLevel = sm.probeLevel();
+		this.#resolvePeerSetup();
 	}
 
 	/**
@@ -234,6 +327,16 @@ export class Session {
 	): Promise<[AsyncGenerator<ProbeResult>, undefined] | [undefined, Error]> {
 		if (this.#ctx.err()) {
 			return [undefined, new Error("session is closing")];
+		}
+
+		// The publisher advertises its Probe capability in SETUP; a subscriber
+		// MUST consult it before relying on a Probe Stream.
+		await Promise.race([this.#peerSetup, this.#ctx.done()]);
+		if (this.#ctx.err()) {
+			return [undefined, new Error("session is closing")];
+		}
+		if (this.#peerProbeLevel === ProbeLevels.None) {
+			return [undefined, new Error("moq: peer does not support probing")];
 		}
 
 		if (!this.#outgoingProbeStream || this.#outgoingProbeStreamClosed) {
@@ -337,11 +440,11 @@ export class Session {
 			return [undefined, err];
 		}
 
-		// Send ANNOUNCE_INTEREST message
-		const req = new AnnounceInterestMessage({ prefix });
+		// Send ANNOUNCE_REQUEST message
+		const req = new AnnounceRequestMessage({ prefix });
 		err = await req.encode(stream.writable);
 		if (err) {
-			console.error("moq: failed to send ANNOUNCE_INTEREST message:", err);
+			console.error("moq: failed to send ANNOUNCE_REQUEST message:", err);
 			return [undefined, err];
 		}
 
@@ -395,8 +498,8 @@ export class Session {
 			subscriberPriority: config?.priority ?? 0,
 			subscriberOrdered: config?.ordered ? 1 : 0,
 			subscriberMaxLatency: config?.maxLatency ?? 0,
-			startGroup: config?.startGroup ? config.startGroup + 1 : 0,
-			endGroup: config?.endGroup ? config.endGroup + 1 : 0,
+			groupStart: config?.startGroup ? config.startGroup + 1 : 0,
+			groupEnd: config?.endGroup ? config.endGroup + 1 : 0,
 		});
 		err = await req.encode(stream.writable);
 		if (err) {
@@ -408,30 +511,26 @@ export class Session {
 		const queue = new Queue<[ReceiveStream, GroupMessage]>();
 		this.#queues.set(subscribeId, queue);
 
-		// Read the type byte for the first response
-		const [msgType, , typeErr] = await readVarint(stream.readable);
-		if (typeErr) {
-			console.error("moq: failed to read SUBSCRIBE response type:", typeErr);
-			return [undefined, typeErr];
-		}
-		if (msgType !== 0x0) {
-			const respErr = new Error(`moq: unexpected first SUBSCRIBE response type: ${msgType}`);
-			console.error(respErr.message);
+		// Read the first response: SUBSCRIBE_OK resolves the start group;
+		// SUBSCRIBE_END without a preceding OK means the track has already
+		// ended with no matching groups.
+		const [resp, respErr] = await readSubscribeResponse(stream.readable);
+		if (respErr) {
+			console.error("moq: failed to read SUBSCRIBE response:", respErr);
 			return [undefined, respErr];
 		}
-
-		const rsp = new SubscribeOkMessage({});
-		err = await rsp.decode(stream.readable);
-		if (err) {
-			console.error("moq: failed to receive SUBSCRIBE_OK message:", err);
-			return [undefined, err];
+		if (!resp.ok && !resp.end) {
+			const dropErr = new Error("moq: unexpected SUBSCRIBE_DROP message before SUBSCRIBE_OK");
+			console.error(dropErr.message);
+			return [undefined, dropErr];
 		}
 
 		const subscribeStream = new SendSubscribeStream(
 			this.#ctx,
 			stream,
 			req,
-			rsp,
+			resp.ok,
+			resp.end,
 		);
 
 		// Start background reading of subscribe responses (Ok updates, Drops)
@@ -497,6 +596,98 @@ export class Session {
 		return [group, undefined];
 	}
 
+	/**
+	 * Request a track's immutable publisher properties (TRACK_INFO) over a
+	 * Track Stream, including the timescale needed to interpret frame
+	 * timestamps. The returned properties are fixed for the lifetime of the
+	 * track and should be cached by the caller.
+	 *
+	 * Mirrors Go's `Session.TrackInfo(ctx, path, name) (*PublishInfo, error)`.
+	 */
+	async trackInfo(
+		path: BroadcastPath,
+		name: TrackName,
+	): Promise<[Info, undefined] | [undefined, Error]> {
+		if (this.#ctx.err()) {
+			return [undefined, new Error("session is closing")];
+		}
+
+		const [stream, openErr] = await this.#webtransport.openStream();
+		if (openErr) {
+			console.error("moq: failed to open track stream:", openErr);
+			return [undefined, openErr];
+		}
+
+		let [, err] = await writeVarint(stream.writable, BiStreamTypes.TrackStreamType);
+		if (err) {
+			cancelStreamWithError(stream, SessionErrorCode.InternalError);
+			return [undefined, err];
+		}
+
+		const req = new TrackMessage({ broadcastPath: path, trackName: name });
+		err = await req.encode(stream.writable);
+		if (err) {
+			cancelStreamWithError(stream, SessionErrorCode.InternalError);
+			return [undefined, err];
+		}
+
+		const rsp = new TrackInfoMessage({});
+		err = await rsp.decode(stream.readable);
+		if (err) {
+			cancelStreamWithError(stream, SessionErrorCode.InternalError);
+			return [undefined, err];
+		}
+
+		await stream.writable.close().catch(() => {});
+
+		if (rsp.timescale === 0) {
+			return [undefined, new Error("moq: received TRACK_INFO with zero Timescale")];
+		}
+
+		return [{
+			priority: rsp.publisherPriority,
+			ordered: rsp.publisherOrdered !== 0,
+			maxLatency: rsp.publisherMaxLatency,
+			timescale: rsp.timescale,
+		}, undefined];
+	}
+
+	async #handleTrackStream(stream: Stream): Promise<void> {
+		const req = new TrackMessage({});
+		const err = await req.decode(stream.readable);
+		if (err) {
+			console.error("Failed to decode TrackMessage:", err);
+			cancelStreamWithError(stream, SessionErrorCode.InternalError);
+			return;
+		}
+
+		const info = this.mux.trackInfo(
+			validateBroadcastPath(req.broadcastPath),
+			req.trackName,
+		);
+		if (info === undefined) {
+			// Unknown track: reset the stream.
+			cancelStreamWithError(stream, SubscribeErrorCode.TrackNotFound);
+			return;
+		}
+
+		const rsp = new TrackInfoMessage({
+			publisherPriority: info.priority,
+			publisherOrdered: info.ordered ? 1 : 0,
+			publisherMaxLatency: info.maxLatency,
+			timescale: info.timescale === 0 ? DEFAULT_TIMESCALE : info.timescale,
+		});
+		const encErr = await rsp.encode(stream.writable);
+		if (encErr) {
+			console.error("moq: failed to encode TRACK_INFO message:", encErr);
+			cancelStreamWithError(stream, SessionErrorCode.InternalError);
+			return;
+		}
+
+		// The publisher FINs immediately after TRACK_INFO.
+		await stream.writable.close().catch(() => {});
+	}
+
 	async #handleGroupStream(reader: ReceiveStream): Promise<void> {
 		const req = new GroupMessage({});
 		const err = await req.decode(reader);
@@ -544,10 +735,10 @@ export class Session {
 	}
 
 	async #handleAnnounceStream(stream: Stream): Promise<void> {
-		const req = new AnnounceInterestMessage({});
+		const req = new AnnounceRequestMessage({});
 		const err = await req.decode(stream.readable);
 		if (err) {
-			console.error("Failed to decode AnnounceInterestMessage:", err);
+			console.error("Failed to decode AnnounceRequestMessage:", err);
 			return;
 		}
 
@@ -560,6 +751,14 @@ export class Session {
 
 	async #handleProbeStream(stream: Stream): Promise<void> {
 		const quic = this.#webtransport as unknown as TransportStatsCapable;
+
+		// We did not advertise the Probe capability; the spec requires
+		// resetting a Probe Stream we cannot serve. Use NotSupported so a
+		// subscriber can distinguish it from an internal fault (matches Go).
+		if (this.#localProbeLevel === ProbeLevels.None) {
+			cancelStreamWithError(stream, ProbeErrorCode.NotSupported);
+			return;
+		}
 
 		if (this.#incomingProbeStream && this.#incomingProbeStream !== stream) {
 			cancelStreamWithError(this.#incomingProbeStream, ProbeErrorCode.Internal);
@@ -709,6 +908,9 @@ export class Session {
 					case BiStreamTypes.GoawayStreamType:
 						pendingHandles.push(this.#handleGoawayStream(stream));
 						break;
+					case BiStreamTypes.TrackStreamType:
+						pendingHandles.push(this.#handleTrackStream(stream));
+						break;
 					default:
 						cancelStreamWithError(stream, SessionErrorCode.InternalError);
 						break;
@@ -752,6 +954,9 @@ export class Session {
 				switch (num) {
 					case UniStreamTypes.GroupStreamType:
 						pendingHandles.push(this.#handleGroupStream(stream));
+						break;
+					case UniStreamTypes.SetupStreamType:
+						pendingHandles.push(this.#handleSetupStream(stream));
 						break;
 					default:
 						stream.cancel(SessionErrorCode.InternalError).catch(() => {});

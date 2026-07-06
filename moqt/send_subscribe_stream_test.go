@@ -64,11 +64,10 @@ func TestSendSubscribeStream_SubscribeID(t *testing.T) {
 	assert.Equal(t, id, returnedID, "SubscribeID() should return the correct ID")
 }
 
-func TestSendSubscribeStream_ReadInfo(t *testing.T) {
+func TestSendSubscribeStream_NoOkAtConstruction(t *testing.T) {
 	sss := newTestSendSubscribeStream(t, nil)
 
-	ret := sss.ReadInfo()
-	assert.Equal(t, PublishInfo{}, ret, "ReadInfo() should return the Info passed to constructor")
+	assert.False(t, sss.okReceived, "no SUBSCRIBE_OK has been received at construction")
 }
 
 func TestSendSubscribeStream_TrackConfig(t *testing.T) {
@@ -138,8 +137,8 @@ func TestSendSubscribeStream_UpdateSubscribe_EncodesWireFormat(t *testing.T) {
 	assert.Equal(t, uint8(7), decoded.SubscriberPriority)
 	assert.Equal(t, uint8(1), decoded.SubscriberOrdered)
 	assert.Equal(t, uint64(42), decoded.SubscriberMaxLatency)
-	assert.Equal(t, uint64(11), decoded.StartGroup)
-	assert.Equal(t, uint64(21), decoded.EndGroup)
+	assert.Equal(t, uint64(11), decoded.GroupStart)
+	assert.Equal(t, uint64(21), decoded.GroupEnd)
 	assert.Equal(t, newConfig, sss.TrackConfig())
 }
 

@@ -135,7 +135,9 @@ func (m *FakeStreamConn) OpenUniStreamSync(ctx context.Context) (transport.SendS
 		return nil, err
 	}
 	m.mu.Unlock()
-	return nil, nil
+	// A real connection never returns (nil, nil); hand out a usable fake
+	// stream so session goroutines (e.g. the Setup Stream) can proceed.
+	return &FakeQUICSendStream{}, nil
 }
 
 func (m *FakeStreamConn) LocalAddr() net.Addr {

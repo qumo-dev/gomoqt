@@ -182,8 +182,8 @@ Deno.test("Client shim - dial() delegates to connect()", () => {
 	p.catch(() => {});
 });
 
-Deno.test("Client - ALPN constant is moq-lite-04", () => {
-	assertEquals(ALPN, "moq-lite-04");
+Deno.test("Client - ALPN constant is moq-lite-05", () => {
+	assertEquals(ALPN, "moq-lite-05");
 });
 
 // Restore original WebTransport after all tests

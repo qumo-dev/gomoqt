@@ -442,6 +442,16 @@ type TrackHandler interface {
 	ServeTrack(*TrackWriter)
 }
 
+// TrackInfoProvider is optionally implemented by TrackHandlers that can
+// answer TRACK_INFO requests with a track's immutable publisher properties.
+// Handlers that do not implement it are served with default properties
+// (zero priority, unordered, no retention, DefaultTimescale).
+type TrackInfoProvider interface {
+	// TrackInfo returns the publisher properties for the named track and
+	// whether the track exists.
+	TrackInfo(name TrackName) (PublishInfo, bool)
+}
+
 // NotFound is a default convenience handler function which responds to
 // subscribers by closing the track writer with a TrackNotFound error.
 var NotFound = func(tw *TrackWriter) {

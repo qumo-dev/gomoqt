@@ -14,24 +14,41 @@ func newAnnouncementReader(stream transport.Stream, prefix prefix, initSuffixes 
 		panic("invalid prefix for AnnouncementReader")
 	}
 
+	readerCtx, cancelCause := context.WithCancelCause(stream.Context())
+
 	ar := &AnnouncementReader{
-		ctx:         context.WithValue(stream.Context(), biStreamTypeCtxKey, message.StreamTypeAnnounce),
+		ctx:         context.WithValue(readerCtx, biStreamTypeCtxKey, message.StreamTypeAnnounce),
 		stream:      stream,
 		prefix:      prefix,
 		actives:     make(map[suffix]*Announcement),
 		pendings:    make([]*Announcement, 0),
 		announcedCh: make(chan struct{}, 1),
+		cancelCause: cancelCause,
 	}
 
 	for _, suffix := range initSuffixes {
-		ann, _ := NewAnnouncement(stream.Context(), BroadcastPath(prefix+suffix))
+		ann, _ := NewAnnouncement(readerCtx, BroadcastPath(prefix+suffix))
 		ar.actives[suffix] = ann
 		ar.pendings = append(ar.pendings, ann)
 	}
 
 	// Receive announcements in a separate goroutine
 	go func() {
-		var am message.AnnounceMessage
+		// The publisher sends ANNOUNCE_OK exactly once before any
+		// ANNOUNCE_BROADCAST. Its Hop ID is the implicit trailing entry of
+		// every broadcast's Hop ID list on this stream.
+		var okMsg message.AnnounceOkMessage
+		if err := okMsg.Decode(ar.stream); err != nil {
+			// Cancel the reader rather than returning silently: without this
+			// a malformed ANNOUNCE_OK (or an unexpected reset) on an
+			// otherwise-open stream leaves ReceiveAnnouncement blocked
+			// forever, since ar.ctx would never fire.
+			ar.fail(err)
+			return
+		}
+		peerHopID := okMsg.HopID
+
+		var am message.AnnounceBroadcastMessage
 		var err error
 
 		for {
@@ -45,32 +62,28 @@ func newAnnouncementReader(stream transport.Stream, prefix prefix, initSuffixes 
 			case message.ACTIVE:
 				{
 					suffix := am.BroadcastPathSuffix
-					var shouldClose bool
-					// Mutate maps under lock
+					// Mutate maps under lock. An active for an already-active
+					// path atomically replaces the prior advertisement.
 					func() {
 						ar.announcementsMu.Lock()
 						defer func() {
 							ar.announcementsMu.Unlock()
 						}()
 						old, ok := ar.actives[suffix]
-						if !ok || !old.IsActive() {
-							ann, _ := NewAnnouncement(ar.ctx, BroadcastPath(ar.prefix+suffix))
-							ann.hopIDs = am.HopIDs
-							ar.actives[suffix] = ann
-							ar.pendings = append(ar.pendings, ann)
-							select {
-							case ar.announcedCh <- struct{}{}:
-							default:
-							}
-							return
+						if ok && old.IsActive() {
+							old.end()
 						}
-						shouldClose = true
+						ann, _ := NewAnnouncement(ar.ctx, BroadcastPath(ar.prefix+suffix))
+						// Reconstruct the full hop path: the broadcast's Hop ID
+						// list plus the peer's implicit ANNOUNCE_OK Hop ID.
+						ann.hopIDs = appendHopID(am.HopIDs, peerHopID)
+						ar.actives[suffix] = ann
+						ar.pendings = append(ar.pendings, ann)
+						select {
+						case ar.announcedCh <- struct{}{}:
+						default:
+						}
 					}()
-
-					if shouldClose {
-						ar.CloseWithError(AnnounceErrorCodeDuplicated)
-						return
-					}
 				}
 			case message.ENDED:
 				{
@@ -91,6 +104,8 @@ func newAnnouncementReader(stream transport.Stream, prefix prefix, initSuffixes 
 					if handled {
 						continue
 					}
+					// An ended for a path that is not currently active is a
+					// protocol violation; reset the stream.
 					ar.CloseWithError(AnnounceErrorCodeDuplicated)
 					return
 				}
@@ -102,6 +117,19 @@ func newAnnouncementReader(stream transport.Stream, prefix prefix, initSuffixes 
 	}()
 
 	return ar
+}
+
+// appendHopID appends the peer's ANNOUNCE_OK Hop ID to a broadcast's Hop ID
+// list, reconstructing the full hop path. A peer Hop ID of 0 means the peer
+// does not participate in hop tracking and is not appended.
+func appendHopID(hopIDs []uint64, peerHopID uint64) []uint64 {
+	if peerHopID == 0 {
+		return hopIDs
+	}
+	result := make([]uint64, len(hopIDs)+1)
+	copy(result, hopIDs)
+	result[len(hopIDs)] = peerHopID
+	return result
 }
 
 // AnnouncementReader receives and manages broadcast announcements for a prefix from
@@ -120,6 +148,17 @@ type AnnouncementReader struct {
 
 	pendings    []*Announcement
 	announcedCh chan struct{} // notify when new announcement is available
+
+	// cancelCause cancels readerCtx (and thus ar.ctx) when the announce
+	// goroutine hits a fatal decode error, so ReceiveAnnouncement unblocks.
+	cancelCause context.CancelCauseFunc
+}
+
+// fail cancels the reader context with cause, unblocking ReceiveAnnouncement.
+func (ar *AnnouncementReader) fail(err error) {
+	if ar.cancelCause != nil {
+		ar.cancelCause(err)
+	}
 }
 
 // ReceiveAnnouncement blocks until an announcement for the configured prefix is available or until ctx or the reader's context is canceled.
@@ -184,6 +223,10 @@ func (ras *AnnouncementReader) Close() error {
 		return nil
 	}
 
+	// Cancel the reader context so any blocked ReceiveAnnouncement unblocks
+	// promptly (rather than busy-spinning on a closed announcedCh).
+	ras.fail(context.Canceled)
+
 	if ras.announcedCh != nil {
 		close(ras.announcedCh)
 		ras.announcedCh = nil
@@ -198,6 +241,8 @@ func (ras *AnnouncementReader) Close() error {
 func (ras *AnnouncementReader) CloseWithError(code AnnounceErrorCode) {
 	ras.announcementsMu.Lock()
 	defer ras.announcementsMu.Unlock()
+
+	ras.fail(context.Canceled)
 
 	if ras.announcedCh != nil {
 		close(ras.announcedCh)

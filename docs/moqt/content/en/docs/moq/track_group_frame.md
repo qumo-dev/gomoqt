@@ -32,7 +32,6 @@ func (*TrackWriter) OpenGroupAt(GroupSequence) (*GroupWriter, error)
 func (*TrackWriter) SkipGroups(n uint64)
 func (*TrackWriter) DropGroups(SubscribeDrop) error
 func (*TrackWriter) DropNextGroups(n uint64, code SubscribeErrorCode) error
-func (*TrackWriter) WriteInfo(PublishInfo) error
 func (*TrackWriter) TrackConfig() *SubscribeConfig
 func (*TrackWriter) Updated() <-chan struct{}
 func (*TrackWriter) Context() context.Context

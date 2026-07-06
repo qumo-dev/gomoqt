@@ -18,23 +18,20 @@ import (
 // the encode path is measured with no sink allocation on the writer side.
 func discardStream() *FakeQUICStream { return &FakeQUICStream{} }
 
-// BenchmarkReceiveSubscribeStream_WriteInfo measures writeInfoLocked: it writes
+// BenchmarkReceiveSubscribeStream_WriteOk measures writeOkLocked: it writes
 // a 1-byte SUBSCRIBE_OK type prefix ([]byte{...} — one allocation) then encodes
 // a SubscribeOkMessage to the stream. Runs once per subscribe response.
-func BenchmarkReceiveSubscribeStream_WriteInfo(b *testing.B) {
-	info := PublishInfo{
-		Priority:   TrackPriority(5),
-		MaxLatency: 2000,
-	}
+func BenchmarkReceiveSubscribeStream_WriteOk(b *testing.B) {
 	substr := &receiveSubscribeStream{stream: discardStream()}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	for b.Loop() {
-		if err := substr.writeInfoLocked(info); err != nil {
+		if err := substr.writeOkLocked(GroupSequence(1)); err != nil {
 			b.Fatal(err)
 		}
+		substr.responseStarted = false
 	}
 }
 
@@ -88,16 +85,13 @@ func BenchmarkSendSubscribeStream_UpdateSubscribe(b *testing.B) {
 func BenchmarkReadSubscribeResponse(b *testing.B) {
 	var okBuf bytes.Buffer
 	okBuf.Write([]byte{byte(message.MessageTypeSubscribeOk)})
-	_ = (message.SubscribeOkMessage{
-		PublisherPriority:   5,
-		PublisherMaxLatency: 2000,
-	}).Encode(&okBuf)
+	_ = (message.SubscribeOkMessage{Group: 1}).Encode(&okBuf)
 
 	var dropBuf bytes.Buffer
 	dropBuf.Write([]byte{byte(message.MessageTypeSubscribeDrop)})
 	_ = (message.SubscribeDropMessage{
-		StartGroup: 1,
-		EndGroup:   10,
+		GroupStart: 1,
+		GroupEnd:   10,
 		ErrorCode:  0,
 	}).Encode(&dropBuf)
 
@@ -106,7 +100,7 @@ func BenchmarkReadSubscribeResponse(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for b.Loop() {
-			if _, _, err := readSubscribeResponse(reader); err != nil {
+			if _, err := readSubscribeResponse(reader); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -117,7 +111,7 @@ func BenchmarkReadSubscribeResponse(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for b.Loop() {
-			if _, _, err := readSubscribeResponse(reader); err != nil {
+			if _, err := readSubscribeResponse(reader); err != nil {
 				b.Fatal(err)
 			}
 		}

@@ -5,6 +5,7 @@ import { NotFoundTrackHandler } from "./broadcast.ts";
 
 import type { TrackWriter } from "./track_writer.ts";
 import type { TrackPrefix } from "./track_prefix.ts";
+import { DEFAULT_TIMESCALE, type Info } from "./info.ts";
 
 type AnnouncedTrackHandler = {
 	announcement: Announcement;
@@ -125,6 +126,25 @@ export class TrackMux {
 	}
 
 	/**
+	 * Look up the immutable publisher properties for a track, used to answer
+	 * TRACK_INFO requests. Returns `undefined` when the broadcast path is not
+	 * announced or the handler reports the track as unknown. Handlers that do
+	 * not implement {@link TrackInfoProvider} are served with defaults.
+	 */
+	trackInfo(path: BroadcastPath, name: string): Info | undefined {
+		const announced = this.#handlers.get(path);
+		if (!announced) {
+			return undefined;
+		}
+		const provider = announced.handler as Partial<TrackInfoProvider>;
+		if (typeof provider.trackInfo === "function") {
+			return provider.trackInfo(name);
+		}
+		// Handler exists but declares no explicit properties: serve defaults.
+		return { priority: 0, ordered: false, maxLatency: 0, timescale: DEFAULT_TIMESCALE };
+	}
+
+	/**
 	 * Dispatch an incoming subscription to the matching handler.
 	 * If no handler is found, responds with {@link NotFoundTrackHandler}.
 	 */
@@ -214,4 +234,16 @@ export interface TrackHandler {
 	 * @param trackWriter - Writer for sending groups to the subscriber.
 	 */
 	serveTrack(trackWriter: TrackWriter): void | Promise<void>;
+}
+
+/**
+ * Optionally implemented by {@link TrackHandler}s that can answer TRACK_INFO
+ * requests with a track's immutable publisher properties.
+ */
+export interface TrackInfoProvider {
+	/**
+	 * Returns the publisher properties for the named track, or `undefined`
+	 * when the track does not exist.
+	 */
+	trackInfo(name: string): Info | undefined;
 }

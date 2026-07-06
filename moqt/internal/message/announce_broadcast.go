@@ -12,16 +12,16 @@ const (
 
 type AnnounceStatus byte
 
-// AnnounceMessage is sent on an ANNOUNCE stream.
+// AnnounceBroadcastMessage is sent on an ANNOUNCE stream.
 // Only the broadcast path suffix is carried on the wire; the receiver
 // reconstructs the full broadcast path by prepending the requested prefix.
-type AnnounceMessage struct {
+type AnnounceBroadcastMessage struct {
 	AnnounceStatus      AnnounceStatus
 	BroadcastPathSuffix string
 	HopIDs              []uint64
 }
 
-func (am AnnounceMessage) Len() int {
+func (am AnnounceBroadcastMessage) Len() int {
 	var l int
 
 	l += VarintLen(uint64(am.AnnounceStatus))
@@ -34,7 +34,7 @@ func (am AnnounceMessage) Len() int {
 	return l
 }
 
-func (am AnnounceMessage) Encode(w io.Writer) error {
+func (am AnnounceBroadcastMessage) Encode(w io.Writer) error {
 	msgLen := am.Len()
 
 	b := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
@@ -52,7 +52,7 @@ func (am AnnounceMessage) Encode(w io.Writer) error {
 	return err
 }
 
-func (am *AnnounceMessage) Decode(src io.Reader) error {
+func (am *AnnounceBroadcastMessage) Decode(src io.Reader) error {
 	size, err := ReadMessageLength(src)
 	if err != nil {
 		return err

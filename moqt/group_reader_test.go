@@ -232,7 +232,7 @@ func TestGroupReader_ReadFrame(t *testing.T) {
 				frame := NewFrame(10)
 				_, _ = frame.Write([]byte("test data"))
 				var buf bytes.Buffer
-				err := frame.encode(&buf)
+				err := frame.encode(&buf, 0)
 				if err != nil {
 					panic(err)
 				}
@@ -308,7 +308,7 @@ func TestGroupReader_Frames(t *testing.T) {
 		_, _ = frame.Write([]byte("test"))
 
 		var buf bytes.Buffer
-		err := frame.encode(&buf)
+		err := frame.encode(&buf, 0)
 		if err != nil {
 			t.Fatalf("failed to encode frame: %v", err)
 		}

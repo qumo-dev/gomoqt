@@ -142,10 +142,14 @@ func TestFrame_EncodeDecode_RoundTrip(t *testing.T) {
 
 					var buf bytes.Buffer
 					// encode must succeed (fatal for this subtest)
-					require.NoError(t, frame.encode(&buf))
+					require.NoError(t, frame.encode(&buf, 0))
 
-					// Use ReadMessageLength to ensure the encoded length equals payload
+					// Skip the timestamp delta varint, then ensure the encoded
+					// length equals the payload length
 					r := bytes.NewReader(buf.Bytes())
+					delta, err := message.ReadMessageLength(r)
+					require.NoError(t, err)
+					require.Equal(t, uint64(0), delta)
 					n, err := message.ReadMessageLength(r)
 					require.NoError(t, err)
 					require.Equal(t, uint64(len(tt.payload)), n)
@@ -220,7 +224,7 @@ func TestFrame_EncodeHeaderLayout(t *testing.T) {
 	_, _ = frame.Write([]byte("test"))
 
 	var buf bytes.Buffer
-	err := frame.encode(&buf)
+	err := frame.encode(&buf, 0)
 	assert.NoError(t, err)
 
 	encoded := buf.Bytes()
@@ -290,10 +294,12 @@ func TestFrame_Encode(t *testing.T) {
 			}
 
 			var buf bytes.Buffer
-			require.NoError(t, frame.encode(&buf))
+			require.NoError(t, frame.encode(&buf, 0))
 
-			// Build expected bytes: varint(length) followed by payload
-			expectedHeader, _ := message.WriteMessageLength(nil, uint64(len(tt.payload)))
+			// Build expected bytes: varint(timestamp delta = 0), varint(length),
+			// then payload
+			expectedHeader, _ := message.WriteVarint(nil, 0)
+			expectedHeader, _ = message.WriteMessageLength(expectedHeader, uint64(len(tt.payload)))
 			expected := append(expectedHeader, tt.payload...)
 
 			got := buf.Bytes()
@@ -310,9 +316,11 @@ func TestFrame_Encode(t *testing.T) {
 func TestFrame_decode_RejectsOversizedLength(t *testing.T) {
 	// Largest value expressible in a QUIC varint (uint62 max), encoded as the
 	// payload length prefix. No payload bytes follow.
-	lengthPrefix, _ := message.WriteMessageLength(nil, 1<<62-1)
+	// The wire prefix is the timestamp delta varint followed by the length.
+	lengthPrefix, _ := message.WriteVarint(nil, 0)
+	lengthPrefix, _ = message.WriteMessageLength(lengthPrefix, 1<<62-1)
 
 	f := NewFrame(0)
-	err := f.decode(bytes.NewReader(lengthPrefix))
+	err := f.decode(bytes.NewReader(lengthPrefix), 0)
 	assert.ErrorIs(t, err, message.ErrMessageTooLarge)
 }

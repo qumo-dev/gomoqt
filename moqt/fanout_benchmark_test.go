@@ -90,7 +90,7 @@ func BenchmarkFanOut_ViewerConnections(b *testing.B) {
 // (time.Since(epoch) — QPC-backed on Windows, NOT wall-clock UnixNano, which ticks
 // coarsely on Windows and quantizes sub-ms latency to 0) into the first 8 bytes of
 // every frame so each viewer measures one-way publish->deliver latency. The
-// publisher is GATED: after responding to the SUBSCRIBE via WriteInfo, it blocks
+// publisher is GATED: after responding to the SUBSCRIBE via ensureOk, it blocks
 // until all viewers are parked in AcceptGroup, so no backlog built during dialing
 // contaminates the latency samples. Reports p50/p95/p99/max plus the spread of
 // per-viewer medians ("fairness"), which surfaces head-of-line blocking and
@@ -151,7 +151,7 @@ func BenchmarkFanOut_TracksPerConnection(b *testing.B) {
 		frameSize = 16 << 10 // match ViewerConnections for direct comparison
 		fpg       = 256
 	)
-	// The publishers are GATED (see setupMultiTrackServer): they WriteInfo to flush
+	// The publishers are GATED (see setupMultiTrackServer): they ensureOk to flush
 	// each SUBSCRIBE_OK, then block until all N tracks are subscribed before
 	// blasting. Without the gate, already-blasting publishers starve later
 	// subscribes' OKs (the subscribe handshake timed out at ~21 tracks ungated);
@@ -562,7 +562,7 @@ func (c *latencyCollector) collected() []time.Duration {
 
 // setupFanoutLatencyServer mirrors setupSaturatingServer (egress_benchmark_test.go)
 // but (a) GATES the publisher on ready — after responding to the SUBSCRIBE via
-// WriteInfo (flushing the SUBSCRIBE_OK without opening a throwaway group), it
+// ensureOk (flushing the SUBSCRIBE_OK without opening a throwaway group), it
 // blocks until ready is closed, so viewers connect and park in AcceptGroup before
 // steady frames flow (no dialing-phase backlog) — and (b) stamps an 8-byte
 // big-endian MONOTONIC clock reading (time.Since(epoch)) into the first 8 bytes of
@@ -602,11 +602,11 @@ func setupFanoutLatencyServer(tb testing.TB, ctx context.Context, frameSize, fra
 	}
 
 	mux.PublishFunc(ctx, "/server.broadcast", func(tw *TrackWriter) {
-		// Respond to the SUBSCRIBE explicitly with WriteInfo so the viewer's
+		// Respond to the SUBSCRIBE explicitly with ensureOk so the viewer's
 		// Subscribe() handshake completes during dialing, BEFORE the gate blocks.
-		// (OpenGroup would send this OK lazily via ensureInfo, but WriteInfo avoids
+		// (OpenGroup would send this OK lazily on first open, but ensureOk avoids
 		// opening a throwaway uni stream + group header just to flush the response.)
-		if err := tw.WriteInfo(PublishInfo{}); err != nil {
+		if err := tw.subscribeStream.ensureOk(1); err != nil {
 			return
 		}
 
@@ -664,7 +664,7 @@ func setupFanoutLatencyServer(tb testing.TB, ctx context.Context, frameSize, fra
 // all N tracks over ONE connection (see readTracksPerConnection) — the
 // tracks-per-connection regime. The server config mirrors setupSaturatingServer
 // verbatim; only the per-track publish loop differs. Each publisher is GATED on
-// ready: it WriteInfos to flush the SUBSCRIBE_OK, then blocks until ready is
+// ready: it ensureOks to flush the SUBSCRIBE_OK, then blocks until ready is
 // closed (by fanoutReaders, once readers are parked) before blasting. Without the
 // gate, already-blasting publishers starve later subscribes' OKs and the handshake
 // times out (~21 tracks ungated); with it the sweep measures steady-state fan-out.
@@ -697,9 +697,9 @@ func setupMultiTrackServer(tb testing.TB, ctx context.Context, frameSize, frames
 		path := fmt.Sprintf("/server.t%d", t)
 		mux.PublishFunc(ctx, BroadcastPath(path), func(tw *TrackWriter) {
 			// Flush the SUBSCRIBE_OK (sent lazily on first OpenGroup via
-			// ensureInfo) with WriteInfo so the subscribe handshake completes
+			// ensureOk) so the subscribe handshake completes
 			// during setup, BEFORE the gate blocks production.
-			if err := tw.WriteInfo(PublishInfo{}); err != nil {
+			if err := tw.subscribeStream.ensureOk(1); err != nil {
 				return
 			}
 			// Gate: block until all tracks are subscribed (ready closed by

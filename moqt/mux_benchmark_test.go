@@ -112,7 +112,7 @@ func BenchmarkTrackMux_ServeTrack(b *testing.B) {
 // pipeline end to end: each iteration Publishes a new track whose path matches
 // a registered AnnouncementWriter's prefix, which triggers
 // Announce -> announcement-tree walk -> per-node subscription snapshot ->
-// channel send -> SendAnnouncement -> AnnounceMessage encode on the writer's
+// channel send -> SendAnnouncement -> AnnounceBroadcastMessage encode on the writer's
 // stream.
 //
 // The previous version constructed an AnnouncementWriter per iteration but

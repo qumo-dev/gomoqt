@@ -30,7 +30,7 @@ func BenchmarkSession_Subscribe(b *testing.B) {
 				// Mock Read for SUBSCRIBE_OK message
 				mockBiStream.ReadFunc = func(b []byte) (int, error) {
 					// Encode SUBSCRIBE_OK message
-					msg := message.SubscribeOkMessage{}
+					msg := message.SubscribeOkMessage{Group: 1}
 					var buf bytes.Buffer
 					_, _ = buf.Write([]byte{byte(message.MessageTypeSubscribeOk)})
 					err := msg.Encode(&buf)
@@ -86,7 +86,7 @@ func BenchmarkSession_ConcurrentSubscribe(b *testing.B) {
 				mockBiStream := &FakeQUICStream{}
 				streamIndex++
 				mockBiStream.ReadFunc = func(b []byte) (int, error) {
-					msg := message.SubscribeOkMessage{}
+					msg := message.SubscribeOkMessage{Group: 1}
 					var buf bytes.Buffer
 					_, _ = buf.Write([]byte{byte(message.MessageTypeSubscribeOk)})
 					err := msg.Encode(&buf)

@@ -48,7 +48,9 @@ func TestAnnouncementReader_ReceiveAnnouncement(t *testing.T) {
 		"success_with_valid_announcement": {
 			receiveAnnounceStream: func() *AnnouncementReader {
 				buf := bytes.NewBuffer(nil)
-				err := message.AnnounceMessage{
+				// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
+				require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
+				err := message.AnnounceBroadcastMessage{
 					BroadcastPathSuffix: "valid_announcement",
 					AnnounceStatus:      message.ACTIVE,
 				}.Encode(buf)
@@ -67,7 +69,14 @@ func TestAnnouncementReader_ReceiveAnnouncement(t *testing.T) {
 		},
 		"context_cancelled": {
 			receiveAnnounceStream: func() *AnnouncementReader {
-				mockStream := &FakeQUICStream{}
+				mockStream := &FakeQUICStream{
+					// Block forever on read so the only cancellation signal is
+					// the caller's context (a read EOF would independently
+					// fatal-cancel the reader under draft-05 error handling).
+					ReadFunc: func([]byte) (int, error) {
+						select {}
+					},
+				}
 				// Don't provide initial suffixes so that ReceiveAnnouncement will wait
 				return newAnnouncementReader(mockStream, "/test/", []string{})
 			}(),
@@ -258,8 +267,10 @@ func TestAnnouncementReader_AnnouncementTracking(t *testing.T) {
 func TestAnnouncementReader_ConcurrentAccess(t *testing.T) {
 	// Create multiple messages
 	buf := bytes.NewBuffer(nil)
+	// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
+	require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
 	for i := range 5 {
-		err := message.AnnounceMessage{
+		err := message.AnnounceBroadcastMessage{
 			BroadcastPathSuffix: fmt.Sprintf("/stream%d", i),
 			AnnounceStatus:      message.ACTIVE,
 		}.Encode(buf)
@@ -392,13 +403,14 @@ func TestAnnouncementReader_InvalidMessage(t *testing.T) {
 	// Give time for processing invalid data (short)
 	time.Sleep(5 * time.Millisecond)
 
-	// When decode fails, the goroutine just returns without closing the stream
-	// So the context should NOT be cancelled in this case
+	// A fatal ANNOUNCE_OK decode error cancels the reader context (surfacing
+	// the failure to ReceiveAnnouncement instead of hanging forever on an
+	// open stream).
 	select {
 	case <-ras.ctx.Done():
-		t.Error("Stream should not be closed when decode fails - goroutine should just return")
+		// expected: the reader context is cancelled with the decode error.
 	default:
-		// This is expected - context is not cancelled when decode fails
+		t.Error("reader context should be cancelled after a fatal ANNOUNCE_OK decode error")
 	}
 
 }
@@ -406,7 +418,9 @@ func TestAnnouncementReader_InvalidMessage(t *testing.T) {
 func TestAnnouncementReader_ActiveThenEnded(t *testing.T) {
 	// Test scenario: stream becomes active then ended
 	buf := bytes.NewBuffer(nil)
-	messages := []message.AnnounceMessage{
+	// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
+	require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
+	messages := []message.AnnounceBroadcastMessage{
 		{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ACTIVE},
 		{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ENDED},
 	}
@@ -464,7 +478,9 @@ func TestAnnouncementReader_ActiveThenEnded(t *testing.T) {
 func TestAnnouncementReader_MultipleActiveStreams(t *testing.T) {
 	// Test scenario: multiple streams become active
 	buf := bytes.NewBuffer(nil)
-	messages := []message.AnnounceMessage{
+	// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
+	require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
+	messages := []message.AnnounceBroadcastMessage{
 		{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ACTIVE},
 		{BroadcastPathSuffix: "stream2", AnnounceStatus: message.ACTIVE},
 	}
@@ -533,7 +549,9 @@ func TestAnnouncementReader_MultipleActiveStreams(t *testing.T) {
 func TestAnnouncementReader_DuplicateActiveError(t *testing.T) {
 	// Test scenario: duplicate ACTIVE message should cause error
 	buf := bytes.NewBuffer(nil)
-	messages := []message.AnnounceMessage{
+	// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
+	require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
+	messages := []message.AnnounceBroadcastMessage{
 		{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ACTIVE},
 		{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ACTIVE}, // Duplicate
 	}
@@ -576,7 +594,9 @@ func TestAnnouncementReader_DuplicateActiveError(t *testing.T) {
 func TestAnnouncementReader_EndNonExistentStreamError(t *testing.T) {
 	// Test scenario: ENDED message for non-existent stream should cause error
 	buf := bytes.NewBuffer(nil)
-	messages := []message.AnnounceMessage{
+	// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
+	require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
+	messages := []message.AnnounceBroadcastMessage{
 		{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ENDED}, // End without ACTIVE
 	}
 	for _, msg := range messages {
@@ -618,7 +638,9 @@ func TestAnnouncementReader_EndNonExistentStreamError(t *testing.T) {
 func TestAnnouncementReader_NotifyChannel(t *testing.T) {
 	// Create a message
 	buf := bytes.NewBuffer(nil)
-	err := message.AnnounceMessage{
+	// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
+	require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
+	err := message.AnnounceBroadcastMessage{
 		BroadcastPathSuffix: "test_stream",
 		AnnounceStatus:      message.ACTIVE}.Encode(buf)
 	require.NoError(t, err)
@@ -722,7 +744,9 @@ func TestAnnouncementReader_BoundaryValues(t *testing.T) {
 
 			// Create message with the test suffix
 			buf := bytes.NewBuffer(nil)
-			err := message.AnnounceMessage{
+			// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
+			require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
+			err := message.AnnounceBroadcastMessage{
 				BroadcastPathSuffix: tt.suffix,
 				AnnounceStatus:      message.ACTIVE}.Encode(buf)
 			require.NoError(t, err)
@@ -804,11 +828,13 @@ func TestAnnouncementReader_StreamErrors(t *testing.T) {
 
 			ras := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
 
-			// In quic-go, Read errors are receive-side events and do NOT cancel
-			// the stream's Context (which is send-side). The reader goroutine
-			// silently exits on decode errors.
+			// A read error on the announce stream is now fatal to the reader:
+			// the goroutine cancels the reader context with the decode error
+			// as cause (rather than exiting silently and leaving
+			// ReceiveAnnouncement blocked forever on an open stream).
 
-			// The initial "valid_announcement" should still be available.
+			// The initial "valid_announcement" is still available (consumed
+			// from the pending batch before the cancellation is observed).
 			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 			defer cancel()
 
@@ -816,15 +842,12 @@ func TestAnnouncementReader_StreamErrors(t *testing.T) {
 			assert.NoError(t, err)
 			assert.NotNil(t, ann)
 
-			// After consuming the initial pending, the goroutine is dead (decode
-			// failed) so no more announcements will arrive. ReceiveAnnouncement
-			// should block until ctx times out.
-			shortCtx, shortCancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-			defer shortCancel()
-
-			ann2, err := ras.ReceiveAnnouncement(shortCtx)
+			// After consuming the initial pending, the reader context is
+			// cancelled with the decode error, so ReceiveAnnouncement returns
+			// that error promptly instead of blocking until ctx times out.
+			ann2, err := ras.ReceiveAnnouncement(context.Background())
 			assert.Nil(t, ann2)
-			assert.ErrorIs(t, err, context.DeadlineExceeded)
+			assert.ErrorIs(t, err, testError)
 		})
 	}
 }
