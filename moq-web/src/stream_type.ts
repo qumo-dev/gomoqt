@@ -10,12 +10,16 @@ export const BiStreamTypes = {
 	ProbeStreamType: 0x04,
 	/** Goaway stream for session migration. */
 	GoawayStreamType: 0x05,
+	/** Track stream for fetching immutable publisher properties. */
+	TrackStreamType: 0x06,
 } as const;
 
 /** Stream type identifiers for unidirectional streams as defined in MOQ Lite. */
 export const UniStreamTypes = {
 	/** Group stream carrying frame data from publisher to subscriber. */
 	GroupStreamType: 0x00,
+	/** Setup stream advertising capabilities at session start. */
+	SetupStreamType: 0x01,
 } as const;
 
 /** Union of all bidirectional stream type values. */

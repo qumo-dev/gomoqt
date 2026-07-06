@@ -5,9 +5,9 @@ import type { Writer } from "@okdaichi/golikejs/io";
 
 Deno.test("SubscribeDropMessage - encode/decode roundtrip - multiple scenarios", async (t) => {
 	const testCases = {
-		"normal case": { startGroup: 10, endGroup: 20, errorCode: 1 },
-		"zero values": { startGroup: 0, endGroup: 0, errorCode: 0 },
-		"large numbers": { startGroup: 1000000, endGroup: 2000000, errorCode: 65535 },
+		"normal case": { groupStart: 10, groupEnd: 20, errorCode: 1 },
+		"zero values": { groupStart: 0, groupEnd: 0, errorCode: 0 },
+		"large numbers": { groupStart: 1000000, groupEnd: 2000000, errorCode: 65535 },
 	};
 
 	for (const [caseName, input] of Object.entries(testCases)) {
@@ -22,8 +22,8 @@ Deno.test("SubscribeDropMessage - encode/decode roundtrip - multiple scenarios",
 			const decoded = new SubscribeDropMessage({});
 			const decodeErr = await decoded.decode(readBuffer);
 			assertEquals(decodeErr, undefined, `decode failed for ${caseName}`);
-			assertEquals(decoded.startGroup, input.startGroup, `startGroup ${caseName}`);
-			assertEquals(decoded.endGroup, input.endGroup, `endGroup ${caseName}`);
+			assertEquals(decoded.groupStart, input.groupStart, `groupStart ${caseName}`);
+			assertEquals(decoded.groupEnd, input.groupEnd, `groupEnd ${caseName}`);
 			assertEquals(decoded.errorCode, input.errorCode, `errorCode ${caseName}`);
 		});
 	}
@@ -37,7 +37,7 @@ Deno.test("SubscribeDropMessage - error cases", async (t) => {
 				new Error("Write failed"),
 			],
 		};
-		const err = await new SubscribeDropMessage({ startGroup: 1 }).encode(writer);
+		const err = await new SubscribeDropMessage({ groupStart: 1 }).encode(writer);
 		assertEquals(err instanceof Error, true);
 	});
 

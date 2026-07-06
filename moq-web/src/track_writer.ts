@@ -1,5 +1,4 @@
 import { GroupWriter } from "./group_stream.ts";
-import type { Info } from "./info.ts";
 import { type Context, ContextCancelledError, toAbortSignal } from "@okdaichi/golikejs/context";
 import type { ReceiveSubscribeStream, SubscribeDrop, TrackConfig } from "./subscribe_stream.ts";
 import type { SendStream } from "./internal/webtransport/mod.ts";
@@ -136,9 +135,10 @@ export class TrackWriter {
 			return [undefined, this.context.err()!];
 		}
 
-		// ensureInfo is not raced against the signal (Go passes no ctx here).
+		// ensureOk is not raced against the signal (Go passes no ctx here).
+		// The first opened group resolves the subscription's absolute start.
 		let err: Error | undefined;
-		err = await this.#subscribeStream.ensureInfo();
+		err = await this.#subscribeStream.ensureOk(seq);
 		if (err) {
 			return [undefined, err];
 		}
@@ -194,19 +194,6 @@ export class TrackWriter {
 		return [group, undefined];
 	}
 
-	/**
-	 * Write publisher {@link Info} to the subscriber.
-	 * @param info - Track information to send.
-	 */
-	async writeInfo(info: Info): Promise<Error | undefined> {
-		const err = await this.#subscribeStream.writeInfo(info);
-		if (err) {
-			return err;
-		}
-
-		return undefined;
-	}
-
 	async closeWithError(code: SubscribeErrorCode): Promise<void> {
 		// Cancel all groups with the error first
 		await Promise.allSettled(this.#groups.map(
@@ -221,6 +208,12 @@ export class TrackWriter {
 		await Promise.allSettled(this.#groups.map(
 			(group) => group.close(),
 		));
+
+		// Signal that no group after the last opened sequence will be
+		// produced. When no groups were opened, this is a SUBSCRIBE_END
+		// without a preceding SUBSCRIBE_OK (a track that ended with no
+		// matching groups).
+		await this.#subscribeStream.writeEnd(this.#groupCount);
 
 		await this.#subscribeStream.close();
 	}

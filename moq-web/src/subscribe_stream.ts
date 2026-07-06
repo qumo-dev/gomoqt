@@ -2,6 +2,7 @@ import type { SubscribeMessage } from "./internal/message/mod.ts";
 import {
 	readVarint,
 	SubscribeDropMessage,
+	SubscribeEndMessage,
 	SubscribeOkMessage,
 	SubscribeUpdateMessage,
 	writeVarint,
@@ -13,7 +14,6 @@ import { Cond, Mutex, Once } from "@okdaichi/golikejs/sync";
 import type { CancelCauseFunc, Context } from "@okdaichi/golikejs/context";
 import { withCancelCause } from "@okdaichi/golikejs/context";
 import { WebTransportStreamError } from "./internal/webtransport/mod.ts";
-import type { Info } from "./info.ts";
 import type { SubscribeID, TrackPriority } from "./alias.ts";
 import { SubscribeErrorCode } from "./error.ts";
 
@@ -41,8 +41,9 @@ export interface SubscribeDrop {
 	errorCode: number;
 }
 
-const MESSAGE_TYPE_SUBSCRIBE_OK = 0x0;
-const MESSAGE_TYPE_SUBSCRIBE_DROP = 0x1;
+export const MESSAGE_TYPE_SUBSCRIBE_OK = 0x0;
+export const MESSAGE_TYPE_SUBSCRIBE_END = 0x1;
+export const MESSAGE_TYPE_SUBSCRIBE_DROP = 0x2;
 
 function groupSequenceFromWire(v: number): number {
 	if (v === 0) return 0;
@@ -63,19 +64,23 @@ function groupSequenceToWire(gs: number): number {
 export class SendSubscribeStream {
 	#config: TrackConfig;
 	#id: SubscribeID;
-	#info: Info;
 	#stream: Stream;
 	readonly context: Context;
 	#cancelFunc: CancelCauseFunc;
 	#mu: Mutex = new Mutex();
 	#cond: Cond = new Cond(this.#mu);
 	#drops: SubscribeDrop[] = [];
+	#resolvedStart: number = 0;
+	#okReceived: boolean = false;
+	#endGroup: number = 0;
+	#ended: boolean = false;
 
 	constructor(
 		sessCtx: Context,
 		stream: Stream,
 		subscribe: SubscribeMessage,
-		ok: SubscribeOkMessage,
+		ok?: SubscribeOkMessage,
+		end?: SubscribeEndMessage,
 	) {
 		[this.context, this.#cancelFunc] = withCancelCause(sessCtx);
 		this.#stream = stream;
@@ -83,17 +88,18 @@ export class SendSubscribeStream {
 			priority: subscribe.subscriberPriority,
 			ordered: subscribe.subscriberOrdered !== 0,
 			maxLatency: subscribe.subscriberMaxLatency,
-			startGroup: groupSequenceFromWire(subscribe.startGroup),
-			endGroup: groupSequenceFromWire(subscribe.endGroup),
+			startGroup: groupSequenceFromWire(subscribe.groupStart),
+			endGroup: groupSequenceFromWire(subscribe.groupEnd),
 		};
 		this.#id = subscribe.subscribeId;
-		this.#info = {
-			priority: ok.publisherPriority,
-			ordered: ok.publisherOrdered !== 0,
-			maxLatency: ok.publisherMaxLatency,
-			startGroup: groupSequenceFromWire(ok.startGroup),
-			endGroup: groupSequenceFromWire(ok.endGroup),
-		};
+		if (ok) {
+			this.#resolvedStart = ok.group;
+			this.#okReceived = true;
+		}
+		if (end) {
+			this.#endGroup = end.group;
+			this.#ended = true;
+		}
 	}
 
 	get subscribeId(): SubscribeID {
@@ -104,8 +110,24 @@ export class SendSubscribeStream {
 		return this.#config;
 	}
 
-	get info(): Info {
-		return this.#info;
+	/** The absolute start group resolved by SUBSCRIBE_OK (0 until received). */
+	get resolvedStart(): number {
+		return this.#resolvedStart;
+	}
+
+	/** Whether SUBSCRIBE_OK has been received. */
+	get okReceived(): boolean {
+		return this.#okReceived;
+	}
+
+	/** Whether the publisher signaled SUBSCRIBE_END. */
+	get ended(): boolean {
+		return this.#ended;
+	}
+
+	/** The last group that may be delivered, from SUBSCRIBE_END. */
+	get endGroup(): number {
+		return this.#endGroup;
 	}
 
 	appendDrop(drop: SubscribeDrop): void {
@@ -125,30 +147,30 @@ export class SendSubscribeStream {
 
 	async readSubscribeResponses(): Promise<void> {
 		while (true) {
-			const [ok, drop, err] = await readSubscribeResponse(this.#stream.readable);
+			const [resp, err] = await readSubscribeResponse(this.#stream.readable);
 			if (err) {
 				return;
 			}
 
-			if (ok) {
-				// Update info (SubscribeOk can be received multiple times)
-				this.#info = {
-					priority: ok.publisherPriority,
-					ordered: ok.publisherOrdered !== 0,
-					maxLatency: ok.publisherMaxLatency,
-					startGroup: groupSequenceFromWire(ok.startGroup),
-					endGroup: groupSequenceFromWire(ok.endGroup),
-				};
+			if (resp.ok) {
+				this.#resolvedStart = resp.ok.group;
+				this.#okReceived = true;
 				continue;
 			}
 
-			if (drop) {
+			if (resp.end) {
+				this.#endGroup = resp.end.group;
+				this.#ended = true;
+				continue;
+			}
+
+			if (resp.drop) {
+				// SUBSCRIBE_DROP carries plain absolute sequences.
 				this.appendDrop({
-					startGroup: drop.startGroup,
-					endGroup: drop.endGroup,
-					errorCode: drop.errorCode,
+					startGroup: resp.drop.groupStart,
+					endGroup: resp.drop.groupEnd,
+					errorCode: resp.drop.errorCode,
 				});
-				return;
 			}
 		}
 	}
@@ -158,8 +180,8 @@ export class SendSubscribeStream {
 			subscriberPriority: update.priority,
 			subscriberOrdered: update.ordered ? 1 : 0,
 			subscriberMaxLatency: update.maxLatency,
-			startGroup: groupSequenceToWire(update.startGroup),
-			endGroup: groupSequenceToWire(update.endGroup),
+			groupStart: groupSequenceToWire(update.startGroup),
+			groupEnd: groupSequenceToWire(update.endGroup),
 		});
 		const err = await msg.encode(this.#stream.writable);
 		if (err) {
@@ -193,7 +215,8 @@ export class ReceiveSubscribeStream {
 	#cond: Cond = new Cond(this.#mu);
 	#stream: Stream;
 	#responseStarted: boolean = false;
-	#ensureInfoOnce: Once = new Once();
+	#endSent: boolean = false;
+	#ensureOkOnce: Once = new Once();
 	readonly context: Context;
 	#cancelFunc: CancelCauseFunc;
 
@@ -208,8 +231,8 @@ export class ReceiveSubscribeStream {
 			priority: subscribe.subscriberPriority,
 			ordered: subscribe.subscriberOrdered !== 0,
 			maxLatency: subscribe.subscriberMaxLatency,
-			startGroup: groupSequenceFromWire(subscribe.startGroup),
-			endGroup: groupSequenceFromWire(subscribe.endGroup),
+			startGroup: groupSequenceFromWire(subscribe.groupStart),
+			endGroup: groupSequenceFromWire(subscribe.groupEnd),
 		};
 		[this.context, this.#cancelFunc] = withCancelCause(sessCtx);
 
@@ -233,8 +256,8 @@ export class ReceiveSubscribeStream {
 				priority: msg.subscriberPriority,
 				ordered: msg.subscriberOrdered !== 0,
 				maxLatency: msg.subscriberMaxLatency,
-				startGroup: groupSequenceFromWire(msg.startGroup),
-				endGroup: groupSequenceFromWire(msg.endGroup),
+				startGroup: groupSequenceFromWire(msg.groupStart),
+				endGroup: groupSequenceFromWire(msg.groupEnd),
 			};
 
 			this.#cond.broadcast();
@@ -249,27 +272,22 @@ export class ReceiveSubscribeStream {
 		return this.#cond.wait();
 	}
 
-	async writeInfo(info?: Info): Promise<Error | undefined> {
+	/**
+	 * Write SUBSCRIBE_OK with the resolved absolute start group.
+	 */
+	async writeOk(group: number): Promise<Error | undefined> {
 		const err = this.context.err();
 		if (err !== undefined) {
 			return err;
 		}
 
-		const i = info ??
-			{ priority: 0, ordered: false, maxLatency: 0, startGroup: 0, endGroup: 0 };
 		// Write type byte for SUBSCRIBE_OK
 		const [, writeErr] = await writeVarint(this.#stream.writable, MESSAGE_TYPE_SUBSCRIBE_OK);
 		if (writeErr) {
 			return new Error(`moq: failed to write SUBSCRIBE_OK type: ${writeErr}`);
 		}
 
-		const msg = new SubscribeOkMessage({
-			publisherPriority: i.priority,
-			publisherOrdered: i.ordered ? 1 : 0,
-			publisherMaxLatency: i.maxLatency,
-			startGroup: groupSequenceToWire(i.startGroup),
-			endGroup: groupSequenceToWire(i.endGroup),
-		});
+		const msg = new SubscribeOkMessage({ group });
 
 		const encErr = await msg.encode(this.#stream.writable);
 		if (encErr) {
@@ -281,16 +299,47 @@ export class ReceiveSubscribeStream {
 		return undefined;
 	}
 
-	async ensureInfo(info?: Info): Promise<Error | undefined> {
-		return await this.#ensureInfoOnce.do(() => this.writeInfo(info));
+	/** Send SUBSCRIBE_OK exactly once; subsequent calls are no-ops. */
+	async ensureOk(group: number): Promise<Error | undefined> {
+		return await this.#ensureOkOnce.do(() => this.writeOk(group));
+	}
+
+	/**
+	 * Send SUBSCRIBE_END with the last group that may be delivered. Per
+	 * moq-lite-05, SUBSCRIBE_END without a preceding SUBSCRIBE_OK signals a
+	 * track that ended with no matching groups.
+	 */
+	async writeEnd(group: number): Promise<Error | undefined> {
+		if (this.#endSent) {
+			return undefined;
+		}
+		const err = this.context.err();
+		if (err !== undefined) {
+			return err;
+		}
+
+		const [, typeErr] = await writeVarint(this.#stream.writable, MESSAGE_TYPE_SUBSCRIBE_END);
+		if (typeErr) {
+			return new Error(`moq: failed to write SUBSCRIBE_END type: ${typeErr}`);
+		}
+
+		const msg = new SubscribeEndMessage({ group });
+		const encErr = await msg.encode(this.#stream.writable);
+		if (encErr) {
+			return new Error(`moq: failed to encode SUBSCRIBE_END message: ${encErr}`);
+		}
+
+		this.#endSent = true;
+
+		return undefined;
 	}
 
 	async writeDrop(drop: SubscribeDrop): Promise<Error | undefined> {
 		if (!this.#responseStarted) {
-			const err = await this.ensureInfo();
-			if (err) {
-				return err;
-			}
+			// A leading range is dropped implicitly by SUBSCRIBE_OK: resolving
+			// the start group past the dropped range makes an explicit
+			// SUBSCRIBE_DROP unnecessary.
+			return await this.ensureOk(drop.endGroup + 1);
 		}
 
 		// Write type byte for SUBSCRIBE_DROP
@@ -299,9 +348,10 @@ export class ReceiveSubscribeStream {
 			return new Error(`moq: failed to write SUBSCRIBE_DROP type: ${typeErr}`);
 		}
 
+		// SUBSCRIBE_DROP carries plain absolute sequences.
 		const msg = new SubscribeDropMessage({
-			startGroup: drop.startGroup,
-			endGroup: drop.endGroup,
+			groupStart: drop.startGroup,
+			groupEnd: drop.endGroup,
 			errorCode: drop.errorCode,
 		});
 		const err = await msg.encode(this.#stream.writable);
@@ -338,17 +388,23 @@ export class ReceiveSubscribeStream {
 	}
 }
 
-async function readSubscribeResponse(
+/**
+ * One decoded publisher message from the Subscribe Stream; exactly one
+ * field is set.
+ */
+export interface SubscribeResponse {
+	ok?: SubscribeOkMessage;
+	end?: SubscribeEndMessage;
+	drop?: SubscribeDropMessage;
+}
+
+export async function readSubscribeResponse(
 	r: Reader,
-): Promise<
-	| [SubscribeOkMessage, undefined, undefined]
-	| [undefined, SubscribeDropMessage, undefined]
-	| [undefined, undefined, Error]
-> {
-	// Read the type byte: 0x0 = SUBSCRIBE_OK, 0x1 = SUBSCRIBE_DROP
+): Promise<[SubscribeResponse, undefined] | [SubscribeResponse, Error]> {
+	// Read the type byte: 0x0 = SUBSCRIBE_OK, 0x1 = SUBSCRIBE_END, 0x2 = SUBSCRIBE_DROP
 	const [msgType, , err] = await readVarint(r);
 	if (err) {
-		return [undefined, undefined, err];
+		return [{}, err];
 	}
 
 	switch (msgType) {
@@ -356,23 +412,27 @@ async function readSubscribeResponse(
 			const msg = new SubscribeOkMessage({});
 			const decErr = await msg.decode(r);
 			if (decErr) {
-				return [undefined, undefined, decErr];
+				return [{}, decErr];
 			}
-			return [msg, undefined, undefined];
+			return [{ ok: msg }, undefined];
+		}
+		case MESSAGE_TYPE_SUBSCRIBE_END: {
+			const msg = new SubscribeEndMessage({});
+			const decErr = await msg.decode(r);
+			if (decErr) {
+				return [{}, decErr];
+			}
+			return [{ end: msg }, undefined];
 		}
 		case MESSAGE_TYPE_SUBSCRIBE_DROP: {
 			const msg = new SubscribeDropMessage({});
 			const decErr = await msg.decode(r);
 			if (decErr) {
-				return [undefined, undefined, decErr];
+				return [{}, decErr];
 			}
-			return [undefined, msg, undefined];
+			return [{ drop: msg }, undefined];
 		}
 		default:
-			return [
-				undefined,
-				undefined,
-				new Error(`unexpected SUBSCRIBE response type: ${msgType}`),
-			];
+			return [{}, new Error(`unexpected SUBSCRIBE response type: ${msgType}`)];
 	}
 }

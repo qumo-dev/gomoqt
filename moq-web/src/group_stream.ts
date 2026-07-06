@@ -3,7 +3,13 @@ import { withCancelCause } from "@okdaichi/golikejs/context";
 import type { CancelCauseFunc, Context } from "@okdaichi/golikejs/context";
 import { WebTransportStreamError } from "./internal/webtransport/error.ts";
 import type { GroupMessage } from "./internal/message/mod.ts";
-import { readFull, readVarint, writeVarint } from "./internal/message/mod.ts";
+import {
+	readFull,
+	readVarint,
+	writeVarint,
+	zigzagDecode,
+	zigzagEncode,
+} from "./internal/message/mod.ts";
 import { GroupErrorCode } from "./error.ts";
 import { GroupSequence } from "./alias.ts";
 import { BytesBuffer, ByteSink, ByteSinkFunc, ByteSource, Frame } from "./frame.ts";
@@ -32,6 +38,9 @@ export class GroupWriter {
 	#stream: SendStream;
 	readonly context: Context;
 	#cancelFunc: CancelCauseFunc;
+	// Previous frame's timestamp on this stream, used to delta-encode the
+	// next frame (the first frame is encoded relative to 0).
+	#prevTimestamp: number = 0;
 
 	constructor(trackCtx: Context, writer: SendStream, group: GroupMessage) {
 		this.sequence = group.sequence;
@@ -46,8 +55,14 @@ export class GroupWriter {
 	/**
 	 * Write a single frame to the group.
 	 * @param src - Frame data as a {@link ByteSource} or raw `Uint8Array`.
+	 * @param timestamp - Presentation timestamp in the track's timescale
+	 * units. When `src` is a {@link Frame}/`BytesBuffer` its `timestamp`
+	 * field is used unless this parameter is given.
 	 */
-	async writeFrame(src: ByteSource | Uint8Array): Promise<Error | undefined> {
+	async writeFrame(
+		src: ByteSource | Uint8Array,
+		timestamp?: number,
+	): Promise<Error | undefined> {
 		// Convert source to bytes
 		const bytes = src instanceof Uint8Array ? src : (() => {
 			const buf = new Uint8Array(src.byteLength);
@@ -55,8 +70,16 @@ export class GroupWriter {
 			return buf;
 		})();
 
-		// Write length prefix as varint
-		let [, err] = await writeVarint(this.#stream, bytes.byteLength);
+		const ts = timestamp ?? (src instanceof BytesBuffer ? src.timestamp : 0);
+
+		// Write the timestamp delta (zigzag varint) relative to the previous
+		// frame on this stream, then the length prefix, then the payload.
+		let [, err] = await writeVarint(this.#stream, zigzagEncode(ts - this.#prevTimestamp));
+		if (err) {
+			return err;
+		}
+
+		[, err] = await writeVarint(this.#stream, bytes.byteLength);
 		if (err) {
 			return err;
 		}
@@ -66,6 +89,8 @@ export class GroupWriter {
 		if (err) {
 			return err;
 		}
+
+		this.#prevTimestamp = ts;
 
 		return undefined;
 	}
@@ -109,6 +134,11 @@ export class GroupReader {
 	#reader: ReceiveStream;
 	readonly context: Context;
 	#cancelFunc: CancelCauseFunc;
+	// Previous frame's timestamp on this stream, used to resolve the next
+	// frame's delta-encoded timestamp.
+	#prevTimestamp: number = 0;
+	/** Timestamp of the most recently read frame, in timescale units. */
+	lastTimestamp: number = 0;
 
 	constructor(trackCtx: Context, reader: ReceiveStream, group: GroupMessage) {
 		this.sequence = group.sequence;
@@ -133,11 +163,19 @@ export class GroupReader {
 	 * contents as undefined when this returns an error.
 	 */
 	async readFrame(sink: ByteSink | ByteSinkFunc): Promise<Error | undefined> {
-		// Read length prefix as varint
-		const [len, , err1] = await readVarint(this.#reader);
-		// err1 may be an EOFError coming from the underlying stream.  We
+		// Read the timestamp delta (zigzag varint) relative to the previous
+		// frame on this stream.
+		const [delta, , errTs] = await readVarint(this.#reader);
+		// errTs may be an EOFError coming from the underlying stream.  We
 		// propagate it verbatim so callers can detect a normal end‑of‑stream
 		// and break out of their read loops (see `frames()` below).
+		if (errTs) {
+			return errTs;
+		}
+		const ts = this.#prevTimestamp + zigzagDecode(delta);
+
+		// Read length prefix as varint
+		const [len, , err1] = await readVarint(this.#reader);
 		if (err1) {
 			return err1;
 		}
@@ -160,6 +198,9 @@ export class GroupReader {
 				if (err2) {
 					return err2;
 				}
+				sink.timestamp = ts;
+				this.#prevTimestamp = ts;
+				this.lastTimestamp = ts;
 				return undefined;
 			}
 
@@ -181,6 +222,9 @@ export class GroupReader {
 		} catch (e) {
 			return e instanceof Error ? e : new Error(String(e));
 		}
+
+		this.#prevTimestamp = ts;
+		this.lastTimestamp = ts;
 
 		return undefined;
 	}

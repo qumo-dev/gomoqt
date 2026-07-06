@@ -2,26 +2,31 @@ import type { Reader, Writer } from "@okdaichi/golikejs/io";
 import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
 
 export interface SubscribeOkMessageInit {
-	publisherPriority?: number;
-	publisherOrdered?: number;
-	publisherMaxLatency?: number;
-	startGroup?: number;
-	endGroup?: number;
+	group?: number;
 }
 
+/**
+ * SUBSCRIBE_OK message (type 0x0), confirming a subscription and resolving
+ * its absolute start group. The type varint is written by the caller before
+ * `encode` / consumed before `decode`.
+ *
+ * ```text
+ * SUBSCRIBE_OK Message {
+ *   Type (i) = 0x0
+ *   Message Length (i)
+ *   Group (i)
+ * }
+ * ```
+ */
 export class SubscribeOkMessage {
-	publisherPriority: number;
-	publisherOrdered: number;
-	publisherMaxLatency: number;
-	startGroup: number;
-	endGroup: number;
+	/**
+	 * Absolute sequence of the first group that will be delivered
+	 * (plain absolute sequence, not the +1 form used in SUBSCRIBE).
+	 */
+	group: number;
 
 	constructor(init: SubscribeOkMessageInit = {}) {
-		this.publisherPriority = init.publisherPriority ?? 0;
-		this.publisherOrdered = init.publisherOrdered ?? 0;
-		this.publisherMaxLatency = init.publisherMaxLatency ?? 0;
-		this.startGroup = init.startGroup ?? 0;
-		this.endGroup = init.endGroup ?? 0;
+		this.group = init.group ?? 0;
 	}
 
 	/**
@@ -29,11 +34,7 @@ export class SubscribeOkMessage {
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
 		const e = new MessageEncoder();
-		e.uint8(this.publisherPriority);
-		e.uint8(this.publisherOrdered);
-		e.varint(this.publisherMaxLatency);
-		e.varint(this.startGroup);
-		e.varint(this.endGroup);
+		e.varint(this.group);
 		const [, err] = await w.write(e.frame());
 		return err;
 	}
@@ -42,23 +43,15 @@ export class SubscribeOkMessage {
 	 * Decodes the message from the reader.
 	 */
 	async decode(r: Reader): Promise<Error | undefined> {
-		let err: Error | undefined;
-
-		let msgLen: number;
-		[msgLen, , err] = await readVarint(r);
-		if (err) return err;
+		const [msgLen, , err1] = await readVarint(r);
+		if (err1) return err1;
 
 		const buf = new Uint8Array(msgLen);
-		[, err] = await readFull(r, buf);
-		if (err) return err;
+		const [, err2] = await readFull(r, buf);
+		if (err2) return err2;
 
 		const d = new MessageDecoder(buf);
-
-		this.publisherPriority = d.uint8();
-		this.publisherOrdered = d.uint8();
-		this.publisherMaxLatency = d.varint();
-		this.startGroup = d.varint();
-		this.endGroup = d.varint();
+		this.group = d.varint();
 
 		return undefined;
 	}

@@ -1,21 +1,18 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
 import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
 
-export interface SubscribeDropMessageInit {
-	groupStart?: number;
-	groupEnd?: number;
-	errorCode?: number;
+export interface AnnounceRequestMessageInit {
+	prefix?: string;
+	excludeHop?: number;
 }
 
-export class SubscribeDropMessage {
-	groupStart: number;
-	groupEnd: number;
-	errorCode: number;
+export class AnnounceRequestMessage {
+	prefix: string;
+	excludeHop: number;
 
-	constructor(init: SubscribeDropMessageInit = {}) {
-		this.groupStart = init.groupStart ?? 0;
-		this.groupEnd = init.groupEnd ?? 0;
-		this.errorCode = init.errorCode ?? 0;
+	constructor(init: AnnounceRequestMessageInit = {}) {
+		this.prefix = init.prefix ?? "";
+		this.excludeHop = init.excludeHop ?? 0;
 	}
 
 	/**
@@ -23,9 +20,8 @@ export class SubscribeDropMessage {
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
 		const e = new MessageEncoder();
-		e.varint(this.groupStart);
-		e.varint(this.groupEnd);
-		e.varint(this.errorCode);
+		e.string(this.prefix);
+		e.varint(this.excludeHop);
 		const [, err] = await w.write(e.frame());
 		return err;
 	}
@@ -43,9 +39,8 @@ export class SubscribeDropMessage {
 
 		const d = new MessageDecoder(buf);
 
-		this.groupStart = d.varint();
-		this.groupEnd = d.varint();
-		this.errorCode = d.varint();
+		this.prefix = d.string();
+		this.excludeHop = d.varint();
 
 		return undefined;
 	}

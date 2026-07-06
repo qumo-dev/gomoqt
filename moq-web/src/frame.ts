@@ -20,6 +20,13 @@ export type ByteSinkFunc = (p: Uint8Array) => void | Promise<void>;
  * Automatically resizes on write. Use {@link bytes} to read back the data.
  */
 export class BytesBuffer implements ByteSource, ByteSink {
+	/**
+	 * Presentation timestamp of the frame, expressed in the track's
+	 * timescale (units per second, carried in TRACK_INFO). Set it before
+	 * writing a frame; populated by reads.
+	 */
+	timestamp: number = 0;
+
 	#buf: ArrayBuffer; // Internal buffer (full capacity)
 
 	#len: number = 0; // Actual data length
@@ -110,6 +117,8 @@ export class BytesBuffer implements ByteSource, ByteSink {
 export interface Frame extends ByteSource, ByteSink {
 	/** View of the frame's raw bytes. */
 	readonly bytes: Uint8Array;
+	/** Presentation timestamp in the track's timescale units. */
+	timestamp: number;
 }
 
 /**

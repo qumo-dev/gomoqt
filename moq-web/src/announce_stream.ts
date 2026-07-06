@@ -1,7 +1,7 @@
 import { EOFError } from "@okdaichi/golikejs/io";
-import type { AnnounceInterestMessage } from "./internal/message/mod.ts";
-import { AnnounceMessage } from "./internal/message/mod.ts";
-import { ContextCancelledError, watchPromise, withCancelCause } from "@okdaichi/golikejs/context";
+import type { AnnounceRequestMessage } from "./internal/message/mod.ts";
+import { AnnounceBroadcastMessage, AnnounceOkMessage } from "./internal/message/mod.ts";
+import { watchPromise, withCancelCause } from "@okdaichi/golikejs/context";
 import type { CancelCauseFunc, Context } from "@okdaichi/golikejs/context";
 import { Cond, Mutex } from "@okdaichi/golikejs/sync";
 import type { TrackPrefix } from "./track_prefix.ts";
@@ -33,7 +33,7 @@ export class AnnouncementWriter {
 	constructor(
 		sessCtx: Context,
 		stream: Stream,
-		req: AnnounceInterestMessage,
+		req: AnnounceRequestMessage,
 	) {
 		this.#stream = stream;
 		this.prefix = validateTrackPrefix(req.prefix);
@@ -79,7 +79,7 @@ export class AnnouncementWriter {
 				announcement.ended().then(async () => {
 					// When the announcement ends, we remove it from the map
 					this.#announcements.delete(suffix);
-					const msg = new AnnounceMessage({ suffix, active: false });
+					const msg = new AnnounceBroadcastMessage({ suffix, active: false });
 					const err = await msg.encode(this.#stream.writable);
 					if (err && err instanceof WebTransportStreamError) {
 						return new AnnounceError(err.code, err.remote);
@@ -100,9 +100,20 @@ export class AnnouncementWriter {
 			}
 		}
 
-		// Send ACTIVE AnnounceMessage for each initial announcement
+		// ANNOUNCE_OK is sent exactly once, before any ANNOUNCE_BROADCAST,
+		// carrying this node's Hop ID (0: not a relay) and the initial count.
+		const okMsg = new AnnounceOkMessage({
+			hopID: 0,
+			activeCount: this.#announcements.size,
+		});
+		const okErr = await okMsg.encode(this.#stream.writable);
+		if (okErr) {
+			return okErr;
+		}
+
+		// Send ACTIVE AnnounceBroadcastMessage for each initial announcement
 		for (const [sfx, announcement] of this.#announcements.entries()) {
-			const msg = new AnnounceMessage({
+			const msg = new AnnounceBroadcastMessage({
 				suffix: sfx,
 				active: true,
 				hopIDs: [...announcement.hopIDs],
@@ -148,7 +159,11 @@ export class AnnouncementWriter {
 				this.#announcements.delete(suffix);
 			}
 
-			const msg = new AnnounceMessage({ suffix, active });
+			const msg = new AnnounceBroadcastMessage({
+				suffix,
+				active,
+				hopIDs: [...announcement.hopIDs],
+			});
 			let err = await msg.encode(this.#stream.writable);
 			if (err) {
 				return err;
@@ -240,7 +255,7 @@ export class AnnouncementReader {
 	constructor(
 		sessCtx: Context,
 		stream: Stream,
-		announceInterest: AnnounceInterestMessage,
+		announceInterest: AnnounceRequestMessage,
 	) {
 		this.#stream = stream;
 		const prefix = announceInterest.prefix;
@@ -250,9 +265,21 @@ export class AnnouncementReader {
 		this.prefix = prefix;
 		[this.context, this.#cancelFunc] = withCancelCause(sessCtx);
 
-		// Start reading messages from the stream
-		this.#readNext();
+		// The publisher sends ANNOUNCE_OK exactly once before any
+		// ANNOUNCE_BROADCAST. Its Hop ID is the implicit trailing entry of
+		// every broadcast's Hop ID list on this stream.
+		const okMsg = new AnnounceOkMessage({});
+		okMsg.decode(this.#stream.readable).then((err) => {
+			if (err) {
+				return;
+			}
+			this.#peerHopID = okMsg.hopID;
+			// Start reading announcements after ANNOUNCE_OK
+			this.#readNext();
+		}).catch(() => {});
 	}
+
+	#peerHopID: number = 0;
 
 	/**
 	 * Wait for the next active announcement.
@@ -270,7 +297,7 @@ export class AnnouncementReader {
 				return [undefined, new Error("Queue is closed and empty")];
 			}
 
-			if (announcement && announcement.isActive()) {
+			if (announcement.isActive()) {
 				return [announcement, undefined];
 			}
 
@@ -279,23 +306,13 @@ export class AnnouncementReader {
 				return [undefined, err];
 			}
 
-			// Wait for either context cancellation or a condition signal.
-			// Using Promise.race here is safe because `cond.wait()` is implemented such that
-			// it is a lightweight synchronization primitive and does not capture heavy resources.
-			// Even if `cond.wait()` loses the race, it does not keep large memory references alive.
-			const result = await Promise.race([
-				ctx.done().then(() => ctx.err() ?? ContextCancelledError),
-				this.#cond.wait(),
-			]);
-
-			if (result instanceof Error) {
-				return [undefined, result];
-			}
+			// The announcement ended (e.g. was atomically replaced) while
+			// queued: skip it and wait for the next one.
 		}
 	}
 
 	#readNext(): void {
-		const msg = new AnnounceMessage({});
+		const msg = new AnnounceBroadcastMessage({});
 		msg.decode(this.#stream.readable).then(async (err) => {
 			if (err) {
 				// EOFError and connection closed errors are expected during normal shutdown
@@ -321,19 +338,23 @@ export class AnnouncementReader {
 			const old = this.#announcements.get(msg.suffix);
 
 			if (msg.active) {
+				// An active for an already-active path atomically replaces the
+				// prior advertisement (e.g. after a relay failover).
 				if (old && old.isActive()) {
-					await this.closeWithError(AnnounceErrorCode.DuplicatedAnnounce);
-
-					return;
-				} else if (old && !old.isActive()) {
-					this.#announcements.delete(msg.suffix);
+					old.end();
 				}
+				this.#announcements.delete(msg.suffix);
 
 				const fullPath = this.prefix + msg.suffix;
+				// Reconstruct the full hop path: the broadcast's Hop ID list
+				// plus the peer's implicit ANNOUNCE_OK Hop ID (0 = untracked).
+				const hopIDs = this.#peerHopID !== 0
+					? [...msg.hopIDs, this.#peerHopID]
+					: msg.hopIDs;
 				const announcement = new Announcement(
 					validateBroadcastPath(fullPath),
 					this.context.done(),
-					msg.hopIDs,
+					hopIDs,
 				);
 				this.#announcements.set(msg.suffix, announcement);
 				this.#queue.enqueue(announcement);

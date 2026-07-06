@@ -3,10 +3,12 @@ import { spy } from "@std/testing/mock";
 import { Session } from "./session.ts";
 import type { SessionStats } from "./session.ts";
 import {
-	AnnounceInterestMessage,
+	AnnounceRequestMessage,
 	FetchMessage,
 	GroupMessage,
+	ProbeLevels,
 	ProbeMessage,
+	SetupMessage,
 	SubscribeMessage,
 	SubscribeOkMessage,
 	writeVarint,
@@ -68,6 +70,23 @@ type MockTransportStats = {
 	bytesSent?: number;
 	bytesReceived?: number;
 };
+
+// Builds an incoming Setup Stream item carrying the peer's SETUP message,
+// advertising the given probe capability level. Feed this to
+// acceptUniStreamData so capability-gated APIs (e.g. probe) can proceed.
+async function peerSetupUniStream(
+	probeLevel: number = ProbeLevels.Report,
+): Promise<{ type: number; data: Uint8Array }> {
+	const sm = new SetupMessage({});
+	if (probeLevel !== ProbeLevels.None) {
+		sm.addProbe(probeLevel);
+	}
+	const data = await encodeMessageToUint8Array(async (w) => {
+		await writeVarint(w, UniStreamTypes.SetupStreamType);
+		return await sm.encode(w);
+	});
+	return { type: UniStreamTypes.SetupStreamType, data };
+}
 
 class MockWebTransportSession implements StreamConn {
 	#openStreamResponses: Uint8Array[];
@@ -513,6 +532,7 @@ Deno.test({
 
 				const mock = new MockWebTransportSession({
 					openStreamResponses: [rspBytes],
+					acceptUniStreamData: [await peerSetupUniStream()],
 				});
 
 				const session = new Session({ transport: mock });
@@ -577,6 +597,7 @@ Deno.test({
 				const rspBytes2 = await encodeMessageToUint8Array(async (w) => rsp2.encode(w));
 				const mock = new MockWebTransportSession({
 					openStreamResponses: [new Uint8Array([...rspBytes1, ...rspBytes2])],
+					acceptUniStreamData: [await peerSetupUniStream()],
 				});
 
 				const session = new Session({ transport: mock });
@@ -653,7 +674,7 @@ Deno.test({
 					},
 				} as TrackMux;
 
-				const req = new AnnounceInterestMessage({ prefix: "/test/" });
+				const req = new AnnounceRequestMessage({ prefix: "/test/" });
 				const buf = await encodeMessageToUint8Array(async (w) => {
 					await writeVarint(w, BiStreamTypes.AnnounceStreamType);
 					return await req.encode(w);
@@ -1155,6 +1176,7 @@ Deno.test({
 
 				const mock = new MockWebTransportSession({
 					openStreamResponses: [rspBytes],
+					acceptUniStreamData: [await peerSetupUniStream()],
 				});
 
 				const session = new Session({ transport: mock });
@@ -1237,7 +1259,9 @@ Deno.test({
 		await t.step(
 			"probe methods support concurrent access and splitting messages",
 			async () => {
-				const mock = new MockWebTransportSession({});
+				const mock = new MockWebTransportSession({
+					acceptUniStreamData: [await peerSetupUniStream()],
+				});
 				const session = new Session({ transport: mock });
 				await session.ready;
 

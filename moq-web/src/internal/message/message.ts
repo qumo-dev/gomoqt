@@ -556,3 +556,22 @@ export class MessageDecoder {
 		return this.#offset >= this.#buf.length;
 	}
 }
+
+// ============================================================
+// Zigzag encoding for signed values (FRAME Timestamp Delta).
+// JavaScript bitwise operators truncate to 32 bits, so the mapping is done
+// arithmetically; Number stays exact within the 53-bit safe-integer range.
+// ============================================================
+
+/**
+ * Maps a signed integer to an unsigned varint-friendly value
+ * (0 → 0, -1 → 1, 1 → 2, -2 → 3, ...).
+ */
+export function zigzagEncode(n: number): number {
+	return n >= 0 ? 2 * n : -2 * n - 1;
+}
+
+/** The inverse of {@link zigzagEncode}. */
+export function zigzagDecode(u: number): number {
+	return u % 2 === 0 ? u / 2 : -(u + 1) / 2;
+}

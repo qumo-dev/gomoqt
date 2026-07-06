@@ -1,18 +1,18 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
 import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
 
-export interface AnnounceMessageInit {
+export interface AnnounceBroadcastMessageInit {
 	suffix?: string;
 	active?: boolean;
 	hopIDs?: number[];
 }
 
-export class AnnounceMessage {
+export class AnnounceBroadcastMessage {
 	suffix: string;
 	active: boolean;
 	hopIDs: number[];
 
-	constructor(init: AnnounceMessageInit = {}) {
+	constructor(init: AnnounceBroadcastMessageInit = {}) {
 		this.suffix = init.suffix ?? "";
 		this.active = init.active ?? false;
 		this.hopIDs = init.hopIDs ?? [];
