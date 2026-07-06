@@ -254,9 +254,17 @@ func (sess *Session) Path(ctx context.Context) (string, error) {
 		return sess.role.requestPath, nil
 	}
 
+	// Bound the wait by the setup timeout (like waitPeerSetup/Probe) so a
+	// caller passing a long-lived context does not hang until the QUIC idle
+	// timeout if the peer never opens a Setup Stream.
+	timer := time.NewTimer(sess.config.setupTimeout())
+	defer timer.Stop()
+
 	select {
 	case <-sess.peerSetupCh:
 		return sess.peerPath, nil
+	case <-timer.C:
+		return "", errors.New("timed out waiting for peer SETUP")
 	case <-ctx.Done():
 		return "", ctx.Err()
 	case <-sess.ctx.Done():

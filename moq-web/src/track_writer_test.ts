@@ -88,12 +88,12 @@ Deno.test("TrackWriter", async (t) => {
 		},
 	);
 	await t.step(
-		"TrackWriter.openGroup returns error when subscribeStream.writeInfo fails",
+		"TrackWriter.openGroup returns error when subscribeStream.writeOk fails",
 		async () => {
 			const [ctx] = withCancelCause(background());
 			const mockWritable = new MockSendStream({
 				write: spy(async (_p: Uint8Array) => {
-					return [0, new Error("writeInfo failed")] as [
+					return [0, new Error("writeOk failed")] as [
 						number,
 						Error | undefined,
 					];

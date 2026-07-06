@@ -93,6 +93,18 @@ func (r *TrackReader) TrackConfig() *SubscribeConfig {
 	return r.sendSubscribeStream.TrackConfig()
 }
 
+// ResolvedStart returns the absolute start group resolved by the publisher's
+// SUBSCRIBE_OK, or MinGroupSequence before SUBSCRIBE_OK arrives.
+func (r *TrackReader) ResolvedStart() GroupSequence {
+	return r.sendSubscribeStream.resolvedStartGroup()
+}
+
+// Ended reports whether the publisher signaled SUBSCRIBE_END, meaning no group
+// after the resolved range will be produced.
+func (r *TrackReader) Ended() bool {
+	return r.sendSubscribeStream.hasEnded()
+}
+
 // acceptDrop blocks until a drop notification is available or context is canceled.
 func (r *TrackReader) acceptDrop(ctx context.Context) (SubscribeDrop, error) {
 	trackCtx := r.Context()

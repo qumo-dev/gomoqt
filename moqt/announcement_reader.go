@@ -14,17 +14,20 @@ func newAnnouncementReader(stream transport.Stream, prefix prefix, initSuffixes 
 		panic("invalid prefix for AnnouncementReader")
 	}
 
+	readerCtx, cancelCause := context.WithCancelCause(stream.Context())
+
 	ar := &AnnouncementReader{
-		ctx:         context.WithValue(stream.Context(), biStreamTypeCtxKey, message.StreamTypeAnnounce),
+		ctx:         context.WithValue(readerCtx, biStreamTypeCtxKey, message.StreamTypeAnnounce),
 		stream:      stream,
 		prefix:      prefix,
 		actives:     make(map[suffix]*Announcement),
 		pendings:    make([]*Announcement, 0),
 		announcedCh: make(chan struct{}, 1),
+		cancelCause: cancelCause,
 	}
 
 	for _, suffix := range initSuffixes {
-		ann, _ := NewAnnouncement(stream.Context(), BroadcastPath(prefix+suffix))
+		ann, _ := NewAnnouncement(readerCtx, BroadcastPath(prefix+suffix))
 		ar.actives[suffix] = ann
 		ar.pendings = append(ar.pendings, ann)
 	}
@@ -36,6 +39,11 @@ func newAnnouncementReader(stream transport.Stream, prefix prefix, initSuffixes 
 		// every broadcast's Hop ID list on this stream.
 		var okMsg message.AnnounceOkMessage
 		if err := okMsg.Decode(ar.stream); err != nil {
+			// Cancel the reader rather than returning silently: without this
+			// a malformed ANNOUNCE_OK (or an unexpected reset) on an
+			// otherwise-open stream leaves ReceiveAnnouncement blocked
+			// forever, since ar.ctx would never fire.
+			ar.fail(err)
 			return
 		}
 		peerHopID := okMsg.HopID
@@ -140,6 +148,17 @@ type AnnouncementReader struct {
 
 	pendings    []*Announcement
 	announcedCh chan struct{} // notify when new announcement is available
+
+	// cancelCause cancels readerCtx (and thus ar.ctx) when the announce
+	// goroutine hits a fatal decode error, so ReceiveAnnouncement unblocks.
+	cancelCause context.CancelCauseFunc
+}
+
+// fail cancels the reader context with cause, unblocking ReceiveAnnouncement.
+func (ar *AnnouncementReader) fail(err error) {
+	if ar.cancelCause != nil {
+		ar.cancelCause(err)
+	}
 }
 
 // ReceiveAnnouncement blocks until an announcement for the configured prefix is available or until ctx or the reader's context is canceled.
@@ -204,6 +223,10 @@ func (ras *AnnouncementReader) Close() error {
 		return nil
 	}
 
+	// Cancel the reader context so any blocked ReceiveAnnouncement unblocks
+	// promptly (rather than busy-spinning on a closed announcedCh).
+	ras.fail(context.Canceled)
+
 	if ras.announcedCh != nil {
 		close(ras.announcedCh)
 		ras.announcedCh = nil
@@ -218,6 +241,8 @@ func (ras *AnnouncementReader) Close() error {
 func (ras *AnnouncementReader) CloseWithError(code AnnounceErrorCode) {
 	ras.announcementsMu.Lock()
 	defer ras.announcementsMu.Unlock()
+
+	ras.fail(context.Canceled)
 
 	if ras.announcedCh != nil {
 		close(ras.announcedCh)

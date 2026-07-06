@@ -37,19 +37,22 @@ Deno.test("Announcement", async (t) => {
 });
 
 Deno.test("AnnouncementWriter", async (t) => {
-	await t.step("init respects prefix and writes ANNOUNCE_INIT", async () => {
-		const [ctx] = withCancelCause(background());
-		const writeBuf = Buffer.make(256);
-		const mockStream = new MockStream({
-			writable: new MockSendStream({ write: (p) => writeBuf.write(p) }),
-		});
-		const req = new AnnounceRequestMessage({ prefix: "/test/" });
-		const writer = new AnnouncementWriter(ctx, mockStream, req);
-		const ann = new Announcement("/test/abc", ctx.done());
-		const err = await writer.init([ann]);
-		assertEquals(err, undefined);
-		assertEquals(writeBuf.len() > 0, true);
-	});
+	await t.step(
+		"init respects prefix and writes ANNOUNCE_OK followed by ANNOUNCE_BROADCAST",
+		async () => {
+			const [ctx] = withCancelCause(background());
+			const writeBuf = Buffer.make(256);
+			const mockStream = new MockStream({
+				writable: new MockSendStream({ write: (p) => writeBuf.write(p) }),
+			});
+			const req = new AnnounceRequestMessage({ prefix: "/test/" });
+			const writer = new AnnouncementWriter(ctx, mockStream, req);
+			const ann = new Announcement("/test/abc", ctx.done());
+			const err = await writer.init([ann]);
+			assertEquals(err, undefined);
+			assertEquals(writeBuf.len() > 0, true);
+		},
+	);
 
 	await t.step("init returns error when prefix mismatched", async () => {
 		const [ctx] = withCancelCause(background());

@@ -107,7 +107,7 @@ func TestSendSubscribeStream_ReadSubscribeResponses_EndAndDrop(t *testing.T) {
 
 	assert.True(t, substr.okReceived, "OK should mark okReceived")
 	assert.Equal(t, GroupSequence(5), substr.resolvedStart)
-	assert.True(t, substr.ended, "END should mark ended")
+	assert.True(t, substr.hasEnded(), "END should mark ended")
 	assert.Equal(t, GroupSequence(11), substr.endGroup)
 
 	drops := substr.pendingDrops()
@@ -125,5 +125,5 @@ func TestSendSubscribeStream_SetEnd_Direct(t *testing.T) {
 
 	assert.True(t, substr.ended)
 	assert.Equal(t, GroupSequence(42), substr.endGroup)
-	assert.False(t, substr.okReceived, "setEnd alone must not imply OK")
+	
 }

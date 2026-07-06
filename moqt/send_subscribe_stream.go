@@ -128,6 +128,21 @@ func (substr *sendSubscribeStream) setResolvedStart(seq GroupSequence) {
 	substr.okReceived = true
 }
 
+// resolvedStart returns the absolute start group resolved by SUBSCRIBE_OK
+// (MinGroupSequence until SUBSCRIBE_OK arrives).
+func (substr *sendSubscribeStream) resolvedStartGroup() GroupSequence {
+	substr.mu.Lock()
+	defer substr.mu.Unlock()
+	return substr.resolvedStart
+}
+
+// ended reports whether the publisher signaled SUBSCRIBE_END.
+func (substr *sendSubscribeStream) hasEnded() bool {
+	substr.mu.Lock()
+	defer substr.mu.Unlock()
+	return substr.ended
+}
+
 func (substr *sendSubscribeStream) setEnd(seq GroupSequence) {
 	substr.mu.Lock()
 	defer substr.mu.Unlock()

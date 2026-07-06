@@ -123,8 +123,8 @@ You can also use transport-specific methods directly:
 	// WebTransport
 	sess, err := dialer.DialWebTransport(ctx, "host:port", "/path", mux)
 
-	// Native QUIC
-	sess, err := dialer.DialQUIC(ctx, "host:port", mux)
+	// Native QUIC (path is conveyed via the SETUP Path parameter)
+	sess, err := dialer.DialQUIC(ctx, "host:port", "/path", mux)
 ```
 
 > [!NOTE] Note: Nil TrackMux

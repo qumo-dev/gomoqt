@@ -271,12 +271,31 @@ export class AnnouncementReader {
 		const okMsg = new AnnounceOkMessage({});
 		okMsg.decode(this.#stream.readable).then((err) => {
 			if (err) {
+				// Surface the failure rather than swallowing it: cancel the
+				// context with the cause and close the queue so receive()
+				// unblocks instead of hanging on an empty, open queue.
+				this.#fail(
+					err instanceof Error
+						? err
+						: new Error(`moq: failed to read ANNOUNCE_OK: ${err}`),
+				);
 				return;
 			}
 			this.#peerHopID = okMsg.hopID;
 			// Start reading announcements after ANNOUNCE_OK
 			this.#readNext();
-		}).catch(() => {});
+		}).catch((err) => {
+			this.#fail(
+				err instanceof Error ? err : new Error(`moq: failed to read ANNOUNCE_OK: ${err}`),
+			);
+		});
+	}
+
+	// fail cancels the reader context with cause and closes the queue, the two
+	// things receive() needs to unblock with an error instead of hanging.
+	#fail(err: Error): void {
+		this.#cancelFunc(err);
+		this.#queue.close();
 	}
 
 	#peerHopID: number = 0;
@@ -294,7 +313,8 @@ export class AnnouncementReader {
 		while (true) {
 			const announcement = await this.#queue.dequeue();
 			if (announcement === undefined) {
-				return [undefined, new Error("Queue is closed and empty")];
+				// Queue closed (reader failed/closed). Surface the cause, if any.
+				return [undefined, ctx.err() ?? new Error("Queue is closed and empty")];
 			}
 
 			if (announcement.isActive()) {

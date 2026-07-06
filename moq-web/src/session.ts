@@ -440,11 +440,11 @@ export class Session {
 			return [undefined, err];
 		}
 
-		// Send ANNOUNCE_INTEREST message
+		// Send ANNOUNCE_REQUEST message
 		const req = new AnnounceRequestMessage({ prefix });
 		err = await req.encode(stream.writable);
 		if (err) {
-			console.error("moq: failed to send ANNOUNCE_INTEREST message:", err);
+			console.error("moq: failed to send ANNOUNCE_REQUEST message:", err);
 			return [undefined, err];
 		}
 
@@ -753,9 +753,10 @@ export class Session {
 		const quic = this.#webtransport as unknown as TransportStatsCapable;
 
 		// We did not advertise the Probe capability; the spec requires
-		// resetting a Probe Stream we cannot serve.
+		// resetting a Probe Stream we cannot serve. Use NotSupported so a
+		// subscriber can distinguish it from an internal fault (matches Go).
 		if (this.#localProbeLevel === ProbeLevels.None) {
-			cancelStreamWithError(stream, ProbeErrorCode.Internal);
+			cancelStreamWithError(stream, ProbeErrorCode.NotSupported);
 			return;
 		}
 

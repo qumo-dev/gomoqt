@@ -81,7 +81,22 @@ func (f *Frame) Cap() int {
 // prevTimestamp, varint length, then payload. The prefix is encoded into the
 // header area of the frame buffer to minimize allocations and writes.
 func (f *Frame) encode(w io.Writer, prevTimestamp uint64) error {
-	delta := message.ZigzagEncode(int64(f.Timestamp) - int64(prevTimestamp))
+	// The timestamp delta is zigzag-mapped then varint-encoded, which only
+	// fits a 62-bit value. A delta outside [-2^61, 2^61-1] would overflow the
+	// varint and panic inside WriteVarint. That cannot be produced by a
+	// well-formed local publisher, but a relay re-publishing frames whose
+	// timestamps were reconstructed from a malicious/crafted upstream can
+	// drive the uint64→int64 cast into wraparound. Reject it explicitly
+	// rather than crashing the process on untrusted input.
+	const (
+		maxFrameTimestampDelta = int64(1)<<61 - 1
+		minFrameTimestampDelta = -int64(1) << 61
+	)
+	signed := int64(f.Timestamp) - int64(prevTimestamp)
+	if signed > maxFrameTimestampDelta || signed < minFrameTimestampDelta {
+		return ErrTimestampOutOfRange
+	}
+	delta := message.ZigzagEncode(signed)
 	l := uint64(len(f.body))
 
 	prefix, _ := message.WriteVarint(f.header[:0], delta)
