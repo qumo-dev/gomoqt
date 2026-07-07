@@ -21,14 +21,24 @@ func (pm ProbeMessage) Len() int {
 }
 
 func (pm ProbeMessage) Encode(w io.Writer) error {
+	var err error
 	msgLen := pm.Len()
 	b := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
 
-	b, _ = WriteMessageLength(b, uint64(msgLen))
-	b, _ = WriteVarint(b, pm.Bitrate)
-	b, _ = WriteVarint(b, pm.RTT)
+	b, _, err = WriteMessageLength(b, uint64(msgLen))
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteVarint(b, pm.Bitrate)
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteVarint(b, pm.RTT)
+	if err != nil {
+		return err
+	}
 
-	_, err := w.Write(b)
+	_, err = w.Write(b)
 	return err
 }
 

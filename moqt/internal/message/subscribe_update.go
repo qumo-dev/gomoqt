@@ -27,17 +27,30 @@ func (su SubscribeUpdateMessage) Len() int {
 }
 
 func (su SubscribeUpdateMessage) Encode(w io.Writer) error {
+	var err error
 	msgLen := su.Len()
 	p := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
 
-	p, _ = WriteMessageLength(p, uint64(msgLen))
+	p, _, err = WriteMessageLength(p, uint64(msgLen))
+	if err != nil {
+		return err
+	}
 	p = append(p, su.SubscriberPriority)
 	p = append(p, su.SubscriberOrdered)
-	p, _ = WriteVarint(p, su.SubscriberMaxLatency)
-	p, _ = WriteVarint(p, su.StartGroup)
-	p, _ = WriteVarint(p, su.EndGroup)
+	p, _, err = WriteVarint(p, su.SubscriberMaxLatency)
+	if err != nil {
+		return err
+	}
+	p, _, err = WriteVarint(p, su.StartGroup)
+	if err != nil {
+		return err
+	}
+	p, _, err = WriteVarint(p, su.EndGroup)
+	if err != nil {
+		return err
+	}
 
-	_, err := w.Write(p)
+	_, err = w.Write(p)
 
 	return err
 }

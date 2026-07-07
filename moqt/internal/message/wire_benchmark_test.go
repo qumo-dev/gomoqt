@@ -581,7 +581,7 @@ func BenchmarkWriteMessageLength(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				out, _ := message.WriteMessageLength(dst[:0], tc.val)
+				out, _, _ := message.WriteMessageLength(dst[:0], tc.val)
 				sinkWireBytes = out
 			}
 		})
@@ -607,7 +607,7 @@ func BenchmarkReadMessageLength(b *testing.B) {
 				n = 8
 			}
 			encoded := make([]byte, 0, n)
-			encoded, _ = message.WriteMessageLength(encoded, tc.val)
+			encoded, _, _ = message.WriteMessageLength(encoded, tc.val)
 			// Tile the encoded varint so the reader never drains mid-bench.
 			repeating := tile(encoded)
 			reader := bytes.NewReader(repeating)
@@ -641,7 +641,7 @@ func BenchmarkReadMessageLength(b *testing.B) {
 // No validation logic is added here — measurement only.
 func BenchmarkReadMessageLength_MaxUint62_NoBody(b *testing.B) {
 	encoded := make([]byte, 0, 8)
-	encoded, _ = message.WriteMessageLength(encoded, maxUint62)
+	encoded, _, _ = message.WriteMessageLength(encoded, maxUint62)
 	repeating := tile(encoded)
 	reader := bytes.NewReader(repeating)
 

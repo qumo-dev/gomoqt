@@ -32,17 +32,30 @@ func (som SubscribeOkMessage) Len() int {
 }
 
 func (som SubscribeOkMessage) Encode(w io.Writer) error {
+	var err error
 	msgLen := som.Len()
 	b := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
 
-	b, _ = WriteMessageLength(b, uint64(msgLen))
+	b, _, err = WriteMessageLength(b, uint64(msgLen))
+	if err != nil {
+		return err
+	}
 	b = append(b, som.PublisherPriority)
 	b = append(b, som.PublisherOrdered)
-	b, _ = WriteVarint(b, som.PublisherMaxLatency)
-	b, _ = WriteVarint(b, som.StartGroup)
-	b, _ = WriteVarint(b, som.EndGroup)
+	b, _, err = WriteVarint(b, som.PublisherMaxLatency)
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteVarint(b, som.StartGroup)
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteVarint(b, som.EndGroup)
+	if err != nil {
+		return err
+	}
 
-	_, err := w.Write(b)
+	_, err = w.Write(b)
 
 	return err
 }

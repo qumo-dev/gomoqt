@@ -4,17 +4,17 @@ import (
 	"fmt"
 )
 
-func WriteVarint(b []byte, i uint64) ([]byte, int) {
+func WriteVarint(b []byte, i uint64) ([]byte, int, error) {
 	if i <= maxVarInt1 {
 		b = append(b, byte(i))
-		return b, 1
+		return b, 1, nil
 	}
 	if i <= maxVarInt2 {
 		b = append(b,
 			uint8(i>>8)|0x40,
 			byte(i),
 		)
-		return b, 2
+		return b, 2, nil
 	}
 	if i <= maxVarInt4 {
 		b = append(b,
@@ -23,7 +23,7 @@ func WriteVarint(b []byte, i uint64) ([]byte, int) {
 			uint8(i>>8),
 			byte(i),
 		)
-		return b, 4
+		return b, 4, nil
 	}
 	if i <= maxVarInt8 {
 		b = append(b,
@@ -36,29 +36,38 @@ func WriteVarint(b []byte, i uint64) ([]byte, int) {
 			uint8(i>>8),
 			byte(i),
 		)
-		return b, 8
+		return b, 8, nil
 	}
-	panic(fmt.Sprintf("%#x doesn't fit into 62 bits", i))
+	return nil, 0, fmt.Errorf("%#x doesn't fit into 62 bits", i)
 }
 
-func WriteBytes(dest []byte, b []byte) ([]byte, int) {
-	dest, n := WriteVarint(dest, uint64(len(b)))
+func WriteBytes(dest []byte, b []byte) ([]byte, int, error) {
+	dest, n, err := WriteVarint(dest, uint64(len(b)))
+	if err != nil {
+		return nil, 0, err
+	}
 	dest = append(dest, b...)
-	return dest, n + len(b)
+	return dest, n + len(b), nil
 }
 
-func WriteString(dest []byte, s string) ([]byte, int) {
+func WriteString(dest []byte, s string) ([]byte, int, error) {
 	return WriteBytes(dest, []byte(s))
 }
 
-func WriteStringArray(dest []byte, arr []string) ([]byte, int) {
-	dest, n := WriteVarint(dest, uint64(len(arr)))
+func WriteStringArray(dest []byte, arr []string) ([]byte, int, error) {
+	dest, n, err := WriteVarint(dest, uint64(len(arr)))
+	if err != nil {
+		return nil, 0, err
+	}
 	var m int
 	for _, str := range arr {
-		dest, m = WriteString(dest, str)
+		dest, m, err = WriteString(dest, str)
+		if err != nil {
+			return nil, 0, err
+		}
 		n += m
 	}
-	return dest, n
+	return dest, n, nil
 }
 
 const (
@@ -68,6 +77,6 @@ const (
 	maxVarInt8 = 1<<(64-2) - 1
 )
 
-func WriteMessageLength(b []byte, size uint64) ([]byte, int) {
+func WriteMessageLength(b []byte, size uint64) ([]byte, int, error) {
 	return WriteVarint(b, size)
 }

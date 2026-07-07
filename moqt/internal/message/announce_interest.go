@@ -21,14 +21,24 @@ func (aim AnnounceInterestMessage) Len() int {
 }
 
 func (aim AnnounceInterestMessage) Encode(w io.Writer) error {
+	var err error
 	msgLen := aim.Len()
 	b := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
 
-	b, _ = WriteMessageLength(b, uint64(msgLen))
-	b, _ = WriteString(b, aim.BroadcastPathPrefix)
-	b, _ = WriteVarint(b, aim.ExcludeHop)
+	b, _, err = WriteMessageLength(b, uint64(msgLen))
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteString(b, aim.BroadcastPathPrefix)
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteVarint(b, aim.ExcludeHop)
+	if err != nil {
+		return err
+	}
 
-	_, err := w.Write(b)
+	_, err = w.Write(b)
 
 	return err
 }

@@ -47,22 +47,44 @@ func (s SubscribeMessage) Len() int {
 }
 
 func (s SubscribeMessage) Encode(w io.Writer) error {
+	var err error
 	msgLen := s.Len()
 	b := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
 
-	b, _ = WriteMessageLength(b, uint64(msgLen))
-	b, _ = WriteVarint(b, uint64(s.SubscribeID))
-	b, _ = WriteVarint(b, uint64(len(s.BroadcastPath)))
+	b, _, err = WriteMessageLength(b, uint64(msgLen))
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteVarint(b, uint64(s.SubscribeID))
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteVarint(b, uint64(len(s.BroadcastPath)))
+	if err != nil {
+		return err
+	}
 	b = append(b, s.BroadcastPath...)
-	b, _ = WriteVarint(b, uint64(len(s.TrackName)))
+	b, _, err = WriteVarint(b, uint64(len(s.TrackName)))
+	if err != nil {
+		return err
+	}
 	b = append(b, s.TrackName...)
 	b = append(b, s.SubscriberPriority)
 	b = append(b, s.SubscriberOrdered)
-	b, _ = WriteVarint(b, s.SubscriberMaxLatency)
-	b, _ = WriteVarint(b, s.StartGroup)
-	b, _ = WriteVarint(b, s.EndGroup)
+	b, _, err = WriteVarint(b, s.SubscriberMaxLatency)
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteVarint(b, s.StartGroup)
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteVarint(b, s.EndGroup)
+	if err != nil {
+		return err
+	}
 
-	_, err := w.Write(b)
+	_, err = w.Write(b)
 	return err
 }
 

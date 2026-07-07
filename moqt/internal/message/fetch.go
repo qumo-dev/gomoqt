@@ -19,16 +19,29 @@ func (f FetchMessage) Len() int {
 }
 
 func (f FetchMessage) Encode(w io.Writer) error {
+	var err error
 	msgLen := f.Len()
 	b := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
-	b, _ = WriteMessageLength(b, uint64(msgLen))
-	b, _ = WriteVarint(b, uint64(len(f.BroadcastPath)))
+	b, _, err = WriteMessageLength(b, uint64(msgLen))
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteVarint(b, uint64(len(f.BroadcastPath)))
+	if err != nil {
+		return err
+	}
 	b = append(b, f.BroadcastPath...)
-	b, _ = WriteVarint(b, uint64(len(f.TrackName)))
+	b, _, err = WriteVarint(b, uint64(len(f.TrackName)))
+	if err != nil {
+		return err
+	}
 	b = append(b, f.TrackName...)
 	b = append(b, f.Priority)
-	b, _ = WriteVarint(b, f.GroupSequence)
-	_, err := w.Write(b)
+	b, _, err = WriteVarint(b, f.GroupSequence)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(b)
 	return err
 }
 

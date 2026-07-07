@@ -38,15 +38,28 @@ func (sdm SubscribeDropMessage) Len() int {
 }
 
 func (sdm SubscribeDropMessage) Encode(w io.Writer) error {
+	var err error
 	msgLen := sdm.Len()
 	b := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
 
-	b, _ = WriteMessageLength(b, uint64(msgLen))
-	b, _ = WriteVarint(b, sdm.StartGroup)
-	b, _ = WriteVarint(b, sdm.EndGroup)
-	b, _ = WriteVarint(b, sdm.ErrorCode)
+	b, _, err = WriteMessageLength(b, uint64(msgLen))
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteVarint(b, sdm.StartGroup)
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteVarint(b, sdm.EndGroup)
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteVarint(b, sdm.ErrorCode)
+	if err != nil {
+		return err
+	}
 
-	_, err := w.Write(b)
+	_, err = w.Write(b)
 	return err
 }
 

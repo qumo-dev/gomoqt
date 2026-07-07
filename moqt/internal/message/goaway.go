@@ -19,13 +19,20 @@ func (gm GoawayMessage) Len() int {
 }
 
 func (gm GoawayMessage) Encode(w io.Writer) error {
+	var err error
 	msgLen := gm.Len()
 	b := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
 
-	b, _ = WriteMessageLength(b, uint64(msgLen))
-	b, _ = WriteString(b, gm.NewSessionURI)
+	b, _, err = WriteMessageLength(b, uint64(msgLen))
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteString(b, gm.NewSessionURI)
+	if err != nil {
+		return err
+	}
 
-	_, err := w.Write(b)
+	_, err = w.Write(b)
 
 	return err
 }

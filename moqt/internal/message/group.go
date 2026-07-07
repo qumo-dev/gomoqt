@@ -20,14 +20,24 @@ func (g GroupMessage) Len() int {
 }
 
 func (g GroupMessage) Encode(w io.Writer) error {
+	var err error
 	msgLen := g.Len()
 	b := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
 
-	b, _ = WriteMessageLength(b, uint64(msgLen))
-	b, _ = WriteVarint(b, g.SubscribeID)
-	b, _ = WriteVarint(b, g.GroupSequence)
+	b, _, err = WriteMessageLength(b, uint64(msgLen))
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteVarint(b, g.SubscribeID)
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteVarint(b, g.GroupSequence)
+	if err != nil {
+		return err
+	}
 
-	_, err := w.Write(b)
+	_, err = w.Write(b)
 
 	return err
 }

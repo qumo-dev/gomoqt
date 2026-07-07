@@ -23,7 +23,7 @@ func TestWriteVarint(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result, n := WriteVarint([]byte{}, tt.input)
+		result, n, _ := WriteVarint([]byte{}, tt.input)
 		if n != tt.n {
 			t.Errorf("WriteVarint(%d) n = %d, want %d", tt.input, n, tt.n)
 		}
@@ -33,13 +33,11 @@ func TestWriteVarint(t *testing.T) {
 	}
 }
 
-func TestWriteVarintPanic(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("WriteVarint should panic for large values")
-		}
-	}()
-	WriteVarint([]byte{}, maxVarInt8+1)
+func TestWriteVarintError(t *testing.T) {
+	_, _, err := WriteVarint([]byte{}, maxVarInt8+1)
+	if err == nil {
+		t.Error("WriteVarint should return error for large values")
+	}
 }
 
 func TestWriteBytes(t *testing.T) {
@@ -54,7 +52,7 @@ func TestWriteBytes(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result, n := WriteBytes(tt.dest, tt.b)
+		result, n, _ := WriteBytes(tt.dest, tt.b)
 		if n != tt.n {
 			t.Errorf("WriteBytes n = %d, want %d", n, tt.n)
 		}
@@ -76,7 +74,7 @@ func TestWriteString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result, n := WriteString(tt.dest, tt.s)
+		result, n, _ := WriteString(tt.dest, tt.s)
 		if n != tt.n {
 			t.Errorf("WriteString n = %d, want %d", n, tt.n)
 		}
@@ -98,7 +96,7 @@ func TestWriteStringArray(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result, n := WriteStringArray(tt.dest, tt.arr)
+		result, n, _ := WriteStringArray(tt.dest, tt.arr)
 		if n != tt.n {
 			t.Errorf("WriteStringArray n = %d, want %d", n, tt.n)
 		}

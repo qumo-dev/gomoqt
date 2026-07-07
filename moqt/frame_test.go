@@ -293,7 +293,7 @@ func TestFrame_Encode(t *testing.T) {
 			require.NoError(t, frame.encode(&buf))
 
 			// Build expected bytes: varint(length) followed by payload
-			expectedHeader, _ := message.WriteMessageLength(nil, uint64(len(tt.payload)))
+			expectedHeader, _, _ := message.WriteMessageLength(nil, uint64(len(tt.payload)))
 			expected := append(expectedHeader, tt.payload...)
 
 			got := buf.Bytes()
@@ -310,7 +310,7 @@ func TestFrame_Encode(t *testing.T) {
 func TestFrame_decode_RejectsOversizedLength(t *testing.T) {
 	// Largest value expressible in a QUIC varint (uint62 max), encoded as the
 	// payload length prefix. No payload bytes follow.
-	lengthPrefix, _ := message.WriteMessageLength(nil, 1<<62-1)
+	lengthPrefix, _, _ := message.WriteMessageLength(nil, 1<<62-1)
 
 	f := NewFrame(0)
 	err := f.decode(bytes.NewReader(lengthPrefix))

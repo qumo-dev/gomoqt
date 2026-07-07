@@ -60,7 +60,7 @@ func BenchmarkReadVarint(b *testing.B) {
 	for _, w := range widths {
 		b.Run(w.name, func(b *testing.B) {
 			enc := make([]byte, 0, 8)
-			enc, _ = WriteVarint(enc, w.val)
+			enc, _, _ = WriteVarint(enc, w.val)
 			repeating := tile(enc)
 
 			b.ReportAllocs()
@@ -90,7 +90,7 @@ func BenchmarkReadVarint(b *testing.B) {
 func BenchmarkReadBytes(b *testing.B) {
 	payload := []byte("hello-world-payload") // 19 bytes -> 1-byte varint prefix
 	enc := make([]byte, 0, len(payload)+1)
-	enc, _ = WriteBytes(enc, payload)
+	enc, _, _ = WriteBytes(enc, payload)
 	repeating := tile(enc)
 
 	b.ReportAllocs()
@@ -120,7 +120,7 @@ func BenchmarkReadBytes(b *testing.B) {
 func BenchmarkReadString(b *testing.B) {
 	payload := []byte("hello-world-payload")
 	enc := make([]byte, 0, len(payload)+1)
-	enc, _ = WriteBytes(enc, payload)
+	enc, _, _ = WriteBytes(enc, payload)
 	repeating := tile(enc)
 
 	b.ReportAllocs()
@@ -150,7 +150,7 @@ func BenchmarkReadString(b *testing.B) {
 func BenchmarkReadStringArray(b *testing.B) {
 	arr := []string{"alpha", "beta", "gamma"}
 	enc := make([]byte, 0, 32)
-	enc, _ = WriteStringArray(enc, arr)
+	enc, _, _ = WriteStringArray(enc, arr)
 	repeating := tile(enc)
 
 	b.ReportAllocs()
@@ -194,7 +194,7 @@ func BenchmarkWriteVarint(b *testing.B) {
 	for _, w := range widths {
 		b.Run(w.name, func(b *testing.B) {
 			probe := make([]byte, 0, 8)
-			_, encLen := WriteVarint(probe, w.val)
+			_, encLen, _ := WriteVarint(probe, w.val)
 
 			dest := make([]byte, 0, 8) // cap covers the widest single varint
 
@@ -204,7 +204,7 @@ func BenchmarkWriteVarint(b *testing.B) {
 
 			for b.Loop() {
 				dest = dest[:0]
-				out, n := WriteVarint(dest, w.val)
+				out, n, _ := WriteVarint(dest, w.val)
 				sinkInt = n
 				sinkSlice = out
 			}
@@ -215,7 +215,7 @@ func BenchmarkWriteVarint(b *testing.B) {
 func BenchmarkWriteBytes(b *testing.B) {
 	payload := []byte("hello-world-payload")
 	probe := make([]byte, 0, len(payload)+1)
-	_, encLen := WriteBytes(probe, payload)
+	_, encLen, _ := WriteBytes(probe, payload)
 
 	dest := make([]byte, 0, len(payload)+8)
 
@@ -225,7 +225,7 @@ func BenchmarkWriteBytes(b *testing.B) {
 
 	for b.Loop() {
 		dest = dest[:0]
-		out, n := WriteBytes(dest, payload)
+		out, n, _ := WriteBytes(dest, payload)
 		sinkInt = n
 		sinkSlice = out
 	}
@@ -234,7 +234,7 @@ func BenchmarkWriteBytes(b *testing.B) {
 func BenchmarkWriteString(b *testing.B) {
 	s := "hello-world-payload"
 	probe := make([]byte, 0, len(s)+1)
-	_, encLen := WriteString(probe, s)
+	_, encLen, _ := WriteString(probe, s)
 
 	dest := make([]byte, 0, len(s)+8)
 
@@ -244,7 +244,7 @@ func BenchmarkWriteString(b *testing.B) {
 
 	for b.Loop() {
 		dest = dest[:0]
-		out, n := WriteString(dest, s)
+		out, n, _ := WriteString(dest, s)
 		sinkInt = n
 		sinkSlice = out
 	}
@@ -253,7 +253,7 @@ func BenchmarkWriteString(b *testing.B) {
 func BenchmarkWriteStringArray(b *testing.B) {
 	arr := []string{"alpha", "beta", "gamma"}
 	probe := make([]byte, 0, 64)
-	_, encLen := WriteStringArray(probe, arr)
+	_, encLen, _ := WriteStringArray(probe, arr)
 
 	dest := make([]byte, 0, 64) // 1-byte count + 3*(1-byte len + <=5-byte str) = 22 bytes <= 64
 
@@ -263,7 +263,7 @@ func BenchmarkWriteStringArray(b *testing.B) {
 
 	for b.Loop() {
 		dest = dest[:0]
-		out, n := WriteStringArray(dest, arr)
+		out, n, _ := WriteStringArray(dest, arr)
 		sinkInt = n
 		sinkSlice = out
 	}

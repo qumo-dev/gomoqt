@@ -35,19 +35,35 @@ func (am AnnounceMessage) Len() int {
 }
 
 func (am AnnounceMessage) Encode(w io.Writer) error {
+	var err error
 	msgLen := am.Len()
 
 	b := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
 
-	b, _ = WriteMessageLength(b, uint64(msgLen))
-	b, _ = WriteVarint(b, uint64(am.AnnounceStatus))
-	b, _ = WriteString(b, am.BroadcastPathSuffix)
-	b, _ = WriteVarint(b, uint64(len(am.HopIDs)))
+	b, _, err = WriteMessageLength(b, uint64(msgLen))
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteVarint(b, uint64(am.AnnounceStatus))
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteString(b, am.BroadcastPathSuffix)
+	if err != nil {
+		return err
+	}
+	b, _, err = WriteVarint(b, uint64(len(am.HopIDs)))
+	if err != nil {
+		return err
+	}
 	for _, id := range am.HopIDs {
-		b, _ = WriteVarint(b, id)
+		b, _, err = WriteVarint(b, id)
+		if err != nil {
+			return err
+		}
 	}
 
-	_, err := w.Write(b)
+	_, err = w.Write(b)
 
 	return err
 }

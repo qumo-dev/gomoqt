@@ -70,11 +70,14 @@ func (f *Frame) Cap() int {
 // The length is encoded into the header buffer to minimize allocations.
 func (f *Frame) encode(w io.Writer) error {
 	l := uint64(len(f.body))
-	header, _ := message.WriteMessageLength(f.header[:0], l)
+	header, _, err := message.WriteMessageLength(f.header[:0], l)
+	if err != nil {
+		return err
+	}
 	start := 8 - len(header)
 	copy(f.buf[start:], header)
 	end := 8 + len(f.body)
-	_, err := w.Write(f.buf[start:end])
+	_, err = w.Write(f.buf[start:end])
 	return err
 }
 
