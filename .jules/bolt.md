@@ -14,3 +14,6 @@
 **Learning:** In Go, fallback paths (like non-`io.ByteReader` readers) in hot decoding loops shouldn't use dynamic slice allocations (e.g., `make([]byte, size)`) if the maximum size is small and fixed (like an 8-byte varint). Replacing `make()` with a local fixed-size array (e.g., `var buf [8]byte`) and slicing it `buf[:size]` entirely eliminates heap allocations.
 **Action:** When parsing small, bounded objects like varints from an `io.Reader`, use stack-allocated arrays and take their slices (`buf[:length]`) instead of dynamically allocating slices with `make()`.
 
+## 2024-05-14 - String Allocation in HasPrefix and Suffix Generation
+**Learning:** `strings.TrimPrefix` redundantly performs prefix checks, which is inefficient if the prefix presence has already been validated (e.g. by a preceding `HasPrefix` check). Additionally, `strings.HasPrefix(string(b), prefix)` and `strings.TrimPrefix(string(b), prefix)` force allocation when casting type aliases to strings, whereas direct slice comparisons and slicing avoid allocation and function overhead.
+**Action:** When validating string prefixes where the existence of the prefix is already established or guarded by a length check, use direct slicing (`b[len(prefix):]`) and equality checks (`string(b[:len(prefix)]) == prefix`) instead of `strings.TrimPrefix` and `strings.HasPrefix`.
