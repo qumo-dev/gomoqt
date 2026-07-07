@@ -1,0 +1,71 @@
+# Publishes the `moq-web` package to JSR as `@qumo/moq` when a
+# `moq-web-v*` tag is pushed. This tag prefix is intentionally distinct from the
+# Go module's `v*` tags (handled by release.yml): a `moq-web-vX.Y.Z` tag is a
+# JSR-only release and does NOT advance the Go module version, so TS-only
+# patches can ship without re-releasing Go. A dual (Go + JSR) release pushes
+# both tags.
+#
+# Authentication is via GitHub OIDC — no stored token. This requires a ONE-TIME
+# setup on jsr.io: open https://jsr.io/@qumo/moq -> Settings, link this GitHub
+# repository, and enable "Publish from GitHub Actions". The `id-token: write`
+# permission below is what lets `deno publish` mint an OIDC token.
+#
+# `deno publish` is idempotent: it skips (exit 0) if the version in
+# moq-web/deno.json is already published, so re-running via workflow_dispatch on
+# an already-published tag is safe.
+name: Publish to JSR
+
+on:
+  push:
+    tags:
+      - "moq-web-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # JSR OIDC publish
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: moq-web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v2.x
+
+      - name: Type check
+        run: deno check src/mod.ts src/msf/mod.ts
+
+      # Read the version from moq-web/deno.json (the source of truth — deno publish
+      # publishes whatever version is here). On a tag push, also verify the tag's
+      # version matches, so a mistagged release fails loudly instead of publishing
+      # the wrong version.
+      - name: Resolve version
+        id: version
+        run: |
+          JSON_VERSION=$(deno eval "import d from './deno.json' with { type: 'json' }; console.log(d.version)")
+          echo "version=$JSON_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved moq-web/deno.json version: $JSON_VERSION"
+          if [ -n "$GITHUB_REF_NAME" ] && [[ "$GITHUB_REF_NAME" == moq-web-v* ]]; then
+            TAG_VERSION="${GITHUB_REF_NAME#moq-web-v}"
+            if [ "$TAG_VERSION" != "$JSON_VERSION" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME implies version $TAG_VERSION, but moq-web/deno.json is $JSON_VERSION. Align them before publishing."
+              exit 1
+            fi
+          fi
+
+      - name: Publish to JSR
+        run: deno publish
+
+      - name: Summary
+        run: |
+          echo "Published @qumo/moq@${{ steps.version.outputs.version }} to JSR" >> $GITHUB_STEP_SUMMARY
+          echo "https://jsr.io/@qumo/moq@${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
