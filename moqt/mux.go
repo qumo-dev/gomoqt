@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"fmt"
 	"strings"
 	"sync"
 )
@@ -26,7 +27,7 @@ func NewHopID() uint64 {
 	var b [8]byte
 	for {
 		if _, err := rand.Read(b[:]); err != nil {
-			panic("moqt: crypto/rand unavailable: " + err.Error())
+			panic(fmt.Errorf("moqt: crypto/rand unavailable: %w", err))
 		}
 		// Mask to 62 bits to avoid overuint62
 		id := binary.BigEndian.Uint64(b[:]) & 0x3FFFFFFFFFFFFFFF
