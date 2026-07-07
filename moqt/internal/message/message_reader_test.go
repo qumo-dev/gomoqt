@@ -212,6 +212,11 @@ func TestReadBytes(t *testing.T) {
 			input:   []byte{0x05, 0x41, 0x42},
 			wantErr: true,
 		},
+
+		"byte slice too large": {
+			input:   []byte{0xc0, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00}, // 2147483648
+			wantErr: true,
+		},
 		"invalid varint": {
 			input:   []byte{},
 			wantErr: true,
@@ -298,6 +303,11 @@ func TestReadStringArray(t *testing.T) {
 		},
 		"incomplete array": {
 			input:   []byte{0x01, 0x05, 0x68, 0x65},
+			wantErr: true,
+		},
+
+		"string array too large": {
+			input:   []byte{0xc0, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00}, // 2147483648
 			wantErr: true,
 		},
 		"invalid count": {
