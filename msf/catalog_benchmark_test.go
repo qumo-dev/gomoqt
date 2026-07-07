@@ -38,3 +38,18 @@ func BenchmarkCatalogDelta_Validate(b *testing.B) {
 		_ = delta.Validate()
 	}
 }
+
+func BenchmarkCatalogDelta_Validate_Errors(b *testing.B) {
+	delta := CatalogDelta{
+		AddTracks: []Track{
+			{Name: "", Packaging: "", IsLive: new(true)},
+			{Name: "", Packaging: "", IsLive: new(false)},
+		},
+		RemoveTracks: []TrackRef{{Name: ""}},
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = delta.Validate()
+	}
+}

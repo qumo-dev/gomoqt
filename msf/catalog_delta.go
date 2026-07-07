@@ -74,25 +74,22 @@ func (d CatalogDelta) Validate() error {
 	}
 	for i := range d.AddTracks {
 		if errs := d.AddTracks[i].validate(""); len(errs) > 0 {
-			prefix := "addTracks[" + itoa(i) + "]: "
 			for _, err := range errs {
-				problems = append(problems, prefix+err)
+				problems = append(problems, "addTracks["+itoa(i)+"]: "+err)
 			}
 		}
 	}
 	for i := range d.RemoveTracks {
 		if errs := d.RemoveTracks[i].Validate(""); len(errs) > 0 {
-			prefix := "removeTracks[" + itoa(i) + "]: "
 			for _, err := range errs {
-				problems = append(problems, prefix+err)
+				problems = append(problems, "removeTracks["+itoa(i)+"]: "+err)
 			}
 		}
 	}
 	for i := range d.CloneTracks {
 		if errs := d.CloneTracks[i].Validate(""); len(errs) > 0 {
-			prefix := "cloneTracks[" + itoa(i) + "]: "
 			for _, err := range errs {
-				problems = append(problems, prefix+err)
+				problems = append(problems, "cloneTracks["+itoa(i)+"]: "+err)
 			}
 		}
 	}
