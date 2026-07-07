@@ -14,3 +14,6 @@
 **Learning:** In Go, fallback paths (like non-`io.ByteReader` readers) in hot decoding loops shouldn't use dynamic slice allocations (e.g., `make([]byte, size)`) if the maximum size is small and fixed (like an 8-byte varint). Replacing `make()` with a local fixed-size array (e.g., `var buf [8]byte`) and slicing it `buf[:size]` entirely eliminates heap allocations.
 **Action:** When parsing small, bounded objects like varints from an `io.Reader`, use stack-allocated arrays and take their slices (`buf[:length]`) instead of dynamically allocating slices with `make()`.
 
+## 2025-02-14 - Optimize logging error messages
+**Learning:** In Go structured logging (`log/slog`), avoid eager string concatenation for error messages (e.g., `slog.Error("msg: " + err.Error())`). Instead, use structured attributes (e.g., `slog.Error("msg", "error", err)`). This defers string formatting, is more idiomatic, and reduces allocations (by ~4x per log line in benchmarks) especially when log levels are disabled.
+**Action:** Default to using structured attributes (`"error", err`) instead of `.Error()` concatenation or `fmt.Errorf` wrapping when using `slog` for improved performance and structure.
