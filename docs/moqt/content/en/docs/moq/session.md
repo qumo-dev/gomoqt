@@ -29,6 +29,27 @@ func (s *Session) RemoteAddr() net.Addr
 
 Outgoing requests such as subscribing to tracks, fetching specific groups, probing bitrate, or discovering available tracks are handled by the session.
 
+## Request path
+
+How a handler learns the request path depends on the transport binding — the path
+is resolved *above* the session, never stored on `Session` itself:
+
+- **WebTransport:** the path is the HTTP request's `r.URL.Path`, available in your
+  `http.Handler` before the session is upgraded.
+- **Native QUIC:** native QUIC has no handshake-time request URI, so the path is
+  conveyed inside the client's SETUP message. A server-side router reads it before
+  constructing the session and stashes it on the connection context. Recover it with:
+
+```go
+func (h *HandlerImpl) ServeMOQ(sess *moqt.Session) {
+    path, ok := moqt.PathFromContext(sess.Context())
+    // path == "/live/alice" for a client that dialed moqt://host/live/alice
+}
+```
+
+`PathFromContext` returns `("", false)` on the client side and for WebTransport
+sessions.
+
 ## Connection State
 
 After a session is established, you can retrieve connection metadata via `ConnectionState()`:

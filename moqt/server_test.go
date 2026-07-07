@@ -1,9 +1,11 @@
 package moqt
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/quic-go/quic-go"
+	"github.com/qumo-dev/gomoqt/moqt/internal/message"
 	"github.com/qumo-dev/gomoqt/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,6 +30,36 @@ func newTestNativeQUICConn(tb testing.TB, opts ...func(*FakeStreamConn)) *FakeSt
 		opt(conn)
 	}
 	return conn
+}
+
+// withClientSetup returns a FakeStreamConn option that makes the connection's
+// first uni stream carry a SETUP message with the given Path (the client's
+// mandatory Setup Stream on a native-QUIC connection). An empty path omits the
+// Path parameter. Subsequent AcceptUniStream calls return io.EOF, modeling a
+// connection with no further inbound uni streams.
+func withClientSetup(path string) func(*FakeStreamConn) {
+	return func(conn *FakeStreamConn) {
+		var buf bytes.Buffer
+		if err := message.StreamTypeSetup.Encode(&buf); err != nil {
+			panic(err)
+		}
+		var sm message.SetupMessage
+		if path != "" {
+			sm.AddPath(path)
+		}
+		if err := sm.Encode(&buf); err != nil {
+			panic(err)
+		}
+		data := buf.Bytes()
+		var delivered bool
+		conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) {
+			if delivered {
+				return nil, io.EOF
+			}
+			delivered = true
+			return &FakeQUICReceiveStream{ReadFunc: bytes.NewReader(data).Read}, nil
+		}
+	}
 }
 
 func TestServer_Init(t *testing.T) {
@@ -313,7 +346,7 @@ func TestServer_ServeQUICConn_WebTransport(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestServer_ServeQUICConn_NativeQUICCallsHandlerAndReturnsError(t *testing.T) {
+func TestServer_ServeQUICConn_NativeQUICValidSetupCallsHandler(t *testing.T) {
 	called := false
 	s := &Server{
 		Handler: HandleFunc(func(sess *Session) {
@@ -321,11 +354,12 @@ func TestServer_ServeQUICConn_NativeQUICCallsHandlerAndReturnsError(t *testing.T
 		}),
 	}
 
-	conn := newTestNativeQUICConn(t)
+	// The native-QUIC router reads the client's SETUP (carrying the Path) before
+	// constructing the Session, so the connection must offer a Setup Stream.
+	conn := newTestNativeQUICConn(t, withClientSetup("/live"))
 
 	err := s.ServeQUICConn(conn)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no native QUIC handler configured")
+	assert.NoError(t, err)
 	assert.True(t, called)
 }
 
@@ -485,7 +519,7 @@ func TestServer_addRemoveSession_ShutdownCompletesWhenLastSessionLeaves(t *testi
 
 	conn := &FakeStreamConn{}
 
-	sess := newSession(conn, nil, nil, nil, nil, nil, nil, sessionRole{})
+	sess := newSession(conn, nil, nil, nil, nil, nil, nil, sessionSetup{})
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 	s.connManager.addConn(conn)
@@ -558,7 +592,7 @@ func TestServer_handleNativeQUIC_NoHandlerConfigured(t *testing.T) {
 	assert.Contains(t, err.Error(), "no native QUIC handler configured")
 }
 
-func TestServer_handleNativeQUIC_CallsHandlerAndReturnsError(t *testing.T) {
+func TestServer_handleNativeQUIC_CallsHandlerOnValidSetup(t *testing.T) {
 	called := false
 	s := &Server{
 		Handler: HandleFunc(func(sess *Session) {
@@ -566,12 +600,25 @@ func TestServer_handleNativeQUIC_CallsHandlerAndReturnsError(t *testing.T) {
 		}),
 	}
 
-	conn := &FakeStreamConn{}
+	conn := newTestNativeQUICConn(t, withClientSetup("/live"))
 
 	err := s.handleNativeQUIC(conn)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no native QUIC handler configured")
+	assert.NoError(t, err)
 	assert.True(t, called)
+}
+
+// TestServer_handleNativeQUIC_RejectsMissingPath verifies the router rejects a
+// SETUP that omits the mandatory Path parameter (native QUIC has no other way
+// to convey the request path).
+func TestServer_handleNativeQUIC_RejectsMissingPath(t *testing.T) {
+	s := &Server{
+		Handler: HandleFunc(func(*Session) { t.Fatal("handler must not be called") }),
+	}
+	conn := newTestNativeQUICConn(t, withClientSetup(""))
+
+	err := s.handleNativeQUIC(conn)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Path")
 }
 
 func TestListenAndServe_PackageLevel(t *testing.T) {

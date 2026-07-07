@@ -71,7 +71,7 @@ func decodeSetupBytes(tb testing.TB, data []byte) message.SetupMessage {
 func TestSession_OpenSetupStream_QUICClientSendsPath(t *testing.T) {
 	conn, wait := collectSetupStream(t)
 
-	role := sessionRole{isClient: true, hasRequestURI: false, requestPath: "/live"}
+	role := sessionSetup{setupPath: "/live"}
 	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, role)
 	defer sess.CloseWithError(NoError, "")
 
@@ -84,8 +84,8 @@ func TestSession_OpenSetupStream_QUICClientSendsPath(t *testing.T) {
 func TestSession_OpenSetupStream_WebTransportClientOmitsPath(t *testing.T) {
 	conn, wait := collectSetupStream(t)
 
-	role := sessionRole{isClient: true, hasRequestURI: true, requestPath: "/live"}
-	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, role)
+	// WebTransport: no setupPath → Path is omitted.
+	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{})
 	defer sess.CloseWithError(NoError, "")
 
 	sm := decodeSetupBytes(t, wait())
@@ -96,8 +96,7 @@ func TestSession_OpenSetupStream_WebTransportClientOmitsPath(t *testing.T) {
 func TestSession_OpenSetupStream_ServerOmitsPath(t *testing.T) {
 	conn, wait := collectSetupStream(t)
 
-	role := sessionRole{isClient: false, hasRequestURI: false}
-	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, role)
+	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{})
 	defer sess.CloseWithError(NoError, "")
 
 	sm := decodeSetupBytes(t, wait())
@@ -106,63 +105,40 @@ func TestSession_OpenSetupStream_ServerOmitsPath(t *testing.T) {
 }
 
 func TestSession_HandleSetupStream(t *testing.T) {
+	// This handler only runs for sessions whose peer MUST NOT send a Path
+	// parameter (WebTransport both roles; the native-QUIC client receiving the
+	// server's SETUP). The native-QUIC server peer does send a Path, but that
+	// stream is consumed by the router above Session — see the router tests in
+	// session_draft05_test.go. So one uniform rule applies here: any Path
+	// parameter is a protocol violation.
 	tests := map[string]struct {
-		role         sessionRole
 		setup        func() message.SetupMessage
 		wantViolated bool
-		wantPath     string
 	}{
-		"server on native QUIC accepts path": {
-			role: sessionRole{isClient: false, hasRequestURI: false},
-			setup: func() message.SetupMessage {
-				var sm message.SetupMessage
-				sm.AddPath("/live")
-				return sm
-			},
-			wantPath: "/live",
-		},
-		"server on native QUIC rejects missing path": {
-			role:         sessionRole{isClient: false, hasRequestURI: false},
-			setup:        func() message.SetupMessage { return message.SetupMessage{} },
-			wantViolated: true,
-		},
-		"server on native QUIC rejects invalid path": {
-			role: sessionRole{isClient: false, hasRequestURI: false},
-			setup: func() message.SetupMessage {
-				var sm message.SetupMessage
-				sm.AddPath("no-leading-slash")
-				return sm
-			},
-			wantViolated: true,
-		},
-		"server with request URI rejects path": {
-			role: sessionRole{isClient: false, hasRequestURI: true},
-			setup: func() message.SetupMessage {
-				var sm message.SetupMessage
-				sm.AddPath("/live")
-				return sm
-			},
-			wantViolated: true,
-		},
-		"client rejects path from server": {
-			role: sessionRole{isClient: true, hasRequestURI: true},
-			setup: func() message.SetupMessage {
-				var sm message.SetupMessage
-				sm.AddPath("/live")
-				return sm
-			},
-			wantViolated: true,
-		},
-		"client accepts empty setup": {
-			role:  sessionRole{isClient: true, hasRequestURI: true},
+		"accepts empty setup": {
 			setup: func() message.SetupMessage { return message.SetupMessage{} },
+		},
+		"accepts setup with probe only": {
+			setup: func() message.SetupMessage {
+				var sm message.SetupMessage
+				sm.AddProbe(message.ProbeLevelReport)
+				return sm
+			},
+		},
+		"rejects path parameter": {
+			setup: func() message.SetupMessage {
+				var sm message.SetupMessage
+				sm.AddPath("/live")
+				return sm
+			},
+			wantViolated: true,
 		},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			conn := &FakeStreamConn{}
-			sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, tt.role)
+			sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{})
 			defer sess.CloseWithError(NoError, "")
 
 			var buf bytes.Buffer
@@ -187,9 +163,6 @@ func TestSession_HandleSetupStream(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("peer setup was not recorded")
 			}
-			if tt.wantPath != "" {
-				assert.Equal(t, tt.wantPath, sess.peerPath)
-			}
 			assert.NoError(t, conn.Context().Err(), "session must stay open")
 		})
 	}
@@ -197,7 +170,7 @@ func TestSession_HandleSetupStream(t *testing.T) {
 
 func TestSession_HandleSetupStream_Duplicate(t *testing.T) {
 	conn := &FakeStreamConn{}
-	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionRole{isClient: true, hasRequestURI: true})
+	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{})
 	defer sess.CloseWithError(NoError, "")
 
 	encode := func() *FakeQUICReceiveStream {
@@ -224,7 +197,7 @@ func TestSession_HandleSetupStream_Duplicate(t *testing.T) {
 
 func TestSession_Probe_PeerWithoutProbeCapability(t *testing.T) {
 	conn := &FakeStreamConn{}
-	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionRole{})
+	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{})
 	defer sess.CloseWithError(NoError, "")
 
 	markPeerSetupReceived(sess, message.ProbeLevelNone)

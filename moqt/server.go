@@ -327,12 +327,10 @@ func (u *WebTransportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		manager = v.(*connManager)
 	}
 
-	role := sessionRole{
-		isClient:      false,
-		hasRequestURI: true,
-		requestPath:   r.URL.Path,
-	}
-	sess := newSession(conn, u.TrackMux, manager, u.Config, u.FetchHandler, nil, u.Logger, role)
+	// WebTransport: the request path is already resolved by the HTTP
+	// handshake (r.URL.Path), so Session needs no path/role state. Handlers
+	// read the path from r.URL.Path.
+	sess := newSession(conn, u.TrackMux, manager, u.Config, u.FetchHandler, nil, u.Logger, sessionSetup{})
 	// Ensure the session is cleaned up (conn removed from the manager) when
 	// the Handler returns, even if it did not call CloseWithError itself (e.g.
 	// the peer closed the connection). Idempotent.
@@ -360,18 +358,62 @@ func (f HandleFunc) ServeMOQ(sess *Session) {
 }
 
 func (s *Server) handleNativeQUIC(conn StreamConn) error {
-	if s.Handler != nil {
-		role := sessionRole{
-			isClient:      false,
-			hasRequestURI: false,
-		}
-		sess := newSession(conn, s.TrackMux, s.connManager, s.Config, s.FetchHandler, nil, s.Logger, role)
-		// Clean up the session when the Handler returns (idempotent if the
-		// Handler already closed it), so the conn is removed from the manager.
-		defer sess.CloseWithError(NoError, "session ended")
-		s.Handler.ServeMOQ(sess)
+	if s.Handler == nil {
+		return fmt.Errorf("no native QUIC handler configured")
 	}
-	return fmt.Errorf("no native QUIC handler configured")
+
+	// Router: native QUIC has no handshake-time request URI, so the request
+	// path arrives inside the client's SETUP message. Read it here, above
+	// Session — the same place WebTransport resolves r.URL.Path — so Session
+	// itself stays path/role-agnostic.
+	sm, err := readClientSetup(conn, s.Config.setupTimeout())
+	if err != nil {
+		return fmt.Errorf("native QUIC setup: %w", err)
+	}
+	path, ok := sm.Path()
+	if !ok || len(path) == 0 || path[0] != '/' {
+		return fmt.Errorf("native QUIC setup: missing or invalid Path parameter")
+	}
+
+	// Stash the path on the connection context for handlers (mirrors WT's
+	// r.URL.Path) and hand Session the decoded SETUP so it seeds peer-probe
+	// state without re-reading the consumed stream.
+	conn = withPathContext(conn, path)
+	sess := newSession(conn, s.TrackMux, s.connManager, s.Config, s.FetchHandler, nil, s.Logger,
+		sessionSetup{peerSetup: &sm})
+	// Clean up the session when the Handler returns (idempotent if the
+	// Handler already closed it), so the conn is removed from the manager.
+	defer sess.CloseWithError(NoError, "session ended")
+	s.Handler.ServeMOQ(sess)
+	return nil
+}
+
+// readClientSetup reads the client's mandatory Setup Stream (the first uni
+// stream on a native-QUIC connection) and returns the decoded SETUP message.
+// It must run before the Session is constructed so Session's handleUniStreams
+// deterministically sees only post-setup streams.
+func readClientSetup(conn StreamConn, timeout time.Duration) (message.SetupMessage, error) {
+	ctx, cancel := context.WithTimeout(conn.Context(), timeout)
+	defer cancel()
+
+	stream, err := conn.AcceptUniStream(ctx)
+	if err != nil {
+		return message.SetupMessage{}, fmt.Errorf("accept setup stream: %w", err)
+	}
+
+	var st message.StreamType
+	if err := st.Decode(stream); err != nil {
+		return message.SetupMessage{}, fmt.Errorf("decode setup stream type: %w", err)
+	}
+	if st != message.StreamTypeSetup {
+		return message.SetupMessage{}, fmt.Errorf("expected setup stream, got stream type %d", st)
+	}
+
+	var sm message.SetupMessage
+	if err := sm.Decode(stream); err != nil {
+		return message.SetupMessage{}, fmt.Errorf("decode SETUP message: %w", err)
+	}
+	return sm, nil
 }
 
 // ListenAndServe starts the server by listening on the server's Address and serving QUIC connections.

@@ -20,18 +20,20 @@ const (
 	moqtVersion = "moq-lite-05"
 )
 
-// sessionRole describes this endpoint's side of the session and how the
-// transport binding conveys the request path.
-type sessionRole struct {
-	// isClient is true when this endpoint initiated the connection.
-	isClient bool
-	// hasRequestURI is true when the binding carries a request URI in its
-	// own handshake (WebTransport). Bindings negotiated solely via ALPN
-	// (native QUIC) convey the path via the SETUP Path parameter instead.
-	hasRequestURI bool
-	// requestPath is the request path. On a client it is the path to reach;
-	// on a server with a request URI it is the handshake path.
-	requestPath string
+// sessionSetup carries the two pieces of binding-specific SETUP state that a
+// Session cannot derive itself. Both fields are optional; the zero value is a
+// WebTransport server (sends no Path, reads the peer SETUP itself).
+type sessionSetup struct {
+	// setupPath is the Path parameter this endpoint sends in its own outgoing
+	// SETUP. Set only by the native-QUIC client (whose binding has no
+	// handshake-time request URI); empty means "do not send Path".
+	setupPath string
+	// peerSetup is the peer's SETUP message, pre-decoded by the native-QUIC
+	// router on the server side. The router consumes the client's Setup Stream
+	// to learn the request path (above Session), then hands the decoded message
+	// here so Session can seed its peer-probe state without re-reading the
+	// stream. Nil means Session reads the peer SETUP itself (all other bindings).
+	peerSetup *message.SetupMessage
 }
 
 // Session represents an active MOQ session over a QUIC connection.
@@ -64,8 +66,8 @@ type Session struct {
 
 	connManager *connManager
 
-	// role describes this endpoint's side of the session.
-	role sessionRole
+	// setupPath is the Path sent in our outgoing SETUP (native-QUIC client only).
+	setupPath string
 
 	// localProbeLevel is the Probe capability advertised in our SETUP.
 	localProbeLevel uint64
@@ -73,11 +75,9 @@ type Session struct {
 	// peerSetupReceived guards against duplicate Setup Streams.
 	peerSetupReceived atomic.Bool
 	// peerSetupCh is closed once the peer's SETUP message has been processed.
-	// peerProbeLevel and peerPath are written before the close and must only
-	// be read after it.
+	// peerProbeLevel is written before the close and must only be read after it.
 	peerSetupCh    chan struct{}
 	peerProbeLevel uint64
-	peerPath       string
 
 	// probe stream state (subscriber side, lazily initialized)
 	outgoingProbeMu     sync.Mutex
@@ -100,7 +100,7 @@ func newSession(
 	fetchHandler FetchHandler,
 	onGoaway func(newSessionURI string),
 	logger *slog.Logger,
-	role sessionRole,
+	setup sessionSetup,
 ) *Session {
 	if mux == nil {
 		mux = DefaultMux
@@ -115,7 +115,7 @@ func newSession(
 		fetchHandler:    fetchHandler,
 		onGoaway:        onGoaway,
 		logger:          logger,
-		role:            role,
+		setupPath:       setup.setupPath,
 		trackReaders:    make(map[SubscribeID]*TrackReader),
 		trackWriters:    make(map[SubscribeID]*TrackWriter),
 		connManager:     manager,
@@ -126,6 +126,17 @@ func newSession(
 			maxAge:   config.probeMaxAge(),
 			maxDelta: config.probeMaxDelta(),
 		},
+	}
+
+	// When the native-QUIC router has already consumed the peer's Setup Stream
+	// (to learn the request path above Session), seed the peer-probe state from
+	// the decoded message and mark setup received. Done before any goroutine is
+	// launched so handleSetupStream's duplicate-guard sees it, and Probe() does
+	// not block on waitPeerSetup.
+	if setup.peerSetup != nil {
+		sess.peerProbeLevel = setup.peerSetup.ProbeLevel()
+		sess.peerSetupReceived.Store(true)
+		close(sess.peerSetupCh)
 	}
 
 	if manager != nil {
@@ -177,11 +188,10 @@ func (sess *Session) openSetupStream() {
 	if sess.localProbeLevel != message.ProbeLevelNone {
 		sm.AddProbe(sess.localProbeLevel)
 	}
-	if sess.role.isClient && !sess.role.hasRequestURI {
-		path := sess.role.requestPath
-		if path == "" {
-			path = "/"
-		}
+	// Only the native-QUIC client conveys a request path via SETUP; its
+	// binding has no handshake-time request URI. setupPath is empty for every
+	// other role (WebTransport both directions; native-QUIC server).
+	if path := sess.setupPath; path != "" {
 		sm.AddPath(path)
 	}
 
@@ -194,8 +204,15 @@ func (sess *Session) openSetupStream() {
 }
 
 // handleSetupStream processes the peer's SETUP message. A second Setup
-// Stream or an invalid Path parameter is a protocol violation that
-// terminates the session.
+// Stream, a malformed message, or a Path parameter is a protocol violation
+// that terminates the session.
+//
+// This handler runs only for sessions whose peer MUST NOT send a Path
+// parameter (WebTransport in both roles, and the native-QUIC client receiving
+// the server's SETUP). The native-QUIC server peer does send a Path, but that
+// Setup Stream is consumed by the router above Session before this handler is
+// ever reached — so a single uniform rule applies here: any Path parameter is
+// a violation.
 func (sess *Session) handleSetupStream(stream transport.ReceiveStream) {
 	if !sess.peerSetupReceived.CompareAndSwap(false, true) {
 		sess.terminateProtocolViolation("duplicate setup stream")
@@ -209,27 +226,12 @@ func (sess *Session) handleSetupStream(stream transport.ReceiveStream) {
 		return
 	}
 
-	path, hasPath := sm.Path()
-	if sess.role.isClient {
-		// A server MUST NOT send a Path parameter.
-		if hasPath {
-			sess.terminateProtocolViolation("server sent Path parameter")
-			return
-		}
-	} else if sess.role.hasRequestURI {
-		// The binding already carries a request URI (WebTransport);
-		// the Path parameter is prohibited.
-		if hasPath {
-			sess.terminateProtocolViolation("Path parameter on a binding with a request URI")
-			return
-		}
-	} else {
-		// Native QUIC: the client MUST convey the request path via SETUP.
-		if !hasPath || len(path) == 0 || path[0] != '/' {
-			sess.terminateProtocolViolation("missing or invalid Path parameter")
-			return
-		}
-		sess.peerPath = path
+	// For every binding that reaches this handler the peer is prohibited from
+	// sending a Path parameter (the native-QUIC server case is handled by the
+	// router, which never lets the stream reach here).
+	if _, hasPath := sm.Path(); hasPath {
+		sess.terminateProtocolViolation("unexpected Path parameter")
+		return
 	}
 
 	sess.peerProbeLevel = sm.ProbeLevel()
@@ -243,33 +245,6 @@ func (sess *Session) terminateProtocolViolation(msg string) {
 	go func() {
 		_ = sess.CloseWithError(ProtocolViolationErrorCode, msg)
 	}()
-}
-
-// Path returns the request path of the session. For a client, or a server
-// on a binding whose handshake carries the request URI, it returns
-// immediately; for a native QUIC server it blocks until the client's SETUP
-// (which carries the Path parameter) has been received.
-func (sess *Session) Path(ctx context.Context) (string, error) {
-	if sess.role.isClient || sess.role.hasRequestURI {
-		return sess.role.requestPath, nil
-	}
-
-	// Bound the wait by the setup timeout (like waitPeerSetup/Probe) so a
-	// caller passing a long-lived context does not hang until the QUIC idle
-	// timeout if the peer never opens a Setup Stream.
-	timer := time.NewTimer(sess.config.setupTimeout())
-	defer timer.Stop()
-
-	select {
-	case <-sess.peerSetupCh:
-		return sess.peerPath, nil
-	case <-timer.C:
-		return "", errors.New("timed out waiting for peer SETUP")
-	case <-ctx.Done():
-		return "", ctx.Err()
-	case <-sess.ctx.Done():
-		return "", Cause(sess.ctx)
-	}
 }
 
 // waitPeerSetup blocks until the peer's SETUP has been received, the

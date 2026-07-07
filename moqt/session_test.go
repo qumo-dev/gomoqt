@@ -22,7 +22,7 @@ import (
 )
 
 func newTestSession(conn StreamConn) *Session {
-	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionRole{})
+	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{})
 	markPeerSetupReceived(sess, message.ProbeLevelReport)
 	return sess
 }
@@ -85,7 +85,7 @@ func TestNewSession(t *testing.T) {
 			conn.TLSFunc = func() *tls.ConnectionState { return &tls.ConnectionState{NegotiatedProtocol: NextProtoMOQ} }
 			conn.OpenStreamFunc = func() (transport.Stream, error) { return nil, io.EOF }
 
-			session := newSession(conn, tt.mux, nil, nil, nil, nil, nil, sessionRole{})
+			session := newSession(conn, tt.mux, nil, nil, nil, nil, nil, sessionSetup{})
 
 			if tt.expectOK {
 				assert.NotNil(t, session, "newSession should not return nil")
@@ -128,7 +128,7 @@ func TestNewSessionWithNilMux(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			conn := &FakeStreamConn{}
 
-			session := newSession(conn, tt.mux, nil, nil, nil, nil, nil, sessionRole{})
+			session := newSession(conn, tt.mux, nil, nil, nil, nil, nil, sessionSetup{})
 
 			if tt.expectDefault {
 				assert.Equal(t, DefaultMux, session.mux, "should use DefaultMux when nil mux is provided")
@@ -150,7 +150,7 @@ func TestNewSession_ConfigIsCloned(t *testing.T) {
 	conn := &FakeStreamConn{}
 	cfg := &Config{ProbeInterval: 50 * time.Millisecond}
 
-	session := newSession(conn, nil, nil, cfg, nil, nil, nil, sessionRole{})
+	session := newSession(conn, nil, nil, cfg, nil, nil, nil, sessionSetup{})
 	defer session.CloseWithError(InternalSessionErrorCode, "terminate reason")
 
 	// mutate the original after newSession
@@ -837,7 +837,7 @@ func TestSession_Stats_NoTransport(t *testing.T) {
 	// noStatsConn does not implement probeStatsProvider.
 	// Transport-derived fields must be zero values.
 	conn := noStatsConn{}
-	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionRole{})
+	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{})
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 	stats := sess.Stats()
@@ -888,7 +888,7 @@ func TestSession_Stats_EstimatedBitrateUpdatedByDetectBitrateChanges(t *testing.
 	// Pass config at creation time so the Ticker in detectBitrateChanges
 	// picks up the short interval (it is captured at goroutine start).
 	cfg := &Config{ProbeInterval: 5 * time.Millisecond, ProbeMaxAge: 10 * time.Millisecond}
-	sess := newSession(conn, NewTrackMux(0), nil, cfg, nil, nil, nil, sessionRole{})
+	sess := newSession(conn, NewTrackMux(0), nil, cfg, nil, nil, nil, sessionSetup{})
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 	// Allow detectBitrateChanges at least two ticks: first initializes, second measures.
@@ -1410,7 +1410,7 @@ func TestSession_ProcessBiStream_Probe(t *testing.T) {
 
 	// Construct WITH the config — never mutate session.config after newSession,
 	// because detectBitrateChanges (started inside newSession) reads it concurrently.
-	session := newSession(conn, NewTrackMux(0), nil, &Config{ProbeInterval: 5 * time.Millisecond}, nil, nil, nil, sessionRole{})
+	session := newSession(conn, NewTrackMux(0), nil, &Config{ProbeInterval: 5 * time.Millisecond}, nil, nil, nil, sessionSetup{})
 
 	probeStream := &FakeQUICStream{}
 
@@ -1471,7 +1471,7 @@ func TestSession_ProcessBiStream_ProbeMultipleMessages(t *testing.T) {
 
 	session := newSession(conn, NewTrackMux(0), nil,
 		&Config{ProbeInterval: 5 * time.Millisecond, ProbeMaxAge: 15 * time.Millisecond},
-		nil, nil, nil, sessionRole{})
+		nil, nil, nil, sessionSetup{})
 
 	probeStream := &FakeQUICStream{}
 
@@ -1819,7 +1819,7 @@ func TestSession_ProcessBiStream_ProbeUnsupported(t *testing.T) {
 	// never started.  handleProbeStream still registers the stream and reads
 	// PROBE messages; with no PROBE data it hits EOF immediately and returns nil.
 	conn := &noStatsConn{}
-	session := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionRole{})
+	session := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{})
 
 	var incoming bytes.Buffer
 	require.NoError(t, message.StreamTypeProbe.Encode(&incoming))
@@ -2854,7 +2854,7 @@ func TestSession_Stats_EstimatedBitrateUpdatedEveryInterval(t *testing.T) {
 		ProbeMaxAge:   1 * time.Hour,
 		ProbeMaxDelta: 1000.0, // 100000% change needed for notification
 	}
-	sess := newSession(conn, NewTrackMux(0), nil, cfg, nil, nil, nil, sessionRole{})
+	sess := newSession(conn, NewTrackMux(0), nil, cfg, nil, nil, nil, sessionSetup{})
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 	// Initial tick to initialize tracker baseline
@@ -2917,7 +2917,7 @@ func TestSession_Probe_ConcurrentAccess(t *testing.T) {
 
 	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
 
-	session := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionRole{})
+	session := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{})
 	markPeerSetupReceived(session, message.ProbeLevelReport)
 
 	// Test concurrent access to Probe (receiving peer measurements)
