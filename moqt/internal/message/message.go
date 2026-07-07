@@ -31,7 +31,17 @@ func BytesLen(b []byte) int {
 func StringArrayLen(arr []string) int {
 	total := VarintLen(uint64(len(arr)))
 	for _, s := range arr {
-		total += StringLen(s)
+		l := len(s)
+		total += l
+		if uint64(l) <= maxVarInt1 {
+			total += 1
+		} else if uint64(l) <= maxVarInt2 {
+			total += 2
+		} else if uint64(l) <= maxVarInt4 {
+			total += 4
+		} else {
+			total += 8
+		}
 	}
 	return total
 }
