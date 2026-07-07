@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+> **TS release — `@qumo/moq` v0.16.2 (JSR, 2026-07-07).** Patch bump of the TypeScript (`moq-web`) package only: dependency updates, no `@qumo/moq` API or behavior change. The Go module (`moqt`) is unchanged and **not** re-released; the `moqt` entries below remain unreleased. This JSR release publishes the `moq-web` dependency bumps from #307: `@okdaichi/golikejs` `0.9.0` → `0.10.0`, the `@std/{assert,cli,path,testing}` minor bumps, and `zod` `^3.24.2` → `^4.4.3` (a major dependency bump; the zod API surface `@qumo/moq` uses is unchanged in v4, so no source changes were needed — verified by the `src/msf/` catalog/timeline/delta tests).
+
 ## [v0.16.1] - 2026-07-01
 
 > **Dual release.** `v0.16.1` ships both packages at the same version: the Go module (`moqt`, consumed via `go get github.com/qumo-dev/gomoqt@v0.16.1`) and the TypeScript package (`@qumo/moq` on JSR). The `moq-web` bullets below were published via the JSR release; the `moqt` and `deps` bullets ship via this Go tag — notably the `webtransport-go` → `v0.11.0-okdaichi.1` bump (which brings upstream #267, the transport-layer fix for the qumo #205 close-cancellation stall) and the accumulated `moqt` benchmark / dead-code / security work.
