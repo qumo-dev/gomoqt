@@ -216,6 +216,11 @@ func TestReadBytes(t *testing.T) {
 			input:   []byte{},
 			wantErr: true,
 		},
+		"too large size": {
+			// Length prefix exceeding math.MaxInt
+			input:   []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+			wantErr: true,
+		},
 	}
 
 	for name, tt := range tests {
@@ -302,6 +307,11 @@ func TestReadStringArray(t *testing.T) {
 		},
 		"invalid count": {
 			input:   []byte{},
+			wantErr: true,
+		},
+		"too large count": {
+			// Count prefix exceeding math.MaxInt
+			input:   []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
 			wantErr: true,
 		},
 	}

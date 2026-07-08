@@ -8,3 +8,8 @@ Checking memory constraints for OOM vulnerabilities...
 **Vulnerability:** A memory exhaustion (OOM) vulnerability caused by lack of bounds checking when pre-allocating slices for variable-length arrays based on an untrusted varint count prefix (e.g., `make([]string, 0, count)` or `make([]uint64, count)`). An attacker can specify a huge count for an array with very few bytes, causing the server to allocate massive amounts of memory and crash before parsing the next item.
 **Learning:** Even if the overall message size is constrained or the buffer is small, `make` pre-allocations using unvalidated array lengths can cause OOM DoS.
 **Prevention:** Compute a clamped capacity based on `len(b)` and the maximum possible count before allocating, and allocate `make([]T, 0, allocCap)`. Let the subsequent decode loop naturally fail with an EOF when the buffer is exhausted.
+
+## 2024-07-08 - Fix DoS via panic on malformed untrusted input
+**Vulnerability:** A remote Denial of Service (DoS) vulnerability caused by `panic()` calls in `ReadBytes` and `ReadStringArray` when processing untrusted lengths exceeding `math.MaxInt`. An attacker could deliberately send an oversized length prefix, intentionally triggering the panic and crashing the server process.
+**Learning:** `panic()` must never be used to handle malformed, oversized, or invalid untrusted network input. Any input validation failure should result in a graceful error return.
+**Prevention:** Return descriptive errors (e.g., `ErrMessageTooLarge`) instead of panicking when untrusted inputs exceed logical bounds or system limits.
