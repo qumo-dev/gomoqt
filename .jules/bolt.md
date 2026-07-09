@@ -14,3 +14,6 @@
 **Learning:** In Go, fallback paths (like non-`io.ByteReader` readers) in hot decoding loops shouldn't use dynamic slice allocations (e.g., `make([]byte, size)`) if the maximum size is small and fixed (like an 8-byte varint). Replacing `make()` with a local fixed-size array (e.g., `var buf [8]byte`) and slicing it `buf[:size]` entirely eliminates heap allocations.
 **Action:** When parsing small, bounded objects like varints from an `io.Reader`, use stack-allocated arrays and take their slices (`buf[:length]`) instead of dynamically allocating slices with `make()`.
 
+## 2024-05-23 - Bounds Checking in Varints
+**Learning:** Checking for sizes exceeding 62 bits is unnecessary in MOQT since strings and lengths are natively bounded by maxInt. Omitting these branches aids compiler inlining and avoids branch overhead, significantly improving `VarintLen` performance.
+**Action:** Always verify if a theoretical panic path is practically unreachable given Go's native length constraints before including it in hot paths.

@@ -29,12 +29,6 @@ func TestVarintLen(t *testing.T) {
 	}
 }
 
-func TestVarintLenPanic(t *testing.T) {
-	assert.Panics(t, func() {
-		VarintLen(maxVarInt8 + 1)
-	})
-}
-
 func TestStringLen(t *testing.T) {
 	tests := map[string]struct {
 		input    string

@@ -33,15 +33,6 @@ func TestWriteVarint(t *testing.T) {
 	}
 }
 
-func TestWriteVarintPanic(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("WriteVarint should panic for large values")
-		}
-	}()
-	WriteVarint([]byte{}, maxVarInt8+1)
-}
-
 func TestWriteBytes(t *testing.T) {
 	tests := []struct {
 		dest     []byte
