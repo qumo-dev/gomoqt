@@ -248,14 +248,33 @@ func (c Catalog) Validate() error {
 			}
 		}
 	}
-	seen := make(map[TrackID]struct{}, len(c.Tracks))
-	for i, track := range c.Tracks {
-		id := track.ID(c.DefaultNamespace)
-		if _, ok := seen[id]; ok {
-			problems = append(problems, fmt.Sprintf("tracks[%d]: duplicate track identity %q", i, id.String()))
-			continue
+	if len(c.Tracks) <= 16 {
+		var ids [16]TrackID
+		for i, track := range c.Tracks {
+			id := track.ID(c.DefaultNamespace)
+			ids[i] = id
+			duplicate := false
+			for j := 0; j < i; j++ {
+				if ids[j] == id {
+					duplicate = true
+					break
+				}
+			}
+			if duplicate {
+				// use fmt.Sprintf on the cold path, but use %q for escaping
+				problems = append(problems, fmt.Sprintf("tracks[%d]: duplicate track identity %q", i, id.String()))
+			}
 		}
-		seen[id] = struct{}{}
+	} else {
+		seen := make(map[TrackID]struct{}, len(c.Tracks))
+		for i, track := range c.Tracks {
+			id := track.ID(c.DefaultNamespace)
+			if _, ok := seen[id]; ok {
+				problems = append(problems, fmt.Sprintf("tracks[%d]: duplicate track identity %q", i, id.String()))
+				continue
+			}
+			seen[id] = struct{}{}
+		}
 	}
 
 	return newValidationError(problems)
