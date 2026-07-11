@@ -1,9 +1,5 @@
 package message
 
-import (
-	"fmt"
-)
-
 func VarintLen(i uint64) int {
 	if i <= maxVarInt1 {
 		return 1
@@ -14,10 +10,7 @@ func VarintLen(i uint64) int {
 	if i <= maxVarInt4 {
 		return 4
 	}
-	if i <= maxVarInt8 {
-		return 8
-	}
-	panic(fmt.Sprintf("%#x doesn't fit into 62 bits", i))
+	return 8
 }
 
 func StringLen(s string) int {

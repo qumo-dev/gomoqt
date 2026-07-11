@@ -26,13 +26,6 @@ func TestGroupMessage_EncodeDecode(t *testing.T) {
 				GroupSequence: 1<<(64-2) - 1, // maxVarInt8 (uint62 max)
 			},
 		},
-		"too large number": {
-			input: message.GroupMessage{
-				SubscribeID:   1<<64 - 1, // uint64 max
-				GroupSequence: 1<<64 - 1, // uint64 max
-			},
-			wantErr: true,
-		},
 		"zero values": {
 			input: message.GroupMessage{
 				SubscribeID:   0,

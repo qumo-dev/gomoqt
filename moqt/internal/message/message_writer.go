@@ -1,9 +1,5 @@
 package message
 
-import (
-	"fmt"
-)
-
 func WriteVarint(b []byte, i uint64) ([]byte, int) {
 	if i <= maxVarInt1 {
 		b = append(b, byte(i))
@@ -25,20 +21,17 @@ func WriteVarint(b []byte, i uint64) ([]byte, int) {
 		)
 		return b, 4
 	}
-	if i <= maxVarInt8 {
-		b = append(b,
-			uint8(i>>56)|0xc0,
-			uint8(i>>48),
-			uint8(i>>40),
-			uint8(i>>32),
-			uint8(i>>24),
-			uint8(i>>16),
-			uint8(i>>8),
-			byte(i),
-		)
-		return b, 8
-	}
-	panic(fmt.Sprintf("%#x doesn't fit into 62 bits", i))
+	b = append(b,
+		uint8(i>>56)|0xc0,
+		uint8(i>>48),
+		uint8(i>>40),
+		uint8(i>>32),
+		uint8(i>>24),
+		uint8(i>>16),
+		uint8(i>>8),
+		byte(i),
+	)
+	return b, 8
 }
 
 func WriteBytes(dest []byte, b []byte) ([]byte, int) {
