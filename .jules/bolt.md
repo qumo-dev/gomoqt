@@ -14,3 +14,6 @@
 **Learning:** In Go, fallback paths (like non-`io.ByteReader` readers) in hot decoding loops shouldn't use dynamic slice allocations (e.g., `make([]byte, size)`) if the maximum size is small and fixed (like an 8-byte varint). Replacing `make()` with a local fixed-size array (e.g., `var buf [8]byte`) and slicing it `buf[:size]` entirely eliminates heap allocations.
 **Action:** When parsing small, bounded objects like varints from an `io.Reader`, use stack-allocated arrays and take their slices (`buf[:length]`) instead of dynamically allocating slices with `make()`.
 
+## 2026-07-11 - Optimize strings.TrimPrefix and strings.LastIndex
+**Learning:** `strings.TrimPrefix` redundantly performs a prefix check, which is unnecessary if `strings.HasPrefix` was already verified. Replacing it with direct slice indexing (`str[len(prefix):]`) is faster. Similarly, `strings.LastIndexByte` is measurably faster than `strings.LastIndex` for single-character lookups.
+**Action:** Avoid `strings.TrimPrefix` when the prefix presence is already known; use direct slicing instead. Always prefer `IndexByte`/`LastIndexByte` for single-character searches.
