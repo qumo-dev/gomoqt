@@ -466,6 +466,68 @@ func TestServer_Close_ReturnsWithActiveSession(t *testing.T) {
 	}
 }
 
+// TestServer_Shutdown_ReturnsWithActiveSession is the Shutdown analogue of the
+// #181 regression test for Close. With an active client session that does not
+// disconnect on its own, Shutdown(ctx) must return within the ctx drain window:
+// the per-conn goAway force-closes the connection when ctx expires, the session
+// runs CloseWithError (which signals its Tracks/Groups so handler goroutines
+// exit and the WaitGroup drains), and the connManager empties. Previously the
+// lack of a Track/Group signal let CloseWithError's wg.Wait() hang on handler
+// goroutines that never noticed the connection was gone (qumo #286).
+func TestServer_Shutdown_ReturnsWithActiveSession(t *testing.T) {
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := pc.LocalAddr().String()
+	_ = pc.Close()
+
+	server := &Server{
+		Addr: addr,
+		TLSConfig: &tls.Config{
+			NextProtos:         []string{NextProtoH3, NextProtoMOQ},
+			Certificates:       []tls.Certificate{generateTestCert(t)},
+			InsecureSkipVerify: true,
+		},
+		Handler: HandleFunc(func(sess *Session) { <-sess.Context().Done() }),
+	}
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, ErrServerClosed) {
+			t.Logf("server: %v", err)
+		}
+	}()
+
+	client := &Dialer{TLSConfig: &tls.Config{InsecureSkipVerify: true}}
+	var active *Session
+	require.Eventually(t, func() bool {
+		s, derr := client.Dial(context.Background(), "https://"+addr+"/moqt", nil)
+		if derr != nil {
+			return false
+		}
+		active = s
+		return true
+	}, 5*time.Second, 50*time.Millisecond, "listener should accept a dial")
+	defer func() {
+		if active != nil {
+			_ = active.CloseWithError(NoError, "test done")
+		}
+	}()
+
+	// Short drain window: goAway force-closes on ctx expiry, CloseWithError
+	// signals Tracks/Groups, the session unblocks, connManager drains.
+	done := make(chan struct{})
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(6 * time.Second):
+		t.Fatal("Server.Shutdown(ctx) hung with an active connection (qumo #286)")
+	}
+}
+
 func TestServer_Shutdown_NoSessions(t *testing.T) {
 	s := &Server{}
 	s.init()

@@ -544,7 +544,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		}(conn)
 	}
 
-	// Wait for all sessions to close
+	// Wait for all sessions to close. The per-connection goAway calls above
+	// force-close any connection still open when ctx expires (the graceful drain
+	// window), so its session runs CloseWithError -> removeConn and the
+	// connManager drains within the window.
 	<-connManager.Done()
 
 	// Close WebTransport server (guard against panics from underlying implementations)

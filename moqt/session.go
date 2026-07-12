@@ -208,6 +208,13 @@ func (s *Session) CloseWithError(code SessionErrorCode, msg string) error {
 		return fmt.Errorf("session termination failed: %w", err)
 	}
 
+	// Signal active Tracks and Groups to terminate so the stream-handling
+	// goroutines waiting on them (e.g. a relay's per-subscriber egress) exit and
+	// wg.Wait() below can complete. Without this, a handler blocked on a track
+	// the session is tearing down pins the WaitGroup, so CloseWithError never
+	// returns and the conn never leaves the connManager — hanging Server.Shutdown.
+	s.closeTracksAndGroups()
+
 	// Wait for finishing handling streams
 	s.wg.Wait()
 
@@ -798,6 +805,47 @@ func (s *Session) addTrackReader(id SubscribeID, reader *TrackReader) {
 	defer s.trackReaderMapLocker.Unlock()
 
 	s.trackReaders[id] = reader
+}
+
+// closeTracksAndGroups signals all active TrackWriters (server-side tracks being
+// served to subscribers) and TrackReaders (client-side subscriptions) to
+// terminate by closing them. Closing a track cancels its stream context and
+// closes its groups, which unblocks any per-track handler goroutine waiting on
+// that context (e.g. a relay's subscriber egress blocked in a select or in the
+// next OpenGroupAt/WriteFrame). Called from CloseWithError so the session's
+// stream-handling WaitGroup drains instead of hanging on handlers that are
+// waiting on tracks the session is tearing down.
+//
+// Each Close is best-effort: a shutdown path must not abort because one track's
+// Close fails or panics (e.g. a placeholder/malformed track), so the remaining
+// tracks still get signaled.
+func (s *Session) closeTracksAndGroups() {
+	closeSafe := func(c func() error) {
+		defer func() { recover() }()
+		_ = c()
+	}
+
+	s.trackWriterMapLocker.Lock()
+	writers := make([]*TrackWriter, 0, len(s.trackWriters))
+	for _, tw := range s.trackWriters {
+		writers = append(writers, tw)
+	}
+	s.trackWriters = make(map[SubscribeID]*TrackWriter)
+	s.trackWriterMapLocker.Unlock()
+	for _, tw := range writers {
+		closeSafe(tw.Close)
+	}
+
+	s.trackReaderMapLocker.Lock()
+	readers := make([]*TrackReader, 0, len(s.trackReaders))
+	for _, tr := range s.trackReaders {
+		readers = append(readers, tr)
+	}
+	s.trackReaders = make(map[SubscribeID]*TrackReader)
+	s.trackReaderMapLocker.Unlock()
+	for _, tr := range readers {
+		closeSafe(tr.Close)
+	}
 }
 
 func (s *Session) removeTrackReader(id SubscribeID) {
