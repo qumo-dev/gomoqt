@@ -11,7 +11,7 @@ import (
 
 // TestDecode_RejectsOversizedLength ensures every length-prefixed message rejects
 // an attacker-controlled length prefix that exceeds MaxMessageSize, returning
-// ErrMessageTooLarge before allocating the payload buffer. Without this guard a peer
+// message.ErrMessageTooLarge before allocating the payload buffer. Without this guard a peer
 // can advertise a maxUint62 length and force make([]byte, ~4.6e18) -> OOM crash.
 func TestDecode_RejectsOversizedLength(t *testing.T) {
 	// Largest value expressible in a QUIC varint (uint62 max), encoded as the
@@ -60,10 +60,23 @@ func TestDecode_RejectsOversizedArrayCount(t *testing.T) {
 	err := am.Decode(bytes.NewReader(full))
 	assert.ErrorIs(t, err, io.EOF) // Should fail with EOF reading first missing HopID, NOT OOM crash
 
-	// 2. ReadStringArray count
+	// 2. message.ReadStringArray count
 	b2 := make([]byte, 0, 8)
 	b2, _ = message.WriteVarint(b2, 1000000) // Count = 1,000,000
 
 	_, _, err2 := message.ReadStringArray(b2)
 	assert.ErrorIs(t, err2, io.EOF) // Should fail with EOF reading first missing string, NOT OOM crash
+}
+
+func TestReadBytes_RejectsOversizedLength(t *testing.T) {
+	// Largest value expressible in a QUIC varint (uint62 max)
+	lengthPrefix, _ := message.WriteMessageLength(nil, 1<<62-1)
+	_, _, err := message.ReadBytes(lengthPrefix)
+	assert.ErrorIs(t, err, message.ErrMessageTooLarge)
+}
+
+func TestReadStringArray_RejectsOversizedCount(t *testing.T) {
+	lengthPrefix, _ := message.WriteMessageLength(nil, 1<<62-1)
+	_, _, err := message.ReadStringArray(lengthPrefix)
+	assert.ErrorIs(t, err, message.ErrMessageTooLarge)
 }
