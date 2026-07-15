@@ -319,3 +319,25 @@ func TestReadStringArray(t *testing.T) {
 		})
 	}
 }
+
+func TestReadBytes_Oversized(t *testing.T) {
+	var buf [8]byte
+	buf[0] = 0x83
+	buf[1] = 0x20
+	buf[2] = 0x00
+	buf[3] = 0x01
+
+	_, _, err := ReadBytes(buf[:])
+	assert.ErrorIs(t, err, ErrMessageTooLarge)
+}
+
+func TestReadStringArray_Oversized(t *testing.T) {
+	var buf [8]byte
+	buf[0] = 0x83
+	buf[1] = 0x20
+	buf[2] = 0x00
+	buf[3] = 0x01
+
+	_, _, err := ReadStringArray(buf[:])
+	assert.ErrorIs(t, err, ErrMessageTooLarge)
+}
