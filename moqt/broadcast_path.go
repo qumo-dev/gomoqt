@@ -29,12 +29,15 @@ func (bc BroadcastPath) GetSuffix(prefix string) (string, bool) {
 		return "", false
 	}
 
-	return strings.TrimPrefix(string(bc), prefix), true
+	// OPTIMIZATION: HasPrefix has already verified the presence of the prefix.
+	// Direct slicing avoids the redundant prefix check in strings.TrimPrefix.
+	return string(bc)[len(prefix):], true
 }
 
 // Extension returns the file extension of the path (e.g., ".mp4") if present.
 func (bc BroadcastPath) Extension() string {
-	if i := strings.LastIndex(string(bc), "."); i >= 0 {
+	// OPTIMIZATION: strings.LastIndexByte is faster than strings.LastIndex for single character lookups.
+	if i := strings.LastIndexByte(string(bc), '.'); i >= 0 {
 		return string(bc)[i:]
 	}
 
