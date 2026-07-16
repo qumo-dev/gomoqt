@@ -208,6 +208,11 @@ func TestReadBytes(t *testing.T) {
 			n:        4,
 			wantErr:  false,
 		},
+
+		"exceeds max bytes": {
+			input:   []byte{0x80, 0x03, 0x1a, 0x13, 0x22},
+			wantErr: true,
+		},
 		"incomplete data": {
 			input:   []byte{0x05, 0x41, 0x42},
 			wantErr: true,
