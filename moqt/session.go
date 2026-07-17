@@ -945,10 +945,7 @@ func (t *bitrateTracker) monitor(ctx context.Context, interval time.Duration, pr
 			return
 		case now := <-ticker.C:
 			stats := provider.ConnectionStats()
-			t.mu.Lock()
 			bitrate, ok := t.next(stats, now)
-			t.mu.Unlock()
-
 			if !ok {
 				continue
 			}
@@ -960,12 +957,14 @@ func (t *bitrateTracker) monitor(ctx context.Context, interval time.Duration, pr
 	}
 }
 
-// next takes one bitrate sample. The caller must hold t.mu. It returns the
-// measured bitrate and whether to notify the prober (first sample, maxAge
-// elapsed, or a large-enough delta). measureBitrate already stored
-// estimatedBitrate, so notifying only advances the throttle bookkeeping that
-// gates how often we write back to the prober.
+// next takes one bitrate sample. It returns the measured bitrate and whether
+// to notify the prober (first sample, maxAge elapsed, or a large-enough
+// delta). measureBitrate already stored estimatedBitrate, so notifying only
+// advances the throttle bookkeeping that gates how often we write back to the
+// prober.
 func (t *bitrateTracker) next(stats quic.ConnectionStats, now time.Time) (uint64, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	bitrate := t.measureBitrate(stats, now)
 
 	notify := t.lastSentAt.IsZero() ||
