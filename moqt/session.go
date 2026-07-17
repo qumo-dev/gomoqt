@@ -92,19 +92,14 @@ func newSession(
 		connManager:     manager,
 		probeResponseCh: make(chan ProbeResult, 1), // latest-value semantics
 		probeTargetsCh:  make(chan ProbeResult, 1), // latest-value semantics
-		bitrateTracker: bitrateTracker{
-			maxAge:   config.probeMaxAge(),
-			maxDelta: config.probeMaxDelta(),
-		},
 	}
 
 	if manager != nil {
 		manager.addConn(conn)
 	}
 
-	if provider, ok := conn.(probeStatsProvider); ok {
-		sess.bitrateTracker.provider = provider
-	}
+	provider, _ := conn.(probeStatsProvider)
+	sess.bitrateTracker = newBitrateTracker(config, provider)
 
 	// Listen bidirectional streams
 	sess.wg.Go(func() {
@@ -519,9 +514,7 @@ func (sess *Session) Probe(targetBitrate uint64) (<-chan ProbeResult, error) {
 					}
 					return
 				}
-				sess.bitrateTracker.mu.Lock()
 				sess.bitrateTracker.record(pm.Bitrate, time.Now())
-				sess.bitrateTracker.mu.Unlock()
 
 				// Update the latest probe result, dropping it if the channel buffer is full (i.e. the previous value has not been consumed).
 				select {
@@ -928,7 +921,18 @@ type bitrateTracker struct {
 	lastSentAt       time.Time
 
 	mu       sync.Mutex         // guards non-atomic fields (initialized, bytesSent, sampleTime, lastSentAt)
-	provider probeStatsProvider // for lazy EstimatedBitrate sampling (set in newSession)
+	provider probeStatsProvider // connection-stats source; nil if the conn exposes none
+}
+
+// newBitrateTracker builds a tracker for a session. provider is nil when the
+// connection exposes no stats (some WebTransport conns, test fakes); such a
+// tracker stays inert — EstimatedBitrate stays zero and the monitor never runs.
+func newBitrateTracker(config *Config, provider probeStatsProvider) bitrateTracker {
+	return bitrateTracker{
+		maxAge:   config.probeMaxAge(),
+		maxDelta: config.probeMaxDelta(),
+		provider: provider,
+	}
 }
 
 func (t *bitrateTracker) monitor(ctx context.Context, interval time.Duration, provider probeStatsProvider, onProbe func(bitrate, rtt uint64)) {
@@ -960,24 +964,33 @@ func (t *bitrateTracker) next(stats quic.ConnectionStats, now time.Time) (uint64
 	bitrate := t.measureBitrate(stats, now)
 
 	if t.lastSentAt.IsZero() {
-		t.record(bitrate, now)
+		t.recordLocked(bitrate, now)
 		return bitrate, true
 	}
 
 	lastSentBitrate := t.lastSentBitrate.Load()
 	if now.Sub(t.lastSentAt) >= t.maxAge ||
 		hasDelta(lastSentBitrate, bitrate, t.maxDelta) {
-		t.record(bitrate, now)
+		t.recordLocked(bitrate, now)
 		return bitrate, true
 	}
 
 	return bitrate, false
 }
 
-func (t *bitrateTracker) record(bitrate uint64, now time.Time) {
+// recordLocked updates the stored bitrate; the caller must already hold t.mu.
+func (t *bitrateTracker) recordLocked(bitrate uint64, now time.Time) {
 	t.estimatedBitrate.Store(bitrate)
 	t.lastSentBitrate.Store(bitrate)
 	t.lastSentAt = now
+}
+
+// record is the concurrency-safe form of recordLocked, for callers that do not
+// hold t.mu (e.g. Session.Probe recording a peer-reported bitrate).
+func (t *bitrateTracker) record(bitrate uint64, now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.recordLocked(bitrate, now)
 }
 
 func (t *bitrateTracker) measureBitrate(stats quic.ConnectionStats, now time.Time) uint64 {
