@@ -103,6 +103,14 @@ func newSession(
 	if provider, ok := conn.(probeStatsProvider); ok {
 		sess.bitrateTracker.provider = provider
 	}
+	// Wire the monitor's session-owned inputs once, at construction. The tracker
+	// owns the rest of the monitor lifecycle and launches it lazily on demand.
+	sess.bitrateTracker.monitorDeps = monitorInputs{
+		ctx:      sess.ctx,
+		wg:       &sess.wg,
+		interval: sess.config.probeInterval(),
+		onProbe:  sess.handleMeasuredBitrate,
+	}
 
 	// Listen bidirectional streams
 	sess.wg.Go(func() {
@@ -821,9 +829,7 @@ func (sess *Session) handleProbeStream(stream transport.Stream) error {
 	sess.incomingProbeMu.Unlock()
 
 	// Lazily start the bitrate monitor the first time a peer opens a probe stream.
-	sess.bitrateTracker.startMonitorOnce(func() {
-		sess.wg.Go(func() { sess.detectBitrateChanges(sess.bitrateTracker.provider) })
-	})
+	sess.bitrateTracker.startMonitor()
 
 	defer func() {
 		sess.incomingProbeMu.Lock()
@@ -876,25 +882,18 @@ func (sess *Session) notifyTargets(bitrate uint64) {
 	}
 }
 
-func (sess *Session) detectBitrateChanges(provider probeStatsProvider) {
-	sess.bitrateTracker.monitor(sess.ctx, sess.config.probeInterval(), provider, func(bitrate, rtt uint64) {
-		sess.incomingProbeMu.Lock()
-		stream := sess.incomingProbeStream
-		sess.incomingProbeMu.Unlock()
-		if stream == nil {
-			return
-		}
-
-		err := message.ProbeMessage{
-			Bitrate: bitrate,
-			RTT:     rtt,
-		}.Encode(stream)
-		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				sess.logError("failed to send periodic probe", err)
-			}
-		}
-	})
+// handleMeasuredBitrate is the bitrate monitor's on-probe callback: it writes a
+// locally-measured bitrate back to the prober over the inbound probe stream.
+func (sess *Session) handleMeasuredBitrate(bitrate, rtt uint64) {
+	sess.incomingProbeMu.Lock()
+	stream := sess.incomingProbeStream
+	sess.incomingProbeMu.Unlock()
+	if stream == nil {
+		return
+	}
+	if err := (message.ProbeMessage{Bitrate: bitrate, RTT: rtt}.Encode(stream)); err != nil && !errors.Is(err, io.EOF) {
+		sess.logError("failed to send periodic probe", err)
+	}
 }
 
 type probeStatsProvider interface {
@@ -920,20 +919,37 @@ type bitrateTracker struct {
 
 	// startOnce ensures the bitrate monitor goroutine is launched at most once.
 	startOnce sync.Once
+	// monitorDeps holds the session-owned inputs the tracker needs to launch and
+	// run its own background monitor; wired in newSession so the tracker owns the
+	// full monitor lifecycle without a back-reference to Session.
+	monitorDeps monitorInputs
 }
 
-// startMonitorOnce launches the bitrate monitor the first time a peer opens a
-// probe stream. spawn — provided by the Session, which owns the monitor's
-// context, wait group, and on-probe callback — runs at most once, and only when
-// a connection-stats provider is configured. Sessions that are never probed
-// (the common subscriber case in high-fan-out) never launch it: one fewer
-// goroutine per session, with EstimatedBitrate kept fresh via lazy Stats()
-// sampling.
-func (t *bitrateTracker) startMonitorOnce(spawn func()) {
+// monitorInputs are the session-owned inputs the bitrate monitor needs. The
+// tracker owns the goroutine and the measurement loop; the Session injects only
+// these dependencies (it owns the context, wait group, and what to do with a
+// measurement via onProbe).
+type monitorInputs struct {
+	ctx      context.Context
+	wg       *sync.WaitGroup
+	interval time.Duration
+	// onProbe is invoked with each measured bitrate; the Session uses it to
+	// write the measurement back over the inbound probe stream.
+	onProbe func(bitrate, rtt uint64)
+}
+
+// startMonitor launches the background bitrate monitor goroutine the first time
+// a peer opens a probe stream, and only when a connection-stats provider is
+// configured. Sessions that are never probed (the common subscriber case in
+// high-fan-out) never launch it: one fewer goroutine per session, with
+// EstimatedBitrate kept fresh via lazy Stats() sampling.
+func (t *bitrateTracker) startMonitor() {
 	t.startOnce.Do(func() {
-		if t.provider != nil {
-			spawn()
+		if t.provider == nil {
+			return
 		}
+		d := t.monitorDeps
+		d.wg.Go(func() { t.monitor(d.ctx, d.interval, t.provider, d.onProbe) })
 	})
 }
 

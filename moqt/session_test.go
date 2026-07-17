@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -866,6 +867,26 @@ func TestSession_Stats_EstimatedBitrateZeroBeforeProbe(t *testing.T) {
 	assert.Equal(t, uint64(0), stats.EstimatedBitrate)
 }
 
+func TestSession_LazyMonitor_NoGoroutineBeforeProbe(t *testing.T) {
+	// The whole point of the lazy bitrate monitor: a session that is never
+	// probed must not run the background monitor goroutine. Verify by inspecting
+	// the live goroutine stacks — none should be blocked in bitrateTracker.monitor.
+	conn := &FakeStreamConn{}
+	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
+		return quic.ConnectionStats{BytesSent: 1}
+	}
+	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil)
+	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
+
+	// Let newSession's own goroutines (handleBiStreams, handleUniStreams) settle.
+	time.Sleep(50 * time.Millisecond)
+
+	buf := make([]byte, 1<<20)
+	n := runtime.Stack(buf, true)
+	assert.NotContains(t, string(buf[:n]), "(*bitrateTracker).monitor",
+		"non-probed session must not run the bitrate monitor goroutine")
+}
+
 func TestSession_Stats_EstimatedBitrateUpdatedByLazySampling(t *testing.T) {
 	// For a session that is never probed, the bitrate monitor goroutine is never
 	// started; EstimatedBitrate is refreshed lazily by each Stats() call sampling
@@ -1403,8 +1424,8 @@ func TestSession_ProcessBiStream_Probe(t *testing.T) {
 		return quic.ConnectionStats{}
 	}
 
-	// Construct WITH the config — never mutate session.config after newSession,
-	// because detectBitrateChanges (started inside newSession) reads it concurrently.
+	// Construct WITH the config; the bitrate monitor captures probeInterval at
+	// construction (stored in the tracker), so it must be set before newSession.
 	session := newSession(conn, NewTrackMux(0), nil, &Config{ProbeInterval: 5 * time.Millisecond}, nil, nil, nil)
 
 	probeStream := &FakeQUICStream{}
@@ -2898,7 +2919,7 @@ func TestSession_ProbeMonitor_WritesBitrateBackOnInboundStream(t *testing.T) {
 	// Regression guard for the lazy bitrate monitor. The Stats()-based tests
 	// above all refresh EstimatedBitrate via lazy Stats() sampling — none of them
 	// starts the monitor goroutine. This case opens an inbound probe stream
-	// (handleProbeStream → bitrateTracker.startMonitorOnce) and asserts the
+	// (handleProbeStream → bitrateTracker.startMonitor) and asserts the
 	// monitor writes the locally-measured bitrate back to the prober over that
 	// stream.
 	var statsMu sync.Mutex
