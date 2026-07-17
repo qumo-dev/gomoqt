@@ -927,7 +927,7 @@ type bitrateTracker struct {
 	lastSentBitrate  atomic.Uint64
 	lastSentAt       time.Time
 
-	mu       sync.Mutex         // guards non-atomic fields (bytesSent, sampleTime, lastSentAt)
+	mu       sync.Mutex         // guards non-atomic fields (initialized, bytesSent, sampleTime, lastSentAt)
 	provider probeStatsProvider // for lazy EstimatedBitrate sampling (set in newSession)
 }
 
@@ -1013,14 +1013,18 @@ func (t *bitrateTracker) getEstimatedBitrate() uint64 {
 	// Lazy sampling: compute EstimatedBitrate on demand from local connection
 	// stats. This replaces the eager background monitor goroutine for sessions
 	// that are never probed (subscribers), while still keeping EstimatedBitrate
-	// fresh for any caller of Stats().
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	// fresh for any caller of Stats(). Stats() is intended to be called at
+	// monitoring cadence, not per-frame: each call samples over the window
+	// elapsed since the last call, so very frequent polling yields noisy values.
 	now := time.Now()
 	stats := t.provider.ConnectionStats()
-	bitrate := t.measureBitrate(stats, now)
-	t.record(bitrate, now)
-	return t.estimatedBitrate.Load()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	// measureBitrate updates estimatedBitrate directly. We deliberately do NOT
+	// call record() here: that would also mutate the monitor's probe-writeback
+	// throttle (lastSentAt/lastSentBitrate) and suppress responses to probers,
+	// which Stats() has no business touching.
+	return t.measureBitrate(stats, now)
 }
 
 func hasDelta(oldVal, newVal uint64, maxDelta float64) bool {

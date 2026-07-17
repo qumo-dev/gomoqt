@@ -866,7 +866,11 @@ func TestSession_Stats_EstimatedBitrateZeroBeforeProbe(t *testing.T) {
 	assert.Equal(t, uint64(0), stats.EstimatedBitrate)
 }
 
-func TestSession_Stats_EstimatedBitrateUpdatedByDetectBitrateChanges(t *testing.T) {
+func TestSession_Stats_EstimatedBitrateUpdatedByLazySampling(t *testing.T) {
+	// For a session that is never probed, the bitrate monitor goroutine is never
+	// started; EstimatedBitrate is refreshed lazily by each Stats() call sampling
+	// ConnectionStats. The first Stats() sets the baseline, the second measures a
+	// non-zero rate — no background ticker is involved.
 	var mu sync.Mutex
 	var bytesSent uint64
 	conn := &FakeStreamConn{}
@@ -879,13 +883,10 @@ func TestSession_Stats_EstimatedBitrateUpdatedByDetectBitrateChanges(t *testing.
 		mu.Unlock()
 		return quic.ConnectionStats{BytesSent: n}
 	}
-	// Pass config at creation time so the Ticker in detectBitrateChanges
-	// picks up the short interval (it is captured at goroutine start).
 	cfg := &Config{ProbeInterval: 5 * time.Millisecond, ProbeMaxAge: 10 * time.Millisecond}
 	sess := newSession(conn, NewTrackMux(0), nil, cfg, nil, nil, nil)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
-	// Allow detectBitrateChanges at least two ticks: first initializes, second measures.
 	assert.Eventually(t, func() bool {
 		return sess.Stats().EstimatedBitrate > 0
 	}, 200*time.Millisecond, 10*time.Millisecond)
@@ -2891,6 +2892,84 @@ func TestSession_Stats_EstimatedBitrateUpdatedEveryInterval(t *testing.T) {
 
 	secondBitrate := sess.Stats().EstimatedBitrate
 	assert.NotEqual(t, firstBitrate, secondBitrate, "EstimatedBitrate should update every interval even if change is small")
+}
+
+func TestSession_ProbeMonitor_WritesBitrateBackOnInboundStream(t *testing.T) {
+	// Regression guard for the lazy bitrate monitor. The Stats()-based tests
+	// above all refresh EstimatedBitrate via lazy Stats() sampling — none of them
+	// starts the monitor goroutine. This case opens an inbound probe stream
+	// (handleProbeStream → startProbeMonitorOnce) and asserts the monitor writes
+	// the locally-measured bitrate back to the prober over that stream.
+	var statsMu sync.Mutex
+	bytesSent := uint64(100_000)
+	conn := &FakeStreamConn{}
+	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
+		// Each call advances BytesSent so measureBitrate sees a non-zero delta.
+		statsMu.Lock()
+		bytesSent += 100_000
+		n := bytesSent
+		statsMu.Unlock()
+		return quic.ConnectionStats{BytesSent: n}
+	}
+	cfg := &Config{ProbeInterval: 5 * time.Millisecond, ProbeMaxAge: time.Hour, ProbeMaxDelta: 1000.0}
+	session := newSession(conn, NewTrackMux(0), nil, cfg, nil, nil, nil)
+	t.Cleanup(func() { _ = session.CloseWithError(NoError, "") })
+
+	// Inbound probe stream: StreamTypeProbe + one ProbeMessage, then block so
+	// handleProbeStream keeps the stream registered (incomingProbeStream != nil)
+	// and the monitor has somewhere to write back to.
+	var incoming bytes.Buffer
+	require.NoError(t, message.StreamTypeProbe.Encode(&incoming))
+	require.NoError(t, message.ProbeMessage{Bitrate: 1_000_000}.Encode(&incoming))
+	incomingData := incoming.Bytes()
+	unblockRead := make(chan struct{})
+
+	var written bytes.Buffer
+	var writtenMu sync.Mutex
+	probeStream := &FakeQUICStream{}
+	probeStream.ReadFunc = func(p []byte) (int, error) {
+		if len(incomingData) > 0 {
+			n := copy(p, incomingData)
+			incomingData = incomingData[n:]
+			return n, nil
+		}
+		<-unblockRead
+		return 0, io.EOF
+	}
+	probeStream.WriteFunc = func(p []byte) (int, error) {
+		writtenMu.Lock()
+		defer writtenMu.Unlock()
+		return written.Write(p)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		session.processBiStream(probeStream)
+		close(done)
+	}()
+	defer func() {
+		close(unblockRead)
+		<-done
+	}()
+
+	// The first monitor writeback carries Bitrate=0 (the baseline tick); a
+	// subsequent tick must write back a non-zero measured bitrate.
+	assert.Eventually(t, func() bool {
+		writtenMu.Lock()
+		snapshot := make([]byte, written.Len())
+		copy(snapshot, written.Bytes())
+		writtenMu.Unlock()
+		for r := bytes.NewReader(snapshot); ; {
+			var pm message.ProbeMessage
+			if err := pm.Decode(r); err != nil {
+				break
+			}
+			if pm.Bitrate > 0 {
+				return true
+			}
+		}
+		return false
+	}, 500*time.Millisecond, 5*time.Millisecond)
 }
 
 func TestSession_Probe_ConcurrentAccess(t *testing.T) {
