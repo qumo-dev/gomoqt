@@ -14,3 +14,7 @@
 **Learning:** In Go, fallback paths (like non-`io.ByteReader` readers) in hot decoding loops shouldn't use dynamic slice allocations (e.g., `make([]byte, size)`) if the maximum size is small and fixed (like an 8-byte varint). Replacing `make()` with a local fixed-size array (e.g., `var buf [8]byte`) and slicing it `buf[:size]` entirely eliminates heap allocations.
 **Action:** When parsing small, bounded objects like varints from an `io.Reader`, use stack-allocated arrays and take their slices (`buf[:length]`) instead of dynamically allocating slices with `make()`.
 
+
+## 2024-07-17 - O(N^2) Linear Search Outperforms Maps for Small Slices in Go
+**Learning:** In Go, for finding duplicates or validating uniqueness in very small slices (e.g., N <= 16), an O(N^2) nested loop comparison is measurably faster (~57% speedup) than using a `map[T]struct{}`. This avoids heap allocations and element hashing overhead on the happy path.
+**Action:** Always consider using stack-allocated arrays and linear search loops instead of maps for duplicate detection or uniqueness validation when the expected slice size is known to be very small, falling back to maps only for larger sizes.

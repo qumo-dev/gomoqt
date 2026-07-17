@@ -287,17 +287,47 @@ func (b *Broadcast) staleTrackNamesLocked(catalog Catalog) []moqt.TrackName {
 
 // validateCatalogForBroadcast rejects catalog shapes that cannot be routed by Broadcast.
 func validateCatalogForBroadcast(catalog Catalog, catalogTrackName moqt.TrackName) error {
-	seen := make(map[moqt.TrackName]TrackID, len(catalog.Tracks))
-	for _, track := range catalog.Tracks {
+	// Optimization: For typical catalogs, O(N^2) linear search with a small stack array is faster than map allocations.
+	type trackInfo struct {
+		name moqt.TrackName
+		id   TrackID
+	}
+	var seenArray [16]trackInfo
+	var seenMap map[moqt.TrackName]TrackID
+
+	for i, track := range catalog.Tracks {
 		name := moqt.TrackName(track.Name)
 		if name == catalogTrackName {
 			return fmt.Errorf("msf: catalog contains reserved track name %q", catalogTrackName)
 		}
 		id := track.ID(catalog.DefaultNamespace)
-		if previous, ok := seen[name]; ok && previous != id {
-			return fmt.Errorf("msf: broadcast requires unique track names across namespaces; duplicate name %q found for %q and %q", name, previous.String(), id.String())
+
+		if i < len(seenArray) {
+			duplicate := false
+			var previous TrackID
+			for j := 0; j < i; j++ {
+				if seenArray[j].name == name {
+					duplicate = true
+					previous = seenArray[j].id
+					break
+				}
+			}
+			if duplicate && previous != id {
+				return fmt.Errorf("msf: broadcast requires unique track names across namespaces; duplicate name %q found for %q and %q", name, previous.String(), id.String())
+			}
+			seenArray[i] = trackInfo{name: name, id: id}
+		} else {
+			if seenMap == nil {
+				seenMap = make(map[moqt.TrackName]TrackID, len(catalog.Tracks))
+				for j := 0; j < len(seenArray); j++ {
+					seenMap[seenArray[j].name] = seenArray[j].id
+				}
+			}
+			if previous, ok := seenMap[name]; ok && previous != id {
+				return fmt.Errorf("msf: broadcast requires unique track names across namespaces; duplicate name %q found for %q and %q", name, previous.String(), id.String())
+			}
+			seenMap[name] = id
 		}
-		seen[name] = id
 	}
 	return nil
 }
