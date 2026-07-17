@@ -2898,8 +2898,9 @@ func TestSession_ProbeMonitor_WritesBitrateBackOnInboundStream(t *testing.T) {
 	// Regression guard for the lazy bitrate monitor. The Stats()-based tests
 	// above all refresh EstimatedBitrate via lazy Stats() sampling — none of them
 	// starts the monitor goroutine. This case opens an inbound probe stream
-	// (handleProbeStream → startProbeMonitorOnce) and asserts the monitor writes
-	// the locally-measured bitrate back to the prober over that stream.
+	// (handleProbeStream → bitrateTracker.startMonitorOnce) and asserts the
+	// monitor writes the locally-measured bitrate back to the prober over that
+	// stream.
 	var statsMu sync.Mutex
 	bytesSent := uint64(100_000)
 	conn := &FakeStreamConn{}

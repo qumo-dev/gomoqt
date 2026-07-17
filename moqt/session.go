@@ -61,8 +61,6 @@ type Session struct {
 	probeTargetsCh      chan ProbeResult
 
 	bitrateTracker bitrateTracker
-
-	probeMonitorOnce sync.Once // starts the bitrate monitor lazily (only when a probe stream arrives)
 }
 
 func newSession(
@@ -823,7 +821,9 @@ func (sess *Session) handleProbeStream(stream transport.Stream) error {
 	sess.incomingProbeMu.Unlock()
 
 	// Lazily start the bitrate monitor the first time a peer opens a probe stream.
-	sess.startProbeMonitorOnce()
+	sess.bitrateTracker.startMonitorOnce(func() {
+		sess.wg.Go(func() { sess.detectBitrateChanges(sess.bitrateTracker.provider) })
+	})
 
 	defer func() {
 		sess.incomingProbeMu.Lock()
@@ -876,18 +876,6 @@ func (sess *Session) notifyTargets(bitrate uint64) {
 	}
 }
 
-// startProbeMonitorOnce starts the bitrate monitor goroutine the first time a
-// peer opens a probe stream to this session. Sessions that are never probed
-// (the common subscriber case in high-fan-out) never start it — one fewer
-// goroutine per session, preserving EstimatedBitrate via lazy Stats() sampling.
-func (sess *Session) startProbeMonitorOnce() {
-	sess.probeMonitorOnce.Do(func() {
-		if sess.bitrateTracker.provider != nil {
-			sess.wg.Go(func() { sess.detectBitrateChanges(sess.bitrateTracker.provider) })
-		}
-	})
-}
-
 func (sess *Session) detectBitrateChanges(provider probeStatsProvider) {
 	sess.bitrateTracker.monitor(sess.ctx, sess.config.probeInterval(), provider, func(bitrate, rtt uint64) {
 		sess.incomingProbeMu.Lock()
@@ -929,6 +917,24 @@ type bitrateTracker struct {
 
 	mu       sync.Mutex         // guards non-atomic fields (initialized, bytesSent, sampleTime, lastSentAt)
 	provider probeStatsProvider // for lazy EstimatedBitrate sampling (set in newSession)
+
+	// startOnce ensures the bitrate monitor goroutine is launched at most once.
+	startOnce sync.Once
+}
+
+// startMonitorOnce launches the bitrate monitor the first time a peer opens a
+// probe stream. spawn — provided by the Session, which owns the monitor's
+// context, wait group, and on-probe callback — runs at most once, and only when
+// a connection-stats provider is configured. Sessions that are never probed
+// (the common subscriber case in high-fan-out) never launch it: one fewer
+// goroutine per session, with EstimatedBitrate kept fresh via lazy Stats()
+// sampling.
+func (t *bitrateTracker) startMonitorOnce(spawn func()) {
+	t.startOnce.Do(func() {
+		if t.provider != nil {
+			spawn()
+		}
+	})
 }
 
 func (t *bitrateTracker) monitor(ctx context.Context, interval time.Duration, provider probeStatsProvider, onProbe func(bitrate, rtt uint64)) {
