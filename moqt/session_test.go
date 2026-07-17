@@ -1424,8 +1424,8 @@ func TestSession_ProcessBiStream_Probe(t *testing.T) {
 		return quic.ConnectionStats{}
 	}
 
-	// Construct WITH the config; the bitrate monitor captures probeInterval at
-	// construction (stored in the tracker), so it must be set before newSession.
+	// Construct WITH the config — never mutate session.config after newSession:
+	// the lazily-started bitrate monitor reads probeInterval() concurrently.
 	session := newSession(conn, NewTrackMux(0), nil, &Config{ProbeInterval: 5 * time.Millisecond}, nil, nil, nil)
 
 	probeStream := &FakeQUICStream{}
@@ -2919,7 +2919,7 @@ func TestSession_ProbeMonitor_WritesBitrateBackOnInboundStream(t *testing.T) {
 	// Regression guard for the lazy bitrate monitor. The Stats()-based tests
 	// above all refresh EstimatedBitrate via lazy Stats() sampling — none of them
 	// starts the monitor goroutine. This case opens an inbound probe stream
-	// (handleProbeStream → bitrateTracker.startMonitor) and asserts the
+	// (handleProbeStream → startProbeMonitorOnce) and asserts the
 	// monitor writes the locally-measured bitrate back to the prober over that
 	// stream.
 	var statsMu sync.Mutex
