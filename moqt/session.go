@@ -61,6 +61,8 @@ type Session struct {
 	probeTargetsCh      chan ProbeResult
 
 	bitrateTracker bitrateTracker
+
+	probeMonitorOnce sync.Once // starts the bitrate monitor lazily (only when a probe stream arrives)
 }
 
 func newSession(
@@ -101,9 +103,7 @@ func newSession(
 	}
 
 	if provider, ok := conn.(probeStatsProvider); ok {
-		sess.wg.Go(func() {
-			sess.detectBitrateChanges(provider)
-		})
+		sess.bitrateTracker.provider = provider
 	}
 
 	// Listen bidirectional streams
@@ -519,7 +519,9 @@ func (sess *Session) Probe(targetBitrate uint64) (<-chan ProbeResult, error) {
 					}
 					return
 				}
+				sess.bitrateTracker.mu.Lock()
 				sess.bitrateTracker.record(pm.Bitrate, time.Now())
+				sess.bitrateTracker.mu.Unlock()
 
 				// Update the latest probe result, dropping it if the channel buffer is full (i.e. the previous value has not been consumed).
 				select {
@@ -820,6 +822,9 @@ func (sess *Session) handleProbeStream(stream transport.Stream) error {
 	sess.incomingProbeStream = stream
 	sess.incomingProbeMu.Unlock()
 
+	// Lazily start the bitrate monitor the first time a peer opens a probe stream.
+	sess.startProbeMonitorOnce()
+
 	defer func() {
 		sess.incomingProbeMu.Lock()
 		if sess.incomingProbeStream == stream {
@@ -871,6 +876,18 @@ func (sess *Session) notifyTargets(bitrate uint64) {
 	}
 }
 
+// startProbeMonitorOnce starts the bitrate monitor goroutine the first time a
+// peer opens a probe stream to this session. Sessions that are never probed
+// (the common subscriber case in high-fan-out) never start it — one fewer
+// goroutine per session, preserving EstimatedBitrate via lazy Stats() sampling.
+func (sess *Session) startProbeMonitorOnce() {
+	sess.probeMonitorOnce.Do(func() {
+		if sess.bitrateTracker.provider != nil {
+			sess.wg.Go(func() { sess.detectBitrateChanges(sess.bitrateTracker.provider) })
+		}
+	})
+}
+
 func (sess *Session) detectBitrateChanges(provider probeStatsProvider) {
 	sess.bitrateTracker.monitor(sess.ctx, sess.config.probeInterval(), provider, func(bitrate, rtt uint64) {
 		sess.incomingProbeMu.Lock()
@@ -909,6 +926,9 @@ type bitrateTracker struct {
 	estimatedBitrate atomic.Uint64
 	lastSentBitrate  atomic.Uint64
 	lastSentAt       time.Time
+
+	mu       sync.Mutex         // guards non-atomic fields (bytesSent, sampleTime, lastSentAt)
+	provider probeStatsProvider // for lazy EstimatedBitrate sampling (set in newSession)
 }
 
 func (t *bitrateTracker) monitor(ctx context.Context, interval time.Duration, provider probeStatsProvider, onProbe func(bitrate, rtt uint64)) {
@@ -921,7 +941,9 @@ func (t *bitrateTracker) monitor(ctx context.Context, interval time.Duration, pr
 			return
 		case now := <-ticker.C:
 			stats := provider.ConnectionStats()
+			t.mu.Lock()
 			bitrate, ok := t.next(stats, now)
+			t.mu.Unlock()
 
 			if !ok {
 				continue
@@ -985,6 +1007,19 @@ func (t *bitrateTracker) measureBitrate(stats quic.ConnectionStats, now time.Tim
 }
 
 func (t *bitrateTracker) getEstimatedBitrate() uint64 {
+	if t.provider == nil {
+		return t.estimatedBitrate.Load()
+	}
+	// Lazy sampling: compute EstimatedBitrate on demand from local connection
+	// stats. This replaces the eager background monitor goroutine for sessions
+	// that are never probed (subscribers), while still keeping EstimatedBitrate
+	// fresh for any caller of Stats().
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	now := time.Now()
+	stats := t.provider.ConnectionStats()
+	bitrate := t.measureBitrate(stats, now)
+	t.record(bitrate, now)
 	return t.estimatedBitrate.Load()
 }
 
