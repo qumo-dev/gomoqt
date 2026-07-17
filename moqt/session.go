@@ -960,37 +960,32 @@ func (t *bitrateTracker) monitor(ctx context.Context, interval time.Duration, pr
 	}
 }
 
+// next takes one bitrate sample. The caller must hold t.mu. It returns the
+// measured bitrate and whether to notify the prober (first sample, maxAge
+// elapsed, or a large-enough delta). measureBitrate already stored
+// estimatedBitrate, so notifying only advances the throttle bookkeeping that
+// gates how often we write back to the prober.
 func (t *bitrateTracker) next(stats quic.ConnectionStats, now time.Time) (uint64, bool) {
 	bitrate := t.measureBitrate(stats, now)
 
-	if t.lastSentAt.IsZero() {
-		t.recordLocked(bitrate, now)
-		return bitrate, true
+	notify := t.lastSentAt.IsZero() ||
+		now.Sub(t.lastSentAt) >= t.maxAge ||
+		hasDelta(t.lastSentBitrate.Load(), bitrate, t.maxDelta)
+	if notify {
+		t.lastSentBitrate.Store(bitrate)
+		t.lastSentAt = now
 	}
-
-	lastSentBitrate := t.lastSentBitrate.Load()
-	if now.Sub(t.lastSentAt) >= t.maxAge ||
-		hasDelta(lastSentBitrate, bitrate, t.maxDelta) {
-		t.recordLocked(bitrate, now)
-		return bitrate, true
-	}
-
-	return bitrate, false
+	return bitrate, notify
 }
 
-// recordLocked updates the stored bitrate; the caller must already hold t.mu.
-func (t *bitrateTracker) recordLocked(bitrate uint64, now time.Time) {
-	t.estimatedBitrate.Store(bitrate)
-	t.lastSentBitrate.Store(bitrate)
-	t.lastSentAt = now
-}
-
-// record is the concurrency-safe form of recordLocked, for callers that do not
-// hold t.mu (e.g. Session.Probe recording a peer-reported bitrate).
+// record stores a bitrate sample from outside the monitor loop (e.g. a
+// peer-reported PROBE result) and locks t.mu itself, so callers need not.
 func (t *bitrateTracker) record(bitrate uint64, now time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.recordLocked(bitrate, now)
+	t.estimatedBitrate.Store(bitrate)
+	t.lastSentBitrate.Store(bitrate)
+	t.lastSentAt = now
 }
 
 func (t *bitrateTracker) measureBitrate(stats quic.ConnectionStats, now time.Time) uint64 {
