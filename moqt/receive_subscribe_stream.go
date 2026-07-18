@@ -26,16 +26,16 @@ type receiveSubscribeStream struct {
 	responseStarted bool
 }
 
-// subscribeUpdated blocks until the peer sends the next SUBSCRIBE_UPDATE,
-// applies it as the current config, and returns that config. It returns an
-// error once the subscribe stream ends or is closed (the terminal signal for an
-// update-reading loop).
+// readUpdate blocks until the peer sends the next SUBSCRIBE_UPDATE, applies it
+// as the current config, and returns that config. It returns an error once the
+// subscribe stream ends or is closed (the terminal signal for an update-reading
+// loop).
 //
 // It reads the stream, so at most one call may be in flight at a time; run it
 // from a single caller-owned goroutine if the publisher wants to track updates.
 // A subscription whose publisher never calls it (the common relay fan-out case)
 // spends no goroutine on update reading at all.
-func (substr *receiveSubscribeStream) subscribeUpdated() (*SubscribeConfig, error) {
+func (substr *receiveSubscribeStream) readUpdate() (*SubscribeConfig, error) {
 	var updateMsg message.SubscribeUpdateMessage
 	if err := updateMsg.Decode(substr.stream); err != nil {
 		return nil, err

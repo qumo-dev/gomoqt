@@ -17,9 +17,9 @@ import (
 )
 
 // newReceiveSubscribeStream no longer starts any background goroutine: the
-// subscribe stream is read only on demand by subscribeUpdated, from the caller's
-// own goroutine. So these tests need no goroutine-reaping (no synctest / sleeps)
-// except where they explicitly drive subscribeUpdated concurrently.
+// subscribe stream is read only on demand by readUpdate, from the caller's own
+// goroutine. So these tests need no goroutine-reaping (no synctest / sleeps)
+// except where they explicitly drive readUpdate concurrently.
 
 func TestNewReceiveSubscribeStream(t *testing.T) {
 	tests := map[string]struct {
@@ -47,7 +47,7 @@ func TestNewReceiveSubscribeStream(t *testing.T) {
 // TestReceiveSubscribeStream_ConstructorReadsNothing is the core property behind
 // the goroutine reduction: constructing a subscription must not read the stream
 // (i.e. must not start a background reader). The stream is touched only when the
-// publisher opts into updates by calling subscribeUpdated.
+// publisher opts into updates by calling readUpdate.
 func TestReceiveSubscribeStream_ConstructorReadsNothing(t *testing.T) {
 	var reads atomic.Int64
 	mockStream := &FakeQUICStream{
@@ -103,22 +103,22 @@ func TestReceiveSubscribeStream_TrackConfig(t *testing.T) {
 	}
 }
 
-func TestReceiveSubscribeStream_SubscribeUpdated(t *testing.T) {
-	// One SUBSCRIBE_UPDATE waiting on the stream: subscribeUpdated returns its
-	// config and makes it the current TrackConfig.
+func TestReceiveSubscribeStream_ReadUpdate(t *testing.T) {
+	// One SUBSCRIBE_UPDATE waiting on the stream: readUpdate returns its config
+	// and makes it the current TrackConfig.
 	buf := &bytes.Buffer{}
 	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 5}.Encode(buf))
 	mockStream := &FakeQUICStream{ReadFunc: buf.Read}
 
 	rss := newReceiveSubscribeStream(SubscribeID(123), mockStream, &SubscribeConfig{Priority: TrackPriority(1)})
 
-	got, err := rss.subscribeUpdated()
+	got, err := rss.readUpdate()
 	require.NoError(t, err)
 	assert.Equal(t, TrackPriority(5), got.Priority, "returned config carries the update")
 	assert.Equal(t, TrackPriority(5), rss.TrackConfig().Priority, "TrackConfig reflects the update")
 }
 
-func TestReceiveSubscribeStream_SubscribeUpdated_Sequence(t *testing.T) {
+func TestReceiveSubscribeStream_ReadUpdate_Sequence(t *testing.T) {
 	// Successive calls return successive updates in order.
 	buf := &bytes.Buffer{}
 	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 1}.Encode(buf))
@@ -127,21 +127,21 @@ func TestReceiveSubscribeStream_SubscribeUpdated_Sequence(t *testing.T) {
 
 	rss := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
-	first, err := rss.subscribeUpdated()
+	first, err := rss.readUpdate()
 	require.NoError(t, err)
 	assert.Equal(t, TrackPriority(1), first.Priority)
 
-	second, err := rss.subscribeUpdated()
+	second, err := rss.readUpdate()
 	require.NoError(t, err)
 	assert.Equal(t, TrackPriority(2), second.Priority)
 }
 
-func TestReceiveSubscribeStream_SubscribeUpdated_ErrorOnStreamEnd(t *testing.T) {
-	// A zero-value FakeQUICStream returns io.EOF on Read; subscribeUpdated must
-	// surface an error so a caller's read loop terminates.
+func TestReceiveSubscribeStream_ReadUpdate_ErrorOnStreamEnd(t *testing.T) {
+	// A zero-value FakeQUICStream returns io.EOF on Read; readUpdate must surface
+	// an error so a caller's read loop terminates.
 	rss := newReceiveSubscribeStream(SubscribeID(1), &FakeQUICStream{}, &SubscribeConfig{})
 
-	got, err := rss.subscribeUpdated()
+	got, err := rss.readUpdate()
 	assert.Error(t, err, "stream end must return an error")
 	assert.Nil(t, got)
 }

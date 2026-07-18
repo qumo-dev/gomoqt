@@ -276,7 +276,7 @@ func (w *TrackWriter) TrackConfig() *SubscribeConfig {
 	return w.subscribeStream.TrackConfig()
 }
 
-// SubscribeUpdated blocks until the subscriber sends the next SUBSCRIBE_UPDATE,
+// ReadUpdate blocks until the subscriber sends the next SUBSCRIBE_UPDATE,
 // applies it as the track's current config, and returns that config. It returns
 // an error once the subscribe stream ends or is closed.
 //
@@ -284,11 +284,11 @@ func (w *TrackWriter) TrackConfig() *SubscribeConfig {
 // publisher that wants to follow subscriber updates should call it in a loop
 // from a single goroutine. Publishers that ignore updates simply never call it
 // and spend no goroutine on them.
-func (w *TrackWriter) SubscribeUpdated() (*SubscribeConfig, error) {
+func (w *TrackWriter) ReadUpdate() (*SubscribeConfig, error) {
 	if w.subscribeStream == nil {
 		return nil, ErrClosedSession
 	}
-	return w.subscribeStream.subscribeUpdated()
+	return w.subscribeStream.readUpdate()
 }
 
 // openGroupWithSequence is the internal implementation for opening a group with a specific sequence.

@@ -626,9 +626,9 @@ func TestTrackWriter_WriteInfo(t *testing.T) {
 	assert.Equal(t, uint64(100), okMsg.PublisherMaxLatency)
 }
 
-func TestTrackWriter_SubscribeUpdated(t *testing.T) {
+func TestTrackWriter_ReadUpdate(t *testing.T) {
 	// A SUBSCRIBE_UPDATE waiting on the subscribe stream is returned by
-	// SubscribeUpdated and applied to the track's config.
+	// ReadUpdate and applied to the track's config.
 	buf := &bytes.Buffer{}
 	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 9}.Encode(buf))
 	mockStream := &FakeQUICStream{ReadFunc: buf.Read}
@@ -640,17 +640,17 @@ func TestTrackWriter_SubscribeUpdated(t *testing.T) {
 
 	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {})
 
-	got, err := sender.SubscribeUpdated()
+	got, err := sender.ReadUpdate()
 	require.NoError(t, err)
 	assert.Equal(t, TrackPriority(9), got.Priority)
 	assert.Equal(t, TrackPriority(9), sender.TrackConfig().Priority)
 }
 
-func TestTrackWriter_SubscribeUpdated_NilSubscribeStream(t *testing.T) {
+func TestTrackWriter_ReadUpdate_NilSubscribeStream(t *testing.T) {
 	// Defensive: a TrackWriter with no subscribe stream returns a terminal error
 	// so a caller's update loop exits rather than spinning.
 	w := &TrackWriter{}
-	got, err := w.SubscribeUpdated()
+	got, err := w.ReadUpdate()
 	assert.ErrorIs(t, err, ErrClosedSession)
 	assert.Nil(t, got)
 }
