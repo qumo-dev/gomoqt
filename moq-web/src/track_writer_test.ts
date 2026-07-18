@@ -3,9 +3,10 @@ import { spy } from "@std/testing/mock";
 import { TrackWriter } from "./track_writer.ts";
 import { background, withCancelCause } from "@okdaichi/golikejs/context";
 import { SendStream } from "./internal/webtransport/mod.ts";
-import { MockSendStream, MockStream } from "./mock_stream_test.ts";
+import { MockReceiveStream, MockSendStream, MockStream } from "./mock_stream_test.ts";
 import { ReceiveSubscribeStream } from "./subscribe_stream.ts";
-import { SubscribeMessage } from "./internal/message/mod.ts";
+import { SubscribeMessage, SubscribeUpdateMessage } from "./internal/message/mod.ts";
+import { EOFError } from "@okdaichi/golikejs/io";
 import { GroupErrorCode } from "./error.ts";
 
 Deno.test("TrackWriter", async (t) => {
@@ -341,6 +342,82 @@ Deno.test("TrackWriter", async (t) => {
 			assertInstanceOf(err, Error);
 			assertEquals((err as Error).message, "track closed");
 			assertEquals(openCalled, false);
+		},
+	);
+	await t.step(
+		"TrackWriter.readUpdate returns the next update and refreshes config",
+		async () => {
+			const [ctx] = withCancelCause(background());
+			// Encode a SUBSCRIBE_UPDATE to bytes for the readable side.
+			const parts: Uint8Array[] = [];
+			await new SubscribeUpdateMessage({ subscriberPriority: 7 }).encode({
+				write: async (p: Uint8Array) => {
+					parts.push(new Uint8Array(p));
+					return [p.length, undefined] as [number, Error | undefined];
+				},
+			});
+			const data = new Uint8Array(parts.reduce((n, a) => n + a.length, 0));
+			let off = 0;
+			for (const a of parts) {
+				data.set(a, off);
+				off += a.length;
+			}
+			let readOff = 0;
+			const readable = new MockReceiveStream({
+				read: spy(async (p: Uint8Array) => {
+					if (readOff >= data.length) {
+						return [0, new EOFError()] as [number, Error | undefined];
+					}
+					const n = Math.min(p.length, data.length - readOff);
+					p.set(data.subarray(readOff, readOff + n));
+					readOff += n;
+					return [n, undefined] as [number, Error | undefined];
+				}),
+			});
+			const stream = new MockStream({ writable: new MockSendStream({}), readable });
+			const subscribe = new SubscribeMessage({
+				subscribeId: 99,
+				broadcastPath: "/test",
+				trackName: "test",
+				subscriberPriority: 0,
+			});
+			const rss = new ReceiveSubscribeStream(ctx, stream, subscribe);
+			const openUni = async () =>
+				[new MockSendStream({}), undefined] as [SendStream, undefined];
+			const tw = new TrackWriter("/test", "test", rss, openUni);
+
+			const [cfg, err] = await tw.readUpdate();
+
+			assertEquals(err, undefined);
+			assertEquals(cfg?.priority, 7);
+			assertEquals(tw.config.priority, 7);
+		},
+	);
+	await t.step(
+		"TrackWriter.readUpdate returns an error when the stream ends",
+		async () => {
+			const [ctx] = withCancelCause(background());
+			const readable = new MockReceiveStream({
+				read: spy(async (_p: Uint8Array) => {
+					return [0, new EOFError()] as [number, Error | undefined];
+				}),
+			});
+			const stream = new MockStream({ writable: new MockSendStream({}), readable });
+			const subscribe = new SubscribeMessage({
+				subscribeId: 99,
+				broadcastPath: "/test",
+				trackName: "test",
+				subscriberPriority: 0,
+			});
+			const rss = new ReceiveSubscribeStream(ctx, stream, subscribe);
+			const openUni = async () =>
+				[new MockSendStream({}), undefined] as [SendStream, undefined];
+			const tw = new TrackWriter("/test", "test", rss, openUni);
+
+			const [cfg, err] = await tw.readUpdate();
+
+			assertEquals(cfg, undefined);
+			assertInstanceOf(err, EOFError);
 		},
 	);
 });
