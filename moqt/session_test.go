@@ -2994,6 +2994,43 @@ func TestSession_ProbeMonitor_WritesBitrateBackOnInboundStream(t *testing.T) {
 	}, 500*time.Millisecond, 5*time.Millisecond)
 }
 
+func TestSession_GetEstimatedBitrate_PassiveWhileMonitorRunning(t *testing.T) {
+	// When the monitor owns the sampling baseline (monitorRunning set), a
+	// getEstimatedBitrate/Stats() call must read the stored value passively and
+	// must NOT consume the byte-delta window (i.e. must not call ConnectionStats
+	// or advance sampleTime/bytesSent).
+	var statsCalls atomic.Int64
+	conn := &FakeStreamConn{}
+	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
+		statsCalls.Add(1)
+		return quic.ConnectionStats{BytesSent: 1}
+	}
+	tr := newBitrateTracker(&Config{}, conn)
+	tr.monitorRunning.Store(true)
+	tr.estimatedBitrate.Store(4242)
+
+	got := tr.getEstimatedBitrate()
+
+	assert.Equal(t, uint64(4242), got, "must return the monitor's stored value")
+	assert.Zero(t, statsCalls.Load(), "must not sample ConnectionStats while the monitor runs")
+}
+
+func TestSession_GetEstimatedBitrate_LazySamplesWithoutMonitor(t *testing.T) {
+	// Without a monitor, getEstimatedBitrate samples ConnectionStats on demand:
+	// the first call sets the baseline (returns 0), the second measures a delta.
+	var bytesSent uint64
+	conn := &FakeStreamConn{}
+	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
+		bytesSent += 100_000
+		return quic.ConnectionStats{BytesSent: bytesSent}
+	}
+	tr := newBitrateTracker(&Config{}, conn)
+
+	assert.Zero(t, tr.getEstimatedBitrate(), "first sample sets the baseline")
+	time.Sleep(2 * time.Millisecond)
+	assert.NotZero(t, tr.getEstimatedBitrate(), "second sample measures a non-zero rate")
+}
+
 func TestSession_Probe_ConcurrentAccess(t *testing.T) {
 	ctx := t.Context()
 

@@ -876,6 +876,7 @@ func (sess *Session) notifyTargets(bitrate uint64) {
 func (sess *Session) startProbeMonitorOnce() {
 	sess.probeMonitorOnce.Do(func() {
 		if sess.bitrateTracker.provider != nil {
+			sess.bitrateTracker.monitorRunning.Store(true)
 			sess.wg.Go(func() { sess.detectBitrateChanges(sess.bitrateTracker.provider) })
 		}
 	})
@@ -922,6 +923,13 @@ type bitrateTracker struct {
 
 	mu       sync.Mutex         // guards non-atomic fields (initialized, bytesSent, sampleTime, lastSentAt)
 	provider probeStatsProvider // connection-stats source; nil if the conn exposes none
+
+	// monitorRunning is set once the background monitor goroutine starts (a
+	// probe stream arrived). While set, the monitor owns the sampling baseline
+	// and keeps estimatedBitrate fresh, so getEstimatedBitrate reads it
+	// passively instead of sampling — otherwise a Stats() call would consume the
+	// monitor's byte-delta window and understate its next writeback to the prober.
+	monitorRunning atomic.Bool
 }
 
 // newBitrateTracker builds a tracker for a session. provider is nil when the
@@ -1014,14 +1022,17 @@ func (t *bitrateTracker) measureBitrate(stats quic.ConnectionStats, now time.Tim
 }
 
 func (t *bitrateTracker) getEstimatedBitrate() uint64 {
-	if t.provider == nil {
+	// When the monitor goroutine is running it owns the sampling baseline and
+	// keeps estimatedBitrate fresh; read it passively so Stats() does not consume
+	// the monitor's byte-delta window. This also covers the nil-provider case
+	// (no monitor, no lazy sampling — estimatedBitrate stays whatever it was).
+	if t.provider == nil || t.monitorRunning.Load() {
 		return t.estimatedBitrate.Load()
 	}
-	// Lazy sampling: compute EstimatedBitrate on demand from local connection
-	// stats. This replaces the eager background monitor goroutine for sessions
-	// that are never probed (subscribers), while still keeping EstimatedBitrate
-	// fresh for any caller of Stats(). Stats() is intended to be called at
-	// monitoring cadence, not per-frame: each call samples over the window
+	// Lazy sampling: no monitor is running (a never-probed session), so compute
+	// EstimatedBitrate on demand from local connection stats — this replaces the
+	// eager background monitor for subscribers. Stats() is intended to be called
+	// at monitoring cadence, not per-frame: each call samples over the window
 	// elapsed since the last call, so very frequent polling yields noisy values.
 	now := time.Now()
 	stats := t.provider.ConnectionStats()
