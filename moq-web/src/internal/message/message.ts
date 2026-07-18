@@ -20,6 +20,11 @@ export { bytesLen, stringLen, varintLen };
 // Maximum bytes length (1 GiB)
 export const MAX_BYTES_LENGTH = 1 << 30;
 
+// Shared UTF-8 decoder. `TextDecoder.decode(bytes)` (no `{ stream: true }`) is
+// stateless per call, so a single instance is safe to reuse and avoids the
+// ~150 ns per-call construction cost. Mirrors the shared `utf8Encoder` below.
+const utf8Decoder = new TextDecoder();
+
 /**
  * Reads exactly len(p) bytes from r into p.
  * Like Go's io.ReadFull.
@@ -250,7 +255,7 @@ export async function readString(
 	if (err) {
 		return ["", n, err];
 	}
-	const str = new TextDecoder().decode(bytes);
+	const str = utf8Decoder.decode(bytes);
 	return [str, n, undefined];
 }
 
@@ -344,7 +349,7 @@ export function parseBytes(
  */
 export function parseString(buf: Uint8Array, offset: number): [string, number] {
 	const [bytes, n] = parseBytes(buf, offset);
-	const str = new TextDecoder().decode(bytes);
+	const str = utf8Decoder.decode(bytes);
 	return [str, n];
 }
 
