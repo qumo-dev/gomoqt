@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -866,7 +867,31 @@ func TestSession_Stats_EstimatedBitrateZeroBeforeProbe(t *testing.T) {
 	assert.Equal(t, uint64(0), stats.EstimatedBitrate)
 }
 
-func TestSession_Stats_EstimatedBitrateUpdatedByDetectBitrateChanges(t *testing.T) {
+func TestSession_LazyMonitor_NoGoroutineBeforeProbe(t *testing.T) {
+	// The whole point of the lazy bitrate monitor: a session that is never
+	// probed must not run the background monitor goroutine. Verify by inspecting
+	// the live goroutine stacks — none should be blocked in bitrateTracker.monitor.
+	conn := &FakeStreamConn{}
+	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
+		return quic.ConnectionStats{BytesSent: 1}
+	}
+	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil)
+	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
+
+	// Let newSession's own goroutines (handleBiStreams, handleUniStreams) settle.
+	time.Sleep(50 * time.Millisecond)
+
+	buf := make([]byte, 1<<20)
+	n := runtime.Stack(buf, true)
+	assert.NotContains(t, string(buf[:n]), "(*bitrateTracker).monitor",
+		"non-probed session must not run the bitrate monitor goroutine")
+}
+
+func TestSession_Stats_EstimatedBitrateUpdatedByLazySampling(t *testing.T) {
+	// For a session that is never probed, the bitrate monitor goroutine is never
+	// started; EstimatedBitrate is refreshed lazily by each Stats() call sampling
+	// ConnectionStats. The first Stats() sets the baseline, the second measures a
+	// non-zero rate — no background ticker is involved.
 	var mu sync.Mutex
 	var bytesSent uint64
 	conn := &FakeStreamConn{}
@@ -879,13 +904,10 @@ func TestSession_Stats_EstimatedBitrateUpdatedByDetectBitrateChanges(t *testing.
 		mu.Unlock()
 		return quic.ConnectionStats{BytesSent: n}
 	}
-	// Pass config at creation time so the Ticker in detectBitrateChanges
-	// picks up the short interval (it is captured at goroutine start).
 	cfg := &Config{ProbeInterval: 5 * time.Millisecond, ProbeMaxAge: 10 * time.Millisecond}
 	sess := newSession(conn, NewTrackMux(0), nil, cfg, nil, nil, nil)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
-	// Allow detectBitrateChanges at least two ticks: first initializes, second measures.
 	assert.Eventually(t, func() bool {
 		return sess.Stats().EstimatedBitrate > 0
 	}, 200*time.Millisecond, 10*time.Millisecond)
@@ -1402,8 +1424,8 @@ func TestSession_ProcessBiStream_Probe(t *testing.T) {
 		return quic.ConnectionStats{}
 	}
 
-	// Construct WITH the config — never mutate session.config after newSession,
-	// because detectBitrateChanges (started inside newSession) reads it concurrently.
+	// Construct WITH the config — never mutate session.config after newSession:
+	// the lazily-started bitrate monitor reads probeInterval() concurrently.
 	session := newSession(conn, NewTrackMux(0), nil, &Config{ProbeInterval: 5 * time.Millisecond}, nil, nil, nil)
 
 	probeStream := &FakeQUICStream{}
@@ -2891,6 +2913,122 @@ func TestSession_Stats_EstimatedBitrateUpdatedEveryInterval(t *testing.T) {
 
 	secondBitrate := sess.Stats().EstimatedBitrate
 	assert.NotEqual(t, firstBitrate, secondBitrate, "EstimatedBitrate should update every interval even if change is small")
+}
+
+func TestSession_ProbeMonitor_WritesBitrateBackOnInboundStream(t *testing.T) {
+	// Regression guard for the lazy bitrate monitor. The Stats()-based tests
+	// above all refresh EstimatedBitrate via lazy Stats() sampling — none of them
+	// starts the monitor goroutine. This case opens an inbound probe stream
+	// (handleProbeStream → startProbeMonitorOnce) and asserts the
+	// monitor writes the locally-measured bitrate back to the prober over that
+	// stream.
+	var statsMu sync.Mutex
+	bytesSent := uint64(100_000)
+	conn := &FakeStreamConn{}
+	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
+		// Each call advances BytesSent so measureBitrate sees a non-zero delta.
+		statsMu.Lock()
+		bytesSent += 100_000
+		n := bytesSent
+		statsMu.Unlock()
+		return quic.ConnectionStats{BytesSent: n}
+	}
+	cfg := &Config{ProbeInterval: 5 * time.Millisecond, ProbeMaxAge: time.Hour, ProbeMaxDelta: 1000.0}
+	session := newSession(conn, NewTrackMux(0), nil, cfg, nil, nil, nil)
+	t.Cleanup(func() { _ = session.CloseWithError(NoError, "") })
+
+	// Inbound probe stream: StreamTypeProbe + one ProbeMessage, then block so
+	// handleProbeStream keeps the stream registered (incomingProbeStream != nil)
+	// and the monitor has somewhere to write back to.
+	var incoming bytes.Buffer
+	require.NoError(t, message.StreamTypeProbe.Encode(&incoming))
+	require.NoError(t, message.ProbeMessage{Bitrate: 1_000_000}.Encode(&incoming))
+	incomingData := incoming.Bytes()
+	unblockRead := make(chan struct{})
+
+	var written bytes.Buffer
+	var writtenMu sync.Mutex
+	probeStream := &FakeQUICStream{}
+	probeStream.ReadFunc = func(p []byte) (int, error) {
+		if len(incomingData) > 0 {
+			n := copy(p, incomingData)
+			incomingData = incomingData[n:]
+			return n, nil
+		}
+		<-unblockRead
+		return 0, io.EOF
+	}
+	probeStream.WriteFunc = func(p []byte) (int, error) {
+		writtenMu.Lock()
+		defer writtenMu.Unlock()
+		return written.Write(p)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		session.processBiStream(probeStream)
+		close(done)
+	}()
+	defer func() {
+		close(unblockRead)
+		<-done
+	}()
+
+	// The first monitor writeback carries Bitrate=0 (the baseline tick); a
+	// subsequent tick must write back a non-zero measured bitrate.
+	assert.Eventually(t, func() bool {
+		writtenMu.Lock()
+		snapshot := make([]byte, written.Len())
+		copy(snapshot, written.Bytes())
+		writtenMu.Unlock()
+		for r := bytes.NewReader(snapshot); ; {
+			var pm message.ProbeMessage
+			if err := pm.Decode(r); err != nil {
+				break
+			}
+			if pm.Bitrate > 0 {
+				return true
+			}
+		}
+		return false
+	}, 500*time.Millisecond, 5*time.Millisecond)
+}
+
+func TestSession_GetEstimatedBitrate_PassiveWhileMonitorRunning(t *testing.T) {
+	// When the monitor owns the sampling baseline (monitorRunning set), a
+	// getEstimatedBitrate/Stats() call must read the stored value passively and
+	// must NOT consume the byte-delta window (i.e. must not call ConnectionStats
+	// or advance sampleTime/bytesSent).
+	var statsCalls atomic.Int64
+	conn := &FakeStreamConn{}
+	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
+		statsCalls.Add(1)
+		return quic.ConnectionStats{BytesSent: 1}
+	}
+	tr := newBitrateTracker(&Config{}, conn)
+	tr.monitorRunning.Store(true)
+	tr.estimatedBitrate.Store(4242)
+
+	got := tr.getEstimatedBitrate()
+
+	assert.Equal(t, uint64(4242), got, "must return the monitor's stored value")
+	assert.Zero(t, statsCalls.Load(), "must not sample ConnectionStats while the monitor runs")
+}
+
+func TestSession_GetEstimatedBitrate_LazySamplesWithoutMonitor(t *testing.T) {
+	// Without a monitor, getEstimatedBitrate samples ConnectionStats on demand:
+	// the first call sets the baseline (returns 0), the second measures a delta.
+	var bytesSent uint64
+	conn := &FakeStreamConn{}
+	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
+		bytesSent += 100_000
+		return quic.ConnectionStats{BytesSent: bytesSent}
+	}
+	tr := newBitrateTracker(&Config{}, conn)
+
+	assert.Zero(t, tr.getEstimatedBitrate(), "first sample sets the baseline")
+	time.Sleep(2 * time.Millisecond)
+	assert.NotZero(t, tr.getEstimatedBitrate(), "second sample measures a non-zero rate")
 }
 
 func TestSession_Probe_ConcurrentAccess(t *testing.T) {
