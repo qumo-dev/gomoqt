@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"sync"
+	"sync/atomic"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
@@ -15,91 +16,67 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The tests below wrap goroutine-starting setup in synctest.Test. The background
-// goroutine started by newReceiveSubscribeStream reads until Decode errors
-// (EOF for a zero-value FakeQUICStream), then exits. synctest.Test guarantees
-// that goroutine has exited before the test body returns — so the assertions
-// observe the final state deterministically, with no time.Sleep. (mux_test.go
-// and session_test.go use the same pattern.)
+// newReceiveSubscribeStream no longer starts any background goroutine: the
+// subscribe stream is read only on demand by readUpdate, from the caller's own
+// goroutine. So these tests need no goroutine-reaping (no synctest / sleeps)
+// except where they explicitly drive readUpdate concurrently.
 
 func TestNewReceiveSubscribeStream(t *testing.T) {
 	tests := map[string]struct {
 		subscribeID SubscribeID
 		config      *SubscribeConfig
 	}{
-		"valid creation": {
-			subscribeID: SubscribeID(123),
-			config: &SubscribeConfig{
-				Priority: TrackPriority(1),
-			},
-		},
-		"zero subscribe ID": {
-			subscribeID: SubscribeID(0),
-			config: &SubscribeConfig{
-				Priority: TrackPriority(0),
-			},
-		},
+		"valid creation":    {subscribeID: SubscribeID(123), config: &SubscribeConfig{Priority: TrackPriority(1)}},
+		"zero subscribe ID": {subscribeID: SubscribeID(0), config: &SubscribeConfig{Priority: TrackPriority(0)}},
 		"large subscribe ID": {
 			subscribeID: SubscribeID(4294967295),
-			config: &SubscribeConfig{
-				Priority: TrackPriority(255),
-			},
+			config:      &SubscribeConfig{Priority: TrackPriority(255)},
 		},
-		"nil config": {
-			subscribeID: SubscribeID(1),
-			config:      nil,
-		},
+		"nil config": {subscribeID: SubscribeID(1), config: nil},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				mockStream := &FakeQUICStream{}
+			rss := newReceiveSubscribeStream(tt.subscribeID, &FakeQUICStream{}, tt.config)
 
-				rss := newReceiveSubscribeStream(tt.subscribeID, mockStream, tt.config)
-
-				assert.NotNil(t, rss, "newReceiveSubscribeStream should not return nil")
-				assert.Equal(t, tt.subscribeID, rss.SubscribeID(), "SubscribeID should match")
-				assert.NotNil(t, rss.Updated(), "Updated channel should not be nil")
-			})
+			assert.NotNil(t, rss, "newReceiveSubscribeStream should not return nil")
+			assert.Equal(t, tt.subscribeID, rss.SubscribeID(), "SubscribeID should match")
 		})
 	}
 }
 
-func TestReceiveSubscribeStream_SubscribeID(t *testing.T) {
-	tests := map[string]struct {
-		subscribeID SubscribeID
-	}{
-		"minimum value": {
-			subscribeID: SubscribeID(0),
-		},
-		"small value": {
-			subscribeID: SubscribeID(1),
-		},
-		"medium value": {
-			subscribeID: SubscribeID(1000),
-		},
-		"large value": {
-			subscribeID: SubscribeID(1000000),
-		},
-		"maximum uint62": {
-			subscribeID: SubscribeID(1<<(64-2) - 1), // maxVarInt8
+// TestReceiveSubscribeStream_ConstructorReadsNothing is the core property behind
+// the goroutine reduction: constructing a subscription must not read the stream
+// (i.e. must not start a background reader). The stream is touched only when the
+// publisher opts into updates by calling readUpdate.
+func TestReceiveSubscribeStream_ConstructorReadsNothing(t *testing.T) {
+	var reads atomic.Int64
+	mockStream := &FakeQUICStream{
+		ReadFunc: func(p []byte) (int, error) {
+			reads.Add(1)
+			select {} // a real reader would block here
 		},
 	}
 
-	for name, tt := range tests {
+	rss := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
+	t.Cleanup(func() { _ = rss.closeWithError(SubscribeErrorCodeInternal) })
+
+	// A background reader, if one existed, would have called Read by now.
+	time.Sleep(20 * time.Millisecond)
+	assert.Zero(t, reads.Load(), "constructor must not read the subscribe stream")
+}
+
+func TestReceiveSubscribeStream_SubscribeID(t *testing.T) {
+	tests := map[string]SubscribeID{
+		"minimum value":  SubscribeID(0),
+		"small value":    SubscribeID(1),
+		"medium value":   SubscribeID(1000),
+		"large value":    SubscribeID(1000000),
+		"maximum uint62": SubscribeID(1<<(64-2) - 1), // maxVarInt8
+	}
+	for name, id := range tests {
 		t.Run(name, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				mockStream := &FakeQUICStream{}
-
-				config := &SubscribeConfig{
-					Priority: TrackPriority(1),
-				}
-
-				rss := newReceiveSubscribeStream(tt.subscribeID, mockStream, config)
-
-				result := rss.SubscribeID()
-				assert.Equal(t, tt.subscribeID, result, "SubscribeID should match expected value")
-			})
+			rss := newReceiveSubscribeStream(id, &FakeQUICStream{}, &SubscribeConfig{Priority: TrackPriority(1)})
+			assert.Equal(t, id, rss.SubscribeID(), "SubscribeID should match expected value")
 		})
 	}
 }
@@ -108,319 +85,167 @@ func TestReceiveSubscribeStream_TrackConfig(t *testing.T) {
 	tests := map[string]struct {
 		config *SubscribeConfig
 	}{
-		"valid config": {
-			config: &SubscribeConfig{
-				Priority: TrackPriority(10),
-			},
-		},
-		"zero values": {
-			config: &SubscribeConfig{
-				Priority: TrackPriority(0),
-			},
-		},
-		"nil config": {
-			config: nil,
-		},
+		"valid config": {config: &SubscribeConfig{Priority: TrackPriority(10)}},
+		"zero values":  {config: &SubscribeConfig{Priority: TrackPriority(0)}},
+		"nil config":   {config: nil},
 	}
-
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				subscribeID := SubscribeID(123)
-				mockStream := &FakeQUICStream{}
+			rss := newReceiveSubscribeStream(SubscribeID(123), &FakeQUICStream{}, tt.config)
 
-				rss := newReceiveSubscribeStream(subscribeID, mockStream, tt.config)
+			resultConfig := rss.TrackConfig()
 
-				resultConfig := rss.TrackConfig()
-
-				assert.NotNil(t, resultConfig, "TrackConfig should not be nil")
-				if tt.config != nil {
-					assert.Equal(t, tt.config.Priority, resultConfig.Priority, "TrackPriority should match")
-				}
-			})
+			assert.NotNil(t, resultConfig, "TrackConfig should not be nil")
+			if tt.config != nil {
+				assert.Equal(t, tt.config.Priority, resultConfig.Priority, "TrackPriority should match")
+			}
 		})
 	}
 }
 
-func TestReceiveSubscribeStream_Updated(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		subscribeID := SubscribeID(123)
-		mockStream := &FakeQUICStream{}
+func TestReceiveSubscribeStream_ReadUpdate(t *testing.T) {
+	// One SUBSCRIBE_UPDATE waiting on the stream: readUpdate returns its config
+	// and makes it the current TrackConfig.
+	buf := &bytes.Buffer{}
+	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 5}.Encode(buf))
+	mockStream := &FakeQUICStream{ReadFunc: buf.Read}
 
-		config := &SubscribeConfig{
-			Priority: TrackPriority(1),
-		}
+	rss := newReceiveSubscribeStream(SubscribeID(123), mockStream, &SubscribeConfig{Priority: TrackPriority(1)})
 
-		rss := newReceiveSubscribeStream(subscribeID, mockStream, config)
-
-		updatedCh := rss.Updated()
-		assert.NotNil(t, updatedCh, "Updated channel should not be nil")
-
-		// EOF stops the background goroutine; it does not close Updated().
-		assert.NotNil(t, updatedCh)
-	})
+	got, err := rss.readUpdate()
+	require.NoError(t, err)
+	assert.Equal(t, TrackPriority(5), got.Priority, "returned config carries the update")
+	assert.Equal(t, TrackPriority(5), rss.TrackConfig().Priority, "TrackConfig reflects the update")
 }
 
-func TestReceiveSubscribeStream_ListenUpdates_WithSubscribeUpdateMessage(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		subscribeID := SubscribeID(123)
+func TestReceiveSubscribeStream_ReadUpdate_Sequence(t *testing.T) {
+	// Successive calls return successive updates in order.
+	buf := &bytes.Buffer{}
+	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 1}.Encode(buf))
+	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 2}.Encode(buf))
+	mockStream := &FakeQUICStream{ReadFunc: buf.Read}
 
-		// Create a valid SubscribeUpdateMessage
-		updateMsg := message.SubscribeUpdateMessage{
-			SubscriberPriority: 5,
-		}
+	rss := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
-		// Encode the message
-		buf := &bytes.Buffer{}
-		err := updateMsg.Encode(buf)
-		require.NoError(t, err)
+	first, err := rss.readUpdate()
+	require.NoError(t, err)
+	assert.Equal(t, TrackPriority(1), first.Priority)
 
-		mockStream := &FakeQUICStream{
-			ReadFunc: buf.Read,
-		}
+	second, err := rss.readUpdate()
+	require.NoError(t, err)
+	assert.Equal(t, TrackPriority(2), second.Priority)
+}
 
-		config := &SubscribeConfig{
-			Priority: TrackPriority(1),
-		}
+func TestReceiveSubscribeStream_ReadUpdate_ErrorOnStreamEnd(t *testing.T) {
+	// A zero-value FakeQUICStream returns io.EOF on Read; readUpdate must surface
+	// an error so a caller's read loop terminates.
+	rss := newReceiveSubscribeStream(SubscribeID(1), &FakeQUICStream{}, &SubscribeConfig{})
 
-		rss := newReceiveSubscribeStream(subscribeID, mockStream, config)
-
-		// Wait for the update to be processed
-		select {
-		case <-rss.Updated():
-			// Should receive update notification
-		case <-time.After(100 * time.Millisecond):
-			t.Error("Expected to receive update notification")
-		}
-		// Check that config was updated
-		updatedConfig := rss.TrackConfig()
-		if err == nil {
-			assert.Equal(t, TrackPriority(5), updatedConfig.Priority, "TrackPriority should be updated")
-		}
-	})
+	got, err := rss.readUpdate()
+	assert.Error(t, err, "stream end must return an error")
+	assert.Nil(t, got)
 }
 
 func TestReceiveSubscribeStream_CloseWithError(t *testing.T) {
-	tests := map[string]struct {
-		errorCode SubscribeErrorCode
-		expectErr bool
-	}{
-		"internal error": {
-			errorCode: SubscribeErrorCodeInternal,
-			expectErr: false,
-		},
-		"invalid range error": {
-			errorCode: SubscribeErrorCodeInvalidRange,
-			expectErr: false,
-		},
-		"track not found error": {
-			errorCode: SubscribeErrorCodeNotFound,
-			expectErr: false,
-		},
+	tests := map[string]SubscribeErrorCode{
+		"internal error":        SubscribeErrorCodeInternal,
+		"invalid range error":   SubscribeErrorCodeInvalidRange,
+		"track not found error": SubscribeErrorCodeNotFound,
 	}
-
-	// Not wrapped in synctest: the mock ReadFunc blocks forever (select{}) to
-	// keep the background reader goroutine alive while closeWithError runs —
-	// synctest cannot service a select{}, so this stays on real time.
-	for name, tt := range tests {
+	for name, code := range tests {
 		t.Run(name, func(t *testing.T) {
-			subscribeID := SubscribeID(123)
+			var cancelled atomic.Bool
 			mockStream := &FakeQUICStream{
-				ReadFunc: func(p []byte) (int, error) {
-					// Block to prevent automatic closure
-					select {}
-				},
+				CancelReadFunc:  func(transport.StreamErrorCode) { cancelled.Store(true) },
+				CancelWriteFunc: func(transport.StreamErrorCode) { cancelled.Store(true) },
 			}
 
-			config := &SubscribeConfig{
-				Priority: TrackPriority(1),
-			}
+			rss := newReceiveSubscribeStream(SubscribeID(123), mockStream, &SubscribeConfig{})
 
-			rss := newReceiveSubscribeStream(subscribeID, mockStream, config)
-			updatedCh := rss.Updated()
-
-			err := rss.closeWithError(tt.errorCode)
-
-			if tt.expectErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-
-			select {
-			case _, ok := <-updatedCh:
-				assert.False(t, ok, "updated channel should be closed")
-			case <-time.After(100 * time.Millisecond):
-				t.Fatal("expected updated channel to close")
-			}
+			assert.NoError(t, rss.closeWithError(code))
+			assert.True(t, cancelled.Load(), "closeWithError must cancel the stream")
 		})
 	}
 }
 
-func TestReceiveSubscribeStream_CloseWithError_MultipleClose(t *testing.T) {
-	mockStream := &FakeQUICStream{}
+func TestReceiveSubscribeStream_CloseWithError_Idempotent(t *testing.T) {
+	// Double close must be safe (no panic, no error) — the caller and the
+	// session-teardown path may both close a subscription.
+	rss := newReceiveSubscribeStream(SubscribeID(1), &FakeQUICStream{}, &SubscribeConfig{})
 
-	config := &SubscribeConfig{
-		Priority: TrackPriority(1),
+	assert.NoError(t, rss.closeWithError(SubscribeErrorCodeInternal))
+	assert.NoError(t, rss.closeWithError(SubscribeErrorCodeInternal))
+}
+
+func TestReceiveSubscribeStream_ReadUpdate_ConcurrentIsSerialized(t *testing.T) {
+	// Two concurrent readUpdate calls must not interleave their Decodes on the
+	// stream (readMu serializes them). Two updates are queued; each caller gets
+	// exactly one, and both priorities are observed with no torn read.
+	buf := &bytes.Buffer{}
+	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 1}.Encode(buf))
+	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 2}.Encode(buf))
+	var readMu sync.Mutex // FakeQUICStream.Read via buf is not itself concurrency-safe
+	mockStream := &FakeQUICStream{ReadFunc: func(p []byte) (int, error) {
+		readMu.Lock()
+		defer readMu.Unlock()
+		return buf.Read(p)
+	}}
+
+	rss := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
+
+	var wg sync.WaitGroup
+	got := make([]uint8, 2)
+	for i := range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cfg, err := rss.readUpdate()
+			if assert.NoError(t, err) {
+				got[i] = uint8(cfg.Priority)
+			}
+		}()
 	}
-	// Create stream manually
-	rss := newReceiveSubscribeStream(123, mockStream, config)
-	updatedCh := rss.Updated()
+	wg.Wait()
 
-	rss.closeWithError(SubscribeErrorCodeInternal)
-	rss.closeWithError(SubscribeErrorCodeInternal)
-
-	select {
-	case _, ok := <-updatedCh:
-		assert.False(t, ok, "updated channel should be closed")
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("expected updated channel to close")
-	}
+	assert.ElementsMatch(t, []uint8{1, 2}, got, "each caller gets a distinct, intact update")
 }
 
 func TestReceiveSubscribeStream_ConcurrentAccess(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		subscribeID := SubscribeID(123)
-		mockStream := &FakeQUICStream{}
+	rss := newReceiveSubscribeStream(SubscribeID(123), &FakeQUICStream{}, &SubscribeConfig{Priority: TrackPriority(1)})
 
-		config := &SubscribeConfig{
-			Priority: TrackPriority(1),
-		}
+	var wg sync.WaitGroup
+	const numGoroutines = 10
 
-		rss := newReceiveSubscribeStream(subscribeID, mockStream, config)
-
-		// Test concurrent access to SubscribeID (should be safe as it's read-only)
-		var wg sync.WaitGroup
-		numGoroutines := 10
-
-		wg.Add(numGoroutines)
-		for range numGoroutines {
-			go func() {
-				defer wg.Done()
-				id := rss.SubscribeID()
-				assert.Equal(t, subscribeID, id)
-			}()
-		}
-
-		// Test concurrent access to TrackConfig
-		wg.Add(numGoroutines)
-		for range numGoroutines {
-			go func() {
-				defer wg.Done()
-				config := rss.TrackConfig()
-				assert.NotNil(t, config)
-			}()
-		}
-
-		// Wait for all goroutines to complete
-		done := make(chan struct{})
+	wg.Add(numGoroutines)
+	for range numGoroutines {
 		go func() {
-			wg.Wait()
-			close(done)
+			defer wg.Done()
+			assert.Equal(t, SubscribeID(123), rss.SubscribeID())
 		}()
+	}
 
-		select {
-		case <-done:
-			// All concurrent accesses completed successfully
-		case <-time.After(1 * time.Second):
-			t.Error("Concurrent access test timed out")
-		}
-		// Clean up - wait for update channel to close
-		select {
-		case <-rss.Updated():
-		case <-time.After(100 * time.Millisecond):
-		}
-	})
+	wg.Add(numGoroutines)
+	for range numGoroutines {
+		go func() {
+			defer wg.Done()
+			assert.NotNil(t, rss.TrackConfig())
+		}()
+	}
+
+	wg.Wait()
 }
 
 func TestReceiveSubscribeStream_Close_DoesNotCancelReadOnGracefulClose(t *testing.T) {
-	// Create a mock stream that returns EOF on Read and a background context.
 	mockStream := &FakeQUICStream{}
 
 	rss := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
-	// Perform a graceful close; it should not call CancelRead
-	err := rss.close()
-	require.NoError(t, err)
+	// A graceful close must not call CancelRead.
+	require.NoError(t, rss.close())
 
-	// Assert Close was called but CancelRead was not
 	assert.ErrorIs(t, mockStream.Context().Err(), context.Canceled)
 	_, readErr := mockStream.Read(make([]byte, 1))
 	var streamErr *transport.StreamError
 	assert.False(t, errors.As(readErr, &streamErr))
-}
-
-func TestReceiveSubscribeStream_UpdateChannelBehavior(t *testing.T) {
-	t.Run("channel closes on EOF", func(t *testing.T) {
-		synctest.Test(t, func(t *testing.T) {
-			subscribeID := SubscribeID(123)
-			mockStream := &FakeQUICStream{}
-			config := &SubscribeConfig{Priority: TrackPriority(1)}
-
-			rss := newReceiveSubscribeStream(subscribeID, mockStream, config)
-
-			// The background goroutine processes EOF and exits; Updated() is
-			// not closed by EOF, so this receive falls through to the timeout.
-			select {
-			case _, ok := <-rss.Updated():
-				if ok {
-					t.Log("Channel should be closed and ready to receive")
-				} else {
-					t.Log("Channel is properly closed")
-				}
-			case <-time.After(100 * time.Millisecond):
-				t.Log("Channel should be closed and ready to receive")
-			}
-		})
-	})
-
-	t.Run("multiple updates sent to channel", func(t *testing.T) {
-		synctest.Test(t, func(t *testing.T) {
-			subscribeID := SubscribeID(123)
-
-			// Create multiple update messages
-			updates := []message.SubscribeUpdateMessage{
-				{
-					SubscriberPriority: 1,
-				},
-				{
-					SubscriberPriority: 2,
-				},
-			}
-
-			buf := &bytes.Buffer{}
-			for _, update := range updates {
-				err := update.Encode(buf)
-				require.NoError(t, err)
-			}
-
-			mockStream := &FakeQUICStream{
-				ReadFunc: buf.Read,
-			}
-
-			config := &SubscribeConfig{Priority: TrackPriority(0)}
-			rss := newReceiveSubscribeStream(subscribeID, mockStream, config) // Should receive multiple update notifications
-			updateCount := 0
-			expectedUpdates := 1 // We expect at least 1 update, but may get more
-
-			timeout := time.After(200 * time.Millisecond)
-			for updateCount < expectedUpdates {
-				select {
-				case _, ok := <-rss.Updated():
-					if !ok {
-						// Channel closed
-						t.Logf("Channel closed after %d updates", updateCount)
-						break
-					}
-					updateCount++
-					t.Logf("Received update %d", updateCount)
-				case <-timeout:
-					t.Errorf("Timeout waiting for updates, received %d out of at least %d expected", updateCount, expectedUpdates)
-					return
-				}
-			}
-			// We received at least the minimum expected updates
-			assert.GreaterOrEqual(t, updateCount, expectedUpdates, "Should receive at least expected number of updates")
-		})
-	})
+	assert.ErrorIs(t, readErr, io.EOF)
 }

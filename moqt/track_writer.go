@@ -268,6 +268,11 @@ func (w *TrackWriter) DropNextGroups(n uint64, code SubscribeErrorCode) error {
 	}
 }
 
+// TrackConfig returns the subscriber's current config. It reflects the latest
+// SUBSCRIBE_UPDATE only if the publisher is draining updates via ReadUpdate:
+// the config advances when ReadUpdate applies an update, not on its own. A
+// publisher that never calls ReadUpdate sees the initial (SUBSCRIBE-time)
+// config.
 func (w *TrackWriter) TrackConfig() *SubscribeConfig {
 	if w.subscribeStream == nil {
 		return &SubscribeConfig{}
@@ -276,8 +281,22 @@ func (w *TrackWriter) TrackConfig() *SubscribeConfig {
 	return w.subscribeStream.TrackConfig()
 }
 
-func (w *TrackWriter) Updated() <-chan struct{} {
-	return w.subscribeStream.Updated()
+// ReadUpdate blocks until the subscriber sends the next SUBSCRIBE_UPDATE,
+// applies it as the track's current config (observable via TrackConfig), and
+// returns that config. It returns an error once the subscribe stream ends or is
+// closed — the terminal signal for a read loop.
+//
+// A publisher that wants to follow subscriber updates calls it in a loop from a
+// single goroutine; it is the only thing that keeps TrackConfig fresh.
+// Publishers that ignore updates simply never call it and spend no goroutine on
+// them. Concurrent callers are serialized (their reads cannot interleave) but
+// each receives a distinct update in an unspecified order — prefer a single
+// caller.
+func (w *TrackWriter) ReadUpdate() (*SubscribeConfig, error) {
+	if w.subscribeStream == nil {
+		return nil, ErrClosedSession
+	}
+	return w.subscribeStream.readUpdate()
 }
 
 // openGroupWithSequence is the internal implementation for opening a group with a specific sequence.

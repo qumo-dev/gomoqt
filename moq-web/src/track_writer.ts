@@ -49,6 +49,12 @@ export class TrackWriter {
 		return this.#subscribeStream.subscribeId;
 	}
 
+	/**
+	 * The subscriber's current config. It reflects the latest SUBSCRIBE_UPDATE
+	 * only if the publisher is draining updates via readUpdate: it advances when
+	 * readUpdate applies an update, not on its own. A publisher that never calls
+	 * readUpdate sees the initial (SUBSCRIBE-time) config.
+	 */
 	get config(): TrackConfig {
 		return this.#subscribeStream.trackConfig;
 	}
@@ -119,8 +125,20 @@ export class TrackWriter {
 		});
 	}
 
-	async updated(): Promise<void> {
-		return this.#subscribeStream.updated();
+	/**
+	 * readUpdate awaits the next SUBSCRIBE_UPDATE from the subscriber, applies it
+	 * as the track's current config (observable via `config`), and returns it.
+	 * The error is set once the subscribe stream ends or is closed — the terminal
+	 * signal for a read loop.
+	 *
+	 * A publisher that wants to follow subscriber updates calls it in a loop; it
+	 * is the only thing that keeps `config` fresh. Publishers that ignore updates
+	 * simply never call it, spending nothing on update reading. Concurrent callers
+	 * are serialized but each receives a distinct update in unspecified order —
+	 * prefer a single caller.
+	 */
+	async readUpdate(): Promise<[TrackConfig, undefined] | [undefined, Error]> {
+		return this.#subscribeStream.readUpdate();
 	}
 
 	async #openGroupWithSequence(

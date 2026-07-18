@@ -8,44 +8,11 @@ import (
 )
 
 func newReceiveSubscribeStream(id SubscribeID, stream transport.Stream, config *SubscribeConfig) *receiveSubscribeStream {
-	substr := &receiveSubscribeStream{
+	return &receiveSubscribeStream{
 		subscribeID: id,
 		config:      config,
 		stream:      stream,
-		updatedCh:   make(chan struct{}, 1),
 	}
-
-	// Listen for updates in a separate goroutine
-	go func() {
-		var updateMsg message.SubscribeUpdateMessage
-		var err error
-
-		for {
-			err = updateMsg.Decode(substr.stream)
-			if err != nil {
-				break
-			}
-
-			config := &SubscribeConfig{
-				Priority:   TrackPriority(updateMsg.SubscriberPriority),
-				Ordered:    boolFromWireFlag(updateMsg.SubscriberOrdered),
-				MaxLatency: updateMsg.SubscriberMaxLatency,
-				StartGroup: groupSequenceFromWire(updateMsg.StartGroup),
-				EndGroup:   groupSequenceFromWire(updateMsg.EndGroup),
-			}
-
-			substr.mu.Lock()
-
-			substr.config = config
-			select {
-			case substr.updatedCh <- struct{}{}:
-			default:
-			}
-			substr.mu.Unlock()
-		}
-	}()
-
-	return substr
 }
 
 type receiveSubscribeStream struct {
@@ -53,11 +20,46 @@ type receiveSubscribeStream struct {
 
 	stream transport.Stream
 
-	mu sync.Mutex
+	readMu sync.Mutex // serializes readUpdate so concurrent callers can't interleave Decodes on the stream
+	mu     sync.Mutex // guards config
 
 	config          *SubscribeConfig
-	updatedCh       chan struct{}
 	responseStarted bool
+}
+
+// readUpdate blocks until the peer sends the next SUBSCRIBE_UPDATE, applies it
+// as the current config, and returns that config. It returns an error once the
+// subscribe stream ends or is closed (the terminal signal for an update-reading
+// loop).
+//
+// It reads the stream one message at a time. readMu serializes concurrent
+// callers so their Decodes cannot interleave, but a publisher that wants to
+// follow updates should still call it from a single goroutine — concurrent
+// callers each receive a distinct update in an unspecified order. A
+// subscription whose publisher never calls it (the common relay fan-out case)
+// spends no goroutine on update reading at all.
+func (substr *receiveSubscribeStream) readUpdate() (*SubscribeConfig, error) {
+	substr.readMu.Lock()
+	defer substr.readMu.Unlock()
+
+	var updateMsg message.SubscribeUpdateMessage
+	if err := updateMsg.Decode(substr.stream); err != nil {
+		return nil, err
+	}
+
+	config := &SubscribeConfig{
+		Priority:   TrackPriority(updateMsg.SubscriberPriority),
+		Ordered:    boolFromWireFlag(updateMsg.SubscriberOrdered),
+		MaxLatency: updateMsg.SubscriberMaxLatency,
+		StartGroup: groupSequenceFromWire(updateMsg.StartGroup),
+		EndGroup:   groupSequenceFromWire(updateMsg.EndGroup),
+	}
+
+	substr.mu.Lock()
+	substr.config = config
+	substr.mu.Unlock()
+
+	return config, nil
 }
 
 func (substr *receiveSubscribeStream) SubscribeID() SubscribeID {
@@ -153,33 +155,11 @@ func (substr *receiveSubscribeStream) TrackConfig() *SubscribeConfig {
 	return substr.config
 }
 
-func (substr *receiveSubscribeStream) Updated() <-chan struct{} {
-	return substr.updatedCh
-}
-
 func (substr *receiveSubscribeStream) close() error {
-	substr.mu.Lock()
-	defer substr.mu.Unlock()
-
-	if updateCh := substr.updatedCh; updateCh != nil {
-		substr.updatedCh = nil
-		close(updateCh)
-	}
-
 	return substr.stream.Close()
 }
 
 func (substr *receiveSubscribeStream) closeWithError(code SubscribeErrorCode) error {
-	substr.mu.Lock()
-	defer substr.mu.Unlock()
-
-	strErrCode := transport.StreamErrorCode(code)
-	cancelStreamWithError(substr.stream, strErrCode)
-
-	if updateCh := substr.updatedCh; updateCh != nil {
-		substr.updatedCh = nil
-		close(updateCh)
-	}
-
+	cancelStreamWithError(substr.stream, transport.StreamErrorCode(code))
 	return nil
 }

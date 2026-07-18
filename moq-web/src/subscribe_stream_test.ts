@@ -174,7 +174,7 @@ Deno.test("ReceiveSubscribeStream closeWithError does nothing if context cancele
 	await rss.closeWithError(2);
 });
 
-Deno.test("ReceiveSubscribeStream updated waiters are notified upon update", async () => {
+Deno.test("ReceiveSubscribeStream readUpdate applies the next SUBSCRIBE_UPDATE", async () => {
 	const [ctx] = withCancelCause(background());
 	const sub = new SubscribeMessage({
 		subscribeId: 10,
@@ -182,7 +182,7 @@ Deno.test("ReceiveSubscribeStream updated waiters are notified upon update", asy
 		trackName: "t",
 		subscriberPriority: 0,
 	});
-	// Encode update message to get data for readable
+	// Encode an update message to bytes for the readable side.
 	const encoderWrittenData: Uint8Array[] = [];
 	const encoderStream = {
 		write: spy(async (p: Uint8Array) => {
@@ -201,7 +201,6 @@ Deno.test("ReceiveSubscribeStream updated waiters are notified upon update", asy
 		data.set(arr, offset);
 		offset += arr.length;
 	}
-	// Create mock stream with the encoded data
 	const mockWritable = new MockSendStream({});
 	let readOffset = 0;
 	const mockReadable = new MockReceiveStream({
@@ -220,11 +219,66 @@ Deno.test("ReceiveSubscribeStream updated waiters are notified upon update", asy
 		readable: mockReadable,
 	});
 	const rss = new ReceiveSubscribeStream(ctx, s2, sub);
-	await new Promise((r) => setTimeout(r, 0));
+
+	// Config is unchanged until the publisher drains the update.
+	assertEquals(rss.trackConfig.priority, 0);
+
+	const [cfg, err] = await rss.readUpdate();
+
+	assertEquals(err, undefined);
+	assertEquals(cfg?.priority, 5);
 	assertEquals(rss.trackConfig.priority, 5);
 });
 
-Deno.test("ReceiveSubscribeStream closeWithError cancels streams and broadcasts cond", async () => {
+Deno.test("ReceiveSubscribeStream readUpdate returns an error when the stream ends", async () => {
+	const [ctx] = withCancelCause(background());
+	const sub = new SubscribeMessage({
+		subscribeId: 11,
+		broadcastPath: "/x",
+		trackName: "t",
+		subscriberPriority: 0,
+	});
+	const mockReadable = new MockReceiveStream({
+		read: spy(async (_p: Uint8Array) => {
+			return [0, new EOFError()] as [number, Error | undefined];
+		}),
+	});
+	const s = new MockStream({
+		writable: new MockSendStream({}),
+		readable: mockReadable,
+	});
+	const rss = new ReceiveSubscribeStream(ctx, s, sub);
+
+	const [cfg, err] = await rss.readUpdate();
+
+	assertEquals(cfg, undefined);
+	assertEquals(err instanceof EOFError, true);
+});
+
+Deno.test("ReceiveSubscribeStream does not read the stream until readUpdate is called", async () => {
+	const [ctx] = withCancelCause(background());
+	const sub = new SubscribeMessage({
+		subscribeId: 12,
+		broadcastPath: "/x",
+		trackName: "t",
+		subscriberPriority: 0,
+	});
+	const readSpy = spy(async (_p: Uint8Array) => {
+		return [0, new EOFError()] as [number, Error | undefined];
+	});
+	const s = new MockStream({
+		writable: new MockSendStream({}),
+		readable: new MockReceiveStream({ read: readSpy }),
+	});
+
+	new ReceiveSubscribeStream(ctx, s, sub);
+	// Give any (erroneously started) background reader a chance to run.
+	await new Promise((r) => setTimeout(r, 0));
+
+	assertEquals(readSpy.calls.length, 0);
+});
+
+Deno.test("ReceiveSubscribeStream closeWithError cancels both stream directions", async () => {
 	const [ctx] = withCancelCause(background());
 	const writableCancelCalls: number[] = [];
 	const mockWritable = new MockSendStream({
