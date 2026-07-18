@@ -8,7 +8,6 @@ import {
 } from "./internal/message/mod.ts";
 import type { Stream } from "./internal/webtransport/mod.ts";
 import type { Reader } from "@okdaichi/golikejs/io";
-import { EOFError } from "@okdaichi/golikejs/io";
 import { Cond, Mutex, Once } from "@okdaichi/golikejs/sync";
 import type { CancelCauseFunc, Context } from "@okdaichi/golikejs/context";
 import { withCancelCause } from "@okdaichi/golikejs/context";
@@ -189,8 +188,7 @@ export class SendSubscribeStream {
 export class ReceiveSubscribeStream {
 	readonly subscribeId: SubscribeID;
 	#trackConfig: TrackConfig;
-	#mu: Mutex = new Mutex();
-	#cond: Cond = new Cond(this.#mu);
+	#readMu: Mutex = new Mutex();
 	#stream: Stream;
 	#responseStarted: boolean = false;
 	#ensureInfoOnce: Once = new Once();
@@ -212,21 +210,37 @@ export class ReceiveSubscribeStream {
 			endGroup: groupSequenceFromWire(subscribe.endGroup),
 		};
 		[this.context, this.#cancelFunc] = withCancelCause(sessCtx);
-
-		this.#handleUpdates();
 	}
 
-	async #handleUpdates(): Promise<void> {
-		while (true) {
+	/**
+	 * trackConfig reflects the latest SUBSCRIBE_UPDATE only if the publisher is
+	 * draining updates via readUpdate: it advances when readUpdate applies an
+	 * update, not on its own. A publisher that never calls readUpdate sees the
+	 * initial (SUBSCRIBE-time) config.
+	 */
+	get trackConfig(): TrackConfig {
+		return this.#trackConfig;
+	}
+
+	/**
+	 * readUpdate awaits the next SUBSCRIBE_UPDATE, applies it as the current
+	 * config (observable via trackConfig), and returns it. The error is set once
+	 * the subscribe stream ends or is closed — the terminal signal for a read
+	 * loop.
+	 *
+	 * It reads the stream one message at a time. #readMu serializes concurrent
+	 * callers so their reads cannot interleave, but a publisher that wants to
+	 * follow updates should call it from one place — concurrent callers each get
+	 * a distinct update in unspecified order. A subscription whose publisher
+	 * never calls it spends nothing on update reading (no background task).
+	 */
+	async readUpdate(): Promise<[TrackConfig, undefined] | [undefined, Error]> {
+		await this.#readMu.lock();
+		try {
 			const msg = new SubscribeUpdateMessage({});
 			const err = await msg.decode(this.#stream.readable);
 			if (err) {
-				if (err instanceof EOFError) {
-					console.error(
-						`moq: error reading SUBSCRIBE_UPDATE message for subscribe ID: ${this.subscribeId}: ${err}`,
-					);
-				}
-				return;
+				return [undefined, err];
 			}
 
 			this.#trackConfig = {
@@ -236,17 +250,10 @@ export class ReceiveSubscribeStream {
 				startGroup: groupSequenceFromWire(msg.startGroup),
 				endGroup: groupSequenceFromWire(msg.endGroup),
 			};
-
-			this.#cond.broadcast();
+			return [this.#trackConfig, undefined];
+		} finally {
+			this.#readMu.unlock();
 		}
-	}
-
-	get trackConfig(): TrackConfig {
-		return this.#trackConfig;
-	}
-
-	async updated(): Promise<void> {
-		return this.#cond.wait();
 	}
 
 	async writeInfo(info?: Info): Promise<Error | undefined> {
@@ -318,8 +325,6 @@ export class ReceiveSubscribeStream {
 		}
 		this.#cancelFunc(undefined);
 		await this.#stream.writable.close();
-
-		this.#cond.broadcast();
 	}
 
 	async closeWithError(code: SubscribeErrorCode): Promise<void> {
@@ -333,8 +338,6 @@ export class ReceiveSubscribeStream {
 		this.#cancelFunc(cause);
 		await this.#stream.writable.cancel(code);
 		await this.#stream.readable.cancel(code);
-
-		this.#cond.broadcast();
 	}
 }
 
