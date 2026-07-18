@@ -20,7 +20,8 @@ type receiveSubscribeStream struct {
 
 	stream transport.Stream
 
-	mu sync.Mutex
+	readMu sync.Mutex // serializes readUpdate so concurrent callers can't interleave Decodes on the stream
+	mu     sync.Mutex // guards config
 
 	config          *SubscribeConfig
 	responseStarted bool
@@ -31,11 +32,16 @@ type receiveSubscribeStream struct {
 // subscribe stream ends or is closed (the terminal signal for an update-reading
 // loop).
 //
-// It reads the stream, so at most one call may be in flight at a time; run it
-// from a single caller-owned goroutine if the publisher wants to track updates.
-// A subscription whose publisher never calls it (the common relay fan-out case)
+// It reads the stream one message at a time. readMu serializes concurrent
+// callers so their Decodes cannot interleave, but a publisher that wants to
+// follow updates should still call it from a single goroutine — concurrent
+// callers each receive a distinct update in an unspecified order. A
+// subscription whose publisher never calls it (the common relay fan-out case)
 // spends no goroutine on update reading at all.
 func (substr *receiveSubscribeStream) readUpdate() (*SubscribeConfig, error) {
+	substr.readMu.Lock()
+	defer substr.readMu.Unlock()
+
 	var updateMsg message.SubscribeUpdateMessage
 	if err := updateMsg.Decode(substr.stream); err != nil {
 		return nil, err

@@ -168,6 +168,48 @@ func TestReceiveSubscribeStream_CloseWithError(t *testing.T) {
 	}
 }
 
+func TestReceiveSubscribeStream_CloseWithError_Idempotent(t *testing.T) {
+	// Double close must be safe (no panic, no error) — the caller and the
+	// session-teardown path may both close a subscription.
+	rss := newReceiveSubscribeStream(SubscribeID(1), &FakeQUICStream{}, &SubscribeConfig{})
+
+	assert.NoError(t, rss.closeWithError(SubscribeErrorCodeInternal))
+	assert.NoError(t, rss.closeWithError(SubscribeErrorCodeInternal))
+}
+
+func TestReceiveSubscribeStream_ReadUpdate_ConcurrentIsSerialized(t *testing.T) {
+	// Two concurrent readUpdate calls must not interleave their Decodes on the
+	// stream (readMu serializes them). Two updates are queued; each caller gets
+	// exactly one, and both priorities are observed with no torn read.
+	buf := &bytes.Buffer{}
+	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 1}.Encode(buf))
+	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 2}.Encode(buf))
+	var readMu sync.Mutex // FakeQUICStream.Read via buf is not itself concurrency-safe
+	mockStream := &FakeQUICStream{ReadFunc: func(p []byte) (int, error) {
+		readMu.Lock()
+		defer readMu.Unlock()
+		return buf.Read(p)
+	}}
+
+	rss := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
+
+	var wg sync.WaitGroup
+	got := make([]uint8, 2)
+	for i := range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cfg, err := rss.readUpdate()
+			if assert.NoError(t, err) {
+				got[i] = uint8(cfg.Priority)
+			}
+		}()
+	}
+	wg.Wait()
+
+	assert.ElementsMatch(t, []uint8{1, 2}, got, "each caller gets a distinct, intact update")
+}
+
 func TestReceiveSubscribeStream_ConcurrentAccess(t *testing.T) {
 	rss := newReceiveSubscribeStream(SubscribeID(123), &FakeQUICStream{}, &SubscribeConfig{Priority: TrackPriority(1)})
 
