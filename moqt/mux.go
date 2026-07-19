@@ -173,10 +173,6 @@ func (mux *TrackMux) Announce(announcement *Announcement, handler TrackHandler) 
 	}
 
 	// Reserve a subscription slice to reuse across nodes and avoid allocations
-	type awChan struct {
-		aw *AnnouncementWriter
-		ch chan *Announcement
-	}
 	var subsArray [8]awChan
 	subs := subsArray[:0]
 
@@ -186,9 +182,7 @@ func (mux *TrackMux) Announce(announcement *Announcement, handler TrackHandler) 
 		// Snapshot subscriptions under RLock and send without holding the lock
 		node.mu.RLock()
 		subs = subs[:0]
-		for aw, ch := range node.subscriptions {
-			subs = append(subs, awChan{aw: aw, ch: ch})
-		}
+		subs = append(subs, node.cachedSubs...)
 		node.mu.RUnlock()
 
 		for _, ac := range subs {
@@ -203,6 +197,7 @@ func (mux *TrackMux) Announce(announcement *Announcement, handler TrackHandler) 
 				// delete by AnnouncementWriter pointer without scanning
 				node.mu.Lock()
 				delete(node.subscriptions, ac.aw)
+				node.updateCachedSubs()
 				node.mu.Unlock()
 				// Close the AW to signal the writer to cleanup and close its channel.
 				go func(a *AnnouncementWriter) {
@@ -316,11 +311,15 @@ func (mux *TrackMux) serveAnnouncements(aw *AnnouncementWriter) {
 		leafNode.subscriptions = make(map[*AnnouncementWriter](chan *Announcement))
 	}
 	leafNode.subscriptions[aw] = ch
+
+	leafNode.updateCachedSubs()
+
 	leafNode.mu.Unlock()
 
 	defer func() {
 		leafNode.mu.Lock()
 		delete(leafNode.subscriptions, aw)
+		leafNode.updateCachedSubs()
 		leafNode.mu.Unlock()
 	}()
 
@@ -349,6 +348,11 @@ func (mux *TrackMux) serveAnnouncements(aw *AnnouncementWriter) {
 
 type prefixSegment = string
 
+type awChan struct {
+	aw *AnnouncementWriter
+	ch chan *Announcement
+}
+
 type announcingNode struct {
 	mu sync.RWMutex
 
@@ -359,8 +363,19 @@ type announcingNode struct {
 	children map[prefixSegment]*announcingNode
 
 	subscriptions map[*AnnouncementWriter](chan *Announcement)
+	// cachedSubs is an atomic slice of awChan representing the map contents.
+	// It is updated on copy-on-write basis whenever subscriptions are modified.
+	cachedSubs []awChan
 
 	announcements map[*Announcement]struct{}
+}
+
+func (node *announcingNode) updateCachedSubs() {
+	newSubs := make([]awChan, 0, len(node.subscriptions))
+	for w, c := range node.subscriptions {
+		newSubs = append(newSubs, awChan{aw: w, ch: c})
+	}
+	node.cachedSubs = newSubs
 }
 
 func (node *announcingNode) getChild(seg prefixSegment) *announcingNode {
