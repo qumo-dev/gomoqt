@@ -286,26 +286,64 @@ func (c Catalog) ApplyDelta(delta CatalogDelta) (Catalog, error) {
 	}
 	maps.Copy(result.ExtraFields, cloneRawMessages(delta.ExtraFields))
 
+	// Pre-allocate a map for duplicate checking.
+	trackIndex := make(map[TrackID]int, len(result.Tracks))
+	for i, track := range result.Tracks {
+		trackIndex[track.ID(result.DefaultNamespace)] = i
+	}
+
 	order := delta.operationOrder()
 	for _, op := range order {
 		switch op {
 		case deltaOperationAdd:
 			for _, track := range delta.AddTracks {
-				if err := result.addTrack(track); err != nil {
-					return Catalog{}, err
+				id := track.ID(result.DefaultNamespace)
+				if idx, ok := trackIndex[id]; ok {
+					return Catalog{}, fmt.Errorf("msf: cannot add duplicate track %q at index %d", id.String(), idx)
 				}
+
+				cloned := track.Clone()
+				result.Tracks = append(result.Tracks, cloned)
+				trackIndex[id] = len(result.Tracks) - 1
 			}
 		case deltaOperationRemove:
 			for _, track := range delta.RemoveTracks {
-				if err := result.removeTrack(track); err != nil {
-					return Catalog{}, err
+				id := track.ID(result.DefaultNamespace)
+				idx, ok := trackIndex[id]
+				if !ok {
+					return Catalog{}, fmt.Errorf("msf: cannot remove unknown track %q", id.String())
+				}
+
+				result.Tracks = append(result.Tracks[:idx], result.Tracks[idx+1:]...)
+
+				// Rebuild index for tracks after the removed element
+				delete(trackIndex, id)
+				for i := idx; i < len(result.Tracks); i++ {
+					trackIndex[result.Tracks[i].ID(result.DefaultNamespace)] = i
 				}
 			}
 		case deltaOperationClone:
 			for _, track := range delta.CloneTracks {
-				if err := result.cloneTrack(track); err != nil {
-					return Catalog{}, err
+				parentID := TrackID{Namespace: track.effectiveNamespace(result.DefaultNamespace), Name: track.ParentName}
+				parentIdx, ok := trackIndex[parentID]
+				if !ok {
+					return Catalog{}, fmt.Errorf("msf: cannot clone unknown parent track %q", parentID.String())
 				}
+
+				cloned := result.Tracks[parentIdx].Clone()
+				cloned.applyOverrides(track.Track)
+
+				if cloned.Name == "" {
+					return Catalog{}, fmt.Errorf("msf: cloned track derived from %q is missing name", parentID.String())
+				}
+
+				newID := cloned.ID(result.DefaultNamespace)
+				if idx, exists := trackIndex[newID]; exists {
+					return Catalog{}, fmt.Errorf("msf: cannot clone into duplicate track %q at index %d", newID.String(), idx)
+				}
+
+				result.Tracks = append(result.Tracks, cloned)
+				trackIndex[newID] = len(result.Tracks) - 1
 			}
 		}
 	}
@@ -341,63 +379,6 @@ func ParseCatalog(data []byte) (Catalog, error) {
 // provided for convenience when the catalog is already available as a string.
 func ParseCatalogString(s string) (Catalog, error) {
 	return ParseCatalog([]byte(s))
-}
-
-// addTrack appends a new track after checking that its resolved identity is unique.
-func (c *Catalog) addTrack(track Track) error {
-	id := track.ID(c.DefaultNamespace)
-	if _, idx, ok := c.findTrack(id); ok {
-		return fmt.Errorf("msf: cannot add duplicate track %q at index %d", id.String(), idx)
-	}
-
-	c.Tracks = append(c.Tracks, track.Clone())
-	return nil
-}
-
-// removeTrack removes the track identified by track from the catalog.
-func (c *Catalog) removeTrack(track TrackRef) error {
-	id := track.ID(c.DefaultNamespace)
-	_, idx, ok := c.findTrack(id)
-	if !ok {
-		return fmt.Errorf("msf: cannot remove unknown track %q", id.String())
-	}
-
-	c.Tracks = append(c.Tracks[:idx], c.Tracks[idx+1:]...)
-	return nil
-}
-
-// cloneTrack creates a new track by cloning an existing parent and applying overrides.
-func (c *Catalog) cloneTrack(track TrackClone) error {
-	parentID := TrackID{Namespace: track.effectiveNamespace(c.DefaultNamespace), Name: track.ParentName}
-	parent, _, ok := c.findTrack(parentID)
-	if !ok {
-		return fmt.Errorf("msf: cannot clone unknown parent track %q", parentID.String())
-	}
-
-	cloned := parent.Clone()
-	cloned.applyOverrides(track.Track)
-
-	if cloned.Name == "" {
-		return fmt.Errorf("msf: cloned track derived from %q is missing name", parentID.String())
-	}
-
-	newID := cloned.ID(c.DefaultNamespace)
-	if _, idx, exists := c.findTrack(newID); exists {
-		return fmt.Errorf("msf: cannot clone into duplicate track %q at index %d", newID.String(), idx)
-	}
-
-	c.Tracks = append(c.Tracks, cloned)
-	return nil
-}
-
-// findTrack looks up a track by resolved identity and returns the track and its index.
-func (c Catalog) findTrack(id TrackID) (Track, int, bool) {
-	for i, track := range c.Tracks {
-		if track.ID(c.DefaultNamespace) == id {
-			return track, i, true
-		}
-	}
-	return Track{}, -1, false
 }
 
 var (
