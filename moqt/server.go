@@ -129,6 +129,9 @@ type Server struct {
 	initOnce sync.Once
 
 	inShutdown atomic.Bool
+
+	shutdownCtx    context.Context
+	shutdownCancel context.CancelFunc
 }
 
 func (s *Server) init() {
@@ -136,6 +139,7 @@ func (s *Server) init() {
 		if s.Counters == nil {
 			s.Counters = new(ServerCounters)
 		}
+		s.shutdownCtx, s.shutdownCancel = context.WithCancel(context.Background())
 		s.listeners = make(map[QUICListener]struct{})
 		s.connManager = newConnManager()
 		if s.WebTransportServer == nil {
@@ -192,8 +196,9 @@ func (s *Server) ServeQUICListener(ln QUICListener) error {
 
 	// Watch for shutdown and cancel context when shutting down
 	go func() {
-		for !s.shuttingDown() {
-			time.Sleep(100 * time.Millisecond)
+		select {
+		case <-s.shutdownCtx.Done():
+		case <-ctx.Done(): // cancel if accept loop exits
 		}
 		cancel()
 	}()
@@ -495,11 +500,12 @@ func (s *Server) Close() error {
 		return ErrServerClosed
 	}
 
-	// Set the shutdown flag
-	s.inShutdown.Store(true)
-
 	// Ensure that the server is initialized
 	s.init()
+
+	// Set the shutdown flag
+	s.inShutdown.Store(true)
+	s.shutdownCancel()
 
 	// Close all listeners first to stop accepting new connections
 	s.listenerMu.Lock()
@@ -558,8 +564,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		return ErrServerClosed
 	}
 
+	s.init()
+
 	// Set the shutdown flag
 	s.inShutdown.Store(true)
+	s.shutdownCancel()
 
 	// Close all listeners first to stop accepting new connections
 	s.listenerMu.Lock()

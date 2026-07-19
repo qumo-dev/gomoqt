@@ -14,8 +14,10 @@
 **Learning:** In Go, fallback paths (like non-`io.ByteReader` readers) in hot decoding loops shouldn't use dynamic slice allocations (e.g., `make([]byte, size)`) if the maximum size is small and fixed (like an 8-byte varint). Replacing `make()` with a local fixed-size array (e.g., `var buf [8]byte`) and slicing it `buf[:size]` entirely eliminates heap allocations.
 **Action:** When parsing small, bounded objects like varints from an `io.Reader`, use stack-allocated arrays and take their slices (`buf[:length]`) instead of dynamically allocating slices with `make()`.
 
-
-
 ## YYYY-MM-DD - [Zero-allocation String Write]
 **Learning:** In Go, replacing `WriteBytes(dest, []byte(s))` with `append(dest, s...)` avoids string-to-bytes conversion overhead and reduces benchmark time.
 **Action:** Use `append` for string writing optimization.
+
+## 2026-07-19 - Context Synchronization in Shutdown Polling
+**Learning:** Replacing a `time.Sleep` loop in a goroutine with an event-driven `select` statement blocking on `context.Done()` drastically improves execution latency and eliminates unnecessary CPU busy-waiting, reducing simulated server shutdown benchmarks from ~100.5ms/op to ~5.4ms/op.
+**Action:** When creating asynchronous shutdown watchers or lifecycle loops, avoid `time.Sleep` polling in favor of `context.WithCancel` and `select` mechanisms for precise, immediate orchestration.

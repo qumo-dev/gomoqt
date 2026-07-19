@@ -285,6 +285,10 @@ func TestServer_connContext_PanicsOnNilCustomContext(t *testing.T) {
 func TestServer_ServeQUICListener_ShuttingDown(t *testing.T) {
 	s := &Server{}
 	s.inShutdown.Store(true)
+	s.init()
+	if s.shutdownCancel != nil {
+		s.shutdownCancel()
+	}
 
 	err := s.ServeQUICListener(&FakeEarlyListener{})
 	assert.Equal(t, ErrServerClosed, err)
@@ -377,6 +381,10 @@ func TestServer_ListenAndServe_ConfiguresDefaultsBeforeListen(t *testing.T) {
 func TestServer_ListenAndServeTLS_ShuttingDown(t *testing.T) {
 	s := &Server{}
 	s.inShutdown.Store(true)
+	s.init()
+	if s.shutdownCancel != nil {
+		s.shutdownCancel()
+	}
 	err := s.ListenAndServeTLS("cert.pem", "key.pem")
 	assert.Equal(t, ErrServerClosed, err)
 }
@@ -482,6 +490,10 @@ func TestServer_addRemoveSession_ShutdownCompletesWhenLastSessionLeaves(t *testi
 	s := &Server{}
 	s.init()
 	s.inShutdown.Store(true)
+	s.init()
+	if s.shutdownCancel != nil {
+		s.shutdownCancel()
+	}
 
 	conn := &FakeStreamConn{}
 
@@ -730,6 +742,10 @@ func TestServer_ServeQUICListener_AcceptsAndServesConn(t *testing.T) {
 
 	// Shut down the server to stop the listener loop
 	s.inShutdown.Store(true)
+	s.init()
+	if s.shutdownCancel != nil {
+		s.shutdownCancel()
+	}
 	ln.Close()
 
 	select {
