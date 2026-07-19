@@ -184,7 +184,12 @@ func (b *Broadcast) RemoveTrack(name moqt.TrackName) bool {
 	removed := false
 	for i := range updated.Tracks {
 		if moqt.TrackName(updated.Tracks[i].Name) == name {
-			updated.Tracks = append(updated.Tracks[:i], updated.Tracks[i+1:]...)
+			// Swap with the last element and trim to avoid O(N) shift.
+			// The catalog track order is not guaranteed to be preserved, but
+			// order doesn't semantically matter for tracks in a broadcast.
+			updated.Tracks[i] = updated.Tracks[len(updated.Tracks)-1]
+			updated.Tracks[len(updated.Tracks)-1] = Track{} // avoid memory leak
+			updated.Tracks = updated.Tracks[:len(updated.Tracks)-1]
 			removed = true
 			break
 		}
