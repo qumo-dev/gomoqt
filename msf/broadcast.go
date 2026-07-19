@@ -29,12 +29,20 @@ type Broadcast struct {
 	catalogTrackName moqt.TrackName
 	catalog          Catalog
 	tracks           moqt.Broadcast
+
+	trackIndexes map[string]int
 }
 
 // initLocked initializes lazily allocated broadcast defaults while b.mu is held.
 func (b *Broadcast) initLocked() {
 	if b.catalogTrackName == "" {
 		b.catalogTrackName = DefaultCatalogTrackName
+	}
+	if b.trackIndexes == nil {
+		b.trackIndexes = make(map[string]int)
+		for i, track := range b.catalog.Tracks {
+			b.trackIndexes[track.Name] = i
+		}
 	}
 }
 
@@ -109,6 +117,12 @@ func (b *Broadcast) SetCatalog(catalog Catalog) error {
 	b.initLocked()
 	staleTrackNames := b.staleTrackNamesLocked(clone)
 	b.catalog = clone
+
+	b.trackIndexes = make(map[string]int, len(b.catalog.Tracks))
+	for i, track := range b.catalog.Tracks {
+		b.trackIndexes[track.Name] = i
+	}
+
 	for _, name := range staleTrackNames {
 		b.tracks.Remove(name)
 	}
@@ -143,20 +157,16 @@ func (b *Broadcast) RegisterTrack(track Track, handler moqt.TrackHandler) error 
 	updated := b.catalog.Clone()
 	trackID := trackClone.ID(updated.DefaultNamespace)
 
-	replaced := false
-	for i := range updated.Tracks {
-		if updated.Tracks[i].Name == trackClone.Name {
-			if updated.Tracks[i].ID(updated.DefaultNamespace) != trackID {
-				return fmt.Errorf("msf: broadcast requires unique track names across namespaces; duplicate name %q found for %q and %q", trackClone.Name, updated.Tracks[i].ID(updated.DefaultNamespace).String(), trackID.String())
-			}
-			updated.Tracks[i] = trackClone
-			replaced = true
-			break
+	idx, replaced := b.trackIndexes[trackClone.Name]
+	if replaced {
+		if updated.Tracks[idx].ID(updated.DefaultNamespace) != trackID {
+			return fmt.Errorf("msf: broadcast requires unique track names across namespaces; duplicate name %q found for %q and %q", trackClone.Name, updated.Tracks[idx].ID(updated.DefaultNamespace).String(), trackID.String())
 		}
-	}
-	if !replaced {
+		updated.Tracks[idx] = trackClone
+	} else {
 		updated.Tracks = append(updated.Tracks, trackClone)
 	}
+
 	if err := updated.Validate(); err != nil {
 		return err
 	}
@@ -165,6 +175,9 @@ func (b *Broadcast) RegisterTrack(track Track, handler moqt.TrackHandler) error 
 	}
 
 	b.catalog = updated
+	if !replaced {
+		b.trackIndexes[trackClone.Name] = len(updated.Tracks) - 1
+	}
 	return b.tracks.Register(moqt.TrackName(trackClone.Name), handler)
 }
 
@@ -182,15 +195,18 @@ func (b *Broadcast) RemoveTrack(name moqt.TrackName) bool {
 	b.initLocked()
 	updated := b.catalog.Clone()
 	removed := false
-	for i := range updated.Tracks {
-		if moqt.TrackName(updated.Tracks[i].Name) == name {
-			updated.Tracks = append(updated.Tracks[:i], updated.Tracks[i+1:]...)
-			removed = true
-			break
+
+	nameStr := string(name)
+	if idx, ok := b.trackIndexes[nameStr]; ok {
+		updated.Tracks = append(updated.Tracks[:idx], updated.Tracks[idx+1:]...)
+		removed = true
+		b.catalog = updated
+
+		delete(b.trackIndexes, nameStr)
+		for i := idx; i < len(updated.Tracks); i++ {
+			b.trackIndexes[updated.Tracks[i].Name] = i
 		}
 	}
-
-	b.catalog = updated
 	removedFromTracks := b.tracks.Remove(name)
 
 	return removed || removedFromTracks
