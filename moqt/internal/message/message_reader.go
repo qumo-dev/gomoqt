@@ -78,8 +78,8 @@ func ReadBytes(b []byte) ([]byte, int, error) {
 		return nil, 0, err
 	}
 	b = b[n:]
-	if num > math.MaxInt {
-		panic("byte slice too large")
+	if num > MaxMessageSize {
+		return nil, 0, ErrMessageTooLarge
 	}
 
 	if uint64(len(b)) < num {
@@ -104,7 +104,7 @@ func ReadStringArray(b []byte) ([]string, int, error) {
 	}
 
 	if count > math.MaxInt {
-		panic("string array too large")
+		return nil, 0, errors.New("string array too large")
 	}
 
 	b = b[total:]
