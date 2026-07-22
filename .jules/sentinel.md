@@ -8,3 +8,7 @@ Checking memory constraints for OOM vulnerabilities...
 **Vulnerability:** A memory exhaustion (OOM) vulnerability caused by lack of bounds checking when pre-allocating slices for variable-length arrays based on an untrusted varint count prefix (e.g., `make([]string, 0, count)` or `make([]uint64, count)`). An attacker can specify a huge count for an array with very few bytes, causing the server to allocate massive amounts of memory and crash before parsing the next item.
 **Learning:** Even if the overall message size is constrained or the buffer is small, `make` pre-allocations using unvalidated array lengths can cause OOM DoS.
 **Prevention:** Compute a clamped capacity based on `len(b)` and the maximum possible count before allocating, and allocate `make([]T, 0, allocCap)`. Let the subsequent decode loop naturally fail with an EOF when the buffer is exhausted.
+## YYYY-MM-DD - Fix DoS via panic in message decoding
+**Vulnerability:** Found a DoS vulnerability in moqt/internal/message/message_reader.go where decoding byte slices and string arrays could trigger a `panic` if the length prefix was excessively large.
+**Learning:** Using `panic()` to handle malformed or oversized untrusted network input introduces a critical Denial of Service (DoS) vulnerability.
+**Prevention:** Always fail securely by returning appropriate errors (e.g., `ErrMessageTooLarge`) and validating payload lengths against limits like `MaxMessageSize` instead of panicking.
