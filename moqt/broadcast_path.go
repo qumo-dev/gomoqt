@@ -29,12 +29,12 @@ func (bc BroadcastPath) GetSuffix(prefix string) (string, bool) {
 		return "", false
 	}
 
-	return strings.TrimPrefix(string(bc), prefix), true
+	return string(bc)[len(prefix):], true
 }
 
 // Extension returns the file extension of the path (e.g., ".mp4") if present.
 func (bc BroadcastPath) Extension() string {
-	if i := strings.LastIndex(string(bc), "."); i >= 0 {
+	if i := strings.LastIndexByte(string(bc), '.'); i >= 0 {
 		return string(bc)[i:]
 	}
 
