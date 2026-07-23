@@ -287,17 +287,49 @@ func (b *Broadcast) staleTrackNamesLocked(catalog Catalog) []moqt.TrackName {
 
 // validateCatalogForBroadcast rejects catalog shapes that cannot be routed by Broadcast.
 func validateCatalogForBroadcast(catalog Catalog, catalogTrackName moqt.TrackName) error {
-	seen := make(map[moqt.TrackName]TrackID, len(catalog.Tracks))
-	for _, track := range catalog.Tracks {
+	type seenEntry struct {
+		name moqt.TrackName
+		id   TrackID
+	}
+	var seen [16]seenEntry
+	numSeen := 0
+
+	for i, track := range catalog.Tracks {
 		name := moqt.TrackName(track.Name)
 		if name == catalogTrackName {
 			return fmt.Errorf("msf: catalog contains reserved track name %q", catalogTrackName)
 		}
 		id := track.ID(catalog.DefaultNamespace)
-		if previous, ok := seen[name]; ok && previous != id {
-			return fmt.Errorf("msf: broadcast requires unique track names across namespaces; duplicate name %q found for %q and %q", name, previous.String(), id.String())
+
+		dup := false
+		for j := 0; j < numSeen; j++ {
+			if seen[j].name == name {
+				if seen[j].id != id {
+					return fmt.Errorf("msf: broadcast requires unique track names across namespaces; duplicate name %q found for %q and %q", name, seen[j].id.String(), id.String())
+				}
+				dup = true
+				break
+			}
 		}
-		seen[name] = id
+
+		if !dup && numSeen == 16 {
+			for j := 16; j < i; j++ {
+				prevName := moqt.TrackName(catalog.Tracks[j].Name)
+				if prevName == name {
+					prevID := catalog.Tracks[j].ID(catalog.DefaultNamespace)
+					if prevID != id {
+						return fmt.Errorf("msf: broadcast requires unique track names across namespaces; duplicate name %q found for %q and %q", name, prevID.String(), id.String())
+					}
+					dup = true
+					break
+				}
+			}
+		}
+
+		if !dup && numSeen < 16 {
+			seen[numSeen] = seenEntry{name: name, id: id}
+			numSeen++
+		}
 	}
 	return nil
 }

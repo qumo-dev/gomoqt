@@ -14,3 +14,6 @@
 **Learning:** In Go, fallback paths (like non-`io.ByteReader` readers) in hot decoding loops shouldn't use dynamic slice allocations (e.g., `make([]byte, size)`) if the maximum size is small and fixed (like an 8-byte varint). Replacing `make()` with a local fixed-size array (e.g., `var buf [8]byte`) and slicing it `buf[:size]` entirely eliminates heap allocations.
 **Action:** When parsing small, bounded objects like varints from an `io.Reader`, use stack-allocated arrays and take their slices (`buf[:length]`) instead of dynamically allocating slices with `make()`.
 
+## YYYY-MM-DD - [Optimize Track Duplicate Detection]
+**Learning:** For small slices in Go (e.g., N <= 16), an O(N^2) nested loop comparison for duplicate detection is significantly faster than using a `map[T]struct{}`. The map overhead (allocation, hashing) dominates the execution time for small datasets typical in MSF track validations. Using a fixed-size stack array combined with a nested loop eliminates heap allocations and provides a faster execution path.
+**Action:** Replace map-based duplicate checks with O(N^2) loop checks for small, fixed-size slice validations where N is known to be small on average.
