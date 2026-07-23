@@ -29,7 +29,6 @@ func TestBroadcastRegisterAndServeTrack(t *testing.T) {
 	}
 }
 
-
 func TestBroadcastRemoveClosesActiveTracks(t *testing.T) {
 	broadcast := NewBroadcast()
 
@@ -257,16 +256,15 @@ func TestBroadcastClose_MultipleHandlers(t *testing.T) {
 	assert.Equal(t, reflect.ValueOf(NotFoundTrackHandler).Pointer(), reflect.ValueOf(broadcast.Handler("audio")).Pointer())
 }
 
-
 func TestBroadcast_Register(t *testing.T) {
 	dummyHandler := TrackHandlerFunc(func(*TrackWriter) {})
 
 	tests := []struct {
-		name         string
-		broadcast    *Broadcast
-		trackName    TrackName
-		handler      TrackHandler
-		wantErr      string
+		name      string
+		broadcast *Broadcast
+		trackName TrackName
+		handler   TrackHandler
+		wantErr   string
 	}{
 		{
 			name:      "valid registration",
