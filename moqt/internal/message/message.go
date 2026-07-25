@@ -4,6 +4,11 @@ import (
 	"fmt"
 )
 
+// MaxVarintLen is the maximum number of bytes a QUIC/MoQ variable-length integer
+// occupies on the wire (the 8-byte, 62-bit form). Useful for sizing fixed
+// stack buffers that encode a bounded number of varints without allocating.
+const MaxVarintLen = 8
+
 func VarintLen(i uint64) int {
 	if i <= maxVarInt1 {
 		return 1

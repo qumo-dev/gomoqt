@@ -341,24 +341,18 @@ func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequen
 		return nil, err
 	}
 
-	err = message.StreamTypeGroup.Encode(stream)
-	if err != nil {
-		var strErr *transport.StreamError
-		if errors.As(err, &strErr) {
-			return nil, &GroupError{StreamError: strErr}
-		}
-
-		strErrCode := transport.StreamErrorCode(InternalGroupErrorCode)
-		stream.CancelWrite(strErrCode)
-
-		return nil, err
-	}
-
-	err = message.GroupMessage{
+	// Coalesce the uni-stream type header and the GROUP message into a single
+	// Write. On a real QUIC SendStream this halves the per-open Write / stream-
+	// lock / flow-control interactions and removes a throwaway encode buffer.
+	// Wire-identical: the StreamTypeGroup byte followed by the GROUP message
+	// bytes, in the same order the two separate Encode calls produced.
+	var hdr [1 + 3*message.MaxVarintLen]byte // type byte + msg-len + 2 varints
+	buf := append(hdr[:0], byte(message.StreamTypeGroup))
+	buf = message.GroupMessage{
 		SubscribeID:   uint64(w.subscribeStream.subscribeID),
 		GroupSequence: uint64(seq),
-	}.Encode(stream)
-	if err != nil {
+	}.AppendEncode(buf)
+	if _, err = stream.Write(buf); err != nil {
 		var strErr *transport.StreamError
 		if errors.As(err, &strErr) {
 			return nil, &GroupError{StreamError: strErr}

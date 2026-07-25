@@ -134,3 +134,34 @@ func TestGroupMessage_DecodeErrors(t *testing.T) {
 		assert.Equal(t, message.ErrMessageTooShort, err)
 	})
 }
+
+// TestGroupMessage_AppendEncode_WireIdentical guards that AppendEncode produces
+// the exact byte sequence Encode writes. This is the wire-equivalence contract
+// the coalesced openGroupWithSequence relies on; a divergence is a protocol bug.
+func TestGroupMessage_AppendEncode_WireIdentical(t *testing.T) {
+	// Span the varint length boundaries (1/2/4/8-byte encodings) for both
+	// fields, plus zero and the uint62 max.
+	values := []uint64{
+		0,
+		8,                  // small, 1-byte
+		1<<(8-2) - 1,       // max 1-byte
+		1 << (8 - 2),       // 2-byte boundary
+		1<<(16-2) - 1,      // max 2-byte
+		1 << (16 - 2),      // 4-byte boundary
+		1<<(32-2) - 1,      // max 4-byte
+		1 << (32 - 2),      // 8-byte boundary
+		1<<(64-2) - 1,      // uint62 max
+	}
+	for _, sid := range values {
+		for _, seq := range values {
+			msg := message.GroupMessage{SubscribeID: sid, GroupSequence: seq}
+
+			var enc bytes.Buffer
+			require.NoError(t, msg.Encode(&enc))
+
+			got := msg.AppendEncode(nil)
+			assert.Equal(t, enc.Bytes(), got,
+				"AppendEncode != Encode for SubscribeID=%d GroupSequence=%d", sid, seq)
+		}
+	}
+}
