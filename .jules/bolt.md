@@ -13,4 +13,6 @@
 ## 2024-05-19 - Safe Varint Decoding Optimization
 **Learning:** In Go, fallback paths (like non-`io.ByteReader` readers) in hot decoding loops shouldn't use dynamic slice allocations (e.g., `make([]byte, size)`) if the maximum size is small and fixed (like an 8-byte varint). Replacing `make()` with a local fixed-size array (e.g., `var buf [8]byte`) and slicing it `buf[:size]` entirely eliminates heap allocations.
 **Action:** When parsing small, bounded objects like varints from an `io.Reader`, use stack-allocated arrays and take their slices (`buf[:length]`) instead of dynamically allocating slices with `make()`.
-
+## YYYY-MM-DD - Duplicate Detection Optimization
+**Learning:** In Go, replacing a map-based duplicate check with an O(N^2) nested loop against a stack-allocated array is measurably faster for very small slices (e.g., N <= 16) by avoiding map initialization and allocation overhead on the happy path. Do not try to manually string concatenate in error paths (e.g. using `itoa`) as it reduces readability for no benefit in a cold path.
+**Action:** Use an O(N^2) stack array for duplicate detection on small slices, but stick to standard `fmt.Sprintf` for error reporting to maintain code clarity.

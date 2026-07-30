@@ -248,14 +248,36 @@ func (c Catalog) Validate() error {
 			}
 		}
 	}
-	seen := make(map[TrackID]struct{}, len(c.Tracks))
-	for i, track := range c.Tracks {
-		id := track.ID(c.DefaultNamespace)
-		if _, ok := seen[id]; ok {
-			problems = append(problems, fmt.Sprintf("tracks[%d]: duplicate track identity %q", i, id.String()))
-			continue
+	if len(c.Tracks) <= 16 {
+		var seenArray [16]TrackID
+		var numSeen int
+		for i, track := range c.Tracks {
+			id := track.ID(c.DefaultNamespace)
+			duplicate := false
+			for j := 0; j < numSeen; j++ {
+				if seenArray[j] == id {
+					duplicate = true
+					break
+				}
+			}
+			if duplicate {
+				// ⚡ Bolt: Use a stack-allocated array for O(N^2) duplicate detection on small slices to avoid map allocation overhead.
+					problems = append(problems, fmt.Sprintf("tracks[%d]: duplicate track identity %q", i, id.String()))
+				continue
+			}
+			seenArray[numSeen] = id
+			numSeen++
 		}
-		seen[id] = struct{}{}
+	} else {
+		seen := make(map[TrackID]struct{}, len(c.Tracks))
+		for i, track := range c.Tracks {
+			id := track.ID(c.DefaultNamespace)
+			if _, ok := seen[id]; ok {
+				problems = append(problems, fmt.Sprintf("tracks[%d]: duplicate track identity %q", i, id.String()))
+				continue
+			}
+			seen[id] = struct{}{}
+		}
 	}
 
 	return newValidationError(problems)

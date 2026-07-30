@@ -1,0 +1,16 @@
+goos: linux
+goarch: amd64
+pkg: github.com/qumo-dev/gomoqt/msf
+cpu: Intel(R) Xeon(R) Processor @ 2.30GHz
+BenchmarkCatalog_Validate-4   	 6503310	       185.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCatalog_Validate-4   	 6438235	       194.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCatalog_Validate-4   	 6494488	       192.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCatalog_Validate-4   	 6507097	       184.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCatalog_Validate-4   	 6515598	       185.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCatalog_Validate-4   	 6483915	       184.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCatalog_Validate-4   	 5880880	       188.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCatalog_Validate-4   	 6515569	       189.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCatalog_Validate-4   	 6435326	       184.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCatalog_Validate-4   	 6509311	       184.7 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/qumo-dev/gomoqt/msf	14.075s
