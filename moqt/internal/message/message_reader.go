@@ -79,7 +79,8 @@ func ReadBytes(b []byte) ([]byte, int, error) {
 	}
 	b = b[n:]
 	if num > math.MaxInt {
-		panic("byte slice too large")
+		// SECURITY: Return an error instead of panicking on oversized untrusted input to prevent remote Denial of Service (DoS).
+		return nil, 0, errors.New("byte slice too large")
 	}
 
 	if uint64(len(b)) < num {
@@ -104,7 +105,8 @@ func ReadStringArray(b []byte) ([]string, int, error) {
 	}
 
 	if count > math.MaxInt {
-		panic("string array too large")
+		// SECURITY: Return an error instead of panicking on oversized untrusted input to prevent remote Denial of Service (DoS).
+		return nil, 0, errors.New("string array too large")
 	}
 
 	b = b[total:]
