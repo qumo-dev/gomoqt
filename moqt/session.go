@@ -60,6 +60,9 @@ type Session struct {
 	incomingProbeStream transport.Stream
 	probeTargetsCh      chan ProbeResult
 
+	// counters optionally points to the Server accept pipeline counters.
+	counters *ServerCounters
+
 	bitrateTracker bitrateTracker
 
 	probeMonitorOnce sync.Once // starts the bitrate monitor lazily (only when a probe stream arrives)
@@ -73,6 +76,7 @@ func newSession(
 	fetchHandler FetchHandler,
 	onGoaway func(newSessionURI string),
 	logger *slog.Logger,
+	counters *ServerCounters,
 ) *Session {
 	if mux == nil {
 		mux = DefaultMux
@@ -92,6 +96,7 @@ func newSession(
 		connManager:     manager,
 		probeResponseCh: make(chan ProbeResult, 1), // latest-value semantics
 		probeTargetsCh:  make(chan ProbeResult, 1), // latest-value semantics
+		counters:        counters,
 	}
 
 	if manager != nil {
@@ -579,6 +584,10 @@ func (sess *Session) handleBiStreams() {
 			return
 		}
 
+		if sess.counters != nil {
+			sess.counters.BiStreamAccepts.Add(1)
+		}
+
 		// Handle the stream. Tracked on sess.wg so CloseWithError joins in-flight
 		// stream handlers before closing the probe channels (avoids send-on-close races).
 		sess.wg.Go(func() {
@@ -651,12 +660,19 @@ func (sess *Session) handleSubscribeStream(stream transport.Stream) {
 	var sm message.SubscribeMessage
 	err := sm.Decode(stream)
 	if err != nil {
+		if sess.counters != nil {
+			sess.counters.SubscribeErrors.Add(1)
+		}
 		sess.logError("failed to decode SUBSCRIBE message", err)
 		cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeInternal))
 		return
 	}
 
 	// Create a receiveSubscribeStream with draft3 fields decoded from SUBSCRIBE message
+	if sess.counters != nil {
+		sess.counters.SubscribesReceived.Add(1)
+	}
+
 	config := &SubscribeConfig{
 		Priority:   TrackPriority(sm.SubscriberPriority),
 		Ordered:    boolFromWireFlag(sm.SubscriberOrdered),
@@ -683,6 +699,10 @@ func (sess *Session) handleSubscribeStream(stream transport.Stream) {
 		func() { sess.removeTrackWriter(SubscribeID(sm.SubscribeID)) },
 	)
 	sess.addTrackWriter(SubscribeID(sm.SubscribeID), track)
+
+	if sess.counters != nil {
+		sess.counters.SubscribesServed.Add(1)
+	}
 
 	sess.mux.serveTrack(track)
 

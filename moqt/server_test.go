@@ -485,7 +485,7 @@ func TestServer_addRemoveSession_ShutdownCompletesWhenLastSessionLeaves(t *testi
 
 	conn := &FakeStreamConn{}
 
-	sess := newSession(conn, nil, nil, nil, nil, nil, nil)
+	sess := newSession(conn, nil, nil, nil, nil, nil, nil, nil)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 	s.connManager.addConn(conn)
@@ -751,6 +751,49 @@ func TestServer_ServeQUICListener_AcceptError(t *testing.T) {
 	err := s.ServeQUICListener(ln)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to accept QUIC connection")
+	require.NotNil(t, s.Counters)
+	assert.Equal(t, int64(1), s.Counters.AcceptErrors.Load())
+	assert.Equal(t, int64(0), s.Counters.QUICAccepts.Load())
+}
+
+func TestServer_Counters_AutoInitialized(t *testing.T) {
+	s := &Server{}
+	s.init()
+
+	require.NotNil(t, s.Counters, "Server.init should allocate a default ServerCounters when none is set")
+}
+
+func TestServer_Counters_PreservesCallerSupplied(t *testing.T) {
+	counters := &ServerCounters{}
+	s := &Server{Counters: counters}
+	s.init()
+
+	assert.Same(t, counters, s.Counters, "Server.init must not overwrite a caller-supplied ServerCounters")
+}
+
+func TestServer_handleNativeQUIC_IncrementsNativeSessions(t *testing.T) {
+	called := make(chan struct{})
+	s := &Server{
+		Handler: HandleFunc(func(sess *Session) {
+			close(called)
+		}),
+	}
+	s.init()
+
+	conn := newTestNativeQUICConn(t)
+	err := s.ServeQUICConn(conn)
+	// handleNativeQUIC always returns the "no native QUIC handler configured"
+	// sentinel regardless of whether Handler was called; see
+	// TestServer_ServeQUICConn_NativeQUICCallsHandlerAndReturnsError.
+	assert.Error(t, err)
+
+	select {
+	case <-called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Handler to be called")
+	}
+
+	assert.Equal(t, int64(1), s.Counters.NativeSessions.Load())
 }
 
 func TestServer_ServeQUICConn_NilTLS(t *testing.T) {
