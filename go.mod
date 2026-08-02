@@ -3,7 +3,7 @@ module github.com/qumo-dev/gomoqt
 go 1.26.4
 
 require (
-	github.com/okdaichi/webtransport-go v0.11.0-okdaichi.2
+	github.com/okdaichi/webtransport-go v0.12.0-okdaichi.1
 	github.com/quic-go/quic-go v0.61.0
 	github.com/stretchr/testify v1.11.1
 )
