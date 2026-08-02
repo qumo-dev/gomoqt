@@ -246,12 +246,48 @@ func TestGroupWriter_Context(t *testing.T) {
 }
 
 func TestGroupWriter_CancelWrite(t *testing.T) {
-	mockStream := &FakeQUICSendStream{}
+	tests := map[string]struct {
+		hasManager bool
+		errorCode  GroupErrorCode
+	}{
+		"with group manager": {
+			hasManager: true,
+			errorCode:  GroupErrorCode(123),
+		},
+		"without group manager": {
+			hasManager: false,
+			errorCode:  GroupErrorCode(456),
+		},
+	}
 
-	groupManager := newGroupWriterManager()
-	sgs := newGroupWriter(mockStream, GroupSequence(1), groupManager)
-	groupManager.addGroup(sgs)
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			var capturedCode transport.StreamErrorCode
+			mockStream := &FakeQUICSendStream{
+				CancelWriteFunc: func(code transport.StreamErrorCode) {
+					capturedCode = code
+				},
+			}
 
-	sgs.CancelWrite(1)
-	assert.Equal(t, 0, groupManager.countGroups())
+			var groupManager *groupWriterManager
+			if tt.hasManager {
+				groupManager = newGroupWriterManager()
+			}
+
+			sgs := newGroupWriter(mockStream, GroupSequence(1), groupManager)
+
+			if tt.hasManager {
+				// newGroupWriter adds to manager if not nil, but let's double check it's there
+				assert.Equal(t, 1, groupManager.countGroups())
+			}
+
+			sgs.CancelWrite(tt.errorCode)
+
+			assert.Equal(t, transport.StreamErrorCode(tt.errorCode), capturedCode)
+
+			if tt.hasManager {
+				assert.Equal(t, 0, groupManager.countGroups())
+			}
+		})
+	}
 }
