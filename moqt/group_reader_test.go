@@ -265,6 +265,18 @@ func TestGroupReader_ReadFrame(t *testing.T) {
 			expectError: true,
 			expectFrame: true, // ReadFrame doesn't modify frame on error
 		},
+		"generic error": {
+			setupStream: func() *FakeQUICReceiveStream {
+				mockStream := &FakeQUICReceiveStream{
+					ReadFunc: func(p []byte) (int, error) {
+						return 0, errors.New("generic decode error")
+					},
+				}
+				return mockStream
+			},
+			expectError: true,
+			expectFrame: true, // ReadFrame doesn't modify frame on error
+		},
 	}
 
 	for name, tt := range tests {
@@ -287,6 +299,14 @@ func TestGroupReader_ReadFrame(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("nil frame panics", func(t *testing.T) {
+		mockStream := &FakeQUICReceiveStream{}
+		rgs := newGroupReader(123, mockStream, nil)
+		assert.PanicsWithValue(t, "nil frame", func() {
+			rgs.ReadFrame(nil)
+		})
+	})
 }
 
 func TestGroupReader_Frames(t *testing.T) {
