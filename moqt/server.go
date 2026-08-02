@@ -18,6 +18,27 @@ import (
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
+// ServerCounters holds per-stage accept counters for diagnosing connection
+// pipeline bottlenecks (e.g. P>=3 scaling investigations). Each field is an
+// atomic counter incremented at the corresponding stage of the accept path.
+// A nil *ServerCounters is safe to use (increments are no-ops).
+type ServerCounters struct {
+	// QUICAccepts counts successful ln.Accept calls (QUIC handshake complete).
+	QUICAccepts atomic.Int64
+	// NativeSessions counts MoQ sessions created via handleNativeQUIC.
+	NativeSessions atomic.Int64
+	// BiStreamAccepts counts bidirectional streams accepted by handleBiStreams.
+	BiStreamAccepts atomic.Int64
+	// SubscribesReceived counts SUBSCRIBE messages decoded.
+	SubscribesReceived atomic.Int64
+	// SubscribesServed counts mux.serveTrack invocations.
+	SubscribesServed atomic.Int64
+	// AcceptErrors counts ln.Accept errors.
+	AcceptErrors atomic.Int64
+	// SubscribeErrors counts SUBSCRIBE decode failures.
+	SubscribeErrors atomic.Int64
+}
+
 // ListenAndServe starts a new Server bound to the specified address and TLS
 // configuration. It is a convenience helper that constructs a Server with the
 // provided settings and calls its ListenAndServe method.
@@ -49,6 +70,9 @@ func NewWebTransportServer(handler http.Handler) WebTransportServer {
 // The server maintains active sessions and listeners and provides graceful
 // shutdown capabilities.
 type Server struct {
+	// Counters tracks per-stage accept pipeline counters. Nil is safe.
+	Counters *ServerCounters
+
 	// Address to listen on, in the form "host:port".
 	Addr string
 
@@ -109,6 +133,9 @@ type Server struct {
 
 func (s *Server) init() {
 	s.initOnce.Do(func() {
+		if s.Counters == nil {
+			s.Counters = new(ServerCounters)
+		}
 		s.listeners = make(map[QUICListener]struct{})
 		s.connManager = newConnManager()
 		if s.WebTransportServer == nil {
@@ -183,7 +210,14 @@ func (s *Server) ServeQUICListener(ln QUICListener) error {
 			if errors.Is(err, context.Canceled) {
 				return ErrServerClosed
 			}
+			if s.Counters != nil {
+				s.Counters.AcceptErrors.Add(1)
+			}
 			return fmt.Errorf("failed to accept QUIC connection: %w", err)
+		}
+
+		if s.Counters != nil {
+			s.Counters.QUICAccepts.Add(1)
 		}
 
 		// Handle connection in a goroutine
@@ -327,7 +361,7 @@ func (u *WebTransportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		manager = v.(*connManager)
 	}
 
-	sess := newSession(conn, u.TrackMux, manager, u.Config, u.FetchHandler, nil, u.Logger)
+	sess := newSession(conn, u.TrackMux, manager, u.Config, u.FetchHandler, nil, u.Logger, nil)
 	// Ensure the session is cleaned up (conn removed from the manager) when
 	// the Handler returns, even if it did not call CloseWithError itself (e.g.
 	// the peer closed the connection). Idempotent.
@@ -356,7 +390,10 @@ func (f HandleFunc) ServeMOQ(sess *Session) {
 
 func (s *Server) handleNativeQUIC(conn StreamConn) error {
 	if s.Handler != nil {
-		sess := newSession(conn, s.TrackMux, s.connManager, s.Config, s.FetchHandler, nil, s.Logger)
+		sess := newSession(conn, s.TrackMux, s.connManager, s.Config, s.FetchHandler, nil, s.Logger, s.Counters)
+		if s.Counters != nil {
+			s.Counters.NativeSessions.Add(1)
+		}
 		// Clean up the session when the Handler returns (idempotent if the
 		// Handler already closed it), so the conn is removed from the manager.
 		defer sess.CloseWithError(NoError, "session ended")
