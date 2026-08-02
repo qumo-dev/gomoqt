@@ -59,10 +59,14 @@ func TestGroupWriter_GroupSequence(t *testing.T) {
 }
 
 func TestGroupWriter_WriteFrame(t *testing.T) {
+	var writtenData []byte
+
 	tests := map[string]struct {
-		setupFrame  func() *Frame
-		setupMock   func() *FakeQUICSendStream
-		expectError bool
+		setupFrame       func() *Frame
+		setupMock        func() *FakeQUICSendStream
+		expectError      bool
+		expectFrameCount uint64
+		verifyData       func(t *testing.T)
 	}{
 		"write valid frame": {
 			setupFrame: func() *Frame {
@@ -72,10 +76,19 @@ func TestGroupWriter_WriteFrame(t *testing.T) {
 			},
 			setupMock: func() *FakeQUICSendStream {
 				return &FakeQUICSendStream{
-					WriteFunc: func(p []byte) (int, error) { return 0, nil },
+					WriteFunc: func(p []byte) (int, error) {
+						writtenData = append(writtenData, p...)
+						return len(p), nil
+					},
 				}
 			},
-			expectError: false,
+			expectError:      false,
+			expectFrameCount: 1,
+			verifyData: func(t *testing.T) {
+				// The payload length is 9 ("test data"), which is encoded as a varint (1 byte for 9).
+				// Thus, written data should be varint(9) + "test data".
+				assert.Equal(t, append([]byte{9}, []byte("test data")...), writtenData)
+			},
 		},
 		"write nil frame": {
 			setupFrame: func() *Frame {
@@ -84,7 +97,8 @@ func TestGroupWriter_WriteFrame(t *testing.T) {
 			setupMock: func() *FakeQUICSendStream {
 				return &FakeQUICSendStream{}
 			},
-			expectError: false,
+			expectError:      false,
+			expectFrameCount: 0,
 		},
 		"write frame with error": {
 			setupFrame: func() *Frame {
@@ -97,12 +111,14 @@ func TestGroupWriter_WriteFrame(t *testing.T) {
 					WriteFunc: func(p []byte) (int, error) { return 0, errors.New("write error") },
 				}
 			},
-			expectError: true,
+			expectError:      true,
+			expectFrameCount: 0,
 		},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
+			writtenData = nil // reset for each run
 			mockStream := tt.setupMock()
 			sgs := newGroupWriter(mockStream, GroupSequence(123), newGroupWriterManager())
 
@@ -112,6 +128,12 @@ func TestGroupWriter_WriteFrame(t *testing.T) {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
+			}
+
+			assert.Equal(t, tt.expectFrameCount, sgs.frameCount, "frame count should match")
+
+			if tt.verifyData != nil {
+				tt.verifyData(t)
 			}
 		})
 	}
