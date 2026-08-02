@@ -43,8 +43,10 @@ func Example() {
 		TrackMux:  mux,
 		Handler: moqt.HandleFunc(func(sess *moqt.Session) {
 			defer func() { _ = sess.CloseWithError(moqt.NoError, "") }()
-			// Interact with the session here, or simply keep it open so the
-			// TrackMux/FetchHandler can serve subscription and fetch traffic.
+			// The server closes the session when the Handler returns, so block
+			// until the session ends to keep serving subscription/fetch traffic
+			// (the TrackMux and FetchHandler run on their own streams).
+			<-sess.Context().Done()
 		}),
 		FetchHandler: moqt.FetchHandlerFunc(func(w *moqt.GroupWriter, r *moqt.FetchRequest) {
 			defer w.Close()
@@ -120,19 +122,18 @@ func ExampleTrackMux_publish() {
 	mux.PublishFunc(ctx, "/live/stream", func(tw *moqt.TrackWriter) {
 		defer tw.Close()
 
-		var seq moqt.GroupSequence
+		frame := moqt.NewFrame(1500) // reused across frames
 		for {
 			if tw.Context().Err() != nil {
 				return // subscriber or announcement gone
 			}
 
-			gw, err := tw.OpenGroup(ctx)
+			gw, err := tw.OpenGroup(ctx) // advances the group sequence automatically
 			if err != nil {
 				return
 			}
 
 			// Pack a few frames per group. See ExampleGroupWriter for details.
-			frame := moqt.NewFrame(1500)
 			for range 3 {
 				frame.Reset()
 				_, _ = frame.Write([]byte("payload"))
@@ -143,7 +144,6 @@ func ExampleTrackMux_publish() {
 			}
 			_ = gw.Close()
 
-			seq++
 			time.Sleep(33 * time.Millisecond) // ~30 fps
 		}
 	})
