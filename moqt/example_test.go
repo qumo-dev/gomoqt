@@ -16,8 +16,8 @@ import (
 //
 //   - A Frame is a single payload blob (one object/message).
 //   - A Group is an ordered sequence of Frames. A group is the unit of
-//     ordering, priority, and dropping on the wire — publishers emit whole
-//     groups and subscribers consume whole groups.
+//     ordering and dropping on the wire — publishers emit whole groups and
+//     subscribers consume whole groups.
 //
 // Tracks are addressed as (BroadcastPath, TrackName): the path is a slash
 // namespace (e.g. "/live") and the name is the track within it (e.g. "cam-1").
@@ -179,7 +179,7 @@ func ExampleTrackMux_publish() {
 					return
 				}
 			}
-			_ = gw.Close() // flush the group to the subscriber
+			_ = gw.Close() // finalize the group
 
 			time.Sleep(33 * time.Millisecond) // ~30 fps
 		}
@@ -195,7 +195,7 @@ func ExampleTrackMux_publish() {
 //   - open one GroupWriter per group with OpenGroup (or OpenGroupAt to pin a
 //     specific sequence);
 //   - WriteFrame into the group for each payload;
-//   - Close the GroupWriter to flush the group and start the next one.
+//   - Close the GroupWriter to finalize the group once you are done with it.
 //
 // tw.Context() is canceled when the subscriber leaves or the announcement ends,
 // so loops should poll it (or pass it to OpenGroup) to stop promptly.
@@ -217,7 +217,7 @@ func ExampleTrackWriter() {
 			frame.Reset()
 			_, _ = frame.Write([]byte("group payload"))
 			_ = gw.WriteFrame(frame)
-			_ = gw.Close() // flush this group
+			_ = gw.Close() // finalize this group
 		}
 	})
 }
@@ -225,12 +225,14 @@ func ExampleTrackWriter() {
 // ExampleGroupWriter packs several frames into one group.
 //
 // A group is the atomic unit subscribers receive: frames within a group are
-// delivered in order, and a group can be dropped as a whole under congestion.
-// WriteFrame takes a *Frame; to avoid allocations, allocate one Frame before
-// the loop and Reset it between writes.
+// delivered in order, and a publisher can drop a whole group at once via
+// DropGroups to shed load. WriteFrame takes a *Frame and encodes it
+// synchronously, so allocate one Frame before the loop and Reset it between
+// writes — the buffer is safe to reuse once WriteFrame returns.
 //
-// Close the GroupWriter when the group is complete — this flushes it and is
-// required before opening the next group on the same track.
+// Close the GroupWriter when the group is complete. Each group is its own
+// stream, so closing one is not required before opening the next (groups may
+// even overlap); closing finalizes the group so the subscriber can finish it.
 func ExampleGroupWriter() {
 	// In a real program gw comes from TrackWriter.OpenGroup (see ExampleTrackWriter).
 	var gw *moqt.GroupWriter
@@ -386,9 +388,10 @@ func ExampleSession_Fetch() {
 //
 // Probe sends a target-bitrate hint to the publisher and returns a channel of
 // ProbeResult values carrying the publisher's measured bitrate. The publisher
-// drives the cadence; calling Probe again on the same session updates the target
-// without opening a new stream. The channel closes when the probe stream ends
-// or the session terminates.
+// drives the cadence; calling Probe again on the same session updates the
+// target, reusing the existing probe stream when it is still alive (and opening
+// a fresh one if not). The channel closes when the probe stream ends or the
+// session terminates.
 //
 // Use the measured value to pick an encoding bitrate that fits the path, then
 // re-probe when conditions change.
