@@ -12,74 +12,96 @@ import (
 
 // This file illustrates the main usage scenarios of the moqt package.
 //
-// Network-bound examples are shown without an // Output: line, so the Go tool
-// compiles them but does not execute them; they require a live MOQ peer.
-// ExampleFrame is a pure, runnable example.
-
-// Example demonstrates how to create and configure a basic MOQ server.
+// The data model has two nested units:
 //
-// A Server accepts native QUIC sessions (scheme "moqt://"). Handler is invoked
-// once per accepted session; TrackMux routes SUBSCRIBE requests to the
-// registered track handlers, and FetchHandler serves one-off FETCH requests.
+//   - A Frame is a single payload blob (one object/message).
+//   - A Group is an ordered sequence of Frames. A group is the unit of
+//     ordering, priority, and dropping on the wire — publishers emit whole
+//     groups and subscribers consume whole groups.
+//
+// Tracks are addressed as (BroadcastPath, TrackName): the path is a slash
+// namespace (e.g. "/live") and the name is the track within it (e.g. "cam-1").
+//
+// Network-bound examples below carry no // Output: line, so the Go tool
+// compiles them but does not execute them — they require a live MOQ peer.
+// ExampleFrame is pure and runnable.
+
+// Example demonstrates a complete native-QUIC MOQ server.
+//
+// A Server listens for "moqt://" connections and wires together three
+// independently-configurable concerns:
+//
+//   - Handler is the application callback invoked once per accepted session.
+//   - TrackMux routes inbound SUBSCRIBE requests to registered publishers.
+//   - FetchHandler serves one-shot FETCH requests for a single group.
+//
+// Important: the server closes a session when its Handler returns (see
+// handleNativeQUIC). A Handler that wants the session's background stream
+// handling (TrackMux subscriptions, FetchHandler fetches) to keep running must
+// therefore block — here we wait on the session context, which is canceled when
+// the peer closes the connection or the server shuts down.
+//
+// TLS 1.3 is required. ListenAndServe blocks; run it in a goroutine if you need
+// to do other work in the same process. For WebTransport ("https://") servers,
+// use WebTransportHandler with net/http instead of Server.
 func Example() {
-	// Create a minimal TLS configuration (in production, use proper certificates)
 	tlsConfig := &tls.Config{
-		// Configure your certificates here
+		// Configure your server certificate here.
 		MinVersion: tls.VersionTLS13,
 	}
 
-	// Track multiplexer routes announcements and subscriptions to handlers.
+	// TrackMux holds the announcement tree and routes subscribers to publishers.
+	// hopID 0 marks this node as an endpoint (origin), not a relay.
 	mux := moqt.NewTrackMux(0)
 	ctx := context.Background()
 	mux.PublishFunc(ctx, "/live/cam-1", func(tw *moqt.TrackWriter) {
-		// Called once per subscriber; write media here. See ExampleGroupWriter.
+		// Invoked once per subscriber. Write media here; see ExampleTrackWriter.
 		defer tw.Close()
+		<-tw.Context().Done() // keep the track open for the subscriber
 	})
 
-	// Create the MOQ server
 	server := &moqt.Server{
 		Addr:      ":4433",
 		TLSConfig: tlsConfig,
 		TrackMux:  mux,
 		Handler: moqt.HandleFunc(func(sess *moqt.Session) {
 			defer func() { _ = sess.CloseWithError(moqt.NoError, "") }()
-			// The server closes the session when the Handler returns, so block
-			// until the session ends to keep serving subscription/fetch traffic
-			// (the TrackMux and FetchHandler run on their own streams).
+			// Block so the session stays alive for subscription/fetch traffic.
 			<-sess.Context().Done()
 		}),
 		FetchHandler: moqt.FetchHandlerFunc(func(w *moqt.GroupWriter, r *moqt.FetchRequest) {
 			defer w.Close()
-			// Serve a single requested group. See ExampleSession_Fetch.
+			// Serve the single requested group; see ExampleSession_Fetch.
 		}),
 	}
 
-	// Start serving (this blocks, so typically run in a goroutine)
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }
 
-// ExampleClient demonstrates how to create a MOQ client and establish a session.
+// ExampleClient dials a MOQ session from a URL.
 //
-// Dial selects the transport from the URL scheme: "moqt://" for native QUIC and
-// "https://" for WebTransport.
+// Dialer.Dial selects the transport from the URL scheme: "moqt://" uses native
+// QUIC and "https://" uses WebTransport. (DialWebTransport and DialQUIC select
+// a transport explicitly when you already know which one you want.)
+//
+// The mux argument routes INBOUND tracks — subscriptions and announcements
+// directed at this client when it also acts as a publisher. A pure subscriber
+// that never publishes may pass nil.
+//
+// Always close a session when done. CloseWithError carries a code and a
+// human-readable reason to the peer; NoError signals a clean shutdown.
 func ExampleClient() {
-	// Create a TLS configuration
 	tlsConfig := &tls.Config{
-		InsecureSkipVerify: true, // Only for testing!
+		InsecureSkipVerify: true, // TESTING ONLY — use a real CA in production.
 		MinVersion:         tls.VersionTLS13,
 	}
 
-	// Create the client
-	client := &moqt.Dialer{
-		TLSConfig: tlsConfig,
-	}
+	client := &moqt.Dialer{TLSConfig: tlsConfig}
+	mux := moqt.NewTrackMux(0) // pass nil if you never publish from this client
 
-	// Create a track multiplexer for routing
-	mux := moqt.NewTrackMux(0)
-
-	// Connect to the server (use "https://" for WebTransport or "moqt://" for QUIC)
+	// "https://" → WebTransport; "moqt://" → native QUIC.
 	session, err := client.Dial(context.Background(), "https://localhost:4433", mux)
 	if err != nil {
 		log.Fatal(err)
@@ -89,31 +111,46 @@ func ExampleClient() {
 	fmt.Println("Connected to MOQ server")
 }
 
-// ExampleTrackMux demonstrates how to use the track multiplexer for publishing tracks.
+// ExampleTrackMux registers a publishable track on a TrackMux.
 //
-// The handler runs once for each subscriber; cancel the context to withdraw the
-// track (existing subscribers are then closed).
+// A TrackMux keeps two indexes: a flat path→handler map for fast SUBSCRIBE
+// lookup, and a prefix tree of announcements that notifies anyone who has
+// opened an announce stream matching a prefix (see ExampleSession_AcceptAnnounce).
+//
+// PublishFunc is sugar: it creates an Announcement for the path and registers
+// the function as a TrackHandler. The handler runs once PER subscriber; each
+// subscriber gets its own TrackWriter. Cancel the context to withdraw the
+// track — the announcement ends and existing subscribers are closed.
+//
+// Paths must begin with "/".
 func ExampleTrackMux() {
-	// Create a new multiplexer
 	mux := moqt.NewTrackMux(0)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // withdraw the announcement when done publishing
+	defer cancel() // withdraw the announcement when you stop publishing
 
-	// Publish a track with a handler. Paths are slash-prefixed.
 	mux.PublishFunc(ctx, "/example/path", func(tw *moqt.TrackWriter) {
 		defer tw.Close()
-		// A subscriber arrived. See ExampleTrackWriter for writing media.
+		// A subscriber arrived; see ExampleTrackWriter for writing media.
 	})
 
 	fmt.Println("Mux configured with track handler")
 }
 
-// ExampleTrackMux_publish shows a fan-out publisher writing live groups.
+// ExampleTrackMux_publish is a live (streaming) publisher.
 //
-// Publish a handler that loops over groups, opening a GroupWriter per group and
-// writing frames into it. Each connected subscriber receives its own copy of the
-// stream through the same handler invocation.
+// The handler below runs for each subscriber and loops indefinitely, opening a
+// new GroupWriter per group and packing frames into it. OpenGroup atomically
+// advances the group sequence, so consecutive calls produce monotonically
+// increasing group numbers without the caller tracking them.
+//
+// Because the same handler services every subscriber, the mux fans one logical
+// track out to many viewers. Each subscriber's TrackWriter is independent, so a
+// slow viewer does not block others — bounded only by the QUIC stream's
+// per-subscriber flow control.
+//
+// Reuse a single Frame across writes: its buffer is retained across Reset
+// calls, avoiding per-frame allocation on the publishing hot path.
 func ExampleTrackMux_publish() {
 	mux := moqt.NewTrackMux(0)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -133,7 +170,7 @@ func ExampleTrackMux_publish() {
 				return
 			}
 
-			// Pack a few frames per group. See ExampleGroupWriter for details.
+			// Several frames per group; see ExampleGroupWriter.
 			for range 3 {
 				frame.Reset()
 				_, _ = frame.Write([]byte("payload"))
@@ -142,24 +179,33 @@ func ExampleTrackMux_publish() {
 					return
 				}
 			}
-			_ = gw.Close()
+			_ = gw.Close() // flush the group to the subscriber
 
 			time.Sleep(33 * time.Millisecond) // ~30 fps
 		}
 	})
 }
 
-// ExampleTrackWriter demonstrates writing groups and frames to a published track.
+// ExampleTrackWriter shows the per-subscriber writing loop inside a handler.
 //
-// A TrackWriter is supplied to a TrackHandler. Open a GroupWriter for each group,
-// write frames into it, then close it to flush the group to the subscriber.
+// A TrackWriter is handed to a TrackHandler for each subscriber. Within it you:
+//
+//   - optionally call WriteInfo once to publish priority/ordering/latency hints
+//     (these influence how the network schedules this track relative to others);
+//   - open one GroupWriter per group with OpenGroup (or OpenGroupAt to pin a
+//     specific sequence);
+//   - WriteFrame into the group for each payload;
+//   - Close the GroupWriter to flush the group and start the next one.
+//
+// tw.Context() is canceled when the subscriber leaves or the announcement ends,
+// so loops should poll it (or pass it to OpenGroup) to stop promptly.
 func ExampleTrackWriter() {
 	ctx := context.Background()
 
 	moqt.PublishFunc(ctx, "/demo/track", func(tw *moqt.TrackWriter) {
 		defer tw.Close()
 
-		// Optionally advertise publisher priority / ordering to the subscriber.
+		// Advertise publisher-side parameters to the subscriber.
 		_ = tw.WriteInfo(moqt.PublishInfo{Priority: moqt.TrackPriority(5)})
 
 		frame := moqt.NewFrame(4096)
@@ -171,18 +217,24 @@ func ExampleTrackWriter() {
 			frame.Reset()
 			_, _ = frame.Write([]byte("group payload"))
 			_ = gw.WriteFrame(frame)
-			_ = gw.Close() // close to flush the group
+			_ = gw.Close() // flush this group
 		}
 	})
 }
 
-// ExampleGroupWriter shows how to fill and send a group of frames.
+// ExampleGroupWriter packs several frames into one group.
 //
-// Reuse a single Frame across writes to avoid allocations on the hot path.
+// A group is the atomic unit subscribers receive: frames within a group are
+// delivered in order, and a group can be dropped as a whole under congestion.
+// WriteFrame takes a *Frame; to avoid allocations, allocate one Frame before
+// the loop and Reset it between writes.
+//
+// Close the GroupWriter when the group is complete — this flushes it and is
+// required before opening the next group on the same track.
 func ExampleGroupWriter() {
-	// Obtained from TrackWriter.OpenGroup in a real program.
+	// In a real program gw comes from TrackWriter.OpenGroup (see ExampleTrackWriter).
 	var gw *moqt.GroupWriter
-	_ = gw // (illustrative; OpenGroup is shown in ExampleTrackWriter)
+	_ = gw
 
 	frame := moqt.NewFrame(2048) // reused across frames
 	for range 5 {
@@ -193,31 +245,47 @@ func ExampleGroupWriter() {
 	// _ = gw.Close()
 }
 
-// ExampleGroupReader_Frames reads all frames of a group with a range iterator.
+// ExampleGroupReader_Frames reads every frame of one group with a range loop.
 //
-// Frames yields decoded frames until the group stream ends or the reader is
-// canceled. Pass a reusable *Frame as the buffer to avoid per-frame allocations.
+// Frames returns an iterator that decodes frames until the group stream ends
+// (clean EOF), the reader is canceled, or a stream error occurs. Pass a shared
+// *Frame as the scratch buffer: each yielded frame reuses that buffer, so
+// consume or copy the body before the next iteration.
+//
+// For lower-level control (e.g. custom error handling per frame) call ReadFrame
+// directly in a loop instead.
 func ExampleGroupReader_Frames() {
+	// gr comes from TrackReader.AcceptGroup (see ExampleSession_Subscribe).
 	var gr *moqt.GroupReader
-	_ = gr // (illustrative; obtained from TrackReader.AcceptGroup)
+	_ = gr
 
 	buf := moqt.NewFrame(4096)
 	for frame := range gr.Frames(buf) {
-		_ = frame.Body() // consume frame payload
+		_ = frame.Body() // consume before the next iteration overwrites buf
 	}
 }
 
-// ExampleSession_Subscribe subscribes to a remote track and reads its groups.
+// ExampleSession_Subscribe subscribes to a remote track and consumes its groups.
 //
-// Subscribe blocks until the SUBSCRIBE_OK is received, then returns a
-// TrackReader. Accept groups one at a time and read frames from each.
+// Subscribe performs the SUBSCRIBE handshake: it opens a stream, sends the
+// request, and blocks until SUBSCRIBE_OK (or an error). On success it returns a
+// TrackReader. The (path, name) pair identifies the track; a nil config requests
+// the live tail (latest groups) with default priority and no range filter.
+//
+// To customize delivery, pass a *SubscribeConfig: Priority affects relative
+// scheduling, Ordered requests in-order group delivery, MaxLatency caps
+// buffering, and StartGroup/EndGroup select a range (useful for seek/rewind).
+//
+// Then loop: AcceptGroup blocks for the next group, and group.Frames iterates
+// its frames. The loop ends with an error when the track ends or the
+// subscription is canceled.
 func ExampleSession_Subscribe() {
-	var sess *moqt.Session // obtained from Dialer.Dial
+	var sess *moqt.Session // from Dialer.Dial
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Subscribe to "/live/cam-1", default config (latest groups, no start range).
+	// Subscribe to the "cam-1" track under the "/live" namespace, live tail.
 	track, err := sess.Subscribe(ctx, "/live", moqt.TrackName("cam-1"), nil)
 	if err != nil {
 		log.Fatal(err)
@@ -236,12 +304,19 @@ func ExampleSession_Subscribe() {
 	}
 }
 
-// ExampleSession_AcceptAnnounce receives track announcements matching a prefix.
+// ExampleSession_AcceptAnnounce discovers tracks advertised by the peer.
 //
-// AcceptAnnounce opens an announce stream for the given prefix; the returned
-// AnnouncementReader yields each active or new track under that prefix.
+// AcceptAnnounce opens an announce stream for a prefix (which must start with
+// "/" and, unless it is just "/", end with "/"). The returned AnnouncementReader
+// yields an Announcement for every track the peer publishes under that prefix —
+// both the tracks already active when the call is made and any added later. When
+// a track is withdrawn, its Announcement's Done channel fires (see IsActive /
+// AfterFunc on Announcement).
+//
+// This is the discovery mechanism: call it once per prefix you care about, then
+// Subscribe to each announced path as it arrives.
 func ExampleSession_AcceptAnnounce() {
-	var sess *moqt.Session // obtained from Dialer.Dial
+	var sess *moqt.Session // from Dialer.Dial
 
 	reader, err := sess.AcceptAnnounce("/live/")
 	if err != nil {
@@ -249,18 +324,20 @@ func ExampleSession_AcceptAnnounce() {
 	}
 	defer reader.Close()
 
-	ctx := context.Background()
-	for ann := range reader.Announcements(ctx) {
+	for ann := range reader.Announcements(context.Background()) {
 		fmt.Printf("announced: %s\n", ann.BroadcastPath())
 	}
 }
 
-// ExampleAnnouncementReader_ReceiveAnnouncement receives a single announcement.
+// ExampleAnnouncementReader_ReceiveAnnouncement receives one announcement.
 //
-// Use ReceiveAnnouncement when you want to handle each announcement explicitly
-// (e.g. to subscribe as soon as a matching track appears) rather than iterating.
+// ReceiveAnnouncement blocks until an announcement is available or the supplied
+// context / the reader's context is canceled. Use it (rather than the
+// Announcements iterator) when you want explicit control over each step — for
+// example, to subscribe to a track the instant it appears, or to enforce a
+// timeout on the first announcement.
 func ExampleAnnouncementReader_ReceiveAnnouncement() {
-	var reader *moqt.AnnouncementReader // obtained from Session.AcceptAnnounce
+	var reader *moqt.AnnouncementReader // from Session.AcceptAnnounce
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -274,11 +351,16 @@ func ExampleAnnouncementReader_ReceiveAnnouncement() {
 
 // ExampleSession_Fetch fetches a single group by sequence.
 //
-// FETCH is a request/response for one specific group, in contrast to SUBSCRIBE
-// which streams ongoing groups. Build a FetchRequest, optionally attach a
-// context for cancellation/timeout, then read the returned group.
+// FETCH is request/response for ONE specific group, unlike SUBSCRIBE which
+// streams ongoing groups. It is the primitive for seek, rewind, and thumbnail
+// style access: ask for group N of a track, read its frames, done.
+//
+// Build a FetchRequest with the (path, name) and the GroupSequence you want;
+// WithContext attaches a deadline/cancellation source (the request otherwise
+// uses the background context). The returned GroupReader behaves like a
+// subscription's group — iterate Frames to read the payload.
 func ExampleSession_Fetch() {
-	var sess *moqt.Session // obtained from Dialer.Dial
+	var sess *moqt.Session // from Dialer.Dial
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -302,11 +384,16 @@ func ExampleSession_Fetch() {
 
 // ExampleSession_Probe measures the available outbound bitrate.
 //
-// Probe sends a target bitrate hint to the publisher and returns a channel of
-// ProbeResult values carrying the publisher's measured bitrate. Calling Probe
-// again on the same session updates the target.
+// Probe sends a target-bitrate hint to the publisher and returns a channel of
+// ProbeResult values carrying the publisher's measured bitrate. The publisher
+// drives the cadence; calling Probe again on the same session updates the target
+// without opening a new stream. The channel closes when the probe stream ends
+// or the session terminates.
+//
+// Use the measured value to pick an encoding bitrate that fits the path, then
+// re-probe when conditions change.
 func ExampleSession_Probe() {
-	var sess *moqt.Session // obtained from Dialer.Dial
+	var sess *moqt.Session // from Dialer.Dial
 
 	results, err := sess.Probe(2_000_000) // hint 2 Mbps
 	if err != nil {
@@ -320,31 +407,36 @@ func ExampleSession_Probe() {
 	}
 }
 
-// ExampleBroadcast registers track handlers directly, without a TrackMux.
+// ExampleBroadcast registers track handlers without a TrackMux.
 //
-// A Broadcast is a flat name->handler registry. It is useful when routing is
-// handled outside of the prefix tree that TrackMux maintains, or for tests.
+// A Broadcast is a flat TrackName→handler registry with no prefix routing and
+// no announcement tree. It is the lower-level building block: useful when you
+// implement your own routing/discovery, in tests, or when you serve a fixed set
+// of tracks. For prefix-based announcement and SUBSCRIBE routing, prefer
+// TrackMux (see ExampleTrackMux).
 func ExampleBroadcast() {
 	bc := moqt.NewBroadcast()
 	defer bc.Close()
 
-	handler := moqt.TrackHandlerFunc(func(tw *moqt.TrackWriter) {
+	serve := moqt.TrackHandlerFunc(func(tw *moqt.TrackWriter) {
 		defer tw.Close()
-		// serve subscriber
+		// serve this subscriber
 	})
 
-	if err := bc.Register(moqt.TrackName("audio"), handler); err != nil {
+	if err := bc.Register(moqt.TrackName("audio"), serve); err != nil {
 		log.Fatal(err)
 	}
-	if err := bc.Register(moqt.TrackName("video"), handler); err != nil {
+	if err := bc.Register(moqt.TrackName("video"), serve); err != nil {
 		log.Fatal(err)
 	}
 }
 
-// ExampleFrame is a runnable example showing how to build and reuse a Frame.
+// ExampleFrame is a runnable example of building and reusing a Frame.
 //
-// A Frame wraps a reusable payload buffer; Write appends bytes and Reset clears
-// the payload while preserving capacity for the next write.
+// A Frame wraps a reusable payload buffer. Write appends bytes (growing the
+// buffer as needed); Body returns the current payload; Len is its length; Reset
+// clears the payload while preserving capacity for the next write. Reusing one
+// Frame across many writes avoids per-frame allocation on hot paths.
 func ExampleFrame() {
 	frame := moqt.NewFrame(64)
 
@@ -353,7 +445,7 @@ func ExampleFrame() {
 	fmt.Printf("%s\n", frame.Body())
 	fmt.Println(frame.Len())
 
-	frame.Reset() // reuse the underlying buffer for the next frame
+	frame.Reset() // payload gone, buffer capacity retained
 	fmt.Println(frame.Len())
 
 	// Output:
