@@ -394,3 +394,10 @@ func TestBroadcast_Register(t *testing.T) {
 		})
 	}
 }
+
+func TestNewBroadcast(t *testing.T) {
+	b := NewBroadcast()
+	assert.NotNil(t, b)
+	assert.NotNil(t, b.trackHandlers)
+	assert.Empty(t, b.trackHandlers)
+}
