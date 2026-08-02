@@ -47,8 +47,13 @@ func WriteBytes(dest []byte, b []byte) ([]byte, int) {
 	return dest, n + len(b)
 }
 
+// WriteString writes a string with a length prefix.
+// ⚡ Bolt: Direct append(dest, s...) is faster than delegating to WriteBytes([]byte(s))
+// because it avoids the runtime overhead of string-to-bytes conversion.
 func WriteString(dest []byte, s string) ([]byte, int) {
-	return WriteBytes(dest, []byte(s))
+	dest, n := WriteVarint(dest, uint64(len(s)))
+	dest = append(dest, s...)
+	return dest, n + len(s)
 }
 
 func WriteStringArray(dest []byte, arr []string) ([]byte, int) {
