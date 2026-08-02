@@ -98,16 +98,24 @@ func TestReceiveGroupStream_ReadFrame_EOF(t *testing.T) {
 
 func TestReceiveGroupStream_CancelRead(t *testing.T) {
 	tests := map[string]struct {
-		errorCode GroupErrorCode
+		errorCode   GroupErrorCode
+		withManager bool
 	}{
-		"internal group error": {
-			errorCode: InternalGroupErrorCode,
+		"internal group error without manager": {
+			errorCode:   InternalGroupErrorCode,
+			withManager: false,
 		},
-		"out of range error": {
-			errorCode: OutOfRangeErrorCode,
+		"out of range error without manager": {
+			errorCode:   OutOfRangeErrorCode,
+			withManager: false,
 		},
-		"expired group error": {
-			errorCode: ExpiredGroupErrorCode,
+		"expired group error without manager": {
+			errorCode:   ExpiredGroupErrorCode,
+			withManager: false,
+		},
+		"internal group error with manager": {
+			errorCode:   InternalGroupErrorCode,
+			withManager: true,
 		},
 	}
 
@@ -115,7 +123,16 @@ func TestReceiveGroupStream_CancelRead(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			mockStream := &FakeQUICReceiveStream{}
 
-			rgs := newGroupReader(GroupSequence(123), mockStream, nil)
+			var mgr *groupReaderManager
+			if tt.withManager {
+				mgr = newGroupReaderManager()
+			}
+
+			rgs := newGroupReader(GroupSequence(123), mockStream, mgr)
+
+			if tt.withManager {
+				assert.Contains(t, mgr.activeGroups, rgs)
+			}
 
 			rgs.CancelRead(tt.errorCode)
 
@@ -123,6 +140,10 @@ func TestReceiveGroupStream_CancelRead(t *testing.T) {
 			var cancelReadErr *transport.StreamError
 			require.ErrorAs(t, readErr, &cancelReadErr)
 			assert.Equal(t, transport.StreamErrorCode(tt.errorCode), cancelReadErr.ErrorCode)
+
+			if tt.withManager {
+				assert.NotContains(t, mgr.activeGroups, rgs)
+			}
 		})
 	}
 }
