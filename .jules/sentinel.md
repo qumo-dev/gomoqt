@@ -12,3 +12,7 @@ Checking memory constraints for OOM vulnerabilities...
 **Vulnerability:** Remote DoS vulnerability due to panicking on network inputs that exceed bounds.
 **Learning:** In Go network parsing, using `panic()` to handle malformed or oversized untrusted input introduces a remote Denial of Service (DoS) vulnerability.
 **Prevention:** Always fail securely by returning appropriate errors (e.g., `errors.New("byte slice too large")`) rather than panicking.
+## YYYY-MM-DD - [DoS fix: Removed Panic on untrusted input lengths]
+**Vulnerability:** Remote DoS vulnerability due to panicking on network inputs that exceed bounds.
+**Learning:** In Go network parsing, using `panic()` to handle malformed or oversized untrusted input introduces a remote Denial of Service (DoS) vulnerability.
+**Prevention:** Always fail securely by returning safe fallbacks or appropriate errors rather than panicking.

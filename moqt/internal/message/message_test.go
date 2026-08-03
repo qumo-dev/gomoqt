@@ -29,10 +29,8 @@ func TestVarintLen(t *testing.T) {
 	}
 }
 
-func TestVarintLenPanic(t *testing.T) {
-	assert.Panics(t, func() {
-		VarintLen(maxVarInt8 + 1)
-	})
+func TestVarintLenFallback(t *testing.T) {
+	assert.Equal(t, 8, VarintLen(maxVarInt8+1))
 }
 
 func TestStringLen(t *testing.T) {
