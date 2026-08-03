@@ -82,18 +82,18 @@ func main() {
 	// Pipe server output so we can reformat and unify logs
 	serverStdout, err := serverCmd.StdoutPipe()
 	if err != nil {
-		slog.Error("Failed to capture server stdout: " + err.Error())
+		slog.Error("Failed to capture server stdout", "error", err)
 		return
 	}
 	serverStderr, err := serverCmd.StderrPipe()
 	if err != nil {
-		slog.Error("Failed to capture server stderr: " + err.Error())
+		slog.Error("Failed to capture server stderr", "error", err)
 		return
 	}
 
 	err = serverCmd.Start()
 	if err != nil {
-		slog.Error("Failed to start server: " + err.Error())
+		slog.Error("Failed to start server", "error", err)
 		return
 	}
 
@@ -151,17 +151,17 @@ func main() {
 
 	clientStdout, err := clientCmd.StdoutPipe()
 	if err != nil {
-		slog.Error("Failed to capture client stdout: " + err.Error())
+		slog.Error("Failed to capture client stdout", "error", err)
 		return
 	}
 	clientStderr, err := clientCmd.StderrPipe()
 	if err != nil {
-		slog.Error("Failed to capture client stderr: " + err.Error())
+		slog.Error("Failed to capture client stderr", "error", err)
 		return
 	}
 
 	if err = clientCmd.Start(); err != nil {
-		slog.Error(" Failed to start client: " + err.Error())
+		slog.Error("Failed to start client", "error", err)
 		return
 	}
 
