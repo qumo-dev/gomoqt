@@ -268,18 +268,42 @@ func (b *Broadcast) staleTrackNamesLocked(catalog Catalog) []moqt.TrackName {
 		return nil
 	}
 
-	activeNames := make(map[moqt.TrackName]struct{}, len(catalog.Tracks))
-	for _, track := range catalog.Tracks {
-		activeNames[moqt.TrackName(track.Name)] = struct{}{}
-	}
-
 	stale := make([]moqt.TrackName, 0)
-	for _, track := range b.catalog.Tracks {
-		name := moqt.TrackName(track.Name)
-		if _, ok := activeNames[name]; ok {
-			continue
+
+	// ⚡ Bolt: Fast path for small catalogs (N<=16) avoids map initialization
+	// and hashing overhead by using an O(N^2) loop over a stack array.
+	if len(catalog.Tracks) <= 16 {
+		var activeNames [16]moqt.TrackName
+		numNames := 0
+		for _, track := range catalog.Tracks {
+			activeNames[numNames] = moqt.TrackName(track.Name)
+			numNames++
 		}
-		stale = append(stale, name)
+		for _, track := range b.catalog.Tracks {
+			name := moqt.TrackName(track.Name)
+			isActive := false
+			for j := 0; j < numNames; j++ {
+				if activeNames[j] == name {
+					isActive = true
+					break
+				}
+			}
+			if !isActive {
+				stale = append(stale, name)
+			}
+		}
+	} else {
+		activeNames := make(map[moqt.TrackName]struct{}, len(catalog.Tracks))
+		for _, track := range catalog.Tracks {
+			activeNames[moqt.TrackName(track.Name)] = struct{}{}
+		}
+		for _, track := range b.catalog.Tracks {
+			name := moqt.TrackName(track.Name)
+			if _, ok := activeNames[name]; ok {
+				continue
+			}
+			stale = append(stale, name)
+		}
 	}
 
 	return stale
@@ -287,17 +311,42 @@ func (b *Broadcast) staleTrackNamesLocked(catalog Catalog) []moqt.TrackName {
 
 // validateCatalogForBroadcast rejects catalog shapes that cannot be routed by Broadcast.
 func validateCatalogForBroadcast(catalog Catalog, catalogTrackName moqt.TrackName) error {
-	seen := make(map[moqt.TrackName]TrackID, len(catalog.Tracks))
-	for _, track := range catalog.Tracks {
-		name := moqt.TrackName(track.Name)
-		if name == catalogTrackName {
-			return fmt.Errorf("msf: catalog contains reserved track name %q", catalogTrackName)
+	// ⚡ Bolt: Fast path for small catalogs (N<=16) avoids map initialization
+	// and hashing overhead by using an O(N^2) loop over a stack array.
+	if len(catalog.Tracks) <= 16 {
+		type seenEntry struct {
+			name moqt.TrackName
+			id   TrackID
 		}
-		id := track.ID(catalog.DefaultNamespace)
-		if previous, ok := seen[name]; ok && previous != id {
-			return fmt.Errorf("msf: broadcast requires unique track names across namespaces; duplicate name %q found for %q and %q", name, previous.String(), id.String())
+		var seen [16]seenEntry
+		numSeen := 0
+		for _, track := range catalog.Tracks {
+			name := moqt.TrackName(track.Name)
+			if name == catalogTrackName {
+				return fmt.Errorf("msf: catalog contains reserved track name %q", catalogTrackName)
+			}
+			id := track.ID(catalog.DefaultNamespace)
+			for j := 0; j < numSeen; j++ {
+				if seen[j].name == name && seen[j].id != id {
+					return fmt.Errorf("msf: broadcast requires unique track names across namespaces; duplicate name %q found for %q and %q", name, seen[j].id.String(), id.String())
+				}
+			}
+			seen[numSeen] = seenEntry{name: name, id: id}
+			numSeen++
 		}
-		seen[name] = id
+	} else {
+		seen := make(map[moqt.TrackName]TrackID, len(catalog.Tracks))
+		for _, track := range catalog.Tracks {
+			name := moqt.TrackName(track.Name)
+			if name == catalogTrackName {
+				return fmt.Errorf("msf: catalog contains reserved track name %q", catalogTrackName)
+			}
+			id := track.ID(catalog.DefaultNamespace)
+			if previous, ok := seen[name]; ok && previous != id {
+				return fmt.Errorf("msf: broadcast requires unique track names across namespaces; duplicate name %q found for %q and %q", name, previous.String(), id.String())
+			}
+			seen[name] = id
+		}
 	}
 	return nil
 }
