@@ -1,11 +1,10 @@
 package moqt
 
 import (
-	"fmt"
-
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"fmt"
 	"strings"
 	"sync"
 )
