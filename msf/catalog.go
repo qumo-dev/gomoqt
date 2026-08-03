@@ -248,14 +248,36 @@ func (c Catalog) Validate() error {
 			}
 		}
 	}
-	seen := make(map[TrackID]struct{}, len(c.Tracks))
-	for i, track := range c.Tracks {
-		id := track.ID(c.DefaultNamespace)
-		if _, ok := seen[id]; ok {
-			problems = append(problems, fmt.Sprintf("tracks[%d]: duplicate track identity %q", i, id.String()))
-			continue
+	// Validate unique track identities.
+	// For small catalogs (N<=16), O(N^2) loop is faster and avoids map allocations on the happy path.
+	// For larger catalogs, we fallback to a map to avoid O(N^2) performance degradation.
+	if len(c.Tracks) > 16 {
+		seen := make(map[TrackID]struct{}, len(c.Tracks))
+		for i := range c.Tracks {
+			id := c.Tracks[i].ID(c.DefaultNamespace)
+			if _, ok := seen[id]; ok {
+				problems = append(problems, fmt.Sprintf("tracks[%d]: duplicate track identity %q", i, id.String()))
+				continue
+			}
+			seen[id] = struct{}{}
 		}
-		seen[id] = struct{}{}
+	} else if len(c.Tracks) > 1 {
+		var seen [16]TrackID
+		seen[0] = c.Tracks[0].ID(c.DefaultNamespace)
+		for i := 1; i < len(c.Tracks); i++ {
+			id := c.Tracks[i].ID(c.DefaultNamespace)
+			isDuplicate := false
+			for j := 0; j < i; j++ {
+				if seen[j] == id {
+					problems = append(problems, fmt.Sprintf("tracks[%d]: duplicate track identity %q", i, id.String()))
+					isDuplicate = true
+					break
+				}
+			}
+			if !isDuplicate {
+				seen[i] = id
+			}
+		}
 	}
 
 	return newValidationError(problems)
