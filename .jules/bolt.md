@@ -21,3 +21,6 @@
 ## 2026-07-19 - Context Synchronization in Shutdown Polling
 **Learning:** Replacing a `time.Sleep` loop in a goroutine with an event-driven `select` statement blocking on `context.Done()` drastically improves execution latency and eliminates unnecessary CPU busy-waiting, reducing simulated server shutdown benchmarks from ~100.5ms/op to ~5.4ms/op.
 **Action:** When creating asynchronous shutdown watchers or lifecycle loops, avoid `time.Sleep` polling in favor of `context.WithCancel` and `select` mechanisms for precise, immediate orchestration.
+## YYYY-MM-DD - Avoid Map Initialization Overhead for Small Lists
+**Learning:** For finding duplicates or validating uniqueness in very small slices (e.g., N <= 16), an O(N^2) nested loop comparison against a stack-allocated array is measurably faster than using a `map[T]struct{}`. Even if escape analysis optimizes the map to the stack, the nested loop avoids map initialization and element hashing overhead on the happy path.
+**Action:** Provide a fast-path fallback using a small, stack-allocated array and O(N^2) loop for uniqueness detection on small bounded items before falling back to a map.
