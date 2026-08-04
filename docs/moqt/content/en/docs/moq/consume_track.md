@@ -28,12 +28,13 @@ Consuming a track involves reading media data from a `moqt.TrackReader`, which p
         }
 
         go func(gr *moqt.GroupReader) { // Read frames in parallel
-            defer gr.Close()
-
             frame := moqt.NewFrame(0)
             for {
                 if err := gr.ReadFrame(frame); err != nil {
-                    // End of group or error
+                    if !errors.Is(err, io.EOF) {
+                        // Stop reading early and notify the publisher
+                        gr.CancelRead(moqt.InternalGroupErrorCode)
+                    }
                     break
                 }
 
@@ -65,8 +66,11 @@ To receive the next available group from a track, use `TrackReader.AcceptGroup` 
         // End of track or error
         return
     }
-    defer group.Close() // Always close when done
 ```
+
+> [!NOTE] Note: Closing a Group Reader
+> `moqt.GroupReader` has no `Close` method. A group ends on its own when `ReadFrame` returns `io.EOF`.
+> Call `GroupReader.CancelRead` only when you want to stop reading before the end of the group.
 
 ## Read Frames
 

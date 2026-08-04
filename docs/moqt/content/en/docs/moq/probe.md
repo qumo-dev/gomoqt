@@ -107,4 +107,4 @@ Probe operations may return `moqt.ProbeError` or `moqt.SessionError`:
     }
 ```
 
-See [Built-in Error Codes](errors/#built-in-error-codes) for `ProbeErrorCode` values.
+See [Built-in Error Codes](../errors/#built-in-error-codes) for `ProbeErrorCode` values.

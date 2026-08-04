@@ -64,8 +64,8 @@ The reserved catalog track name (`"catalog"` by default) cannot be used.
 `msf.Broadcast` implements `moqt.TrackHandler`, so it can be published directly:
 
 ```go
-    mux := moqt.DefaultMux
-    mux.Publish("/live", broadcast)
+    mux := moqt.NewTrackMux(0)
+    mux.Publish(ctx, "/live", broadcast)
 ```
 
 Subscriptions to the catalog track name are served automatically with the current catalog snapshot serialized as JSON. All other subscriptions are routed to the registered per-track handler.

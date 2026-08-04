@@ -1,16 +1,16 @@
 ---
-title: "What is MOQ (to be)"
+title: "What is MoQ (to be)"
 date: 3025-09-01
 authors:
   - name: okdaichi
     link: https://github.com/okdaichi
     image: https://github.com/okdaichi.png
 tags:
-  - MOQ
+  - MoQ
   - Protocol
 ---
 
-For building real-time media applications, the choice of transport protocol is crucial. We already have several options, such as WebRTC, WebSocket, and HTTP Streaming Protocols. MOQ (Media over QUIC) is also one of the candidates. What is MOQ, and why should we consider it?
+For building real-time media applications, the choice of transport protocol is crucial. We already have several options, such as WebRTC, WebSocket, and HTTP Streaming Protocols. MoQ (Media over QUIC) is also one of the candidates. What is MoQ, and why should we consider it?
 
 <!--more-->
 
@@ -18,9 +18,9 @@ For building real-time media applications, the choice of transport protocol is c
 
 
 
-### MOQ
+### MoQ
 
-MOQ (Media over QUIC) is a protocol designed for real-time media transmission over the internet, leveraging the capabilities of the QUIC transport protocol. QUIC is a modern transport protocol that takes the best aspects of UDP, TCP, HTTPS, and other protocols.
+MoQ (Media over QUIC) is a protocol designed for real-time media transmission over the internet, leveraging the capabilities of the QUIC transport protocol. QUIC is a modern transport protocol that takes the best aspects of UDP, TCP, HTTPS, and other protocols.
 
 ### WebRTC
 
@@ -44,11 +44,11 @@ There are two main scenarios where information needs to be communicated: hop-by-
 - Hop-by-Hop: Information that needs to be communicated between each node in the network, such as routing and forwarding control.
 - End-to-End: Information that needs to be communicated directly between the sender and receiver, such as media configuration and session management.
 
-Either protocols such as WebRTC or MOQ just define how two endpoints communicate, though the handling of hop-by-hop versus end-to-end differs.
-In MOQ, information is divided into hop-by-hop and end-to-end. This allows for a more modular approach, where each node only needs to understand the relevant parts of the protocol. This can lead to better scalability and interoperability.
+Either protocols such as WebRTC or MoQ just define how two endpoints communicate, though the handling of hop-by-hop versus end-to-end differs.
+In MoQ, information is divided into hop-by-hop and end-to-end. This allows for a more modular approach, where each node only needs to understand the relevant parts of the protocol. This can lead to better scalability and interoperability.
 Apart from that, in WebRTC, all information is communicated end-to-end. This means that each client needs to understand the entire protocol stack, which can be complex and lead to interoperability issues.
 
 ### Per-Packet vs Per-Stream
 
 In WebRTC, media data are delivered in individual packets (RTP Packets).
-In MOQ, media data are delivered in multiple streams which is groups multiple packets.
+In MoQ, media data are delivered in multiple streams which is groups multiple packets.

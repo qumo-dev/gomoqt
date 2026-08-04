@@ -1,6 +1,6 @@
 ---
 title: TypeScript / JavaScript
-weight: 1
+weight: 2
 ---
 
 
@@ -11,24 +11,57 @@ We provide a JavaScript client library to facilitate this integration.
 
 ### Prerequisites
 
-- Node.js (version 14 or later)
-- npm (Node Package Manager)
+- A runtime with WebTransport support — a modern browser, or [Deno](https://deno.com/)
+- A package manager that can install from [JSR](https://jsr.io/): `deno`, `npm`, `pnpm`, `yarn`, or `bun`
 
 {{% steps %}}
 
-### Initialize npm module
-
-If you haven't already, initialize an npm module in your project directory.
-
-```bash
-npm init -y
-```
-
 ### Install module
 
+The client library is published to JSR as [`@qumo/moq`](https://jsr.io/@qumo/moq).
+
+{{< tabs items="Deno, npm, pnpm, yarn, bun" >}}
+{{< tab >}}
 ```bash
-npm install @okutanidaichi/moqt
+deno add jsr:@qumo/moq
 ```
+{{< /tab >}}
+{{< tab >}}
+```bash
+npx jsr add @qumo/moq
+```
+{{< /tab >}}
+{{< tab >}}
+```bash
+pnpm dlx jsr add @qumo/moq
+```
+{{< /tab >}}
+{{< tab >}}
+```bash
+yarn dlx jsr add @qumo/moq
+```
+{{< /tab >}}
+{{< tab >}}
+```bash
+bunx jsr add @qumo/moq
+```
+{{< /tab >}}
+{{< /tabs >}}
+
+### Importing modules
+
+```ts
+import { connect } from "@qumo/moq";
+import { parseCatalog } from "@qumo/moq/msf";
+
+const session = await connect("https://localhost:4443/moq");
+const [reader] = await session.subscribe("/broadcast", "video");
+```
+
+| Entrypoint      | Description                                                       |
+|:----------------|:------------------------------------------------------------------|
+| `@qumo/moq`     | Core MoQ client — sessions, tracks, groups, and frames.           |
+| `@qumo/moq/msf` | MSF streaming format — catalogs, deltas, and timelines.           |
 
 {{% /steps %}}
 

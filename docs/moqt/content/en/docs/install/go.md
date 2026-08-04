@@ -33,11 +33,11 @@ go get github.com/qumo-dev/gomoqt
 
 gomoqt provides several packages that can be imported into your Go application. The main package is `moqt`, which contains the core logic for Media over QUIC. In addition to `moqt`, the following packages are provided:
 
-| Package Name   | Description                                                                 |
-|:-------------- |:---------------------------------------------------------------------------|
-| `moqt`         | Main package implementing the core logic for Media over QUIC.               |
-| `quic`         | Abstraction and interface definitions for QUIC used by moqt.<br>Includes a wrapper for `quic-go/quic-go` which is used in `moqt` by default. |
-| `webtransport` | Abstraction and interface definitions for WebTransport used by moqt.<br>Includes a wrapper for `quic-go/webtransport-go` which is used in `moqt` by default. |
+| Import Path                              | Description                                                                 |
+|:-----------------------------------------|:----------------------------------------------------------------------------|
+| `github.com/qumo-dev/gomoqt/moqt`        | Main package implementing the core logic for Media over QUIC.               |
+| `github.com/qumo-dev/gomoqt/msf`         | MOQT Streaming Format — catalogs, catalog deltas, and timeline records.     |
+| `github.com/qumo-dev/gomoqt/transport`   | Abstraction and interface definitions for the QUIC/WebTransport layer used by `moqt`.<br>Wraps `quic-go/quic-go` and `okdaichi/webtransport-go`, which `moqt` uses by default. |
 
 **Example of importing the `moqt` package**:
 

@@ -17,7 +17,7 @@ Broadcasts are announced when they are registered with the `moqt.TrackMux`. This
     var sess *moqt.Session // Holds the mux
 
     // Register and announce a broadcast
-    ann, end := NewAnnouncement(ctx, "/broadcast_path")
+    ann, end := moqt.NewAnnouncement(ctx, "/broadcast_path")
     mux.Announce(ann, trackHandler)
     defer end() // Cleanup when done
 

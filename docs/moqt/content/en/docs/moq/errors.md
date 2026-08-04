@@ -1,6 +1,6 @@
 ---
 title: Errors
-weight: 13
+weight: 14
 ---
 
 ## General Error Variables
@@ -28,7 +28,7 @@ The following error types are defined to represent specific protocol error scena
 
 ### Relationship with QUIC errors
 
-The concrete MOQ error types map directly onto the QUIC error primitives:
+The concrete MoQ error types map directly onto the QUIC error primitives:
 
 - `moqt.SessionError` wraps `*transport.ApplicationError` and represents errors that affect the whole QUIC connection (session-level errors).
 - `moqt.AnnounceError`, `moqt.SubscribeError`, `moqt.GroupError`, `moqt.FetchError`, and `moqt.ProbeError` each wrap `*transport.StreamError` and represent errors that occur on individual QUIC streams (stream-level errors).
@@ -123,18 +123,18 @@ Implementations in `gomoqt/moqt` return specific error types for different error
 ```
 
 > [!NOTE] Note:
-> MOQ-related errors are always returned from specific structs. When analyzing errors, make sure to perform error handling and analysis at the correct location in the code, according to the struct that returns the error. This ensures accurate diagnosis and handling of protocol errors.
+> MoQ-related errors are always returned from specific structs. When analyzing errors, make sure to perform error handling and analysis at the correct location in the code, according to the struct that returns the error. This ensures accurate diagnosis and handling of protocol errors.
 
 ## Error Propagation
 
 You can get `context.Context` via `Context` method implementated in `gomoqt/moqt` such as `moqt.TrackReader` or `moqt.Session`.
-`moqt.Cause` function is provided to access to the root cause of an error propagation and to parse the cause  as a MOQ error if it is a QUIC error.
+`moqt.Cause` function is provided to access to the root cause of an error propagation and to parse the cause  as a MoQ error if it is a QUIC error.
 This is because the `context.Context` holds the original QUIC error and `context.Cause` returns the cause as is.
 ```go
 func Cause(ctx context.Context) error
 ```
 
-**Example: Get MOQ cause from context.Context**
+**Example: Get MoQ cause from context.Context**
 
 ```go
     var ctx context.Context
@@ -143,7 +143,7 @@ func Cause(ctx context.Context) error
     cause = moqt.Cause(ctx)
 ```
 
-To get the MOQ cause from a context, use `errors.As` function with corresponding error type.
+To get the MoQ cause from a context, use `errors.As` function with corresponding error type.
 
 **Example: When `moqt.TrackWriter`'s context is canceled**
 

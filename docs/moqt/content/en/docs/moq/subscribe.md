@@ -96,5 +96,5 @@ If you specify some reason for closing, `TrackReader.CloseWithError` which notif
 ### Consuming a Track
 
 {{< cards >}}
-	{{< card link="../track_group_frame/#consume-a-track" title="Consume a Track" icon="download" subtitle="How to consume a track." >}}
+	{{< card link="../consume_track/" title="Consume a Track" icon="download" subtitle="How to consume a track." >}}
 {{< /cards >}}

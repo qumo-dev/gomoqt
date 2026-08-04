@@ -1,6 +1,6 @@
 ---
 title: Relay
-weight: 12
+weight: 13
 ---
 
 ## Relay a Track
@@ -21,7 +21,6 @@ To forward media data, a server subscribes to a source track as a subscriber to 
         }
 
         go func(gr *moqt.GroupReader) {
-            defer gr.Close()
             seq := gr.GroupSequence()
 
             writers := make([]*moqt.GroupWriter, 0, len(dests))
@@ -38,7 +37,7 @@ To forward media data, a server subscribes to a source track as a subscriber to 
             for {
                 err := gr.ReadFrame(frame)
                 if err != nil {
-                    if err == io.EOF {
+                    if errors.Is(err, io.EOF) {
                         for _, gw := range writers {
                             gw.Close()
                         }
@@ -108,7 +107,3 @@ To enhance UX, consider implementing caching strategies for frequently accessed 
 3. **Cache Invalidation**: Implement strategies to invalidate stale cache entries to ensure data consistency.
 
 By leveraging caching, you can significantly improve the responsiveness of your application and provide a smoother user experience.
-
-## 📝 Future Work
-
-- Per-track Caching Management: (#XXX)

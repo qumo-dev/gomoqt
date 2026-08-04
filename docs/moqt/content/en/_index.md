@@ -16,7 +16,7 @@ images:
 {{<hextra/hero-headline>}}
 Build live media
 &nbsp;<br class="hx:sm:block hx:hidden" />
-with MOQ in Go
+with MoQ in Go
 {{</hextra/hero-headline>}}
 </div>
 

@@ -27,14 +27,14 @@ type TrackWriter struct {
 
 func (*TrackWriter) Close() error
 func (*TrackWriter) CloseWithError(SubscribeErrorCode)
-func (*TrackWriter) OpenGroup() (*GroupWriter, error)
-func (*TrackWriter) OpenGroupAt(GroupSequence) (*GroupWriter, error)
+func (*TrackWriter) OpenGroup(context.Context) (*GroupWriter, error)
+func (*TrackWriter) OpenGroupAt(context.Context, GroupSequence) (*GroupWriter, error)
 func (*TrackWriter) SkipGroups(n uint64)
 func (*TrackWriter) DropGroups(SubscribeDrop) error
 func (*TrackWriter) DropNextGroups(n uint64, code SubscribeErrorCode) error
 func (*TrackWriter) WriteInfo(PublishInfo) error
 func (*TrackWriter) TrackConfig() *SubscribeConfig
-func (*TrackWriter) Updated() <-chan struct{}
+func (*TrackWriter) ReadUpdate() (*SubscribeConfig, error)
 func (*TrackWriter) Context() context.Context
 ```
 

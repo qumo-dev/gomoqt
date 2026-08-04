@@ -56,12 +56,12 @@ When you call `Publish`, `PublishFunc`, or `Announce`, a `moqt.Announcement` is 
 
 This ensures that all participants are aware of available broadcasts and their status. If the announcement ends (for example, if the context is cancelled), the mux cleans up the handler and announcement.
 
-For more details, see the [Announce & Discover](announce_discover.md) documentation.
+For more details, see the [Announce & Discover](../announce_discover/) documentation.
 
 ## Producing a Track
 
 {{< cards >}}
-	{{< card link="../track_group_frame/#produce-a-track" title="Produce a Track" icon="upload" subtitle="How to produce a track." >}}
+	{{< card link="../produce_track/" title="Produce a Track" icon="upload" subtitle="How to produce a track." >}}
 {{< /cards >}}
 
 ## Cancel a Publication

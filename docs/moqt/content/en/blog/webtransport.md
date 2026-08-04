@@ -12,7 +12,7 @@ tags:
   - Web
 ---
 
-WebTransport is a protocol for secure, efficient, and bidirectional communication over the web using QUIC. It builds on QUIC APIs, allowing web browsers and applications to benefit from QUIC features and the Media over QUIC (MOQ) architecture.
+WebTransport is a protocol for secure, efficient, and bidirectional communication over the web using QUIC. It builds on QUIC APIs, allowing web browsers and applications to benefit from QUIC features and the Media over QUIC (MoQ) architecture.
 
 <!--more-->
 

@@ -11,7 +11,7 @@ tags:
   - Protocol
 ---
 
-QUIC is a transport protocol for secure, efficient, and reliable communication over the internet. It supports multiplexed streams, strong security with mandatory TLS, and flexible connection management. QUIC is the foundation for protocols like Media over QUIC (MOQ) and WebTransport.
+QUIC is a transport protocol for secure, efficient, and reliable communication over the internet. It supports multiplexed streams, strong security with mandatory TLS, and flexible connection management. QUIC is the foundation for protocols like Media over QUIC (MoQ) and WebTransport.
 
 <!--more-->
 
