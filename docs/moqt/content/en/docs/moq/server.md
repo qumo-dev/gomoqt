@@ -30,7 +30,7 @@ func main() {
             slog.Info("Native QUIC session established")
             <-sess.Context().Done()
         }),
-        WebTransportServer: &webtransportgo.Server{},
+        // WebTransportServer is omitted: nil selects the default implementation.
         Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
             Level: slog.LevelInfo,
         })),
@@ -65,7 +65,7 @@ The following table describes the public fields of the `Server` struct:
 | `Addr`                 | `string`                    | Server address and port                     |
 | `TLSConfig`            | [`*tls.Config`](https://pkg.go.dev/crypto/tls#Config) | TLS configuration for secure connections    |
 | `QUICConfig`           | [`*quic.Config`](https://pkg.go.dev/github.com/quic-go/quic-go#Config)              | QUIC protocol configuration                 |
-| `Config`               | [`*moqt.Config`](https://pkg.go.dev/github.com/qumo-dev/gomoqt/moqt#Config)                   | MOQ protocol configuration                  |
+| `Config`               | [`*moqt.Config`](https://pkg.go.dev/github.com/qumo-dev/gomoqt/moqt#Config)                   | MoQ protocol configuration                  |
 | `TrackMux`             | `*moqt.TrackMux`              | Multiplexer for routing announcements and track subscriptions. If nil, a global default mux is used. |
 | `Handler`              | [`moqt.Handler`](https://pkg.go.dev/github.com/qumo-dev/gomoqt/moqt#Handler)                 | Handler for accepted native QUIC sessions. If nil, native QUIC connections are not handled. |
 | `FetchHandler`         | [`moqt.FetchHandler`](https://pkg.go.dev/github.com/qumo-dev/gomoqt/moqt#FetchHandler)       | Handles incoming FETCH requests on native QUIC sessions. If nil, FETCH requests are rejected. |
@@ -73,6 +73,7 @@ The following table describes the public fields of the `Server` struct:
 | `ListenFunc`           | `func(addr, tlsConfig, quicConfig) (QUICListener, error)` | Custom QUIC listener function. If nil, the default implementation is used. |
 | `ConnContext`          | `func(ctx context.Context, conn StreamConn) context.Context` | Modifies the context used for a new connection. Optional. |
 | `NextSessionURI`       | `string`                    | The URI sent to clients during `Shutdown`, allowing them to reconnect to a different server. If empty, no redirect URI is provided. |
+| `Counters`             | `*moqt.ServerCounters`      | Optional atomic counters for accepted connections, sessions, streams, and subscribe successes/failures. If nil, no counters are recorded. |
 | `Logger`               | [`*slog.Logger`](https://pkg.go.dev/log/slog#Logger)              | Logger for server events and errors. If nil, logging is disabled. |
 
 {{< tabs items="Using Default QUIC, Using Custom QUIC" >}}
@@ -101,9 +102,9 @@ type Server struct {
 {{< tabs items="Using Default WebTransport, Using Custom WebTransport" >}}
 {{< tab >}}
 
-[`quic-go/webtransport-go`](https://github.com/okdaichi/webtransport-go) is used internally as the default WebTransport implementation when `WebTransportServer` is nil.
+[`okdaichi/webtransport-go`](https://github.com/okdaichi/webtransport-go) — a fork of `quic-go/webtransport-go` carrying a custom upgrader — is used internally as the default WebTransport implementation when `WebTransportServer` is nil.
 
-{{<github-readme-stats user="quic-go" repo="webtransport-go" >}}
+{{<github-readme-stats user="okdaichi" repo="webtransport-go" >}}
 
 {{< /tab >}}
 {{< tab >}}
@@ -178,6 +179,19 @@ For WebTransport connections, use `moqt.WebTransportHandler` to handle HTTP upgr
 ```
 
 `WebTransportHandler` implements `http.Handler` and can be used with any HTTP server. It upgrades the HTTP/3 connection to WebTransport, creates a session, and invokes the configured `Handler`.
+
+| Field                  | Type                        | Description                                 |
+|------------------------|-----------------------------|---------------------------------------------|
+| `Config`               | [`*moqt.Config`](https://pkg.go.dev/github.com/qumo-dev/gomoqt/moqt#Config) | MoQ protocol configuration                  |
+| `TrackMux`             | `*moqt.TrackMux`            | Multiplexer for routing announcements and track subscriptions. |
+| `CheckOrigin`          | `func(r *http.Request) bool` | Validates the origin of an incoming upgrade request. If nil, the upgrader's default policy applies. |
+| `ApplicationProtocols` | `[]string`                  | ALPN tokens accepted for WebTransport upgrades. If empty, `moqt.NextProtoMOQ` is used. |
+| `ReorderingTimeout`    | `time.Duration`             | Maximum wait for out-of-order packets on WebTransport streams. Zero means the transport default. |
+| `Handler`              | [`moqt.Handler`](https://pkg.go.dev/github.com/qumo-dev/gomoqt/moqt#Handler) | Handles the accepted session after a successful handshake. |
+| `FetchHandler`         | [`moqt.FetchHandler`](https://pkg.go.dev/github.com/qumo-dev/gomoqt/moqt#FetchHandler) | Handles incoming FETCH requests. If nil, fetch requests are not handled. |
+| `UpgradeFunc`          | `func(w http.ResponseWriter, r *http.Request) (WebTransportSession, error)` | Custom HTTP-to-WebTransport upgrade. If nil, the default upgrader is used. |
+| `FallbackHandler`      | `http.Handler`              | Handles non-WebTransport requests on the same endpoint. Optional. |
+| `Logger`               | [`*slog.Logger`](https://pkg.go.dev/log/slog#Logger) | Logger for WebTransport events and errors. If nil, logging is disabled. |
 
 ## Run the Server
 

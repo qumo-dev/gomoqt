@@ -1,6 +1,6 @@
 ---
 title: Migrate
-weight: 11
+weight: 12
 ---
 
 Session migration redirects connected clients to a new URI during graceful server shutdown.
@@ -40,13 +40,22 @@ Use `OnGoaway` to handle shutdown notifications:
 
 ## Relay
 
-Use `OnGoaway` on `moqt.Server` to handle notifications from upstream:
+A relay is a client with respect to its upstream, so it handles upstream migration
+with the `moqt.Dialer` it uses to dial upstream — `moqt.Server` has no `OnGoaway` field:
 
 ```go
-    server := moqt.Server{
+    // Upstream connection: react to the upstream server going away.
+    dialer := moqt.Dialer{
         OnGoaway: func(newSessionURI string) {
             slog.Info("Upstream requested migration", "uri", newSessionURI)
+            // Re-dial upstream and re-subscribe.
         },
+        // ...
+    }
+
+    // Downstream connections: hand our own clients a new destination.
+    server := moqt.Server{
+        NextSessionURI: "https://relay-2.example.com/moq",
         // ...
     }
 ```

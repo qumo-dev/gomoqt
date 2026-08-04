@@ -16,7 +16,7 @@ images:
 {{<hextra/hero-headline>}}
 Build live media
 &nbsp;<br class="hx:sm:block hx:hidden" />
-with MOQ in Go
+with MoQ in Go
 {{</hextra/hero-headline>}}
 </div>
 
@@ -52,7 +52,7 @@ for building scalable real-time apps.
 		style="background: radial-gradient(ellipse at 50% 80%,rgba(16,185,129,0.18),hsla(0,0%,100%,0));"
 	>}}
 	{{<hextra/feature-card
-		title="MoQ‑Lite Implementation"
+		title="MoQ Lite Implementation"
 		subtitle="Focused on the practical core today, designed to extend tomorrow."
 		class="card--image"
 		icon="document-text"

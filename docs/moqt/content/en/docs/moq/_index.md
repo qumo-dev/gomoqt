@@ -1,5 +1,5 @@
 ---
-title: MOQ
+title: MoQ
 weight: 5
 ---
 
@@ -17,6 +17,7 @@ MoQ (Media over QUIC) is a live media delivery protocol based on QUIC. It is des
 4. [**General-purpose Data Model**:](#4-general-purpose-data-model)
 5. [**Scalability**:](#5-scalability)
 6. [**Web Support**:](#6-web-support)
+7. [**Multi-Use**:](#7-multi-use)
 
 ### 1. QUIC
 
@@ -83,6 +84,6 @@ MoQ Transport is the standardizing MoQ protocol under the IETF. It is more compl
 - MoQ WG: https://datatracker.ietf.org/wg/moq/about/
 - MoQ Lite: https://datatracker.ietf.org/doc/draft-lcurley-moq-lite/
 - MoQ Transport: https://datatracker.ietf.org/doc/draft-ietf-moq-transport/
-- WebTransport: https://www.rfc-editor.org/rfc/rfc9293.html
+- WebTransport over HTTP/3: https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/
 - QUIC: https://www.rfc-editor.org/rfc/rfc9000.html
 - HTTP/3: https://www.rfc-editor.org/rfc/rfc9114.html

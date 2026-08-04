@@ -1,6 +1,6 @@
 ---
 title: Relay
-weight: 12
+weight: 13
 ---
 
 ## Relay a Track
@@ -21,14 +21,15 @@ To forward media data, a server subscribes to a source track as a subscriber to 
         }
 
         go func(gr *moqt.GroupReader) {
-            defer gr.Close()
             seq := gr.GroupSequence()
 
             writers := make([]*moqt.GroupWriter, 0, len(dests))
             for _, dest := range dests {
                 gw, err := dest.OpenGroupAt(context.Background(), seq)
                 if err != nil {
-                    break
+                    // One failing destination must not stop the fan-out
+                    // to the others.
+                    continue
                 }
 
                 writers = append(writers, gw)
@@ -38,7 +39,7 @@ To forward media data, a server subscribes to a source track as a subscriber to 
             for {
                 err := gr.ReadFrame(frame)
                 if err != nil {
-                    if err == io.EOF {
+                    if errors.Is(err, io.EOF) {
                         for _, gw := range writers {
                             gw.Close()
                         }
@@ -51,12 +52,17 @@ To forward media data, a server subscribes to a source track as a subscriber to 
                     break
                 }
 
+                // Keep only the destinations that accepted the frame, so a
+                // dead one is dropped instead of retried on every frame.
+                live := writers[:0]
                 for _, gw := range writers {
-                    err = gw.WriteFrame(frame)
-                    if err != nil {
-                        break
+                    if err := gw.WriteFrame(frame); err != nil {
+                        gw.CancelWrite(moqt.InternalGroupErrorCode)
+                        continue
                     }
+                    live = append(live, gw)
                 }
+                writers = live
             }
         }(gr)
     }
@@ -108,7 +114,3 @@ To enhance UX, consider implementing caching strategies for frequently accessed 
 3. **Cache Invalidation**: Implement strategies to invalidate stale cache entries to ensure data consistency.
 
 By leveraging caching, you can significantly improve the responsiveness of your application and provide a smoother user experience.
-
-## 📝 Future Work
-
-- Per-track Caching Management: (#XXX)

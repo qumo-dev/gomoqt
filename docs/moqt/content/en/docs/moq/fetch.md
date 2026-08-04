@@ -154,4 +154,4 @@ Fetch operations may return `moqt.FetchError` or `moqt.SessionError`. Use type a
     }
 ```
 
-See [Built-in Error Codes](errors/#built-in-error-codes) for `FetchErrorCode` values.
+See [Built-in Error Codes](../errors/#built-in-error-codes) for `FetchErrorCode` values.

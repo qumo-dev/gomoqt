@@ -13,7 +13,7 @@ It aims to provide a fast, reliable, and scalable solution for real-time media s
 ## Features
 
 - Familiar API Design for Go Developers
-- Based on MOQ-Lite Specification
+- Based on MoQ Lite Specification
 - Pure Go Implementation
 - Dependency-Agnostic Design
 - Browser Support

@@ -63,8 +63,10 @@ When the other side (client or server) subscribes to a broadcast path, the regis
 ```go
     // trackHandler implements moqt.TrackHandler
     var _ moqt.TrackHandler = (*trackHandler)(nil)
+
     type trackHandler struct{}
-    func (h *trackHandler) ServeTrack(ctx context.Context, tw *moqt.TrackWriter) {
+
+    func (h *trackHandler) ServeTrack(tw *moqt.TrackWriter) {
         defer tw.Close() // Always close when done
 
         // Handle track subscription
@@ -73,11 +75,11 @@ When the other side (client or server) subscribes to a broadcast path, the regis
     var mux *moqt.TrackMux
 
     // Register the track handler
-    mux.Publish(ctx, "/broadcast_path", trackHandler{})
+    mux.Publish(ctx, "/broadcast_path", &trackHandler{})
 
     // Register the track handler using an Announcement
     var ann *moqt.Announcement
-    mux.Announce(ann, trackHandler{})
+    mux.Announce(ann, &trackHandler{})
 ```
 
 ## Create a Group

@@ -3,7 +3,7 @@ title: Session
 weight: 3
 ---
 
-A MOQ Session is established when a client dials a server (via `moqt.Dialer`) or a server accepts a connection (via `moqt.Handler`). The session manages subscriptions, announcements, fetches, and probes over the underlying QUIC connection.
+A MoQ Session is established when a client dials a server (via `moqt.Dialer`) or a server accepts a connection (via `moqt.Handler`). The session manages subscriptions, announcements, fetches, and probes over the underlying QUIC connection.
 
 ## Implementation
 
@@ -43,7 +43,7 @@ The `ConnectionState` struct contains:
 
 | Field     | Type                      | Description                                 |
 |-----------|---------------------------|---------------------------------------------|
-| `Version` | `string`                  | The negotiated MOQ protocol version (e.g., `"moq-lite-04"`) |
+| `Version` | `string`                  | The negotiated MoQ protocol version (e.g., `"moq-lite-04"`) |
 | `TLS`     | `*tls.ConnectionState`     | TLS connection state when available          |
 
 ## Connection Statistics
@@ -120,4 +120,4 @@ func (s *Session) CloseWithError(code SessionErrorCode, msg string) error
 - `code`: Error code (e.g., from built-in codes)
 - `msg`: Descriptive message
 
-Prefer reserved error codes for standard reasons. See [Built-in Error Codes](errors/#built-in-error-codes) for details.
+Prefer reserved error codes for standard reasons. See [Built-in Error Codes](../errors/#built-in-error-codes) for details.
