@@ -54,15 +54,15 @@ The following table describes the public fields of the `moqt.Dialer` struct:
 | `OnGoaway`             | `func(newSessionURI string)` | Called when the server requests session migration. The `newSessionURI` parameter contains the redirect URI, which may be empty. |
 | `Logger`               | [`*slog.Logger`](https://pkg.go.dev/log/slog#Logger)              | Logger for connection and session events. If nil, logging is disabled.         |
 
-{{< tabs items="Using Default QUIC, Using Custom QUIC" >}}
-{{< tab >}}
+{{< tabs >}}
+{{< tab name="Using Default QUIC" >}}
 
 [`quic-go/quic-go`](https://github.com/quic-go/quic-go) is used internally as the default QUIC implementation when relevant fields which is set for customization are not set or `nil`.
 
 {{<github-readme-stats user="quic-go" repo="quic-go" >}}
 
 {{< /tab >}}
-{{< tab >}}
+{{< tab name="Using Custom QUIC" >}}
 
 To use a custom QUIC implementation, you need to provide your own dial function. When `Dialer.DialQUICFunc` is set, it is used to dial QUIC connections instead of the default implementation.
 
@@ -77,15 +77,15 @@ type Dialer struct {
 
 {{< /tabs >}}
 
-{{< tabs items="Using Default WebTransport, Using Custom WebTransport" >}}
-{{< tab >}}
+{{< tabs >}}
+{{< tab name="Using Default WebTransport" >}}
 
 [`okdaichi/webtransport-go`](https://github.com/okdaichi/webtransport-go) — a fork of `quic-go/webtransport-go` carrying a custom upgrader — is used internally as the default WebTransport implementation when the relevant customization fields are not set or are `nil`.
 
 {{<github-readme-stats user="okdaichi" repo="webtransport-go" >}}
 
 {{< /tab >}}
-{{< tab >}}
+{{< tab name="Using Custom WebTransport" >}}
 
 To use a custom WebTransport implementation, you need to provide your own dial function. When `Dialer.DialWebTransportFunc` is set, it is used to dial WebTransport connections instead of the default implementation.
 

@@ -42,8 +42,8 @@ Each error type implements the `error` interface and works with Go's standard er
 
 Error codes for each custom error type are summarized below. Click each section to toggle visibility.
 
-{{<tabs items="SessionErrorCode, AnnounceErrorCode, SubscribeErrorCode, GroupErrorCode, FetchErrorCode, ProbeErrorCode" >}}
-{{<tab>}}
+{{< tabs >}}
+{{< tab name="SessionErrorCode" >}}
 | Code Name                    | Value | Description                    |
 |------------------------------|-------|-------------------------------|
 | `moqt.NoError`                      | 0x0   | Normal termination            |
@@ -57,7 +57,7 @@ Error codes for each custom error type are summarized below. Click each section 
 | `moqt.SetupFailedErrorCode`         | 0x13  | Setup failed                  |
 {{< /tab >}}
 
-{{< tab >}}
+{{< tab name="AnnounceErrorCode" >}}
 | Code Name                    | Value | Description                    |
 |------------------------------|-------|-------------------------------|
 | `moqt.AnnounceErrorCodeInternal`     | 0x0   | Internal error                |
@@ -69,7 +69,7 @@ Error codes for each custom error type are summarized below. Click each section 
 {{< /tab >}}
 
 
-{{< tab >}}
+{{< tab name="SubscribeErrorCode" >}}
 | Code Name                    | Value | Description                    |
 |------------------------------|-------|-------------------------------|
 | `moqt.SubscribeErrorCodeInternal`    | 0x00  | Internal error                |
@@ -81,7 +81,7 @@ Error codes for each custom error type are summarized below. Click each section 
 {{< /tab >}}
 
 
-{{< tab >}}
+{{< tab name="GroupErrorCode" >}}
 | Code Name                    | Value | Description                    |
 |------------------------------|-------|-------------------------------|
 | `moqt.InternalGroupErrorCode`       | 0x00  | Internal error                |
@@ -93,14 +93,14 @@ Error codes for each custom error type are summarized below. Click each section 
 | `moqt.InvalidSubscribeIDErrorCode`  | 0x07  | Invalid subscribe ID          |
 {{< /tab >}}
 
-{{< tab >}}
+{{< tab name="FetchErrorCode" >}}
 | Code Name                    | Value | Description                    |
 |------------------------------|-------|-------------------------------|
 | `moqt.FetchErrorCodeInternal`       | 0x00  | Internal error                |
 | `moqt.FetchErrorCodeTimeout`        | 0x01  | Fetch timeout                 |
 {{< /tab >}}
 
-{{< tab >}}
+{{< tab name="ProbeErrorCode" >}}
 | Code Name                    | Value | Description                    |
 |------------------------------|-------|-------------------------------|
 | `moqt.ProbeErrorCodeInternal`       | 0x00  | Internal error                |

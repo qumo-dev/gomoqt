@@ -76,15 +76,15 @@ The following table describes the public fields of the `Server` struct:
 | `Counters`             | `*moqt.ServerCounters`      | Optional atomic counters for accepted connections, sessions, streams, and subscribe successes/failures. If nil, no counters are recorded. |
 | `Logger`               | [`*slog.Logger`](https://pkg.go.dev/log/slog#Logger)              | Logger for server events and errors. If nil, logging is disabled. |
 
-{{< tabs items="Using Default QUIC, Using Custom QUIC" >}}
-{{< tab >}}
+{{< tabs >}}
+{{< tab name="Using Default QUIC" >}}
 
 [`quic-go/quic-go`](https://github.com/quic-go/quic-go) is used internally as the default QUIC implementation when relevant fields which is set for customization are not set or `nil`.
 
 {{<github-readme-stats user="quic-go" repo="quic-go" >}}
 
 {{< /tab >}}
-{{< tab >}}
+{{< tab name="Using Custom QUIC" >}}
 
 To use a custom QUIC implementation, you need to provide your own `ListenFunc`. When `Server.ListenFunc` is set, it is used to listen for incoming QUIC connections instead of the default implementation.
 
@@ -99,15 +99,15 @@ type Server struct {
 
 {{< /tabs >}}
 
-{{< tabs items="Using Default WebTransport, Using Custom WebTransport" >}}
-{{< tab >}}
+{{< tabs >}}
+{{< tab name="Using Default WebTransport" >}}
 
 [`okdaichi/webtransport-go`](https://github.com/okdaichi/webtransport-go) — a fork of `quic-go/webtransport-go` carrying a custom upgrader — is used internally as the default WebTransport implementation when `WebTransportServer` is nil.
 
 {{<github-readme-stats user="okdaichi" repo="webtransport-go" >}}
 
 {{< /tab >}}
-{{< tab >}}
+{{< tab name="Using Custom WebTransport" >}}
 
 To use a custom WebTransport implementation, provide your own implementation of the `WebTransportServer` interface:
 
