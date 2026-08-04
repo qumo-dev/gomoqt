@@ -31,7 +31,7 @@ go get github.com/qumo-dev/gomoqt
 
 ### Importing packages
 
-gomoqt provides several packages that can be imported into your Go application. The main package is `moqt`, which contains the core logic for Media over QUIC. In addition to `moqt`, the following packages are provided:
+gomoqt provides the following packages, which can be imported into your Go application. `moqt` is the main package and the only one most applications need:
 
 | Import Path                              | Description                                                                 |
 |:-----------------------------------------|:----------------------------------------------------------------------------|

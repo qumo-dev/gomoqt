@@ -31,10 +31,8 @@ Consuming a track involves reading media data from a `moqt.TrackReader`, which p
             frame := moqt.NewFrame(0)
             for {
                 if err := gr.ReadFrame(frame); err != nil {
-                    if !errors.Is(err, io.EOF) {
-                        // Stop reading early and notify the publisher
-                        gr.CancelRead(moqt.InternalGroupErrorCode)
-                    }
+                    // io.EOF means the group ended normally; any other
+                    // error means the stream was already torn down.
                     break
                 }
 

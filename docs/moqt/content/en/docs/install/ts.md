@@ -52,10 +52,17 @@ bunx jsr add @qumo/moq
 
 ```ts
 import { connect } from "@qumo/moq";
-import { parseCatalog } from "@qumo/moq/msf";
 
 const session = await connect("https://localhost:4443/moq");
-const [reader] = await session.subscribe("/broadcast", "video");
+
+// subscribe resolves to a [value, error] tuple — always check the error
+// before using the reader.
+const [reader, err] = await session.subscribe("/broadcast", "video");
+if (err !== undefined) {
+	throw err;
+}
+
+// reader is a TrackReader here.
 ```
 
 | Entrypoint      | Description                                                       |
