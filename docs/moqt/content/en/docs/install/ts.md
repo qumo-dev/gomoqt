@@ -20,28 +20,28 @@ We provide a JavaScript client library to facilitate this integration.
 
 The client library is published to JSR as [`@qumo/moq`](https://jsr.io/@qumo/moq).
 
-{{< tabs items="Deno, npm, pnpm, yarn, bun" >}}
-{{< tab >}}
+{{< tabs >}}
+{{< tab name="Deno" >}}
 ```bash
 deno add jsr:@qumo/moq
 ```
 {{< /tab >}}
-{{< tab >}}
+{{< tab name="npm" >}}
 ```bash
 npx jsr add @qumo/moq
 ```
 {{< /tab >}}
-{{< tab >}}
+{{< tab name="pnpm" >}}
 ```bash
 pnpm dlx jsr add @qumo/moq
 ```
 {{< /tab >}}
-{{< tab >}}
+{{< tab name="yarn" >}}
 ```bash
 yarn dlx jsr add @qumo/moq
 ```
 {{< /tab >}}
-{{< tab >}}
+{{< tab name="bun" >}}
 ```bash
 bunx jsr add @qumo/moq
 ```

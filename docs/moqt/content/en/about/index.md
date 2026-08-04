@@ -33,29 +33,29 @@ For inquiries, please contact via GitHub Issues.
 ### Contact
 For questions or feedback, please open an issue on GitHub or reach out via the contact information provided in the repository.
 
-{{< tabs items="GitHub, X, LinkedIn, Discord, Email" >}}
+{{< tabs >}}
 
-  {{< tab >}}
+  {{< tab name="GitHub" >}}
     {{<cards>}}
     {{<card link="https://github.com/okdaichi" title="okdaichi" icon="github" subtitle="Owner">}}
     {{</cards>}}
   {{< /tab >}}
-  {{< tab >}}
+  {{< tab name="X" >}}
     {{<cards>}}
     {{<card link="https://x.com/OD47215" title="だいち Daichi" icon="x" subtitle="Owner">}}
     {{</cards>}}
   {{< /tab >}}
-  {{< tab >}}
+  {{< tab name="LinkedIn" >}}
     {{<cards>}}
     {{<card link="https://www.linkedin.com/in/daichi-okutani-787069315/" title="Daichi Okutani" icon="linkedin" subtitle="Owner">}}
     {{</cards>}}
   {{< /tab >}}
-  {{< tab >}}
+  {{< tab name="Discord" >}}
     {{<cards>}}
     {{<card link="https://discordapp.com/users/daichi0828" title="daichi0828" icon="discord" subtitle="Owner">}}
     {{</cards>}}
   {{< /tab >}}
-  {{< tab >}}
+  {{< tab name="Email" >}}
     {{<cards>}}
     {{<card link="" title="Not Provided" icon="mail" subtitle="Coming Soon">}}
     {{</cards>}}
