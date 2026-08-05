@@ -18,13 +18,9 @@ menu:
       name: Docs
       weight: 2
       url: /docs/
-    - identifier: blog
-      name: Blog
-      weight: 3
-      url: /blog/
     - identifier: sponsor
       name: ❤ Sponsor ↗
-      weight: 4
+      weight: 3
       url: https://github.com/sponsors/qumo-dev
     - identifier: search
       name: Search
@@ -86,9 +82,6 @@ params:
       # height: 30
     # Wider navbar to better align with the Hextra home layout
     width: wide
-  blog:
-    list:
-      displayTags: true
   editURL:
     enable: true
     base: "https://github.com/qumo-dev/gomoqt/edit/main"
