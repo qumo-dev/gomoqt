@@ -8,7 +8,7 @@ import (
 	"github.com/qumo-dev/gomoqt/moqt"
 )
 
-// DefaultCatalogTrackName is the reserved MSF catalog track name from draft-00.
+// DefaultCatalogTrackName is the reserved MSF catalog track name from draft-ietf-moq-msf-01.
 const DefaultCatalogTrackName moqt.TrackName = "catalog"
 
 // Broadcast is an MSF-aware moqt.TrackHandler that serves the catalog track and
