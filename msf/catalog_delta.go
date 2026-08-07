@@ -10,7 +10,13 @@ import (
 //
 // A delta catalog never carries a complete track list. Instead it contains one
 // or more add/remove/clone operations plus optional metadata updates. The JSON
-// form always includes "deltaUpdate": true.
+// form (draft-ietf-moq-msf-01) is a "deltaUpdate" array of operation objects,
+// each shaped as {"op": "add"|"remove"|"clone", "tracks": [...]}.
+//
+// The in-memory model keeps three grouped slices (AddTracks/RemoveTracks/
+// CloneTracks) and records the first-seen block order of each op kind so the
+// wire array round-trips. Interleaved same-type ops (e.g. add,remove,add) are
+// merged into a single group; the resulting catalog is identical in practice.
 type CatalogDelta struct {
 	// DefaultNamespace, if set, replaces the base catalog namespace used for
 	// resolving tracks whose namespace field is omitted.
@@ -44,14 +50,16 @@ type TrackRef struct {
 	ExtraFields map[string]json.RawMessage `json:"-"`
 }
 
-// TrackClone describes a cloneTracks entry in a catalog delta.
+// TrackClone describes a clone operation in a catalog delta.
 //
 // The embedded Track provides the override values to apply to the cloned track.
-// ParentName identifies the source track from which values are inherited.
+// ParentName identifies the source track from which values are inherited and
+// ParentNamespace (optional) identifies the namespace of that source track.
 type TrackClone struct {
 	Track
 
-	ParentName string `json:"-"`
+	ParentName      string `json:"-"`
+	ParentNamespace string `json:"-"`
 }
 
 // Clone returns a deep copy of the delta catalog.
@@ -65,7 +73,7 @@ func (d CatalogDelta) Clone() CatalogDelta {
 	return clone
 }
 
-// Validate checks whether the delta satisfies the package's MSF draft-00 rules.
+// Validate checks whether the delta satisfies the package's MSF draft-01 rules.
 func (d CatalogDelta) Validate() error {
 	var problems []string
 
@@ -142,27 +150,32 @@ var (
 	_ json.Unmarshaler = (*TrackClone)(nil)
 )
 
-// MarshalJSON encodes the delta in the draft-00 JSON form.
+// MarshalJSON encodes the delta in the draft-01 JSON form: a "deltaUpdate"
+// array of {"op", "tracks"} objects in declared operation order.
 func (d CatalogDelta) MarshalJSON() ([]byte, error) {
-	obj := make(map[string]any, len(d.ExtraFields)+6)
+	obj := make(map[string]any, len(d.ExtraFields)+2)
 	for key, raw := range d.ExtraFields {
 		obj[key] = cloneRawMessage(raw)
 	}
-	obj["deltaUpdate"] = true
+	ops := make([]map[string]any, 0, 3)
+	for _, op := range d.operationOrder() {
+		entry := map[string]any{"op": string(op)}
+		switch op {
+		case deltaOperationAdd:
+			entry["tracks"] = d.AddTracks
+		case deltaOperationRemove:
+			entry["tracks"] = d.RemoveTracks
+		case deltaOperationClone:
+			entry["tracks"] = d.CloneTracks
+		}
+		ops = append(ops, entry)
+	}
+	obj["deltaUpdate"] = ops
 	if d.GeneratedAt != nil {
 		obj["generatedAt"] = *d.GeneratedAt
 	}
 	if d.IsComplete {
 		obj["isComplete"] = true
-	}
-	if len(d.AddTracks) > 0 {
-		obj["addTracks"] = d.AddTracks
-	}
-	if len(d.RemoveTracks) > 0 {
-		obj["removeTracks"] = d.RemoveTracks
-	}
-	if len(d.CloneTracks) > 0 {
-		obj["cloneTracks"] = d.CloneTracks
 	}
 	return json.Marshal(obj)
 }
@@ -181,14 +194,10 @@ func (d *CatalogDelta) UnmarshalJSON(data []byte) error {
 	for _, entry := range ordered {
 		switch entry.Key {
 		case "deltaUpdate":
-			var value bool
-			if err := json.Unmarshal(entry.Value, &value); err != nil {
+			sawDeltaUpdate = true
+			if err := d.decodeDeltaOps(entry.Value); err != nil {
 				return err
 			}
-			if !value {
-				return fmt.Errorf("msf: delta catalog must include deltaUpdate=true")
-			}
-			sawDeltaUpdate = true
 		case "version", "tracks":
 			return fmt.Errorf("msf: independent catalog fields are not allowed in a delta catalog")
 		case "generatedAt":
@@ -201,30 +210,67 @@ func (d *CatalogDelta) UnmarshalJSON(data []byte) error {
 			if err := json.Unmarshal(entry.Value, &d.IsComplete); err != nil {
 				return err
 			}
-		case "addTracks":
-			if err := json.Unmarshal(entry.Value, &d.AddTracks); err != nil {
-				return err
-			}
-			d.deltaOpOrder = append(d.deltaOpOrder, deltaOperationAdd)
-		case "removeTracks":
-			if err := json.Unmarshal(entry.Value, &d.RemoveTracks); err != nil {
-				return err
-			}
-			d.deltaOpOrder = append(d.deltaOpOrder, deltaOperationRemove)
-		case "cloneTracks":
-			if err := json.Unmarshal(entry.Value, &d.CloneTracks); err != nil {
-				return err
-			}
-			d.deltaOpOrder = append(d.deltaOpOrder, deltaOperationClone)
 		default:
 			d.ExtraFields[entry.Key] = cloneRawMessage(entry.Value)
 		}
 	}
 	if !sawDeltaUpdate {
-		return fmt.Errorf("msf: delta catalog must include deltaUpdate=true")
+		return fmt.Errorf("msf: delta catalog must include a deltaUpdate array")
 	}
 
 	return nil
+}
+
+// decodeDeltaOps decodes the draft-01 deltaUpdate array of {op, tracks} objects
+// into the grouped slices, recording first-seen block order.
+func (d *CatalogDelta) decodeDeltaOps(data []byte) error {
+	var ops []map[string]json.RawMessage
+	if err := json.Unmarshal(data, &ops); err != nil {
+		return fmt.Errorf("msf: deltaUpdate must be an array of operation objects: %w", err)
+	}
+	for _, opObj := range ops {
+		opRaw, ok := opObj["op"]
+		if !ok {
+			return fmt.Errorf("msf: delta update operation must contain an op field")
+		}
+		var op string
+		if err := json.Unmarshal(opRaw, &op); err != nil {
+			return err
+		}
+		tracksRaw, ok := opObj["tracks"]
+		if !ok {
+			return fmt.Errorf("msf: delta update operation must contain a tracks field")
+		}
+		switch deltaOperationKind(op) {
+		case deltaOperationAdd:
+			if err := json.Unmarshal(tracksRaw, &d.AddTracks); err != nil {
+				return err
+			}
+			d.recordOp(deltaOperationAdd)
+		case deltaOperationRemove:
+			if err := json.Unmarshal(tracksRaw, &d.RemoveTracks); err != nil {
+				return err
+			}
+			d.recordOp(deltaOperationRemove)
+		case deltaOperationClone:
+			if err := json.Unmarshal(tracksRaw, &d.CloneTracks); err != nil {
+				return err
+			}
+			d.recordOp(deltaOperationClone)
+		default:
+			return fmt.Errorf("msf: unknown delta update op %q", op)
+		}
+	}
+	return nil
+}
+
+// recordOp appends kind to the declared operation order, ignoring repeats so
+// only first-seen block order is preserved.
+func (d *CatalogDelta) recordOp(kind deltaOperationKind) {
+	if slices.Contains(d.deltaOpOrder, kind) {
+		return
+	}
+	d.deltaOpOrder = append(d.deltaOpOrder, kind)
 }
 
 // Clone returns a deep copy of the reference.
@@ -313,8 +359,9 @@ func (r *TrackRef) UnmarshalJSON(data []byte) error {
 // Clone returns a deep copy of the clone operation.
 func (c TrackClone) Clone() TrackClone {
 	return TrackClone{
-		Track:      c.Track.Clone(),
-		ParentName: c.ParentName,
+		Track:           c.Track.Clone(),
+		ParentName:      c.ParentName,
+		ParentNamespace: c.ParentNamespace,
 	}
 }
 
@@ -334,16 +381,28 @@ func (c TrackClone) Validate(path string) []string {
 	return problems
 }
 
-// effectiveNamespace resolves the clone entry namespace used for parent lookup.
-func (c TrackClone) effectiveNamespace(defaultNamespace string) string {
-	return c.Track.effectiveNamespace(defaultNamespace)
+// parentEffectiveNamespace resolves the namespace of the parent track being
+// cloned. ParentNamespace takes precedence when set; otherwise the catalog
+// default namespace (and finally the inherited sentinel) is used.
+func (c TrackClone) parentEffectiveNamespace(defaultNamespace string) string {
+	if c.ParentNamespace != "" {
+		return c.ParentNamespace
+	}
+	if defaultNamespace != "" {
+		return defaultNamespace
+	}
+	return inheritedNamespaceSentinel
 }
 
-// MarshalJSON encodes the clone entry as a JSON object with parentName.
+// MarshalJSON encodes the clone entry as a JSON object with parentName and
+// optional parentNamespace.
 func (c TrackClone) MarshalJSON() ([]byte, error) {
 	obj := c.Track.marshalObject()
 	if c.ParentName != "" {
 		obj["parentName"] = c.ParentName
+	}
+	if c.ParentNamespace != "" {
+		obj["parentNamespace"] = c.ParentNamespace
 	}
 	return json.Marshal(obj)
 }
@@ -358,13 +417,18 @@ func (c *TrackClone) UnmarshalJSON(data []byte) error {
 	}
 	trackRaw := make(map[string]json.RawMessage, len(raw))
 	for key, value := range raw {
-		if key == "parentName" {
+		switch key {
+		case "parentName":
 			if err := json.Unmarshal(value, &c.ParentName); err != nil {
 				return err
 			}
-			continue
+		case "parentNamespace":
+			if err := json.Unmarshal(value, &c.ParentNamespace); err != nil {
+				return err
+			}
+		default:
+			trackRaw[key] = value
 		}
-		trackRaw[key] = value
 	}
 	return c.Track.unmarshalObject(trackRaw)
 }

@@ -2,14 +2,15 @@
 
 ## Overview
 
-Package `msf` implements the MOQT Streaming Format catalog and timeline data model from [draft-ietf-moq-msf-00](https://datatracker.ietf.org/doc/html/draft-ietf-moq-msf-00).
+Package `msf` implements the MOQT Streaming Format catalog and timeline data model from [draft-ietf-moq-msf-01](https://datatracker.ietf.org/doc/html/draft-ietf-moq-msf-01).
 
 It focuses on:
 
 - parsing independent catalogs and catalog deltas
 - validating MSF catalog constraints
 - applying delta updates to a base catalog
-- encoding and decoding timeline record formats
+- encoding and decoding timeline record formats (including media-timeline templates)
+- modeling draft-01 catalog features: publish tracks, initialization data list, encryption metadata, authorization info, accessibility descriptors, and variable substitution
 - optionally exposing a small catalog-aware `moqt.TrackHandler` via `Broadcast`
 
 Most of the package is transport-agnostic. The networking primitives themselves still live in [`../moqt`](../moqt/).
@@ -77,7 +78,9 @@ if err != nil {
 - `CatalogDelta` — incremental update for an existing catalog
 - `Track` — track entry in an independent catalog or add operation
 - `TrackRef` — minimal track identity used by `removeTracks`
-- `TrackClone` — clone operation with `parentName` and overrides
+- `TrackClone` — clone operation with `parentName`/`parentNamespace` and overrides
+- `InitDataRef` — entry in the catalog Initialization Data List, referenced by track `initRef`
+- `Template` — media-timeline template for fixed-duration segments
 - `MediaTimelineEntry` — media-time to object-location mapping
 - `EventTimelineRecord` — event timeline record with a single index selector
 - `Broadcast` — optional helper that serves the reserved catalog track and routes registered track handlers
@@ -91,7 +94,7 @@ if err != nil {
 
 ## References
 
-- [MSF draft-ietf-moq-msf-00](https://datatracker.ietf.org/doc/html/draft-ietf-moq-msf-00)
-- [CMSF draft-ietf-moq-cmsf-00](https://datatracker.ietf.org/doc/html/draft-ietf-moq-cmsf-00)
+- [MSF draft-ietf-moq-msf-01](https://datatracker.ietf.org/doc/html/draft-ietf-moq-msf-01)
+- [CMSF draft-ietf-moq-cmsf-00](https://datatracker.ietf.org/doc/html/draft-ietf-moq-cmsf-00) (non-spec extension; not part of MSF-01)
 - [Core `moqt` package](../moqt/)
 - [Root project README](../README.md)

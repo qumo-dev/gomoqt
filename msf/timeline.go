@@ -121,7 +121,7 @@ func (r EventTimelineRecord) Validate() error {
 	return nil
 }
 
-// MarshalJSON encodes the event timeline record using the draft-00 JSON shape.
+// MarshalJSON encodes the event timeline record using the draft-01 JSON shape.
 func (r EventTimelineRecord) MarshalJSON() ([]byte, error) {
 	obj := make(map[string]any, len(r.ExtraFields)+2)
 	for key, raw := range r.ExtraFields {
@@ -142,7 +142,7 @@ func (r EventTimelineRecord) MarshalJSON() ([]byte, error) {
 	return json.Marshal(obj)
 }
 
-// UnmarshalJSON decodes the event timeline record using the draft-00 JSON shape.
+// UnmarshalJSON decodes the event timeline record using the draft-01 JSON shape.
 func (r *EventTimelineRecord) UnmarshalJSON(data []byte) error {
 	*r = EventTimelineRecord{ExtraFields: make(map[string]json.RawMessage)}
 
@@ -179,3 +179,95 @@ func (r *EventTimelineRecord) UnmarshalJSON(data []byte) error {
 
 	return nil
 }
+
+// Template describes a media-timeline template for tracks with fixed-duration
+// segments (draft-ietf-moq-msf-01 §5.2.15 / §7.4). The JSON form is a
+// six-element array:
+//
+//	[startMediaTime, deltaMediaTime, [groupID, objectID], [deltaGroup, deltaObject], startWallclock, deltaWallclock]
+//
+// where deltaMediaTime and deltaWallclock are expressed in milliseconds.
+type Template struct {
+	// StartMediaTime is the media presentation timestamp of the first entry.
+	StartMediaTime int64
+	// DeltaMediaTime is the constant interval between media timestamps (ms).
+	DeltaMediaTime int64
+	// StartLocation is the MOQT Location of the first entry.
+	StartLocation Location
+	// DeltaLocation is the constant interval between MOQT Locations.
+	DeltaLocation Location
+	// StartWallclock is the wallclock time of the first entry; 0 for VOD.
+	StartWallclock int64
+	// DeltaWallclock is the constant interval between wallclock times (ms).
+	DeltaWallclock int64
+}
+
+// MarshalJSON encodes the template as the draft-01 six-element array form.
+func (t Template) MarshalJSON() ([]byte, error) {
+	return json.Marshal([]any{
+		t.StartMediaTime,
+		t.DeltaMediaTime,
+		t.StartLocation,
+		t.DeltaLocation,
+		t.StartWallclock,
+		t.DeltaWallclock,
+	})
+}
+
+// UnmarshalJSON decodes the template from the draft-01 six-element array form.
+func (t *Template) UnmarshalJSON(data []byte) error {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if len(raw) != 6 {
+		return fmt.Errorf("msf: media timeline template must contain exactly 6 items")
+	}
+	if err := json.Unmarshal(raw[0], &t.StartMediaTime); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[1], &t.DeltaMediaTime); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[2], &t.StartLocation); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[3], &t.DeltaLocation); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[4], &t.StartWallclock); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[5], &t.DeltaWallclock); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Clone returns a deep copy of the template. Safe on a nil receiver.
+func (t *Template) Clone() *Template {
+	if t == nil {
+		return nil
+	}
+	clone := *t
+	return &clone
+}
+
+// Entry returns the n-th (zero-based) timeline entry computed from the template
+// per the formulas in draft-ietf-moq-msf-01 §7.4.1.
+func (t Template) Entry(n int64) MediaTimelineEntry {
+	step := uint64(n)
+	return MediaTimelineEntry{
+		MediaTime: t.StartMediaTime + n*t.DeltaMediaTime,
+		Location: Location{
+			GroupID:  t.StartLocation.GroupID + step*t.DeltaLocation.GroupID,
+			ObjectID: t.StartLocation.ObjectID + step*t.DeltaLocation.ObjectID,
+		},
+		Wallclock: t.StartWallclock + n*t.DeltaWallclock,
+	}
+}
+
+var (
+	_ json.Marshaler   = Template{}
+	_ json.Unmarshaler = (*Template)(nil)
+)

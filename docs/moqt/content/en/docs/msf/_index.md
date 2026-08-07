@@ -3,7 +3,7 @@ title: MSF
 weight: 6
 ---
 
-MSF (MOQT Streaming Format, [draft-ietf-moq-msf-00](https://datatracker.ietf.org/doc/html/draft-ietf-moq-msf-00)) defines how media content is organized, described, and delivered over the MoQ transport protocol.
+MSF (MOQT Streaming Format, [draft-ietf-moq-msf-01](https://datatracker.ietf.org/doc/html/draft-ietf-moq-msf-01)) defines how media content is organized, described, and delivered over the MoQ transport protocol.
 
 While MoQ itself provides the transport primitives — broadcasts, tracks, groups, and frames — MSF defines the standard format for describing what media is available and how to consume it.
 
