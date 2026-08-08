@@ -24,3 +24,6 @@
 ## YYYY-MM-DD - Avoid Map Initialization Overhead for Small Lists
 **Learning:** For finding duplicates or validating uniqueness in very small slices (e.g., N <= 16), an O(N^2) nested loop comparison against a stack-allocated array is measurably faster than using a `map[T]struct{}`. Even if escape analysis optimizes the map to the stack, the nested loop avoids map initialization and element hashing overhead on the happy path.
 **Action:** Provide a fast-path fallback using a small, stack-allocated array and O(N^2) loop for uniqueness detection on small bounded items before falling back to a map.
+## YYYY-MM-DD - [Optimize inner duplicate validation loops]
+**Learning:** When replacing a map with an O(N^2) nested loop for duplicate detection in small Go slices, maintain a dedicated counter (e.g., `numSeen`) to track actual unique items added rather than using the outer loop index (`i`).
+**Action:** When skipping duplicates in array-based fallback checks, use a discrete counter for the inner loop bounds.

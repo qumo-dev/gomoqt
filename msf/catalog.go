@@ -264,10 +264,12 @@ func (c Catalog) Validate() error {
 	} else if len(c.Tracks) > 1 {
 		var seen [16]TrackID
 		seen[0] = c.Tracks[0].ID(c.DefaultNamespace)
+		// Bolt: keep a dedicated counter for unique items to prevent bounds mismatch when skipping duplicates
+		numSeen := 1
 		for i := 1; i < len(c.Tracks); i++ {
 			id := c.Tracks[i].ID(c.DefaultNamespace)
 			isDuplicate := false
-			for j := 0; j < i; j++ {
+			for j := 0; j < numSeen; j++ {
 				if seen[j] == id {
 					problems = append(problems, fmt.Sprintf("tracks[%d]: duplicate track identity %q", i, id.String()))
 					isDuplicate = true
@@ -275,7 +277,8 @@ func (c Catalog) Validate() error {
 				}
 			}
 			if !isDuplicate {
-				seen[i] = id
+				seen[numSeen] = id
+				numSeen++
 			}
 		}
 	}
