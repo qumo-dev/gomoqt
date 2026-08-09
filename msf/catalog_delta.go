@@ -243,19 +243,29 @@ func (d *CatalogDelta) decodeDeltaOps(data []byte) error {
 		}
 		switch deltaOperationKind(op) {
 		case deltaOperationAdd:
-			if err := json.Unmarshal(tracksRaw, &d.AddTracks); err != nil {
+			// Decode into a fresh slice and append: encoding/json resets the
+			// destination slice length to zero before appending, so unmarshaling
+			// directly into d.AddTracks would discard any tracks from a previous
+			// add op (repeated same-type ops are legal in draft-01).
+			var add []Track
+			if err := json.Unmarshal(tracksRaw, &add); err != nil {
 				return err
 			}
+			d.AddTracks = append(d.AddTracks, add...)
 			d.recordOp(deltaOperationAdd)
 		case deltaOperationRemove:
-			if err := json.Unmarshal(tracksRaw, &d.RemoveTracks); err != nil {
+			var remove []TrackRef
+			if err := json.Unmarshal(tracksRaw, &remove); err != nil {
 				return err
 			}
+			d.RemoveTracks = append(d.RemoveTracks, remove...)
 			d.recordOp(deltaOperationRemove)
 		case deltaOperationClone:
-			if err := json.Unmarshal(tracksRaw, &d.CloneTracks); err != nil {
+			var clone []TrackClone
+			if err := json.Unmarshal(tracksRaw, &clone); err != nil {
 				return err
 			}
+			d.CloneTracks = append(d.CloneTracks, clone...)
 			d.recordOp(deltaOperationClone)
 		default:
 			return fmt.Errorf("msf: unknown delta update op %q", op)

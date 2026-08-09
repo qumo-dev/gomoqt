@@ -255,6 +255,9 @@ func (t *Template) Clone() *Template {
 
 // Entry returns the n-th (zero-based) timeline entry computed from the template
 // per the formulas in draft-ietf-moq-msf-01 §7.4.1.
+//
+// n MUST be non-negative; the template formulas are defined only for n >= 0 and
+// the location computation uses unsigned arithmetic.
 func (t Template) Entry(n int64) MediaTimelineEntry {
 	step := uint64(n)
 	return MediaTimelineEntry{

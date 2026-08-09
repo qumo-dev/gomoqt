@@ -259,6 +259,25 @@ func TestParseCatalogDelta_RejectsTrailingJSON(t *testing.T) {
 	assert.Contains(t, err.Error(), "after top-level value")
 }
 
+// Repeated same-type ops are legal in draft-01 and must accumulate, not
+// overwrite. encoding/json resets a destination slice before appending, so the
+// decoder must unmarshal into a fresh slice and append (see decodeDeltaOps).
+func TestParseCatalogDelta_RepeatedSameTypeOpsAccumulate(t *testing.T) {
+	delta, err := ParseCatalogDeltaString(`{
+		"deltaUpdate": [
+			{"op": "add", "tracks": [{"name": "a", "packaging": "loc", "isLive": true}]},
+			{"op": "remove", "tracks": [{"name": "old"}]},
+			{"op": "add", "tracks": [{"name": "b", "packaging": "loc", "isLive": true}]}
+		]
+	}`)
+	require.NoError(t, err)
+	require.Len(t, delta.AddTracks, 2)
+	assert.Equal(t, "a", delta.AddTracks[0].Name)
+	assert.Equal(t, "b", delta.AddTracks[1].Name)
+	require.Len(t, delta.RemoveTracks, 1)
+	assert.Equal(t, "old", delta.RemoveTracks[0].Name)
+}
+
 func TestCatalogApplyDelta_PreservesDeclaredOperationOrder(t *testing.T) {
 	base := Catalog{
 		Version: 1,
