@@ -326,13 +326,20 @@ func validateCatalogForBroadcast(catalog Catalog, catalogTrackName moqt.TrackNam
 				return fmt.Errorf("msf: catalog contains reserved track name %q", catalogTrackName)
 			}
 			id := track.ID(catalog.DefaultNamespace)
+			isDuplicate := false
 			for j := 0; j < numSeen; j++ {
-				if seen[j].name == name && seen[j].id != id {
-					return fmt.Errorf("msf: broadcast requires unique track names across namespaces; duplicate name %q found for %q and %q", name, seen[j].id.String(), id.String())
+				if seen[j].name == name {
+					if seen[j].id != id {
+						return fmt.Errorf("msf: broadcast requires unique track names across namespaces; duplicate name %q found for %q and %q", name, seen[j].id.String(), id.String())
+					}
+					isDuplicate = true
+					break
 				}
 			}
-			seen[numSeen] = seenEntry{name: name, id: id}
-			numSeen++
+			if !isDuplicate {
+				seen[numSeen] = seenEntry{name: name, id: id}
+				numSeen++
+			}
 		}
 	} else {
 		seen := make(map[moqt.TrackName]TrackID, len(catalog.Tracks))
