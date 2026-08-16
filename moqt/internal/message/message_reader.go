@@ -108,17 +108,21 @@ func ReadStringArray(b []byte) ([]string, int, error) {
 
 	b = b[total:]
 
-	allocCap := count
 	if count > uint64(len(b)) {
-		allocCap = uint64(len(b))
+		// Each string requires at least 1 byte for its length prefix.
+		// If count > len(b), we are guaranteed to hit io.EOF.
+		return nil, 0, io.EOF
 	}
-	arr := make([]string, 0, allocCap)
-	for range count {
+
+	arr := make([]string, count)
+	for i := uint64(0); i < count; i++ {
 		str, n, err := ReadString(b)
 		if err != nil {
 			return nil, 0, err
 		}
-		arr = append(arr, str)
+		// ⚡ Bolt: Pre-allocating exact capacity and using direct index assignment
+		// avoids the overhead of append() capacity checks and length increments.
+		arr[i] = str
 		b = b[n:]
 		total += n
 	}

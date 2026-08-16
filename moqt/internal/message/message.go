@@ -31,7 +31,20 @@ func BytesLen(b []byte) int {
 func StringArrayLen(arr []string) int {
 	total := VarintLen(uint64(len(arr)))
 	for _, s := range arr {
-		total += StringLen(s)
+		// ⚡ Bolt: Inline StringLen calculation since s is known to be a string
+		// and we can avoid the extra function call overhead.
+		l := uint64(len(s))
+		if l <= maxVarInt1 {
+			total += 1 + int(l)
+		} else if l <= maxVarInt2 {
+			total += 2 + int(l)
+		} else if l <= maxVarInt4 {
+			total += 4 + int(l)
+		} else if l <= maxVarInt8 {
+			total += 8 + int(l)
+		} else {
+			panic(fmt.Sprintf("%#x doesn't fit into 62 bits", l))
+		}
 	}
 	return total
 }

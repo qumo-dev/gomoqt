@@ -24,3 +24,6 @@
 ## YYYY-MM-DD - Avoid Map Initialization Overhead for Small Lists
 **Learning:** For finding duplicates or validating uniqueness in very small slices (e.g., N <= 16), an O(N^2) nested loop comparison against a stack-allocated array is measurably faster than using a `map[T]struct{}`. Even if escape analysis optimizes the map to the stack, the nested loop avoids map initialization and element hashing overhead on the happy path.
 **Action:** Provide a fast-path fallback using a small, stack-allocated array and O(N^2) loop for uniqueness detection on small bounded items before falling back to a map.
+## 2024-08-16 - Optimize ReadStringArray and StringArrayLen
+**Learning:** Inlining string length calculations avoids function call overhead in a tight loop and pre-allocating exact capacities for arrays and using direct index assignments avoids `append()` capacity checks and length increments overhead.
+**Action:** When iterating over arrays and slices with a known length, prefer pre-allocating arrays and assigning values directly rather than using `append()`.
