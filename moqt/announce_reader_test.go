@@ -23,7 +23,7 @@ func TestNewAnnouncementReader(t *testing.T) {
 	mockStream := &FakeQUICStream{}
 	prefix := "/test/prefix/"
 
-	ras := newAnnouncementReader(mockStream, prefix, []string{"suffix1", "suffix2"})
+	ras, _ := newAnnouncementReader(mockStream, prefix, []string{"suffix1", "suffix2"})
 
 	require.NotNil(t, ras)
 	assert.Equal(t, prefix, ras.prefix)
@@ -58,7 +58,7 @@ func TestAnnouncementReader_ReceiveAnnouncement(t *testing.T) {
 				data := append([]byte(nil), buf.Bytes()...)
 				reader := bytes.NewReader(data)
 				mockStream.ReadFunc = reader.Read
-				ras := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
+				ras, _ := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
 				return ras
 			}(),
 			ctx:     context.Background(),
@@ -69,7 +69,8 @@ func TestAnnouncementReader_ReceiveAnnouncement(t *testing.T) {
 			receiveAnnounceStream: func() *AnnouncementReader {
 				mockStream := &FakeQUICStream{}
 				// Don't provide initial suffixes so that ReceiveAnnouncement will wait
-				return newAnnouncementReader(mockStream, "/test/", []string{})
+				ras, _ := newAnnouncementReader(mockStream, "/test/", []string{})
+				return ras
 			}(),
 			ctx: func() context.Context { ctx, cancel := context.WithCancel(context.Background()); cancel(); return ctx }(), wantErr: true,
 			wantErrType: context.Canceled,
@@ -79,7 +80,7 @@ func TestAnnouncementReader_ReceiveAnnouncement(t *testing.T) {
 			receiveAnnounceStream: func() *AnnouncementReader {
 				mockStream := &FakeQUICStream{}
 				// Don't provide initial suffixes so that ReceiveAnnouncement will wait
-				ras := newAnnouncementReader(mockStream, "/test/", []string{})
+				ras, _ := newAnnouncementReader(mockStream, "/test/", []string{})
 				// Allow goroutine to start (very short)
 				time.Sleep(1 * time.Millisecond)
 				_ = ras.Close()
@@ -147,14 +148,15 @@ func TestAnnouncementReader_Close(t *testing.T) {
 	}{"normal_close": {
 		setupFunc: func() *AnnouncementReader {
 			mockStream := &FakeQUICStream{}
-			return newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
+			ras, _ := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
+			return ras
 		},
 		wantErr: false,
 	},
 		"already_closed": {
 			setupFunc: func() *AnnouncementReader {
 				mockStream := &FakeQUICStream{}
-				ras := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
+				ras, _ := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
 				_ = ras.Close() // Close once
 				return ras
 			},
@@ -186,7 +188,7 @@ func TestAnnouncementReader_CloseWithError(t *testing.T) {
 		ReadFunc: func(p []byte) (int, error) { return 0, io.EOF },
 	}
 
-	ras := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
+	ras, _ := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
 
 	// Allow goroutine to start and call Read (very short)
 	time.Sleep(1 * time.Millisecond)
@@ -204,7 +206,7 @@ func TestAnnouncementReader_CloseWithError_MultipleClose(t *testing.T) {
 		ReadFunc: func(p []byte) (int, error) { return 0, io.EOF },
 	}
 
-	ras := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
+	ras, _ := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
 
 	// Allow goroutine to start and call Read (very short)
 	time.Sleep(1 * time.Millisecond)
@@ -220,7 +222,7 @@ func TestAnnouncementReader_CloseWithError_MultipleClose(t *testing.T) {
 
 func TestAnnouncementReader_AnnouncementTracking(t *testing.T) {
 	mockStream := &FakeQUICStream{}
-	ras := newAnnouncementReader(mockStream, "/test/", []string{}) // No initial announcements
+	ras, _ := newAnnouncementReader(mockStream, "/test/", []string{}) // No initial announcements
 
 	// Wait for the goroutine to start and process EOF (deterministic)
 	{
@@ -272,7 +274,7 @@ func TestAnnouncementReader_ConcurrentAccess(t *testing.T) {
 		ReadFunc: reader.Read,
 	}
 
-	ras := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
+	ras, _ := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
 
 	// Wait for message processing to begin (deterministic)
 	{
@@ -355,7 +357,7 @@ func TestAnnouncementReader_PrefixHandling(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			mockStream := &FakeQUICStream{}
-			ras := newAnnouncementReader(mockStream, tt.prefix, []string{tt.suffix})
+			ras, _ := newAnnouncementReader(mockStream, tt.prefix, []string{tt.suffix})
 
 			// Allow goroutine to start and call Read (very short)
 			time.Sleep(1 * time.Millisecond)
@@ -387,7 +389,7 @@ func TestAnnouncementReader_InvalidMessage(t *testing.T) {
 		ReadFunc: buf.Read,
 	}
 
-	ras := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
+	ras, _ := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
 
 	// Give time for processing invalid data (short)
 	time.Sleep(5 * time.Millisecond)
@@ -425,7 +427,7 @@ func TestAnnouncementReader_ActiveThenEnded(t *testing.T) {
 		},
 	}
 
-	ras := newAnnouncementReader(mockStream, "/test/", []string{})
+	ras, _ := newAnnouncementReader(mockStream, "/test/", []string{})
 
 	// Wait until messages are observed by the reader instead of sleeping.
 	{
@@ -483,7 +485,7 @@ func TestAnnouncementReader_MultipleActiveStreams(t *testing.T) {
 		},
 	}
 
-	ras := newAnnouncementReader(mockStream, "/test/", []string{})
+	ras, _ := newAnnouncementReader(mockStream, "/test/", []string{})
 
 	// Wait until messages are observed by the reader instead of sleeping.
 	{
@@ -552,7 +554,7 @@ func TestAnnouncementReader_DuplicateActiveError(t *testing.T) {
 		},
 	}
 
-	ras := newAnnouncementReader(mockStream, "/test/", []string{})
+	ras, _ := newAnnouncementReader(mockStream, "/test/", []string{})
 
 	// Wait for the reader's context to be cancelled due to error.
 	{
@@ -594,7 +596,7 @@ func TestAnnouncementReader_EndNonExistentStreamError(t *testing.T) {
 		},
 	}
 
-	ras := newAnnouncementReader(mockStream, "/test/", []string{})
+	ras, _ := newAnnouncementReader(mockStream, "/test/", []string{})
 
 	// Wait for the reader's context to be cancelled due to error.
 	{
@@ -634,7 +636,7 @@ func TestAnnouncementReader_NotifyChannel(t *testing.T) {
 	}
 
 	// Don't provide initial suffixes so we only get the stream message
-	ras := newAnnouncementReader(mockStream, "/test/", []string{})
+	ras, _ := newAnnouncementReader(mockStream, "/test/", []string{})
 
 	// Wait until the reader has processed the message
 	{
@@ -671,12 +673,12 @@ func TestAnnouncementReader_BoundaryValues(t *testing.T) {
 		suffix       string
 		expectedPath string
 		wantErr      bool
-		expectPanic  bool
+		expectError  bool
 	}{
 		"empty_prefix": {
 			prefix:      "",
 			suffix:      "/stream",
-			expectPanic: true, // invalid prefix causes panic
+			expectError: true, // invalid prefix causes panic
 		},
 		"empty_suffix": {
 			prefix:       "/test/",
@@ -687,7 +689,7 @@ func TestAnnouncementReader_BoundaryValues(t *testing.T) {
 		"both_empty": {
 			prefix:      "",
 			suffix:      "",
-			expectPanic: true, // invalid prefix causes panic
+			expectError: true, // invalid prefix causes panic
 		},
 		"root_prefix": {
 			prefix:       "/",
@@ -712,11 +714,10 @@ func TestAnnouncementReader_BoundaryValues(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			// Handle panic cases
-			if tt.expectPanic {
-				assert.Panics(t, func() {
-					mockStream := &FakeQUICStream{}
-					newAnnouncementReader(mockStream, tt.prefix, []string{})
-				})
+			if tt.expectError {
+				mockStream := &FakeQUICStream{}
+				_, err := newAnnouncementReader(mockStream, tt.prefix, []string{})
+				assert.Error(t, err)
 				return
 			}
 
@@ -738,7 +739,7 @@ func TestAnnouncementReader_BoundaryValues(t *testing.T) {
 			}
 
 			// Don't provide initial suffixes so we only get the stream message
-			ras := newAnnouncementReader(mockStream, tt.prefix, []string{})
+			ras, _ := newAnnouncementReader(mockStream, tt.prefix, []string{})
 
 			// Wait until the reader has processed the message
 			{
@@ -802,7 +803,7 @@ func TestAnnouncementReader_StreamErrors(t *testing.T) {
 				},
 			}
 
-			ras := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
+			ras, _ := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
 
 			// In quic-go, Read errors are receive-side events and do NOT cancel
 			// the stream's Context (which is send-side). The reader goroutine

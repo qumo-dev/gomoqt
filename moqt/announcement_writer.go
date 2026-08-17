@@ -12,9 +12,9 @@ import (
 )
 
 // newAnnouncementWriter creates a new AnnouncementWriter for the given stream and prefix.
-func newAnnouncementWriter(stream transport.Stream, prefix prefix, localHopID uint64, excludeHop uint64, logger *slog.Logger) *AnnouncementWriter {
+func newAnnouncementWriter(stream transport.Stream, prefix prefix, localHopID uint64, excludeHop uint64, logger *slog.Logger) (*AnnouncementWriter, error) {
 	if !isValidPrefix(prefix) {
-		panic("invalid prefix for AnnouncementWriter")
+		return nil, errors.New("invalid prefix for AnnouncementWriter")
 	}
 
 	sas := &AnnouncementWriter{
@@ -28,7 +28,7 @@ func newAnnouncementWriter(stream transport.Stream, prefix prefix, localHopID ui
 		excludeHop: excludeHop,
 	}
 
-	return sas
+	return sas, nil
 }
 
 // AnnouncementWriter manages the sending of announcements for a specified prefix.

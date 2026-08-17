@@ -2,6 +2,7 @@ package moqt
 
 import (
 	"context"
+	"errors"
 	"iter"
 	"sync"
 
@@ -9,9 +10,9 @@ import (
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
-func newAnnouncementReader(stream transport.Stream, prefix prefix, initSuffixes []suffix) *AnnouncementReader {
+func newAnnouncementReader(stream transport.Stream, prefix prefix, initSuffixes []suffix) (*AnnouncementReader, error) {
 	if !isValidPrefix(prefix) {
-		panic("invalid prefix for AnnouncementReader")
+		return nil, errors.New("invalid prefix for AnnouncementReader")
 	}
 
 	ar := &AnnouncementReader{
@@ -101,7 +102,7 @@ func newAnnouncementReader(stream transport.Stream, prefix prefix, initSuffixes 
 		}
 	}()
 
-	return ar
+	return ar, nil
 }
 
 // AnnouncementReader receives and manages broadcast announcements for a prefix from

@@ -932,7 +932,7 @@ func TestMux_ServeAnnouncements_InitSendsExistingAnnouncements(t *testing.T) {
 				},
 			}
 
-			aw := newAnnouncementWriter(mockStream, tc.writerPrefix, 0, 0, nil)
+			aw, _ := newAnnouncementWriter(mockStream, tc.writerPrefix, 0, 0, nil)
 
 			var wg sync.WaitGroup
 			wg.Go(func() {
@@ -990,7 +990,7 @@ func TestMux_ServeAnnouncements_AncestorAndDescendantReceive_AnnounceBefore(t *t
 			}
 			return 0, nil
 		}
-		rootAW := newAnnouncementWriter(rootStream, "/", 0, 0, nil)
+		rootAW, _ := newAnnouncementWriter(rootStream, "/", 0, 0, nil)
 
 		// Descendant writer (prefix /share/)
 		shareStream := &FakeQUICStream{}
@@ -1005,7 +1005,7 @@ func TestMux_ServeAnnouncements_AncestorAndDescendantReceive_AnnounceBefore(t *t
 			}
 			return 0, nil
 		}
-		shareAW := newAnnouncementWriter(shareStream, "/share/", 0, 0, nil)
+		shareAW, _ := newAnnouncementWriter(shareStream, "/share/", 0, 0, nil)
 
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -1055,7 +1055,7 @@ func TestMux_ServeAnnouncements_InvalidPrefix_ClosesWithError(t *testing.T) {
 
 		mockStream := &FakeQUICStream{}
 
-		aw := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil)
+		aw, _ := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil)
 		// Force invalid prefix for this test case (no trailing slash)
 		aw.prefix = "/test"
 
@@ -1124,7 +1124,7 @@ func TestMux_ServeAnnouncements_InitWriteError_ClosesWithInternalError(t *testin
 			},
 		}
 
-		aw := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil)
+		aw, _ := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil)
 
 		var wg sync.WaitGroup
 		wg.Go(func() {
@@ -1191,7 +1191,7 @@ func TestMux_ServeAnnouncements_SendAnnouncementWriteError_ClosesWithInternalErr
 			},
 		}
 
-		aw := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil)
+		aw, _ := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil)
 
 		var wg sync.WaitGroup
 		wg.Go(func() {
@@ -1263,7 +1263,7 @@ func TestMux_ServeAnnouncements_ContextCancel_StopsLoop(t *testing.T) {
 			},
 		}
 
-		aw := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil)
+		aw, _ := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil)
 
 		var wg sync.WaitGroup
 		wg.Go(func() {
@@ -1326,7 +1326,7 @@ func TestMux_ServeAnnouncements_SlowSubscriber_NoDeadlock(t *testing.T) {
 			},
 		}
 
-		aw := newAnnouncementWriter(mockStream, "/slow/", 0, 0, nil)
+		aw, _ := newAnnouncementWriter(mockStream, "/slow/", 0, 0, nil)
 
 		var wg sync.WaitGroup
 		wg.Go(func() {
@@ -1387,7 +1387,7 @@ func TestMux_ServeAnnouncements_MultipleListeners_ReceiveAnnouncement(t *testing
 				return 0, nil
 			},
 		}
-		aw1 := newAnnouncementWriter(mock1, "/multi/", 0, 0, nil)
+		aw1, _ := newAnnouncementWriter(mock1, "/multi/", 0, 0, nil)
 
 		// Second mock stream
 		ctx2, cancel2 := context.WithCancel(context.Background())
@@ -1402,7 +1402,7 @@ func TestMux_ServeAnnouncements_MultipleListeners_ReceiveAnnouncement(t *testing
 				return 0, nil
 			},
 		}
-		aw2 := newAnnouncementWriter(mock2, "/multi/", 0, 0, nil)
+		aw2, _ := newAnnouncementWriter(mock2, "/multi/", 0, 0, nil)
 
 		// Start two serveAnnouncements goroutines
 		var wg sync.WaitGroup
@@ -1480,7 +1480,7 @@ func TestMux_Announce_ClosesBusySubscriber(t *testing.T) {
 			},
 		}
 
-		aw := newAnnouncementWriter(mockStream, "/busy/", 0, 0, nil)
+		aw, _ := newAnnouncementWriter(mockStream, "/busy/", 0, 0, nil)
 
 		var wg sync.WaitGroup
 		wg.Go(func() {
@@ -1537,7 +1537,7 @@ func TestMux_Publish_InitSendsExistingAnnouncements(t *testing.T) {
 		},
 	}
 
-	aw := newAnnouncementWriter(mockStream, "/pubinit/", 0, 0, nil)
+	aw, _ := newAnnouncementWriter(mockStream, "/pubinit/", 0, 0, nil)
 
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -1589,7 +1589,7 @@ func TestMux_Publish_AfterServeAnnouncements_SendsAnnouncement(t *testing.T) {
 		},
 	}
 
-	aw := newAnnouncementWriter(mockStream, "/pubafter/", 0, 0, nil)
+	aw, _ := newAnnouncementWriter(mockStream, "/pubafter/", 0, 0, nil)
 
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -1652,7 +1652,7 @@ func TestMux_PublishFunc_InitSendsExistingAnnouncements(t *testing.T) {
 		},
 	}
 
-	aw := newAnnouncementWriter(mockStream, "/pubfuncinit/", 0, 0, nil)
+	aw, _ := newAnnouncementWriter(mockStream, "/pubfuncinit/", 0, 0, nil)
 
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -1704,7 +1704,7 @@ func TestMux_PublishFunc_AfterServeAnnouncements_SendsAnnouncement(t *testing.T)
 		},
 	}
 
-	aw := newAnnouncementWriter(mockStream, "/pubfuncafter/", 0, 0, nil)
+	aw, _ := newAnnouncementWriter(mockStream, "/pubfuncafter/", 0, 0, nil)
 
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -1770,7 +1770,7 @@ func TestMux_ServeAnnouncements_ConcurrentAnnounce_NoDeadlock(t *testing.T) {
 				return 0, nil
 			}
 			mocks = append(mocks, ms)
-			aw := newAnnouncementWriter(ms, "/race/", 0, 0, nil)
+			aw, _ := newAnnouncementWriter(ms, "/race/", 0, 0, nil)
 			aws = append(aws, aw)
 			readyChans = append(readyChans, ready)
 		}
@@ -2264,7 +2264,7 @@ func TestMux_ServeAnnouncements_AncestorAndDescendantReceive(t *testing.T) {
 			}
 			return 0, nil
 		}
-		rootAW := newAnnouncementWriter(rootStream, "/", 0, 0, nil)
+		rootAW, _ := newAnnouncementWriter(rootStream, "/", 0, 0, nil)
 
 		// Descendant writer (prefix /share/)
 		shareStream := &FakeQUICStream{}
@@ -2279,7 +2279,7 @@ func TestMux_ServeAnnouncements_AncestorAndDescendantReceive(t *testing.T) {
 			}
 			return 0, nil
 		}
-		shareAW := newAnnouncementWriter(shareStream, "/share/", 0, 0, nil)
+		shareAW, _ := newAnnouncementWriter(shareStream, "/share/", 0, 0, nil)
 
 		var wg sync.WaitGroup
 		wg.Add(2)

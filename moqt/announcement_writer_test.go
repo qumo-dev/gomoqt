@@ -25,14 +25,15 @@ func newTestAnnouncementWriter(t *testing.T, opts ...func(*FakeQUICStream)) *Ann
 			f(mockStream)
 		}
 	}
-	return newAnnouncementWriter(mockStream, "/test/", 0, 0, nil)
+	sas, _ := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil)
+	return sas
 }
 
 func TestNewAnnouncementWriter(t *testing.T) {
 	mockStream := &FakeQUICStream{}
 	prefix := "/test/"
 	logger := &slog.Logger{}
-	aw := newAnnouncementWriter(mockStream, prefix, 0, 0, logger)
+	aw, _ := newAnnouncementWriter(mockStream, prefix, 0, 0, logger)
 
 	require.NotNil(t, aw)
 	assert.Equal(t, "/test/", aw.prefix)
@@ -684,7 +685,7 @@ func TestAnnouncementWriter_BoundaryValues(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			mockStream := &FakeQUICStream{}
-			aw := newAnnouncementWriter(mockStream, tt.prefix, 0, 0, nil)
+			aw, _ := newAnnouncementWriter(mockStream, tt.prefix, 0, 0, nil)
 			ann, _ := NewAnnouncement(context.Background(), BroadcastPath(tt.broadcastPath))
 
 			// Initialize the AnnouncementWriter first

@@ -441,7 +441,11 @@ func (sess *Session) AcceptAnnounce(prefix string) (*AnnouncementReader, error) 
 		return nil, fmt.Errorf("failed to send ANNOUNCE_INTEREST message: %w", err)
 	}
 
-	return newAnnouncementReader(stream, prefix, nil), nil
+	reader, err := newAnnouncementReader(stream, prefix, nil)
+	if err != nil {
+		return nil, err
+	}
+	return reader, nil
 }
 
 // SessionStats is a point-in-time snapshot of a Session's operational metrics.
@@ -645,7 +649,10 @@ func (sess *Session) handleAnnounceStream(stream transport.Stream) {
 
 	prefix := aim.BroadcastPathPrefix
 
-	annstr := newAnnouncementWriter(stream, prefix, sess.mux.hopID, aim.ExcludeHop, sess.logger)
+	annstr, err := newAnnouncementWriter(stream, prefix, sess.mux.hopID, aim.ExcludeHop, sess.logger)
+	if err != nil {
+		return
+	}
 
 	sess.mux.serveAnnouncements(annstr)
 
