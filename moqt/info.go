@@ -1,6 +1,6 @@
 package moqt
 
-import "fmt"
+import "strconv"
 
 // PublishInfo holds publication metadata for a track.
 // It describes delivery preferences such as priority, ordering, latency, and
@@ -14,7 +14,24 @@ type PublishInfo struct {
 }
 
 func (pi PublishInfo) String() string {
-	return fmt.Sprintf("{ priority: %d, ordered: %t, max_latency_ms: %d, start_group: %d, end_group: %d }", pi.Priority, pi.Ordered, pi.MaxLatency, pi.StartGroup, pi.EndGroup)
+	// ⚡ Bolt: Zero-allocation string formatting for PublishInfo.
+	b := make([]byte, 0, 128)
+	b = append(b, "{ priority: "...)
+	b = strconv.AppendUint(b, uint64(pi.Priority), 10)
+	b = append(b, ", ordered: "...)
+	if pi.Ordered {
+		b = append(b, "true"...)
+	} else {
+		b = append(b, "false"...)
+	}
+	b = append(b, ", max_latency_ms: "...)
+	b = strconv.AppendUint(b, pi.MaxLatency, 10)
+	b = append(b, ", start_group: "...)
+	b = strconv.AppendUint(b, uint64(pi.StartGroup), 10)
+	b = append(b, ", end_group: "...)
+	b = strconv.AppendUint(b, uint64(pi.EndGroup), 10)
+	b = append(b, " }"...)
+	return string(b)
 }
 
 func ResolveTrackInfo(config SubscribeConfig, info PublishInfo) SubscribeConfig {

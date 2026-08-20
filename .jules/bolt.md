@@ -24,3 +24,6 @@
 ## YYYY-MM-DD - Avoid Map Initialization Overhead for Small Lists
 **Learning:** For finding duplicates or validating uniqueness in very small slices (e.g., N <= 16), an O(N^2) nested loop comparison against a stack-allocated array is measurably faster than using a `map[T]struct{}`. Even if escape analysis optimizes the map to the stack, the nested loop avoids map initialization and element hashing overhead on the happy path.
 **Action:** Provide a fast-path fallback using a small, stack-allocated array and O(N^2) loop for uniqueness detection on small bounded items before falling back to a map.
+## 2026-08-01 - Avoid fmt.Sprintf Allocation Overhead for Struct Strings
+**Learning:** `fmt.Sprintf` incurs reflection and heap allocation overhead in Go, which becomes significant when logging or debugging metadata structs on hot paths.
+**Action:** Replace `fmt.Sprintf` with manual `[]byte` slice appending and `strconv.AppendUint` for high-performance `String()` method serialization.

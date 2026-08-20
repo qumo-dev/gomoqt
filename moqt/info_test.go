@@ -41,6 +41,10 @@ func TestPublishInfo_String(t *testing.T) {
 	assert.Contains(t, result, "max_latency_ms: 100")
 	assert.Contains(t, result, "start_group: 1")
 	assert.Contains(t, result, "end_group: 10")
+
+	info.Ordered = false
+	result2 := info.String()
+	assert.Contains(t, result2, "ordered: false")
 }
 
 func TestResolveTrackInfo(t *testing.T) {

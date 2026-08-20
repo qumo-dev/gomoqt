@@ -70,4 +70,8 @@ func TestSubscribeConfig_String(t *testing.T) {
 	assert.Contains(t, result, "max_latency_ms: 250")
 	assert.Contains(t, result, "start_group: 5")
 	assert.Contains(t, result, "end_group: 10")
+
+	config.Ordered = false
+	result2 := config.String()
+	assert.Contains(t, result2, "ordered: false")
 }
