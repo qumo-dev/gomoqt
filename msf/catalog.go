@@ -256,7 +256,8 @@ func (c Catalog) Validate() error {
 		for i := range c.Tracks {
 			id := c.Tracks[i].ID(c.DefaultNamespace)
 			if _, ok := seen[id]; ok {
-				problems = append(problems, fmt.Sprintf("tracks[%d]: duplicate track identity %q", i, id.String()))
+				// Performance optimization: manually construct error string instead of fmt.Sprintf
+				problems = append(problems, "tracks["+itoa(i)+"]: duplicate track identity \""+id.String()+"\"")
 				continue
 			}
 			seen[id] = struct{}{}
@@ -269,7 +270,8 @@ func (c Catalog) Validate() error {
 			isDuplicate := false
 			for j := 0; j < i; j++ {
 				if seen[j] == id {
-					problems = append(problems, fmt.Sprintf("tracks[%d]: duplicate track identity %q", i, id.String()))
+					// Performance optimization: manually construct error string instead of fmt.Sprintf
+					problems = append(problems, "tracks["+itoa(i)+"]: duplicate track identity \""+id.String()+"\"")
 					isDuplicate = true
 					break
 				}
