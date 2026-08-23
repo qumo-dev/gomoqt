@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **deps:** Toolchain bumped to **Go 1.27.0** (released 2026-08-19), mirroring the 1.26.4 bump (#280): the `go` directive in all three modules (root, `magefiles`, `docs/moqt`) moves `1.26.4` → `1.27.0`, and the pinned `actions/setup-go` versions in `go.yml`, `benchmark-label.yml`, `lint.yml`, and `pages.yml` follow. The golangci-lint `go_version` input moves `^1.26` → `^1.27` — golangci-lint must be built with a toolchain at least as new as the code it analyzes, so leaving it at `^1.26` would fail lint on a `go 1.27.0` module. The documented minimum Go version is refreshed to 1.27 as part of the same bump, fixing drift left by earlier ones: the READMEs (all six languages) and CONTRIBUTING.md still said "Go 1.25.0 or later" (never moved by the 1.26 bump), and the docs install guide said "Go 1.26 or later". No source changes — Go 1.27 is backward-compatible with existing code; `go build`/`go vet` and the full `go test -count=1 ./...` suite pass on go1.27.0 (windows/amd64), and `go mod tidy` reports no drift.
+
 ### Fixed
 
 - **docs:** Audited every page of the Hugo site (`docs/moqt/content/en`) against the actual `moqt`/`msf`/`moq-web` sources and corrected the drift. Code samples that would not compile: `TrackWriter.OpenGroup`/`OpenGroupAt` were missing their `context.Context` first argument; `TrackWriter.Updated()` was still documented after the v0.17.0 rename to `ReadUpdate()`; `consume_track.md` and `relay.md` both called a non-existent `GroupReader.Close()` (the type only has `CancelRead` — a group ends when `ReadFrame` returns `io.EOF`, now stated explicitly); `TrackHandler.ServeTrack` was shown taking `(ctx, tw)` rather than `(*TrackWriter)`, and registered a value where the interface is satisfied by the pointer; `msf/broadcast.md` called `TrackMux.Publish` without its `ctx`; `announce_discover.md` used an unqualified `NewAnnouncement`.
