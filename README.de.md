@@ -31,7 +31,7 @@ Diese Implementierung folgt der [MOQ Lite-Spezifikation](https://www.ietf.org/ar
 
 ## Schnellstart
 ```bash
-# Mage installieren (Go 1.25+)
+# Mage installieren (Go 1.27+)
 go install github.com/magefile/mage@latest
 
 # Führen Sie den Interop-Test im Docker‑Container aus
@@ -84,7 +84,7 @@ Diese Implementierung richtet sich nach der MOQ Lite-Spezifikation. Den aktuelle
 
 ## Entwicklung
 ### Voraussetzungen
-- Go 1.25.0 oder neuer
+- Go 1.27.0 oder neuer
 - [Mage](https://magefile.org/) Build-Tool (Installation: `go install github.com/magefile/mage@latest`)
 
 ### Entwicklungsbefehle

@@ -1,6 +1,6 @@
 module github.com/qumo-dev/gomoqt
 
-go 1.26.4
+go 1.27.0
 
 require (
 	github.com/okdaichi/webtransport-go v0.12.0-okdaichi.2

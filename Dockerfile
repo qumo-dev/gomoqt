@@ -2,7 +2,7 @@
 # Uses Go image as base, installs Deno, mkcert and mage so that the
 # existing mage targets can be executed inside the image.
 
-FROM golang:1.26
+FROM golang:1.27
 
 ARG DENO_VERSION=2.5.0
 

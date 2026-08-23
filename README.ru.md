@@ -33,7 +33,7 @@
 
 ## Быстрый старт
 ```bash
-# установить Mage (Go 1.25+)
+# установить Mage (Go 1.27+)
 go install github.com/magefile/mage@latest
 
 # Запустить interop-тест в Docker-контейнере (TypeScript клиент + сервер)
@@ -87,7 +87,7 @@ mage interop:go
 
 ## Разработка
 ### Необходимые инструменты
-- Go 1.25.0 или новее
+- Go 1.27.0 или новее
 - Система сборки [Mage](https://magefile.org/) (установка: `go install github.com/magefile/mage@latest`)
 
 ### Команды разработки
