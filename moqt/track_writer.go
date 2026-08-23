@@ -343,8 +343,7 @@ func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequen
 
 	err = message.StreamTypeGroup.Encode(stream)
 	if err != nil {
-		var strErr *transport.StreamError
-		if errors.As(err, &strErr) {
+		if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
 			return nil, &GroupError{StreamError: strErr}
 		}
 
@@ -359,8 +358,7 @@ func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequen
 		GroupSequence: uint64(seq),
 	}.Encode(stream)
 	if err != nil {
-		var strErr *transport.StreamError
-		if errors.As(err, &strErr) {
+		if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
 			return nil, &GroupError{StreamError: strErr}
 		}
 

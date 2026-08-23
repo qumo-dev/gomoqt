@@ -2142,7 +2142,7 @@ func TestAnnouncement_AfterFunc_ConcurrentRegistrationAndEnd(t *testing.T) {
 	ctx := context.Background()
 	ann, end := NewAnnouncement(ctx, BroadcastPath("/announce/concurrent"))
 
-	var called int32
+	var called atomic.Int32
 	const n = 100
 	var wg sync.WaitGroup
 	wg.Add(n)
@@ -2150,7 +2150,7 @@ func TestAnnouncement_AfterFunc_ConcurrentRegistrationAndEnd(t *testing.T) {
 	for range n {
 		go func() {
 			ann.AfterFunc(func() {
-				atomic.AddInt32(&called, 1)
+				called.Add(1)
 			})
 			wg.Done()
 		}()
@@ -2169,7 +2169,7 @@ func TestAnnouncement_AfterFunc_ConcurrentRegistrationAndEnd(t *testing.T) {
 		t.Fatal("timed out waiting for announcement done")
 	}
 
-	if got := atomic.LoadInt32(&called); got != n {
+	if got := called.Load(); got != n {
 		t.Fatalf("expected %d handlers invoked, got %d", n, got)
 	}
 }
