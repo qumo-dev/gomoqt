@@ -58,7 +58,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: "1.27.0"
+          go-version-file: go.mod # resolves from the PR-head checkout above, so base+PR bench under one toolchain
           cache: true # reuse the Go build cache -> faster cold compile of base + PR test binaries
 
       - name: Install benchstat
