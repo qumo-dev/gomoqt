@@ -292,12 +292,10 @@ func TestCatalogApplyDelta_CloneTrackInheritsParent(t *testing.T) {
 	}
 	delta := CatalogDelta{
 		CloneTracks: []TrackClone{{
-			Track: Track{
-				Name:    "video-720",
-				Width:   new(int64(1280)),
-				Height:  new(int64(720)),
-				Bitrate: new(int64(3000000)),
-			},
+			Name:       "video-720",
+			Width:      new(int64(1280)),
+			Height:     new(int64(720)),
+			Bitrate:    new(int64(3000000)),
 			ParentName: "video-1080",
 		}},
 	}
@@ -336,7 +334,7 @@ func TestCatalogApplyDelta_Errors(t *testing.T) {
 				Tracks:  []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}},
 			},
 			delta: CatalogDelta{
-				CloneTracks: []TrackClone{{Track: Track{Name: "audio"}, ParentName: "missing"}},
+				CloneTracks: []TrackClone{{Name: "audio", ParentName: "missing"}},
 			},
 			errorMessage: "cannot clone unknown parent track",
 		},
@@ -725,7 +723,7 @@ func TestCatalogApplyDelta_CloneDuplicateTrack(t *testing.T) {
 	}
 	delta := CatalogDelta{
 		CloneTracks: []TrackClone{{
-			Track:      Track{Name: "video-copy"},
+			Name:       "video-copy",
 			ParentName: "video",
 		}},
 	}
@@ -944,7 +942,7 @@ func TestCatalogDelta_Clone(t *testing.T) {
 		IsComplete:       true,
 		AddTracks:        []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}},
 		RemoveTracks:     []TrackRef{{Name: "old", Namespace: "ns"}},
-		CloneTracks:      []TrackClone{{Track: Track{Name: "video-720"}, ParentName: "video-1080"}},
+		CloneTracks:      []TrackClone{{Name: "video-720", ParentName: "video-1080"}},
 		ExtraFields:      map[string]json.RawMessage{"ext": json.RawMessage(`1`)},
 		deltaOpOrder:     []deltaOperationKind{deltaOperationAdd, deltaOperationRemove, deltaOperationClone},
 	}
@@ -982,7 +980,7 @@ func TestCatalogDelta_MarshalJSON_RoundTrip(t *testing.T) {
 			Name:      "old",
 		}},
 		CloneTracks: []TrackClone{{
-			Track:      Track{Name: "video-720", Width: new(int64(1280))},
+			Name: "video-720", Width: new(int64(1280)),
 			ParentName: "video-1080",
 		}},
 		ExtraFields: map[string]json.RawMessage{"custom": json.RawMessage(`true`)},
@@ -1124,12 +1122,10 @@ func TestTrackRef_effectiveNamespace(t *testing.T) {
 
 func TestTrackClone_MarshalJSON_RoundTrip(t *testing.T) {
 	clone := TrackClone{
-		Track: Track{
-			Name:    "video-720",
-			Width:   new(int64(1280)),
-			Height:  new(int64(720)),
-			Bitrate: new(int64(3000000)),
-		},
+		Name:       "video-720",
+		Width:      new(int64(1280)),
+		Height:     new(int64(720)),
+		Bitrate:    new(int64(3000000)),
 		ParentName: "video-1080",
 	}
 
@@ -1149,7 +1145,7 @@ func TestTrackClone_MarshalJSON_RoundTrip(t *testing.T) {
 func TestTrackClone_MarshalJSON(t *testing.T) {
 	t.Run("with parent name", func(t *testing.T) {
 		clone := TrackClone{
-			Track:      Track{Name: "video-720"},
+			Name:       "video-720",
 			ParentName: "video-1080",
 		}
 		data, err := clone.MarshalJSON()
@@ -1159,7 +1155,7 @@ func TestTrackClone_MarshalJSON(t *testing.T) {
 
 	t.Run("without parent name", func(t *testing.T) {
 		clone := TrackClone{
-			Track: Track{Name: "video-720"},
+			Name: "video-720",
 		}
 		data, err := clone.MarshalJSON()
 		require.NoError(t, err)
@@ -1169,12 +1165,10 @@ func TestTrackClone_MarshalJSON(t *testing.T) {
 
 func TestTrackClone_Clone(t *testing.T) {
 	original := TrackClone{
-		Track: Track{
-			Name:  "video-720",
-			Codec: "av01",
-			ExtraFields: map[string]json.RawMessage{
-				"x": json.RawMessage(`[1, 2, 3]`),
-			},
+		Name:  "video-720",
+		Codec: "av01",
+		ExtraFields: map[string]json.RawMessage{
+			"x": json.RawMessage(`[1, 2, 3]`),
 		},
 		ParentName: "video-1080",
 	}
@@ -1260,7 +1254,7 @@ func TestCatalogDeltaValidate_Errors(t *testing.T) {
 		},
 		"clone track invalid": {
 			delta: CatalogDelta{
-				CloneTracks: []TrackClone{{Track: Track{Name: "video"}}}, // missing parentName
+				CloneTracks: []TrackClone{{Name: "video"}}, // missing parentName
 			},
 			errorMessage: "cloneTracks[0]: parentName is required for clone tracks",
 		},
@@ -1698,7 +1692,7 @@ func TestCatalogApplyDelta_UnknownParentTrack(t *testing.T) {
 	}
 	delta := CatalogDelta{
 		CloneTracks: []TrackClone{{
-			Track:      Track{Name: "copy"},
+			Name:       "copy",
 			ParentName: "nonexistent",
 		}},
 	}

@@ -164,7 +164,7 @@ func setupSaturatingServer(tb testing.TB, ctx context.Context, frameSize, frames
 			if err != nil {
 				return
 			}
-			for i := 0; i < framesPerGroup; i++ {
+			for range framesPerGroup {
 				frame.Reset()
 				frame.Write(data)
 				if err := gw.WriteFrame(frame); err != nil {

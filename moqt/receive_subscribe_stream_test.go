@@ -196,14 +196,12 @@ func TestReceiveSubscribeStream_ReadUpdate_ConcurrentIsSerialized(t *testing.T) 
 	var wg sync.WaitGroup
 	got := make([]uint8, 2)
 	for i := range 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			cfg, err := rss.readUpdate()
 			if assert.NoError(t, err) {
 				got[i] = uint8(cfg.Priority)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

@@ -446,10 +446,7 @@ func latencyAt(sorted []time.Duration, p float64) time.Duration {
 	if len(sorted) == 0 {
 		return 0
 	}
-	idx := int(float64(len(sorted)-1) * p)
-	if idx < 0 {
-		idx = 0
-	}
+	idx := max(int(float64(len(sorted)-1)*p), 0)
 	if idx >= len(sorted) {
 		idx = len(sorted) - 1
 	}
@@ -522,10 +519,7 @@ func quantileF64(sorted []float64, p float64) float64 {
 	if len(sorted) == 0 {
 		return 0
 	}
-	idx := int(float64(len(sorted)-1) * p)
-	if idx < 0 {
-		idx = 0
-	}
+	idx := max(int(float64(len(sorted)-1)*p), 0)
 	if idx >= len(sorted) {
 		idx = len(sorted) - 1
 	}
@@ -553,10 +547,7 @@ func (c *latencyCollector) add(d time.Duration) {
 }
 
 func (c *latencyCollector) collected() []time.Duration {
-	n := int(c.idx.Load())
-	if n > len(c.samples) {
-		n = len(c.samples)
-	}
+	n := min(int(c.idx.Load()), len(c.samples))
 	return c.samples[:n]
 }
 
@@ -633,7 +624,7 @@ func setupFanoutLatencyServer(tb testing.TB, ctx context.Context, frameSize, fra
 			if err != nil {
 				return
 			}
-			for i := 0; i < framesPerGroup; i++ {
+			for range framesPerGroup {
 				frame.Reset()
 				binary.BigEndian.PutUint64(data[:8], uint64(int64(time.Since(epoch))))
 				frame.Write(data)
@@ -725,7 +716,7 @@ func setupMultiTrackServer(tb testing.TB, ctx context.Context, frameSize, frames
 				if err != nil {
 					return
 				}
-				for i := 0; i < framesPerGroup; i++ {
+				for range framesPerGroup {
 					frame.Reset()
 					frame.Write(data)
 					if err := gw.WriteFrame(frame); err != nil {
