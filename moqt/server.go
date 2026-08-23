@@ -263,7 +263,7 @@ func (s *Server) connContext(ctx context.Context, conn StreamConn) context.Conte
 	if s.ConnContext != nil {
 		custom := s.ConnContext(ctx, conn)
 		if custom == nil {
-			panic("ConnContext returned nil")
+			return ctx
 		}
 		return custom
 	}

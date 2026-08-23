@@ -270,16 +270,19 @@ func TestServer_connContext_AppliesCustomAndInjectsServer(t *testing.T) {
 	assert.Equal(t, s.connManager, ctxServer)
 }
 
-func TestServer_connContext_PanicsOnNilCustomContext(t *testing.T) {
+func TestServer_connContext_FallbackOnNilCustomContext(t *testing.T) {
 	s := &Server{
 		ConnContext: func(ctx context.Context, conn StreamConn) context.Context {
 			return nil
 		},
 	}
+	s.init()
 
-	assert.Panics(t, func() {
-		_ = s.connContext(context.Background(), &FakeStreamConn{})
-	})
+	ctx := s.connContext(context.Background(), &FakeStreamConn{})
+	assert.NotNil(t, ctx)
+	ctxServer, ok := ctx.Value(serverContextKey).(*connManager)
+	assert.True(t, ok)
+	assert.Equal(t, s.connManager, ctxServer)
 }
 
 func TestServer_ServeQUICListener_ShuttingDown(t *testing.T) {
