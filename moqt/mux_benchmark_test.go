@@ -160,11 +160,9 @@ func BenchmarkTrackMux_ServeAnnouncements(b *testing.B) {
 			aw := newAnnouncementWriter(mockStream, "/room/", 0, 0, nil)
 
 			var awWG sync.WaitGroup
-			awWG.Add(1)
-			go func() {
-				defer awWG.Done()
+			awWG.Go(func() {
 				mux.serveAnnouncements(aw)
-			}()
+			})
 
 			// Block until init has fully completed. The fan-out path in
 			// Announce does a non-blocking channel send and, on overflow, closes
@@ -616,11 +614,9 @@ func BenchmarkTrackMux_AnnouncementTree(b *testing.B) {
 			aw := newAnnouncementWriter(mockStream, "/level1/", 0, 0, nil)
 
 			var awWG sync.WaitGroup
-			awWG.Add(1)
-			go func() {
-				defer awWG.Done()
+			awWG.Go(func() {
 				mux.serveAnnouncements(aw)
-			}()
+			})
 
 			// Block until init completes; see ServeAnnouncements for why this
 			// prevents a Publish from racing init's registerEndHandler.

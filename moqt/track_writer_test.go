@@ -707,3 +707,49 @@ func TestTrackWriter_DropGroups_ContextCanceled(t *testing.T) {
 	})
 	assert.Error(t, err)
 }
+
+func TestTrackWriter_OpenGroup_GroupErrorStreamWriteFailures(t *testing.T) {
+	// A transport.StreamError from the group stream's writes must surface as a
+	// *GroupError wrapping it, from both encode sites in openGroupWithSequence.
+	newSender := func(writeFunc func(p []byte) (int, error)) *TrackWriter {
+		mockStream := &FakeQUICStream{}
+		substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
+
+		openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
+			return &FakeQUICSendStream{WriteFunc: writeFunc}, nil
+		}
+
+		return newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {})
+	}
+
+	t.Run("stream type encode fails", func(t *testing.T) {
+		streamErr := &transport.StreamError{StreamID: 4, ErrorCode: 7, Remote: true}
+		sender := newSender(func([]byte) (int, error) { return 0, streamErr })
+
+		group, err := sender.OpenGroup(context.Background())
+		assert.Nil(t, group)
+
+		var groupErr *GroupError
+		require.ErrorAs(t, err, &groupErr)
+		assert.Same(t, streamErr, groupErr.StreamError)
+	})
+
+	t.Run("group header encode fails", func(t *testing.T) {
+		streamErr := &transport.StreamError{StreamID: 5, ErrorCode: 7, Remote: true}
+		calls := 0
+		sender := newSender(func(p []byte) (int, error) {
+			calls++
+			if calls == 1 {
+				return len(p), nil // stream-type prefix write succeeds...
+			}
+			return 0, streamErr // ...group header write fails
+		})
+
+		group, err := sender.OpenGroup(context.Background())
+		assert.Nil(t, group)
+
+		var groupErr *GroupError
+		require.ErrorAs(t, err, &groupErr)
+		assert.Same(t, streamErr, groupErr.StreamError)
+	})
+}

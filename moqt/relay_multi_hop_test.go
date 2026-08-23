@@ -358,11 +358,9 @@ func TestRelay_SubscriberDisconnectReconnect(t *testing.T) {
 			results := make(chan error, wave2Subscribers)
 			var wg sync.WaitGroup
 			for range wave2Subscribers {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					results <- relaySubscribeAndReadOne(ctx, fixture.edges[targetEdge].addr, 20*time.Second)
-				}()
+				})
 			}
 			wg.Wait()
 			close(results)
