@@ -2,7 +2,6 @@ package moqt
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/qumo-dev/gomoqt/transport"
 )
@@ -256,16 +255,14 @@ func (code SessionErrorCode) String() string {
 // SessionError wraps a QUIC application error with session-specific error codes.
 type SessionError struct{ *transport.ApplicationError }
 
+// ⚡ Bolt: optimized allocation by using string concatenation instead of fmt.Sprintf.
 func (err SessionError) Error() string {
-	var role string
-	if err.Remote {
-		role = "remote"
-	} else {
-		role = "local"
-	}
 	text := err.SessionErrorCode().String()
 	if text != "" {
-		return fmt.Sprintf("%s (%s)", text, role)
+		if err.Remote {
+			return text + " (remote)"
+		}
+		return text + " (local)"
 	}
 	return err.ApplicationError.Error()
 }

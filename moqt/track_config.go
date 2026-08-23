@@ -1,7 +1,7 @@
 package moqt
 
 import (
-	"fmt"
+	"strconv"
 )
 
 // SubscribeConfig holds subscription parameters for a track.
@@ -15,6 +15,23 @@ type SubscribeConfig struct {
 	EndGroup   GroupSequence
 }
 
+// ⚡ Bolt: optimized allocation by replacing fmt.Sprintf with manual append and strconv.
 func (sc SubscribeConfig) String() string {
-	return fmt.Sprintf("{ subscriber_priority: %d, ordered: %t, max_latency_ms: %d, start_group: %d, end_group: %d }", sc.Priority, sc.Ordered, sc.MaxLatency, sc.StartGroup, sc.EndGroup)
+	buf := make([]byte, 0, 128)
+	buf = append(buf, "{ subscriber_priority: "...)
+	buf = strconv.AppendUint(buf, uint64(sc.Priority), 10)
+	buf = append(buf, ", ordered: "...)
+	if sc.Ordered {
+		buf = append(buf, "true"...)
+	} else {
+		buf = append(buf, "false"...)
+	}
+	buf = append(buf, ", max_latency_ms: "...)
+	buf = strconv.AppendUint(buf, sc.MaxLatency, 10)
+	buf = append(buf, ", start_group: "...)
+	buf = strconv.AppendUint(buf, uint64(sc.StartGroup), 10)
+	buf = append(buf, ", end_group: "...)
+	buf = strconv.AppendUint(buf, uint64(sc.EndGroup), 10)
+	buf = append(buf, " }"...)
+	return string(buf)
 }
