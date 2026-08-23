@@ -7,7 +7,7 @@ weight: 1
 
 ### Prerequisites
 
-- Go 1.26 or later (recommended)
+- Go 1.27 or later (recommended)
 - Git (required for building from source)
 - (Optional, recommended) Local certificate tool mkcert (for TLS usage)
 

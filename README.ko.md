@@ -31,7 +31,7 @@ QUIC을 통한 효율적인 미디어 스트리밍을 위해 MOQ Lite 사양을 
 
 ## 빠른 시작
 ```bash
-# Mage 설치 (Go 1.25+)
+# Mage 설치 (Go 1.27+)
 go install github.com/magefile/mage@latest
 
 # Docker 컨테이너에서 interop 테스트 실행 (TypeScript 클라이언트 + 서버)
@@ -85,7 +85,7 @@ mage interop:go
 
 ## 개발
 ### 필수 조건
-- Go 1.25.0 이상
+- Go 1.27.0 이상
 - [Mage](https://magefile.org/) 빌드 도구 (`go install github.com/magefile/mage@latest`로 설치)
 
 ### 개발 명령어

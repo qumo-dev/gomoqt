@@ -15,7 +15,7 @@ This project follows a code of conduct to ensure a welcoming environment for all
 ### Prerequisites
 
 Before you begin, ensure you have the following installed:
-- Go 1.25.0 or later
+- Go 1.27.0 or later
 - [Mage](https://magefile.org/) build tool (install with `go install github.com/magefile/mage@latest`)
 - Git
 

@@ -31,7 +31,7 @@ Media over QUIC (MOQ) の Go 実装で、MOQ Lite 仕様に基づき QUIC 上で
 
 ## クイックスタート
 ```bash
-# Mage をインストール (Go 1.25+)
+# Mage をインストール (Go 1.27+)
 go install github.com/magefile/mage@latest
 
 # Docker コンテナ内で interop テストを実行（TypeScript クライアント + サーバ）
@@ -85,7 +85,7 @@ mage interop:go
 
 ## 開発する
 ### 前提条件
-- Go 1.25.0 以上
+- Go 1.27.0 以上
 - [Mage](https://magefile.org/) ビルドツール (`go install github.com/magefile/mage@latest`)
 
 ### 開発用コマンド

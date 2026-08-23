@@ -31,7 +31,7 @@
 
 ## 快速开始
 ```bash
-# 安装 Mage (需要 Go 1.25+)
+# 安装 Mage (需要 Go 1.27+)
 go install github.com/magefile/mage@latest
 
 # 在 Docker 容器中运行 interop 测试（TypeScript 客户端 + 服务器）
@@ -85,7 +85,7 @@ mage interop:go
 
 ## 开发
 ### 先决条件
-- Go 1.25.0 或更高版本
+- Go 1.27.0 或更高版本
 - [Mage](https://magefile.org/) 构建工具(使用 `go install github.com/magefile/mage@latest` 安装)
 
 ### 开发命令
