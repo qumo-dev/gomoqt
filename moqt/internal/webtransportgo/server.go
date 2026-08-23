@@ -76,6 +76,14 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
+	// An already-expired context would lose the select below whenever the
+	// close goroutine finishes first (with both channels ready, select picks
+	// randomly), so check it up front: Shutdown(canceledCtx) deterministically
+	// reports the context error instead of racing to nil.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// Implement a proper shutdown logic that passes the context to the server
 	closeCh := make(chan struct{})
 
