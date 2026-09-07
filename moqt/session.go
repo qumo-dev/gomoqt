@@ -645,7 +645,7 @@ func (sess *Session) handleAnnounceStream(stream transport.Stream) {
 
 	prefix := aim.BroadcastPathPrefix
 
-	annstr := newAnnouncementWriter(stream, prefix, sess.mux.hopID, aim.ExcludeHop, sess.mux.PathCostFunc, sess.logger)
+	annstr := newAnnouncementWriter(stream, prefix, sess.mux.hopID, aim.ExcludeHop, sess.mux.RouteCostFunc, sess.logger)
 
 	sess.mux.serveAnnouncements(annstr)
 

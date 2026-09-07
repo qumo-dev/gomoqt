@@ -19,12 +19,21 @@ type AnnounceMessage struct {
 	AnnounceStatus      AnnounceStatus
 	BroadcastPathSuffix string
 	HopIDs              []uint64
-	// PathCost is the accumulated upstream path cost in microseconds.
+	// RouteCost is the accumulated route cost of the announcement, in
+	// the semantics of draft-lcurley-moq-cluster 5.2 ROUTE_COST: "the
+	// marginal cost of subscribing via this advertisement". Units are
+	// defined by the deployment's link-cost policy (the cluster draft
+	// prices each link at 1 by default; a deployment MAY price links by
+	// measured RTT instead). Absent means 0.
+	//
 	// It is encoded only when non-zero: peers running older versions
 	// that reject trailing bytes decode the shorter message unchanged,
 	// and senders without a cost contribution keep emitting the exact
-	// previous wire format.
-	PathCost uint64
+	// previous wire format. (Placement as a trailing varint on the
+	// moq-lite ANNOUNCE is a gomoqt-local encoding; the cluster draft
+	// carries the same value as a KVP parameter on PUBLISH_NAMESPACE /
+	// extended NAMESPACE. See gomoqt#409.)
+	RouteCost uint64
 }
 
 func (am AnnounceMessage) Len() int {
@@ -36,8 +45,8 @@ func (am AnnounceMessage) Len() int {
 	for _, id := range am.HopIDs {
 		l += VarintLen(id)
 	}
-	if am.PathCost != 0 {
-		l += VarintLen(am.PathCost)
+	if am.RouteCost != 0 {
+		l += VarintLen(am.RouteCost)
 	}
 
 	return l
@@ -55,8 +64,8 @@ func (am AnnounceMessage) Encode(w io.Writer) error {
 	for _, id := range am.HopIDs {
 		b, _ = WriteVarint(b, id)
 	}
-	if am.PathCost != 0 {
-		b, _ = WriteVarint(b, am.PathCost)
+	if am.RouteCost != 0 {
+		b, _ = WriteVarint(b, am.RouteCost)
 	}
 
 	_, err := w.Write(b)
@@ -119,7 +128,7 @@ func (am *AnnounceMessage) Decode(src io.Reader) error {
 		if err != nil {
 			return err
 		}
-		am.PathCost = cost
+		am.RouteCost = cost
 		b = b[n:]
 	}
 

@@ -83,14 +83,21 @@ type TrackMux struct {
 	// does not participate in hop tracking (e.g. an endpoint, not a relay).
 	hopID uint64
 
-	// PathCostFunc supplies this node's cost contribution, in microseconds,
-	// added to an announcement's accumulated path cost when the mux
-	// forwards it. Relays typically return the RTT to their upstream
-	// session for the announced broadcast path. It must be set before the
+	// RouteCostFunc supplies this node's link cost, added to an
+	// announcement's accumulated route cost when the mux forwards it,
+	// following the ROUTE_COST semantics of draft-lcurley-moq-cluster.
+	// Units are policy-defined: the cluster draft prices a link via the
+	// RELAY_COST setup option (default 1, 0 = free e.g. same
+	// datacenter) and explicitly allows pricing by measured RTT instead,
+	// so a relay may return its upstream RTT in any fixed unit. The
+	// addition saturates rather than wraps. It must be set before the
 	// mux serves its first session and is read-only afterwards. A nil
 	// function (the default) contributes nothing, and the forwarded
-	// message omits the field — matching the previous wire format.
-	PathCostFunc func(*Announcement) uint64
+	// message omits the field — matching the previous wire format. The
+	// draft's remaining policies (a serving relay advertising 0, grace
+	// periods, and the hash tie-break against mutual re-parenting) are
+	// relay-side decisions left to the caller (see gomoqt#409).
+	RouteCostFunc func(*Announcement) uint64
 
 	mu                sync.RWMutex
 	trackHandlerIndex map[BroadcastPath]*announcedTrackHandler

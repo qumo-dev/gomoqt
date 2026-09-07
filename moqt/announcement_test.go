@@ -358,13 +358,14 @@ func TestAnnouncement_ConcurrentContextDone(t *testing.T) {
 	}
 }
 
-// TestAnnouncement_PathCost verifies the microsecond storage converts to a
-// time.Duration and defaults to zero for fresh announcements.
-func TestAnnouncement_PathCost(t *testing.T) {
+// TestAnnouncement_RouteCost verifies the accumulated-cost accessor and
+// its zero default for fresh announcements (origin publishers seed 0 per
+// draft-lcurley-moq-cluster 6.1).
+func TestAnnouncement_RouteCost(t *testing.T) {
 	ann, end := NewAnnouncement(context.Background(), BroadcastPath("/test/path"))
 	defer end()
-	assert.Equal(t, time.Duration(0), ann.PathCost(), "fresh announcement has no accumulated cost")
+	assert.Equal(t, uint64(0), ann.RouteCost(), "fresh announcement has no accumulated cost")
 
-	ann.pathCost = 150_000
-	assert.Equal(t, 150*time.Millisecond, ann.PathCost())
+	ann.routeCost = 150_000
+	assert.Equal(t, uint64(150_000), ann.RouteCost())
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math"
 	"slices"
 	"sync"
 
@@ -12,10 +13,10 @@ import (
 )
 
 // newAnnouncementWriter creates a new AnnouncementWriter for the given stream and prefix.
-// pathCostFunc, when non-nil, supplies this node's per-announcement cost
-// contribution (microseconds) added to the accumulated path cost when
-// forwarding; a nil function contributes nothing and the field is omitted.
-func newAnnouncementWriter(stream transport.Stream, prefix prefix, localHopID uint64, excludeHop uint64, pathCostFunc func(*Announcement) uint64, logger *slog.Logger) *AnnouncementWriter {
+// routeCostFunc, when non-nil, supplies this node's link cost added to the
+// accumulated route cost when forwarding; a nil function contributes
+// nothing and the field is omitted from the wire entirely.
+func newAnnouncementWriter(stream transport.Stream, prefix prefix, localHopID uint64, excludeHop uint64, routeCostFunc func(*Announcement) uint64, logger *slog.Logger) *AnnouncementWriter {
 	if !isValidPrefix(prefix) {
 		panic("invalid prefix for AnnouncementWriter")
 	}
@@ -27,9 +28,9 @@ func newAnnouncementWriter(stream transport.Stream, prefix prefix, localHopID ui
 		actives:      make(map[suffix]*activeAnnouncement),
 		initDone:     make(chan struct{}),
 		logger:       logger,
-		localHopID:   localHopID,
-		excludeHop:   excludeHop,
-		pathCostFunc: pathCostFunc,
+		localHopID:    localHopID,
+		excludeHop:    excludeHop,
+		routeCostFunc: routeCostFunc,
 	}
 
 	return sas
@@ -44,7 +45,7 @@ type AnnouncementWriter struct {
 	logger     *slog.Logger
 	localHopID   uint64 // this node's Hop ID to append when forwarding
 	excludeHop   uint64 // skip announcements whose HopIDs contain this value
-	pathCostFunc func(*Announcement) uint64 // this node's cost contribution, µs (nil = none)
+	routeCostFunc func(*Announcement) uint64 // this node's link cost (nil = none, field omitted)
 
 	mu      sync.RWMutex
 	actives map[suffix]*activeAnnouncement
@@ -85,13 +86,19 @@ func (aw *AnnouncementWriter) buildHopIDs(ann *Announcement) []uint64 {
 	return result
 }
 
-// buildPathCost returns the accumulated path cost in microseconds to encode:
-// the cost the announcement arrived with plus this node's contribution.
+// buildRouteCost returns the accumulated route cost to encode: the cost
+// the announcement arrived with plus this node's link cost. The addition
+// saturates rather than wraps, per draft-lcurley-moq-cluster 6.1 ("an
+// absurd upstream value ranks last instead of overflowing to best").
 // A total of zero omits the field from the wire message entirely.
-func (aw *AnnouncementWriter) buildPathCost(ann *Announcement) uint64 {
-	cost := ann.pathCost
-	if aw.pathCostFunc != nil {
-		cost += aw.pathCostFunc(ann)
+func (aw *AnnouncementWriter) buildRouteCost(ann *Announcement) uint64 {
+	cost := ann.routeCost
+	if aw.routeCostFunc != nil {
+		add := aw.routeCostFunc(ann)
+		if cost > math.MaxUint64-add {
+			return math.MaxUint64
+		}
+		cost += add
 	}
 	return cost
 }
@@ -137,7 +144,7 @@ func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) err
 				AnnounceStatus:      message.ACTIVE,
 				BroadcastPathSuffix: sfx,
 				HopIDs:              aw.buildHopIDs(active.announcement),
-				PathCost:            aw.buildPathCost(active.announcement),
+				RouteCost:           aw.buildRouteCost(active.announcement),
 			}.Encode(aw.stream)
 			if err != nil {
 				if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
@@ -267,7 +274,7 @@ func (aw *AnnouncementWriter) SendAnnouncement(announcement *Announcement) error
 		AnnounceStatus:      message.ACTIVE,
 		BroadcastPathSuffix: suffix,
 		HopIDs:              aw.buildHopIDs(announcement),
-		PathCost:            aw.buildPathCost(announcement),
+		RouteCost:           aw.buildRouteCost(announcement),
 	}.Encode(aw.stream)
 	if err != nil {
 		if strErr, ok := errors.AsType[*transport.StreamError](err); ok {

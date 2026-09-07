@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"testing"
 	"time"
 
@@ -1111,24 +1112,32 @@ func TestAnnouncementWriter_StressTest_HeavyConcurrentAccess(t *testing.T) {
 
 }
 
-// TestAnnouncementWriter_BuildPathCost verifies cost accumulation: the
-// announcement's received cost plus this node's contribution, with a nil
-// contribution function leaving the received cost untouched.
-func TestAnnouncementWriter_BuildPathCost(t *testing.T) {
-	ann := &Announcement{pathCost: 5_000} // 5 ms received upstream
+// TestAnnouncementWriter_BuildRouteCost verifies cost accumulation: the
+// announcement's received cost plus this node's link cost, saturating
+// rather than wrapping (draft-lcurley-moq-cluster 6.1), with a nil cost
+// function leaving the received cost untouched.
+func TestAnnouncementWriter_BuildRouteCost(t *testing.T) {
+	ann := &Announcement{routeCost: 5_000}
 
 	t.Run("nil cost func contributes nothing", func(t *testing.T) {
 		aw := &AnnouncementWriter{}
-		assert.Equal(t, uint64(5_000), aw.buildPathCost(ann))
+		assert.Equal(t, uint64(5_000), aw.buildRouteCost(ann))
 	})
 
-	t.Run("cost func adds this node's contribution", func(t *testing.T) {
-		aw := &AnnouncementWriter{pathCostFunc: func(*Announcement) uint64 { return 2_500 }}
-		assert.Equal(t, uint64(7_500), aw.buildPathCost(ann))
+	t.Run("cost func adds this node's link cost", func(t *testing.T) {
+		aw := &AnnouncementWriter{routeCostFunc: func(*Announcement) uint64 { return 2_500 }}
+		assert.Equal(t, uint64(7_500), aw.buildRouteCost(ann))
 	})
 
 	t.Run("zero total with nil func on fresh announcement", func(t *testing.T) {
 		aw := &AnnouncementWriter{}
-		assert.Equal(t, uint64(0), aw.buildPathCost(&Announcement{}))
+		assert.Equal(t, uint64(0), aw.buildRouteCost(&Announcement{}))
+	})
+
+	t.Run("addition saturates instead of wrapping", func(t *testing.T) {
+		saturated := &Announcement{routeCost: math.MaxUint64 - 1}
+		aw := &AnnouncementWriter{routeCostFunc: func(*Announcement) uint64 { return 10 }}
+		assert.Equal(t, uint64(math.MaxUint64), aw.buildRouteCost(saturated),
+			"an absurd upstream cost must rank last, not overflow to best")
 	})
 }

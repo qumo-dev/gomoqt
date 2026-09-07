@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 // EndAnnouncementFunc is a function that ends an announcement.
@@ -64,10 +63,13 @@ type Announcement struct {
 
 	hopIDs []uint64
 
-	// pathCost is the accumulated upstream path cost in microseconds,
-	// received with the announcement and extended by this node when
-	// forwarding (see TrackMux.PathCostFunc).
-	pathCost uint64
+	// routeCost is the accumulated route cost received with the
+	// announcement, extended by this node's link cost when forwarding
+	// (see TrackMux.RouteCostFunc). Semantics follow the ROUTE_COST of
+	// draft-lcurley-moq-cluster 5.2: the marginal cost of subscribing
+	// via this advertisement. Units are policy-defined; 0 means unset
+	// or free.
+	routeCost uint64
 }
 
 // String returns a string representation of the announcement for debugging.
@@ -101,15 +103,19 @@ func (a *Announcement) HopIDs() []uint64 {
 	return a.hopIDs
 }
 
-// PathCost returns the accumulated upstream path cost carried by the
-// announcement — the sum of the per-hop contributions every relay between
-// the origin and this node added when forwarding (typically each relay's
-// RTT to its own upstream). The final hop's RTT is NOT included: it is
-// measured directly by the receiving node. Route selection should compare
-// PathCost plus the locally measured RTT. It is zero for announcements
-// that traversed only cost-unaware relays or none at all.
-func (a *Announcement) PathCost() time.Duration {
-	return time.Duration(a.pathCost) * time.Microsecond
+// RouteCost returns the accumulated route cost carried by the
+// announcement: what every relay between the origin and this node added
+// when forwarding, per the ROUTE_COST semantics of
+// draft-lcurley-moq-cluster 5.2 ("the marginal cost of subscribing via
+// this advertisement"). Units are defined by the deployment's link-cost
+// policy — the cluster draft defaults each link to 1 (so cost ranks like
+// a weighted hop count) and explicitly allows pricing by measured RTT
+// instead; the receiver combines the value with its own local policy.
+// The final hop's link cost is NOT included: it is added by this node
+// when forwarding, or measured by the receiver directly. Zero means
+// unset, free, or a path traversed only by cost-unaware relays.
+func (a *Announcement) RouteCost() uint64 {
+	return a.routeCost
 }
 
 // Done returns a channel that is closed once when the announcement ends.
