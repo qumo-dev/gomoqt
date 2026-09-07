@@ -157,7 +157,7 @@ func BenchmarkTrackMux_ServeAnnouncements(b *testing.B) {
 					return len(p), nil
 				},
 			}
-			aw := newAnnouncementWriter(mockStream, "/room/", 0, 0, nil)
+			aw := newAnnouncementWriter(mockStream, "/room/", 0, 0, nil, nil)
 
 			var awWG sync.WaitGroup
 			awWG.Go(func() {
@@ -611,7 +611,7 @@ func BenchmarkTrackMux_AnnouncementTree(b *testing.B) {
 					return len(p), nil
 				},
 			}
-			aw := newAnnouncementWriter(mockStream, "/level1/", 0, 0, nil)
+			aw := newAnnouncementWriter(mockStream, "/level1/", 0, 0, nil, nil)
 
 			var awWG sync.WaitGroup
 			awWG.Go(func() {

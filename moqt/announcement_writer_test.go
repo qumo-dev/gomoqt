@@ -25,14 +25,14 @@ func newTestAnnouncementWriter(t *testing.T, opts ...func(*FakeQUICStream)) *Ann
 			f(mockStream)
 		}
 	}
-	return newAnnouncementWriter(mockStream, "/test/", 0, 0, nil)
+	return newAnnouncementWriter(mockStream, "/test/", 0, 0, nil, nil)
 }
 
 func TestNewAnnouncementWriter(t *testing.T) {
 	mockStream := &FakeQUICStream{}
 	prefix := "/test/"
 	logger := &slog.Logger{}
-	aw := newAnnouncementWriter(mockStream, prefix, 0, 0, logger)
+	aw := newAnnouncementWriter(mockStream, prefix, 0, 0, nil, logger)
 
 	require.NotNil(t, aw)
 	assert.Equal(t, "/test/", aw.prefix)
@@ -684,7 +684,7 @@ func TestAnnouncementWriter_BoundaryValues(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			mockStream := &FakeQUICStream{}
-			aw := newAnnouncementWriter(mockStream, tt.prefix, 0, 0, nil)
+			aw := newAnnouncementWriter(mockStream, tt.prefix, 0, 0, nil, nil)
 			ann, _ := NewAnnouncement(context.Background(), BroadcastPath(tt.broadcastPath))
 
 			// Initialize the AnnouncementWriter first
@@ -1109,4 +1109,26 @@ func TestAnnouncementWriter_StressTest_HeavyConcurrentAccess(t *testing.T) {
 	// Verify that we still have some active announcements
 	assert.True(t, len(aw.actives) > 0, "Should have some active announcements remaining")
 
+}
+
+// TestAnnouncementWriter_BuildPathCost verifies cost accumulation: the
+// announcement's received cost plus this node's contribution, with a nil
+// contribution function leaving the received cost untouched.
+func TestAnnouncementWriter_BuildPathCost(t *testing.T) {
+	ann := &Announcement{pathCost: 5_000} // 5 ms received upstream
+
+	t.Run("nil cost func contributes nothing", func(t *testing.T) {
+		aw := &AnnouncementWriter{}
+		assert.Equal(t, uint64(5_000), aw.buildPathCost(ann))
+	})
+
+	t.Run("cost func adds this node's contribution", func(t *testing.T) {
+		aw := &AnnouncementWriter{pathCostFunc: func(*Announcement) uint64 { return 2_500 }}
+		assert.Equal(t, uint64(7_500), aw.buildPathCost(ann))
+	})
+
+	t.Run("zero total with nil func on fresh announcement", func(t *testing.T) {
+		aw := &AnnouncementWriter{}
+		assert.Equal(t, uint64(0), aw.buildPathCost(&Announcement{}))
+	})
 }

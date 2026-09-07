@@ -19,6 +19,12 @@ type AnnounceMessage struct {
 	AnnounceStatus      AnnounceStatus
 	BroadcastPathSuffix string
 	HopIDs              []uint64
+	// PathCost is the accumulated upstream path cost in microseconds.
+	// It is encoded only when non-zero: peers running older versions
+	// that reject trailing bytes decode the shorter message unchanged,
+	// and senders without a cost contribution keep emitting the exact
+	// previous wire format.
+	PathCost uint64
 }
 
 func (am AnnounceMessage) Len() int {
@@ -29,6 +35,9 @@ func (am AnnounceMessage) Len() int {
 	l += VarintLen(uint64(len(am.HopIDs)))
 	for _, id := range am.HopIDs {
 		l += VarintLen(id)
+	}
+	if am.PathCost != 0 {
+		l += VarintLen(am.PathCost)
 	}
 
 	return l
@@ -45,6 +54,9 @@ func (am AnnounceMessage) Encode(w io.Writer) error {
 	b, _ = WriteVarint(b, uint64(len(am.HopIDs)))
 	for _, id := range am.HopIDs {
 		b, _ = WriteVarint(b, id)
+	}
+	if am.PathCost != 0 {
+		b, _ = WriteVarint(b, am.PathCost)
 	}
 
 	_, err := w.Write(b)
@@ -97,6 +109,17 @@ func (am *AnnounceMessage) Decode(src io.Reader) error {
 			return err
 		}
 		am.HopIDs = append(am.HopIDs, num)
+		b = b[n:]
+	}
+
+	// PathCost is a trailing field that older senders omit; read it only
+	// when bytes remain, and keep rejecting any other trailing garbage.
+	if len(b) != 0 {
+		cost, n, err := ReadVarint(b)
+		if err != nil {
+			return err
+		}
+		am.PathCost = cost
 		b = b[n:]
 	}
 

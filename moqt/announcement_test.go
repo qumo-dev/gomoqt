@@ -357,3 +357,14 @@ func TestAnnouncement_ConcurrentContextDone(t *testing.T) {
 		})
 	}
 }
+
+// TestAnnouncement_PathCost verifies the microsecond storage converts to a
+// time.Duration and defaults to zero for fresh announcements.
+func TestAnnouncement_PathCost(t *testing.T) {
+	ann, end := NewAnnouncement(context.Background(), BroadcastPath("/test/path"))
+	defer end()
+	assert.Equal(t, time.Duration(0), ann.PathCost(), "fresh announcement has no accumulated cost")
+
+	ann.pathCost = 150_000
+	assert.Equal(t, 150*time.Millisecond, ann.PathCost())
+}

@@ -42,6 +42,22 @@ func TestAnnounceMessage_EncodeDecode(t *testing.T) {
 				HopIDs:              []uint64{100, 200},
 			},
 		},
+		"with hop ids and path cost": {
+			input: message.AnnounceMessage{
+				AnnounceStatus:      message.ACTIVE,
+				BroadcastPathSuffix: "test",
+				HopIDs:              []uint64{100, 200},
+				PathCost:            250_000,
+			},
+		},
+		"zero path cost decodes as zero": {
+			input: message.AnnounceMessage{
+				AnnounceStatus:      message.ACTIVE,
+				BroadcastPathSuffix: "test",
+				HopIDs:              []uint64{1},
+				PathCost:            0,
+			},
+		},
 	}
 
 	for name, tc := range tests {
@@ -111,17 +127,45 @@ func TestAnnounceMessage_DecodeErrors(t *testing.T) {
 
 	t.Run("extra data", func(t *testing.T) {
 		var am message.AnnounceMessage
-		// Manually construct data with extra bytes after valid data
+		// Manually construct data with extra bytes after valid data. A
+		// single trailing varint is the optional PathCost field, so the
+		// garbage must extend past one varint to be rejected.
 		var buf bytes.Buffer
-		buf.WriteByte(0x05) // length varint = 5
+		buf.WriteByte(0x06) // length varint = 6
 		buf.WriteByte(0x01) // status
 		buf.WriteByte(0x01) // string length 1
 		buf.WriteByte('a')  // string
 		buf.WriteByte(0x00) // hops
-		buf.WriteByte(0x00) // extra byte
+		buf.WriteByte(0x00) // PathCost varint (consumed)
+		buf.WriteByte(0x00) // extra byte beyond it
 		src := bytes.NewReader(buf.Bytes())
 		err := am.Decode(src)
 		assert.Error(t, err)
 		assert.Equal(t, message.ErrMessageTooShort, err)
 	})
+}
+
+// TestAnnounceMessage_ZeroCostOmission verifies the wire-compatibility
+// contract: a zero PathCost produces byte-identical output to a message
+// without the field, so cost-unaware senders keep emitting the previous
+// format and older peers decode it unchanged.
+func TestAnnounceMessage_ZeroCostOmission(t *testing.T) {
+	withCost := message.AnnounceMessage{
+		AnnounceStatus:      message.ACTIVE,
+		BroadcastPathSuffix: "test",
+		HopIDs:              []uint64{7, 8},
+	}
+	withoutCost := withCost
+
+	var a, b bytes.Buffer
+	require.NoError(t, withoutCost.Encode(&a))
+
+	withCost.PathCost = 1 // any nonzero changes the bytes
+	require.NoError(t, withCost.Encode(&b))
+	assert.NotEqual(t, a.Bytes(), b.Bytes(), "nonzero cost must be present on the wire")
+
+	withCost.PathCost = 0
+	var c bytes.Buffer
+	require.NoError(t, withCost.Encode(&c))
+	assert.Equal(t, a.Bytes(), c.Bytes(), "zero cost must encode identically to an omitted field")
 }

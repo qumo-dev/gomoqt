@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // EndAnnouncementFunc is a function that ends an announcement.
@@ -62,6 +63,11 @@ type Announcement struct {
 	once   sync.Once
 
 	hopIDs []uint64
+
+	// pathCost is the accumulated upstream path cost in microseconds,
+	// received with the announcement and extended by this node when
+	// forwarding (see TrackMux.PathCostFunc).
+	pathCost uint64
 }
 
 // String returns a string representation of the announcement for debugging.
@@ -93,6 +99,17 @@ func (a *Announcement) BroadcastPath() BroadcastPath {
 // Each relay appends its own hop ID when forwarding. For local announcements, HopIDs returns nil.
 func (a *Announcement) HopIDs() []uint64 {
 	return a.hopIDs
+}
+
+// PathCost returns the accumulated upstream path cost carried by the
+// announcement — the sum of the per-hop contributions every relay between
+// the origin and this node added when forwarding (typically each relay's
+// RTT to its own upstream). The final hop's RTT is NOT included: it is
+// measured directly by the receiving node. Route selection should compare
+// PathCost plus the locally measured RTT. It is zero for announcements
+// that traversed only cost-unaware relays or none at all.
+func (a *Announcement) PathCost() time.Duration {
+	return time.Duration(a.pathCost) * time.Microsecond
 }
 
 // Done returns a channel that is closed once when the announcement ends.

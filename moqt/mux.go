@@ -83,6 +83,15 @@ type TrackMux struct {
 	// does not participate in hop tracking (e.g. an endpoint, not a relay).
 	hopID uint64
 
+	// PathCostFunc supplies this node's cost contribution, in microseconds,
+	// added to an announcement's accumulated path cost when the mux
+	// forwards it. Relays typically return the RTT to their upstream
+	// session for the announced broadcast path. It must be set before the
+	// mux serves its first session and is read-only afterwards. A nil
+	// function (the default) contributes nothing, and the forwarded
+	// message omits the field — matching the previous wire format.
+	PathCostFunc func(*Announcement) uint64
+
 	mu                sync.RWMutex
 	trackHandlerIndex map[BroadcastPath]*announcedTrackHandler
 
