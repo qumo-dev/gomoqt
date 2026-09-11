@@ -90,12 +90,12 @@ func TestUrgencyFor(t *testing.T) {
 		wantUrgency     int8
 		wantIncremental bool
 	}{
-		"zero maps to quic-go's default urgency": {
+		"zero (lowest priority) maps to the least urgent bucket": {
 			priority:        0,
-			wantUrgency:     3,
+			wantUrgency:     7,
 			wantIncremental: true,
 		},
-		"minimum nonzero priority maps to the least urgent bucket": {
+		"minimum nonzero priority still maps to the least urgent bucket": {
 			priority:        1,
 			wantUrgency:     7,
 			wantIncremental: true,
@@ -123,9 +123,10 @@ func TestUrgencyFor(t *testing.T) {
 
 func TestUrgencyFor_MonotonicWithPriority(t *testing.T) {
 	// Higher TrackPriority (more important) must never produce a higher
-	// (less important) urgency than a lower TrackPriority.
-	prevUrgency, _ := urgencyFor(1)
-	for p := 2; p <= 255; p++ {
+	// (less important) urgency than a lower TrackPriority, across the full
+	// range including the 0/1 boundary.
+	prevUrgency, _ := urgencyFor(0)
+	for p := 1; p <= 255; p++ {
 		urgency, _ := urgencyFor(TrackPriority(p))
 		assert.LessOrEqual(t, urgency, prevUrgency)
 		prevUrgency = urgency
