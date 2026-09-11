@@ -156,6 +156,29 @@ func TestTrackWriter_OpenGroup_Success(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestTrackWriter_OpenGroup_SetsPriority(t *testing.T) {
+	mockStream := &FakeQUICStream{}
+	substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{Priority: 200})
+
+	var mockSendStream *FakeQUICSendStream
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
+		mockSendStream = &FakeQUICSendStream{}
+		return mockSendStream, nil
+	}
+
+	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {})
+
+	group, err := sender.OpenGroup(context.Background())
+	assert.NoError(t, err)
+	assert.NotNil(t, group)
+
+	wantUrgency, wantIncremental := urgencyFor(200)
+	gotUrgency, gotIncremental, ok := mockSendStream.LastPriority()
+	assert.True(t, ok, "SetPriority should have been called")
+	assert.Equal(t, wantUrgency, gotUrgency)
+	assert.Equal(t, wantIncremental, gotIncremental)
+}
+
 func TestTrackWriter_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 

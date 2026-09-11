@@ -350,6 +350,9 @@ func (s *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
 		return nil, fmt.Errorf("failed to open stream for fetch: %w", err)
 	}
 
+	urgency, incremental := urgencyFor(req.Priority)
+	stream.SetPriority(urgency, incremental)
+
 	err = message.StreamTypeFetch.Encode(stream)
 	if err != nil {
 		if strErr, ok := errors.AsType[*transport.StreamError](err); ok && strErr.Remote {
@@ -729,6 +732,13 @@ func (sess *Session) handleFetchStream(stream transport.Stream) {
 		GroupSequence: GroupSequence(fm.GroupSequence),
 		ctx:           stream.Context(),
 	}
+
+	// SetPriority is a local, sender-side scheduling knob (not negotiated
+	// with the peer), so it must be set here too even though the client
+	// already set it on its own end when opening this stream: this call
+	// governs how the server schedules the fetch response data it writes.
+	urgency, incremental := urgencyFor(req.Priority)
+	stream.SetPriority(urgency, incremental)
 
 	group := newGroupWriter(stream, req.GroupSequence, nil)
 

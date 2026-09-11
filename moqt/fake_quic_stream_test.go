@@ -34,6 +34,10 @@ type FakeQUICStream struct {
 	cancelReadErr  error
 	closed         bool  // true after Close (finishedWriting in quic-go)
 	cancelWriteErr error // non-nil after CancelWrite (resetErr in quic-go)
+
+	prioritySet         bool
+	priorityUrgency     int8
+	priorityIncremental bool
 }
 
 var _ transport.Stream = (*FakeQUICStream)(nil)
@@ -150,4 +154,18 @@ func (f *FakeQUICStream) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
-func (f *FakeQUICStream) SetPriority(urgency int8, incremental bool) {}
+func (f *FakeQUICStream) SetPriority(urgency int8, incremental bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.prioritySet = true
+	f.priorityUrgency = urgency
+	f.priorityIncremental = incremental
+}
+
+// LastPriority reports the urgency/incremental values from the most recent
+// SetPriority call, and whether SetPriority was ever called.
+func (f *FakeQUICStream) LastPriority() (urgency int8, incremental bool, ok bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.priorityUrgency, f.priorityIncremental, f.prioritySet
+}

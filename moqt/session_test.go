@@ -1279,6 +1279,12 @@ func TestSession_ProcessBiStream_Fetch(t *testing.T) {
 	require.NotNil(t, gotWriter)
 	assert.Equal(t, GroupSequence(req.GroupSequence), gotWriter.GroupSequence())
 
+	wantUrgency, wantIncremental := urgencyFor(TrackPriority(req.Priority))
+	gotUrgency, gotIncremental, ok := mockStream.LastPriority()
+	assert.True(t, ok, "SetPriority should have been called")
+	assert.Equal(t, wantUrgency, gotUrgency)
+	assert.Equal(t, wantIncremental, gotIncremental)
+
 	_ = session.CloseWithError(NoError, "")
 }
 
@@ -2394,6 +2400,35 @@ func TestSession_Fetch(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, group)
 	assert.Equal(t, GroupSequence(42), group.GroupSequence())
+
+	_ = session.CloseWithError(NoError, "")
+}
+
+func TestSession_Fetch_SetsPriority(t *testing.T) {
+	conn := &FakeStreamConn{}
+
+	mockStream := &FakeQUICStream{}
+	mockStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
+
+	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+
+	session := newTestSession(conn)
+
+	req := &FetchRequest{
+		BroadcastPath: "/test",
+		TrackName:     "video",
+		Priority:      200,
+		GroupSequence: 42,
+	}
+
+	_, err := session.Fetch(req)
+	require.NoError(t, err)
+
+	wantUrgency, wantIncremental := urgencyFor(200)
+	gotUrgency, gotIncremental, ok := mockStream.LastPriority()
+	assert.True(t, ok, "SetPriority should have been called")
+	assert.Equal(t, wantUrgency, gotUrgency)
+	assert.Equal(t, wantIncremental, gotIncremental)
 
 	_ = session.CloseWithError(NoError, "")
 }

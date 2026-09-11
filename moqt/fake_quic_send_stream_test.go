@@ -26,6 +26,10 @@ type FakeQUICSendStream struct {
 	cancelCause    context.CancelCauseFunc
 	closed         bool  // true after Close
 	cancelWriteErr error // non-nil after CancelWrite
+
+	prioritySet         bool
+	priorityUrgency     int8
+	priorityIncremental bool
 }
 
 func (m *FakeQUICSendStream) ensureContext() {
@@ -97,4 +101,18 @@ func (m *FakeQUICSendStream) Context() context.Context {
 	return m.ctx
 }
 
-func (m *FakeQUICSendStream) SetPriority(urgency int8, incremental bool) {}
+func (m *FakeQUICSendStream) SetPriority(urgency int8, incremental bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.prioritySet = true
+	m.priorityUrgency = urgency
+	m.priorityIncremental = incremental
+}
+
+// LastPriority reports the urgency/incremental values from the most recent
+// SetPriority call, and whether SetPriority was ever called.
+func (m *FakeQUICSendStream) LastPriority() (urgency int8, incremental bool, ok bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.priorityUrgency, m.priorityIncremental, m.prioritySet
+}
