@@ -2408,7 +2408,6 @@ func TestSession_Fetch_SetsPriority(t *testing.T) {
 	conn := &FakeStreamConn{}
 
 	mockStream := &FakeQUICStream{}
-	mockStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
 
 	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
 

@@ -733,10 +733,8 @@ func (sess *Session) handleFetchStream(stream transport.Stream) {
 		ctx:           stream.Context(),
 	}
 
-	// SetPriority is a local, sender-side scheduling knob (not negotiated
-	// with the peer), so it must be set here too even though the client
-	// already set it on its own end when opening this stream: this call
-	// governs how the server schedules the fetch response data it writes.
+	// Priority is per-endpoint and not negotiated, so the requester's call on
+	// its own end does not cover the response data written from this side.
 	urgency, incremental := urgencyFor(req.Priority)
 	stream.SetPriority(urgency, incremental)
 
