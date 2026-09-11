@@ -50,6 +50,10 @@ func (wrapper streamWrapper) Context() context.Context {
 	return wrapper.stream.Context()
 }
 
+func (wrapper streamWrapper) SetPriority(urgency int8, incremental bool) {
+	wrapper.stream.SetPriority(urgency, incremental)
+}
+
 var _ transport.ReceiveStream = (*receiveStreamWrapper)(nil)
 
 type receiveStreamWrapper struct {
@@ -92,4 +96,8 @@ func (wrapper sendStreamWrapper) Close() error {
 
 func (wrapper sendStreamWrapper) Context() context.Context {
 	return wrapper.stream.Context()
+}
+
+func (wrapper sendStreamWrapper) SetPriority(urgency int8, incremental bool) {
+	wrapper.stream.SetPriority(urgency, incremental)
 }

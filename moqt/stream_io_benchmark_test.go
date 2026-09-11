@@ -297,6 +297,7 @@ func (s *sinkWriterSendStream) CancelWrite(transport.StreamErrorCode) {}
 func (s *sinkWriterSendStream) SetWriteDeadline(time.Time) error      { return nil }
 func (s *sinkWriterSendStream) Close() error                          { return nil }
 func (s *sinkWriterSendStream) Context() context.Context              { return context.Background() }
+func (s *sinkWriterSendStream) SetPriority(int8, bool)                {}
 
 // humanSize returns a short label (1K, 16K, 64K, 256K, 1M) for a byte size.
 func humanSize(n int) string {

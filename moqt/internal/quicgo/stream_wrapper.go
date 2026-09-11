@@ -50,6 +50,10 @@ func (wrapper rawQuicStream) Context() context.Context {
 	return wrapper.stream.Context()
 }
 
+func (wrapper rawQuicStream) SetPriority(urgency int8, incremental bool) {
+	wrapper.stream.SetPriority(urgency, incremental)
+}
+
 /*
  *
  */
@@ -99,4 +103,8 @@ func (wrapper rawQuicSendStream) Close() error {
 
 func (wrapper rawQuicSendStream) Context() context.Context {
 	return wrapper.stream.Context()
+}
+
+func (wrapper rawQuicSendStream) SetPriority(urgency int8, incremental bool) {
+	wrapper.stream.SetPriority(urgency, incremental)
 }

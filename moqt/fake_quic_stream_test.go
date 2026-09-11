@@ -149,3 +149,5 @@ func (f *FakeQUICStream) SetWriteDeadline(t time.Time) error {
 	}
 	return nil
 }
+
+func (f *FakeQUICStream) SetPriority(urgency int8, incremental bool) {}

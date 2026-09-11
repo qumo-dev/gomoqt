@@ -96,3 +96,5 @@ func (m *FakeQUICSendStream) Context() context.Context {
 	m.ensureContext()
 	return m.ctx
 }
+
+func (m *FakeQUICSendStream) SetPriority(urgency int8, incremental bool) {}

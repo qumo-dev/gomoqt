@@ -107,6 +107,11 @@ func (c *CountingSendStream) Context() context.Context {
 	return c.inner.Context()
 }
 
+// SetPriority delegates to the wrapped stream.
+func (c *CountingSendStream) SetPriority(urgency int8, incremental bool) {
+	c.inner.SetPriority(urgency, incremental)
+}
+
 // Inner returns the wrapped SendStream.
 func (c *CountingSendStream) Inner() transport.SendStream { return c.inner }
 
