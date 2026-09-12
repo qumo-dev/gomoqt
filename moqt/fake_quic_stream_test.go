@@ -10,24 +10,104 @@ import (
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
+// streamResult is one queued I/O outcome for a fake stream.
+// On Read, Data is copied into the caller's buffer; on Write it is ignored.
+// Block parks the call until the stream is cancelled or closed, modelling a
+// peer that has gone quiet without hanging up — reach for it instead of EOF
+// when a reader goroutine must stay alive for the duration of the test.
+type streamResult struct {
+	Data  []byte
+	Err   error
+	Block bool
+}
+
+// resultQueue returns queued results in order, repeating the last entry once
+// exhausted. The zero value is an empty queue, which callers treat as the
+// direction's default (io.EOF for reads, success for writes).
+type resultQueue struct {
+	entries []streamResult
+	idx     int
+	off     int // offset within entries[idx], for partial reads
+}
+
+// next reports the entry for the current call, or ok=false for an empty queue.
+func (q *resultQueue) next() (streamResult, bool) {
+	if len(q.entries) == 0 {
+		return streamResult{}, false
+	}
+	return q.entries[min(q.idx, len(q.entries)-1)], true
+}
+
+// readInto copies the current entry into p, advancing once it is consumed.
+func (q *resultQueue) readInto(p []byte) (int, error) {
+	r, ok := q.next()
+	if !ok {
+		return 0, io.EOF
+	}
+	n := copy(p, r.Data[min(q.off, len(r.Data)):])
+	q.off += n
+	if q.off >= len(r.Data) {
+		q.idx++
+		q.off = 0
+	}
+	return n, r.Err
+}
+
+// blocking reports whether the current entry parks the caller.
+func (q *resultQueue) blocking() bool {
+	r, ok := q.next()
+	return ok && r.Block
+}
+
+// advance consumes the current entry and returns its error (write direction).
+func (q *resultQueue) advance() error {
+	r, ok := q.next()
+	if !ok {
+		return nil
+	}
+	q.idx++
+	return r.Err
+}
+
 // FakeQUICStream is a fake implementation of transport.Stream for testing.
 // By default it models quic-go behavior:
 //   - Context() is the send-side context (cancelled by Close / CancelWrite, NOT by Read errors)
 //   - Close cancels Context() with nil cause (context.Cause returns context.Canceled)
 //   - CancelWrite cancels Context() with *transport.StreamError cause
 //   - CancelRead makes subsequent Read calls return *transport.StreamError (does NOT cancel Context)
+//
+// Read and Write behavior is driven by the Reads/Writes results queues: entries
+// are returned in order and the last entry repeats once exhausted; an empty
+// queue means io.EOF on Read and success on Write. Bytes passed to Write are
+// recorded and readable via Written.
 type FakeQUICStream struct {
 	mu sync.Mutex
 
-	ReadFunc             func(p []byte) (int, error)
-	WriteFunc            func(p []byte) (int, error)
-	CloseFunc            func() error
-	CancelReadFunc       func(transport.StreamErrorCode)
-	CancelWriteFunc      func(transport.StreamErrorCode)
-	ParentCtx            context.Context // optional parent context; default: context.Background()
-	SetDeadlineFunc      func(time.Time) error
-	SetReadDeadlineFunc  func(time.Time) error
-	SetWriteDeadlineFunc func(time.Time) error
+	Reads  []streamResult
+	Writes []streamResult
+
+	ParentCtx context.Context // optional parent context; default: context.Background()
+
+	// Error overrides; zero value means the call succeeds.
+	CloseErr            error
+	SetDeadlineErr      error
+	SetReadDeadlineErr  error
+	SetWriteDeadlineErr error
+
+	// Notification channels, for tests that must observe a call as it happens.
+	// Each send is non-blocking, so an unbuffered channel with no reader is safe.
+	WriteNotify       chan<- struct{}
+	CancelReadNotify  chan<- transport.StreamErrorCode
+	CancelWriteNotify chan<- transport.StreamErrorCode
+
+	reads  resultQueue
+	writes resultQueue
+
+	written          []byte
+	cancelReadCodes  []transport.StreamErrorCode
+	cancelWriteCodes []transport.StreamErrorCode
+
+	unblock chan struct{} // closed by CancelRead/Close to release Block reads
 
 	ctx            context.Context
 	cancelCause    context.CancelCauseFunc
@@ -54,6 +134,17 @@ func (f *FakeQUICStream) ensureContext() {
 	}
 }
 
+// syncQueues copies the configured entries into the internal queues once.
+// Must be called with f.mu held.
+func (f *FakeQUICStream) syncQueues() {
+	if f.reads.entries == nil && f.Reads != nil {
+		f.reads.entries = f.Reads
+	}
+	if f.writes.entries == nil && f.Writes != nil {
+		f.writes.entries = f.Writes
+	}
+}
+
 func (f *FakeQUICStream) Read(p []byte) (int, error) {
 	f.mu.Lock()
 	if f.cancelReadErr != nil {
@@ -61,26 +152,82 @@ func (f *FakeQUICStream) Read(p []byte) (int, error) {
 		f.mu.Unlock()
 		return 0, err
 	}
-	readFunc := f.ReadFunc
-	f.mu.Unlock()
-	if readFunc != nil {
-		return readFunc(p)
+	f.syncQueues()
+	if f.reads.blocking() {
+		f.ensureUnblock()
+		unblock := f.unblock
+		f.mu.Unlock()
+
+		<-unblock
+
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if f.cancelReadErr != nil {
+			return 0, f.cancelReadErr
+		}
+		return 0, io.EOF
 	}
-	return 0, io.EOF
+	defer f.mu.Unlock()
+	return f.reads.readInto(p)
+}
+
+// ensureUnblock lazily creates the channel that releases blocked reads.
+// Must be called with f.mu held.
+func (f *FakeQUICStream) ensureUnblock() {
+	if f.unblock == nil {
+		f.unblock = make(chan struct{})
+	}
+}
+
+// releaseReads wakes any read parked on a Block entry.
+// Must be called with f.mu held.
+func (f *FakeQUICStream) releaseReads() {
+	f.ensureUnblock()
+	select {
+	case <-f.unblock: // already closed
+	default:
+		close(f.unblock)
+	}
 }
 
 func (f *FakeQUICStream) Write(p []byte) (int, error) {
-	if f.WriteFunc != nil {
-		return f.WriteFunc(p)
+	f.mu.Lock()
+	f.syncQueues()
+	err := f.writes.advance()
+	if err == nil {
+		f.written = append(f.written, p...)
+	}
+	notify := f.WriteNotify
+	f.mu.Unlock()
+
+	if notify != nil {
+		select {
+		case notify <- struct{}{}:
+		default:
+		}
+	}
+	if err != nil {
+		return 0, err
 	}
 	return len(p), nil
 }
 
-func (f *FakeQUICStream) Close() error {
-	if f.CloseFunc != nil {
-		return f.CloseFunc()
-	}
+// Written returns a copy of every byte passed to a successful Write.
+func (f *FakeQUICStream) Written() []byte {
 	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]byte, len(f.written))
+	copy(out, f.written)
+	return out
+}
+
+func (f *FakeQUICStream) Close() error {
+	f.mu.Lock()
+	if f.CloseErr != nil {
+		err := f.CloseErr
+		f.mu.Unlock()
+		return err
+	}
 	if f.closed {
 		f.mu.Unlock()
 		return nil
@@ -88,6 +235,7 @@ func (f *FakeQUICStream) Close() error {
 	f.closed = true
 	cancelled := f.cancelWriteErr != nil
 	f.ensureContext()
+	f.releaseReads()
 	cancel := f.cancelCause
 	f.mu.Unlock()
 	if cancelled {
@@ -98,32 +246,68 @@ func (f *FakeQUICStream) Close() error {
 }
 
 func (f *FakeQUICStream) CancelRead(code transport.StreamErrorCode) {
-	if f.CancelReadFunc != nil {
-		f.CancelReadFunc(code)
-		return
-	}
 	f.mu.Lock()
+	f.cancelReadCodes = append(f.cancelReadCodes, code)
 	if f.cancelReadErr == nil {
 		f.cancelReadErr = &transport.StreamError{ErrorCode: code}
 	}
+	f.releaseReads()
+	notify := f.CancelReadNotify
 	f.mu.Unlock()
+
+	if notify != nil {
+		select {
+		case notify <- code:
+		default:
+		}
+	}
 }
 
 func (f *FakeQUICStream) CancelWrite(code transport.StreamErrorCode) {
-	if f.CancelWriteFunc != nil {
-		f.CancelWriteFunc(code)
-		return
-	}
 	f.mu.Lock()
+	f.cancelWriteCodes = append(f.cancelWriteCodes, code)
 	if f.closed || f.cancelWriteErr != nil {
+		notify := f.CancelWriteNotify
 		f.mu.Unlock()
+		if notify != nil {
+			select {
+			case notify <- code:
+			default:
+			}
+		}
 		return
 	}
 	f.cancelWriteErr = &transport.StreamError{ErrorCode: code}
 	f.ensureContext()
 	cancel := f.cancelCause
+	notify := f.CancelWriteNotify
 	f.mu.Unlock()
+
 	cancel(f.cancelWriteErr)
+	if notify != nil {
+		select {
+		case notify <- code:
+		default:
+		}
+	}
+}
+
+// CancelReadCodes returns the codes passed to CancelRead, in order.
+func (f *FakeQUICStream) CancelReadCodes() []transport.StreamErrorCode {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]transport.StreamErrorCode, len(f.cancelReadCodes))
+	copy(out, f.cancelReadCodes)
+	return out
+}
+
+// CancelWriteCodes returns the codes passed to CancelWrite, in order.
+func (f *FakeQUICStream) CancelWriteCodes() []transport.StreamErrorCode {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]transport.StreamErrorCode, len(f.cancelWriteCodes))
+	copy(out, f.cancelWriteCodes)
+	return out
 }
 
 func (f *FakeQUICStream) Context() context.Context {
@@ -134,24 +318,21 @@ func (f *FakeQUICStream) Context() context.Context {
 }
 
 func (f *FakeQUICStream) SetDeadline(t time.Time) error {
-	if f.SetDeadlineFunc != nil {
-		return f.SetDeadlineFunc(t)
-	}
-	return nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.SetDeadlineErr
 }
 
 func (f *FakeQUICStream) SetReadDeadline(t time.Time) error {
-	if f.SetReadDeadlineFunc != nil {
-		return f.SetReadDeadlineFunc(t)
-	}
-	return nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.SetReadDeadlineErr
 }
 
 func (f *FakeQUICStream) SetWriteDeadline(t time.Time) error {
-	if f.SetWriteDeadlineFunc != nil {
-		return f.SetWriteDeadlineFunc(t)
-	}
-	return nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.SetWriteDeadlineErr
 }
 
 func (f *FakeQUICStream) SetPriority(urgency int8, incremental bool) {
