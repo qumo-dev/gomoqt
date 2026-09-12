@@ -86,6 +86,12 @@ type FakeQUICStream struct {
 	Reads  []streamResult
 	Writes []streamResult
 
+	// ReadFrom/WriteTo back the stream with a real io source/sink, for cases a
+	// finite queue cannot express — an endless generator, or a discard sink in
+	// a benchmark. They apply only once the corresponding queue is exhausted.
+	ReadFrom io.Reader
+	WriteTo  io.Writer
+
 	ParentCtx context.Context // optional parent context; default: context.Background()
 
 	// Error overrides; zero value means the call succeeds.
@@ -167,6 +173,11 @@ func (f *FakeQUICStream) Read(p []byte) (int, error) {
 		}
 		return 0, io.EOF
 	}
+	if len(f.reads.entries) == 0 && f.ReadFrom != nil {
+		src := f.ReadFrom
+		f.mu.Unlock()
+		return src.Read(p)
+	}
 	defer f.mu.Unlock()
 	return f.reads.readInto(p)
 }
@@ -194,6 +205,10 @@ func (f *FakeQUICStream) Write(p []byte) (int, error) {
 	f.mu.Lock()
 	f.syncQueues()
 	err := f.writes.advance()
+	sink := f.WriteTo
+	if len(f.writes.entries) > 0 {
+		sink = nil // an explicit queue result wins over the sink
+	}
 	if err == nil {
 		f.written = append(f.written, p...)
 	}
@@ -208,6 +223,9 @@ func (f *FakeQUICStream) Write(p []byte) (int, error) {
 	}
 	if err != nil {
 		return 0, err
+	}
+	if sink != nil {
+		return sink.Write(p)
 	}
 	return len(p), nil
 }

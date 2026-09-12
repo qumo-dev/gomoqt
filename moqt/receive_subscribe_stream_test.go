@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -49,20 +48,23 @@ func TestNewReceiveSubscribeStream(t *testing.T) {
 // (i.e. must not start a background reader). The stream is touched only when the
 // publisher opts into updates by calling readUpdate.
 func TestReceiveSubscribeStream_ConstructorReadsNothing(t *testing.T) {
-	var reads atomic.Int64
-	mockStream := &FakeQUICStream{
-		ReadFunc: func(p []byte) (int, error) {
-			reads.Add(1)
-			select {} // a real reader would block here
-		},
-	}
+	// The fake's results queue has no call counter, so a background reader
+	// is proven absent indirectly: queue a real SUBSCRIBE_UPDATE, wait past
+	// any window a rogue reader would have consumed it in, then confirm
+	// readUpdate() still observes the untouched message.
+	buf := &bytes.Buffer{}
+	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 9}.Encode(buf))
+	mockStream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}}}
 
 	rss := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 	t.Cleanup(func() { _ = rss.closeWithError(SubscribeErrorCodeInternal) })
 
-	// A background reader, if one existed, would have called Read by now.
+	// A background reader, if one existed, would have consumed the update by now.
 	time.Sleep(20 * time.Millisecond)
-	assert.Zero(t, reads.Load(), "constructor must not read the subscribe stream")
+
+	got, err := rss.readUpdate()
+	require.NoError(t, err, "constructor must not have already consumed the subscribe stream")
+	assert.Equal(t, TrackPriority(9), got.Priority)
 }
 
 func TestReceiveSubscribeStream_SubscribeID(t *testing.T) {
@@ -108,7 +110,7 @@ func TestReceiveSubscribeStream_ReadUpdate(t *testing.T) {
 	// and makes it the current TrackConfig.
 	buf := &bytes.Buffer{}
 	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 5}.Encode(buf))
-	mockStream := &FakeQUICStream{ReadFunc: buf.Read}
+	mockStream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}}}
 
 	rss := newReceiveSubscribeStream(SubscribeID(123), mockStream, &SubscribeConfig{Priority: TrackPriority(1)})
 
@@ -123,7 +125,7 @@ func TestReceiveSubscribeStream_ReadUpdate_Sequence(t *testing.T) {
 	buf := &bytes.Buffer{}
 	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 1}.Encode(buf))
 	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 2}.Encode(buf))
-	mockStream := &FakeQUICStream{ReadFunc: buf.Read}
+	mockStream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}}}
 
 	rss := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
@@ -154,16 +156,13 @@ func TestReceiveSubscribeStream_CloseWithError(t *testing.T) {
 	}
 	for name, code := range tests {
 		t.Run(name, func(t *testing.T) {
-			var cancelled atomic.Bool
-			mockStream := &FakeQUICStream{
-				CancelReadFunc:  func(transport.StreamErrorCode) { cancelled.Store(true) },
-				CancelWriteFunc: func(transport.StreamErrorCode) { cancelled.Store(true) },
-			}
+			mockStream := &FakeQUICStream{}
 
 			rss := newReceiveSubscribeStream(SubscribeID(123), mockStream, &SubscribeConfig{})
 
 			assert.NoError(t, rss.closeWithError(code))
-			assert.True(t, cancelled.Load(), "closeWithError must cancel the stream")
+			cancelled := len(mockStream.CancelReadCodes()) > 0 || len(mockStream.CancelWriteCodes()) > 0
+			assert.True(t, cancelled, "closeWithError must cancel the stream")
 		})
 	}
 }
@@ -184,12 +183,9 @@ func TestReceiveSubscribeStream_ReadUpdate_ConcurrentIsSerialized(t *testing.T) 
 	buf := &bytes.Buffer{}
 	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 1}.Encode(buf))
 	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 2}.Encode(buf))
-	var readMu sync.Mutex // FakeQUICStream.Read via buf is not itself concurrency-safe
-	mockStream := &FakeQUICStream{ReadFunc: func(p []byte) (int, error) {
-		readMu.Lock()
-		defer readMu.Unlock()
-		return buf.Read(p)
-	}}
+	// FakeQUICStream.Read is internally mutex-serialized, so no extra locking
+	// is needed here to make concurrent Read calls safe.
+	mockStream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}}}
 
 	rss := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 

@@ -6,12 +6,24 @@ import (
 	"fmt"
 	"io"
 	"strconv"
-	"sync"
 	"testing"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
 	"github.com/qumo-dev/gomoqt/transport"
 )
+
+// benchmarkSubscribeOk returns an encoded SUBSCRIBE_OK, the response a
+// subscribe handshake waits for.
+func benchmarkSubscribeOk(b *testing.B) []byte {
+	b.Helper()
+
+	var buf bytes.Buffer
+	buf.WriteByte(byte(message.MessageTypeSubscribeOk))
+	if err := (message.SubscribeOkMessage{}).Encode(&buf); err != nil {
+		b.Fatalf("encode SUBSCRIBE_OK: %v", err)
+	}
+	return buf.Bytes()
+}
 
 // BenchmarkSession_Subscribe benchmarks subscribe operations
 func BenchmarkSession_Subscribe(b *testing.B) {
@@ -21,28 +33,10 @@ func BenchmarkSession_Subscribe(b *testing.B) {
 		b.Run(fmt.Sprintf("size-%d", size), func(b *testing.B) {
 			conn := &FakeStreamConn{}
 
-			// Mock OpenStream to return streams that will complete the subscribe handshake
-			streamIndex := 0
-			conn.OpenStreamFunc = func() (transport.Stream, error) {
-				mockBiStream := &FakeQUICStream{}
-				streamIndex++
-
-				// Mock Read for SUBSCRIBE_OK message
-				mockBiStream.ReadFunc = func(b []byte) (int, error) {
-					// Encode SUBSCRIBE_OK message
-					msg := message.SubscribeOkMessage{}
-					var buf bytes.Buffer
-					_, _ = buf.Write([]byte{byte(message.MessageTypeSubscribeOk)})
-					err := msg.Encode(&buf)
-					if err != nil {
-						return 0, err
-					}
-					data := buf.Bytes()
-					copy(b, data)
-					return len(data), io.EOF
-				}
-
-				return mockBiStream, nil
+			// Every opened stream completes the subscribe handshake: the single
+			// queue entry repeats, so each Read re-serves the whole SUBSCRIBE_OK.
+			conn.OpenStreams = []biStreamResult{
+				{Stream: &FakeQUICStream{Reads: []streamResult{{Data: benchmarkSubscribeOk(b), Err: io.EOF}}}},
 			}
 
 			session := newTestSession(conn)
@@ -77,27 +71,10 @@ func BenchmarkSession_ConcurrentSubscribe(b *testing.B) {
 		b.Run(fmt.Sprintf("goroutines-%d", conc), func(b *testing.B) {
 			conn := &FakeStreamConn{}
 
-			var streamMu sync.Mutex
-			streamIndex := 0
-			conn.OpenStreamFunc = func() (transport.Stream, error) {
-				streamMu.Lock()
-				defer streamMu.Unlock()
-
-				mockBiStream := &FakeQUICStream{}
-				streamIndex++
-				mockBiStream.ReadFunc = func(b []byte) (int, error) {
-					msg := message.SubscribeOkMessage{}
-					var buf bytes.Buffer
-					_, _ = buf.Write([]byte{byte(message.MessageTypeSubscribeOk)})
-					err := msg.Encode(&buf)
-					if err != nil {
-						return 0, err
-					}
-					data := buf.Bytes()
-					copy(b, data)
-					return len(data), io.EOF
-				}
-				return mockBiStream, nil
+			// The fake is mutex-guarded, so one shared stream serves every
+			// concurrent open; its single queue entry repeats per Read.
+			conn.OpenStreams = []biStreamResult{
+				{Stream: &FakeQUICStream{Reads: []streamResult{{Data: benchmarkSubscribeOk(b), Err: io.EOF}}}},
 			}
 
 			session := newTestSession(conn)

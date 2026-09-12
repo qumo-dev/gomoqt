@@ -3,6 +3,7 @@ package moqt
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -22,6 +23,11 @@ type FakeQUICSendStream struct {
 	mu sync.Mutex
 
 	Writes []streamResult
+
+	// WriteTo backs the stream with a real sink, for cases a finite queue
+	// cannot express — typically a discard sink in a benchmark. It applies
+	// only once the Writes queue is exhausted.
+	WriteTo io.Writer
 
 	ParentCtx context.Context // optional parent context
 
@@ -64,6 +70,10 @@ func (m *FakeQUICSendStream) Write(p []byte) (int, error) {
 		m.writes.entries = m.Writes
 	}
 	err := m.writes.advance()
+	sink := m.WriteTo
+	if len(m.writes.entries) > 0 {
+		sink = nil // an explicit queue result wins over the sink
+	}
 	if err == nil {
 		m.written = append(m.written, p...)
 	}
@@ -78,6 +88,9 @@ func (m *FakeQUICSendStream) Write(p []byte) (int, error) {
 	}
 	if err != nil {
 		return 0, err
+	}
+	if sink != nil {
+		return sink.Write(p)
 	}
 	return len(p), nil
 }

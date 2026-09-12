@@ -21,6 +21,11 @@ type FakeQUICReceiveStream struct {
 
 	Reads []streamResult
 
+	// ReadFrom backs the stream with a real source, for cases a finite queue
+	// cannot express — typically an endless generator in a benchmark. It
+	// applies only once the Reads queue is exhausted.
+	ReadFrom io.Reader
+
 	SetReadDeadlineErr error
 
 	CancelReadNotify chan<- transport.StreamErrorCode
@@ -63,6 +68,11 @@ func (m *FakeQUICReceiveStream) Read(p []byte) (int, error) {
 			return 0, m.cancelReadErr
 		}
 		return 0, io.EOF
+	}
+	if len(m.reads.entries) == 0 && m.ReadFrom != nil {
+		src := m.ReadFrom
+		m.mu.Unlock()
+		return src.Read(p)
 	}
 	defer m.mu.Unlock()
 	return m.reads.readInto(p)

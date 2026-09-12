@@ -230,7 +230,7 @@ func BenchmarkWriteCount_GroupHeader(b *testing.B) {
 			}
 
 			// Discard-backed fake so we isolate WRITE-COUNT, not throughput.
-			fake := &FakeQUICSendStream{WriteFunc: io.Discard.Write}
+			fake := &FakeQUICSendStream{WriteTo: io.Discard}
 			counting := NewCountingSendStream(fake)
 
 			// Pre-build the frame once; payload is fixed across iterations.
