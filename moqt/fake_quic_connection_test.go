@@ -68,8 +68,13 @@ type FakeStreamConn struct {
 	Stats           quicgo.ConnectionStats
 	CloseErr        error // returned by CloseWithError instead of nil
 
-	// CloseNotify receives each CloseWithError call. Sends are non-blocking.
-	CloseNotify chan<- closeCall
+	// StatsBytesSentStep advances the reported BytesSent by this much on every
+	// ConnectionStats call, modelling a connection with ongoing traffic.
+	StatsBytesSentStep uint64
+
+	// Notification channels; sends are non-blocking.
+	CloseNotify  chan<- closeCall
+	AcceptNotify chan<- struct{}
 
 	acceptIdx    int
 	acceptUniIdx int
@@ -120,6 +125,7 @@ func (m *FakeStreamConn) waitDone() error {
 
 func (m *FakeStreamConn) AcceptStream(ctx context.Context) (transport.Stream, error) {
 	m.mu.Lock()
+	signal(m.AcceptNotify)
 	if m.closeErr != nil {
 		err := m.closeErr
 		m.mu.Unlock()
@@ -141,6 +147,7 @@ func (m *FakeStreamConn) AcceptStream(ctx context.Context) (transport.Stream, er
 
 func (m *FakeStreamConn) AcceptUniStream(ctx context.Context) (transport.ReceiveStream, error) {
 	m.mu.Lock()
+	signal(m.AcceptNotify)
 	if m.closeErr != nil {
 		err := m.closeErr
 		m.mu.Unlock()
@@ -291,6 +298,7 @@ func (m *FakeStreamConn) Context() context.Context {
 func (m *FakeStreamConn) ConnectionStats() quicgo.ConnectionStats {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.Stats.BytesSent += m.StatsBytesSentStep
 	return m.Stats
 }
 

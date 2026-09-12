@@ -100,8 +100,13 @@ type FakeQUICStream struct {
 	SetReadDeadlineErr  error
 	SetWriteDeadlineErr error
 
+	// WriteDelay stalls every Write, modelling a slow consumer. Under
+	// testing/synctest this advances virtual time rather than real time.
+	WriteDelay time.Duration
+
 	// Notification channels, for tests that must observe a call as it happens.
 	// Each send is non-blocking, so an unbuffered channel with no reader is safe.
+	ReadNotify        chan<- struct{}
 	WriteNotify       chan<- struct{}
 	CancelReadNotify  chan<- transport.StreamErrorCode
 	CancelWriteNotify chan<- transport.StreamErrorCode
@@ -110,6 +115,7 @@ type FakeQUICStream struct {
 	writes resultQueue
 
 	written          []byte
+	writeCalls       int
 	cancelReadCodes  []transport.StreamErrorCode
 	cancelWriteCodes []transport.StreamErrorCode
 
@@ -173,13 +179,29 @@ func (f *FakeQUICStream) Read(p []byte) (int, error) {
 		}
 		return 0, io.EOF
 	}
+	notify := f.ReadNotify
 	if len(f.reads.entries) == 0 && f.ReadFrom != nil {
 		src := f.ReadFrom
 		f.mu.Unlock()
-		return src.Read(p)
+		n, err := src.Read(p)
+		signal(notify)
+		return n, err
 	}
-	defer f.mu.Unlock()
-	return f.reads.readInto(p)
+	n, err := f.reads.readInto(p)
+	f.mu.Unlock()
+	signal(notify)
+	return n, err
+}
+
+// signal performs a non-blocking send, so an unread channel never stalls a fake.
+func signal(ch chan<- struct{}) {
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
 }
 
 // ensureUnblock lazily creates the channel that releases blocked reads.
@@ -204,6 +226,8 @@ func (f *FakeQUICStream) releaseReads() {
 func (f *FakeQUICStream) Write(p []byte) (int, error) {
 	f.mu.Lock()
 	f.syncQueues()
+	f.writeCalls++
+	delay := f.WriteDelay
 	err := f.writes.advance()
 	sink := f.WriteTo
 	if len(f.writes.entries) > 0 {
@@ -215,6 +239,9 @@ func (f *FakeQUICStream) Write(p []byte) (int, error) {
 	notify := f.WriteNotify
 	f.mu.Unlock()
 
+	if delay > 0 {
+		time.Sleep(delay)
+	}
 	if notify != nil {
 		select {
 		case notify <- struct{}{}:
@@ -228,6 +255,13 @@ func (f *FakeQUICStream) Write(p []byte) (int, error) {
 		return sink.Write(p)
 	}
 	return len(p), nil
+}
+
+// WriteCalls returns how many times Write has been called.
+func (f *FakeQUICStream) WriteCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.writeCalls
 }
 
 // Written returns a copy of every byte passed to a successful Write.

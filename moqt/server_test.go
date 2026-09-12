@@ -742,9 +742,7 @@ func TestServer_ServeQUICListener_AcceptsAndServesConn(t *testing.T) {
 func TestServer_ServeQUICListener_AcceptError(t *testing.T) {
 	s := &Server{}
 	ln := &FakeEarlyListener{
-		AcceptFunc: func(ctx context.Context) (StreamConn, error) {
-			return nil, errors.New("accept failed")
-		},
+		Accepts: []connResult{{Err: errors.New("accept failed")}},
 	}
 
 	err := s.ServeQUICListener(ln)
@@ -805,20 +803,12 @@ func TestServer_ServeQUICConn_NilTLS(t *testing.T) {
 }
 
 func TestServer_goAway_SendsGoawayMessage(t *testing.T) {
-	var written []byte
-	stream := &FakeQUICStream{
-		WriteFunc: func(p []byte) (int, error) {
-			written = append(written, p...)
-			return len(p), nil
-		},
-	}
+	stream := &FakeQUICStream{}
 
 	connCtx, connCancel := context.WithCancel(context.Background())
 	conn := &FakeStreamConn{
-		OpenStreamFunc: func() (transport.Stream, error) {
-			return stream, nil
-		},
-		ParentCtx: connCtx,
+		OpenStreams: []biStreamResult{{Stream: stream}},
+		ParentCtx:   connCtx,
 	}
 
 	// Cancel the connection context to simulate connection close
@@ -827,14 +817,12 @@ func TestServer_goAway_SendsGoawayMessage(t *testing.T) {
 	s := &Server{NextSessionURI: "https://new-server.example.com"}
 	err := s.goAway(context.Background(), conn)
 	assert.NoError(t, err)
-	assert.NotEmpty(t, written)
+	assert.NotEmpty(t, stream.Written())
 }
 
 func TestServer_goAway_OpenStreamError(t *testing.T) {
 	conn := &FakeStreamConn{
-		OpenStreamFunc: func() (transport.Stream, error) {
-			return nil, errors.New("stream error")
-		},
+		OpenStreams: []biStreamResult{{Err: errors.New("stream error")}},
 	}
 
 	s := &Server{}
@@ -844,16 +832,10 @@ func TestServer_goAway_OpenStreamError(t *testing.T) {
 }
 
 func TestServer_goAway_ContextCanceled(t *testing.T) {
-	stream := &FakeQUICStream{
-		WriteFunc: func(p []byte) (int, error) {
-			return len(p), nil
-		},
-	}
+	stream := &FakeQUICStream{}
 
 	conn := &FakeStreamConn{
-		OpenStreamFunc: func() (transport.Stream, error) {
-			return stream, nil
-		},
+		OpenStreams: []biStreamResult{{Stream: stream}},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
