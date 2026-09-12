@@ -71,8 +71,8 @@ func TestNewSession(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			conn := &FakeStreamConn{}
-			conn.TLSFunc = func() *tls.ConnectionState { return &tls.ConnectionState{NegotiatedProtocol: NextProtoMOQ} }
-			conn.OpenStreamFunc = func() (transport.Stream, error) { return nil, io.EOF }
+			conn.TLSState = &tls.ConnectionState{NegotiatedProtocol: NextProtoMOQ}
+			conn.OpenStreams = []biStreamResult{{Err: io.EOF}}
 
 			session := newSession(conn, tt.mux, nil, nil, nil, nil, nil, nil)
 
@@ -93,7 +93,7 @@ func TestNewSession(t *testing.T) {
 
 func TestNewSessionConnectionState(t *testing.T) {
 	session, _ := newTestSessionWithConn(t, func(conn *FakeStreamConn) {
-		conn.TLSFunc = func() *tls.ConnectionState { return &tls.ConnectionState{NegotiatedProtocol: NextProtoMOQ} }
+		conn.TLSState = &tls.ConnectionState{NegotiatedProtocol: NextProtoMOQ}
 	})
 
 	state := session.ConnectionState()
@@ -169,6 +169,23 @@ func TestNewSession_ClosureOnContextCancel(t *testing.T) {
 
 }
 
+// decodeProbeMessages decodes every ProbeMessage in a stream's written bytes,
+// stopping at the first entry that does not decode.
+func decodeProbeMessages(tb testing.TB, written []byte) []message.ProbeMessage {
+	tb.Helper()
+
+	var msgs []message.ProbeMessage
+	r := bytes.NewReader(written)
+	for r.Len() > 0 {
+		var pm message.ProbeMessage
+		if err := pm.Decode(r); err != nil {
+			break
+		}
+		msgs = append(msgs, pm)
+	}
+	return msgs
+}
+
 func TestSession_CloseWithError(t *testing.T) {
 	tests := map[string]struct {
 		code SessionErrorCode
@@ -234,12 +251,10 @@ func TestSession_Subscribe(t *testing.T) {
 
 			// Use ReadFunc for simpler mocking
 			resp := bytes.NewReader(append([]byte(nil), buf.Bytes()...))
-			mockTrackStream.ReadFunc = resp.Read
-
-			mockTrackStream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
+			mockTrackStream.ReadFrom = resp
 
 			conn := &FakeStreamConn{}
-			conn.OpenStreamFunc = func() (transport.Stream, error) { return mockTrackStream, nil }
+			conn.OpenStreams = []biStreamResult{{Stream: mockTrackStream}}
 
 			session := newTestSession(conn)
 
@@ -273,7 +288,6 @@ func TestSession_Subscribe_SubscribeDropAsFirstResponse(t *testing.T) {
 	session := newTestSession(conn)
 
 	requestStream := &FakeQUICStream{}
-	requestStream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
 
 	var response bytes.Buffer
 	require.NoError(t, message.SubscribeDropMessage{
@@ -282,16 +296,9 @@ func TestSession_Subscribe_SubscribeDropAsFirstResponse(t *testing.T) {
 		ErrorCode:  0,
 	}.Encode(&response))
 	responseData := append([]byte{byte(message.MessageTypeSubscribeDrop)}, response.Bytes()...)
-	requestStream.ReadFunc = func(p []byte) (int, error) {
-		if len(responseData) == 0 {
-			return 0, io.EOF
-		}
-		n := copy(p, responseData)
-		responseData = responseData[n:]
-		return n, nil
-	}
+	requestStream.Reads = []streamResult{{Data: responseData}}
 
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return requestStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: requestStream}}
 
 	reader, err := session.Subscribe(context.Background(), "/test", "video", &SubscribeConfig{})
 	require.Error(t, err)
@@ -324,7 +331,7 @@ func TestSession_Subscribe_InvalidPath(t *testing.T) {
 
 func TestSession_Subscribe_OpenError(t *testing.T) {
 	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return nil, errors.New("open stream failed") }
+	conn.OpenStreams = []biStreamResult{{Err: errors.New("open stream failed")}}
 
 	session := newTestSession(conn)
 
@@ -348,7 +355,7 @@ func TestSession_Subscribe_OpenStreamApplicationError(t *testing.T) {
 	}
 
 	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return nil, appErr }
+	conn.OpenStreams = []biStreamResult{{Err: appErr}}
 
 	session := newTestSession(conn)
 
@@ -368,10 +375,10 @@ func TestSession_Subscribe_EncodeStreamTypeError(t *testing.T) {
 	mockTrackStream := &FakeQUICStream{}
 
 	// Make Write fail
-	mockTrackStream.WriteFunc = func(p []byte) (int, error) { return 0, errors.New("write error") }
+	mockTrackStream.Writes = []streamResult{{Err: errors.New("write error")}}
 
 	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockTrackStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockTrackStream}}
 
 	session := newTestSession(conn)
 
@@ -393,10 +400,10 @@ func TestSession_Subscribe_EncodeStreamTypeStreamError(t *testing.T) {
 		ErrorCode: transport.StreamErrorCode(SubscribeErrorCodeInternal),
 		Remote:    true,
 	}
-	mockTrackStream.WriteFunc = func(p []byte) (int, error) { return 0, strErr }
+	mockTrackStream.Writes = []streamResult{{Err: strErr}}
 
 	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockTrackStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockTrackStream}}
 
 	session := newTestSession(conn)
 
@@ -423,11 +430,10 @@ func TestSession_Subscribe_NilConfig(t *testing.T) {
 	assert.NoError(t, err)
 
 	resp := bytes.NewReader(append([]byte(nil), buf.Bytes()...))
-	mockTrackStream.ReadFunc = resp.Read
-	mockTrackStream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
+	mockTrackStream.ReadFrom = resp
 
 	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockTrackStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockTrackStream}}
 
 	session := newTestSession(conn)
 
@@ -444,19 +450,11 @@ func TestSession_Subscribe_EncodeSubscribeMessageStreamError(t *testing.T) {
 	mockTrackStream := &FakeQUICStream{}
 
 	// Use WriteFunc for direct control
-	writeCallCount := 0
-	mockTrackStream.WriteFunc = func(p []byte) (int, error) {
-		writeCallCount++
-		if writeCallCount == 1 {
-			// First write succeeds (StreamType)
-			return len(p), nil
-		}
-		// Second write fails (SubscribeMessage)
-		return 0, errors.New("write error")
-	}
+	// First write (StreamType) succeeds, second (SubscribeMessage) fails.
+	mockTrackStream.Writes = []streamResult{{}, {Err: errors.New("write error")}}
 
 	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockTrackStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockTrackStream}}
 
 	session := newTestSession(conn)
 
@@ -474,23 +472,15 @@ func TestSession_Subscribe_EncodeSubscribeMessageRemoteStreamError(t *testing.T)
 	mockTrackStream := &FakeQUICStream{}
 
 	// Use WriteFunc for direct control
-	writeCallCount := 0
 	strErr := &transport.StreamError{
 		ErrorCode: transport.StreamErrorCode(SubscribeErrorCodeInternal),
 		Remote:    true,
 	}
-	mockTrackStream.WriteFunc = func(p []byte) (int, error) {
-		writeCallCount++
-		if writeCallCount == 1 {
-			// First write succeeds (StreamType)
-			return len(p), nil
-		}
-		// Second write fails with remote StreamError
-		return 0, strErr
-	}
+	// First write (StreamType) succeeds, second fails with a remote StreamError.
+	mockTrackStream.Writes = []streamResult{{}, {Err: strErr}}
 
 	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockTrackStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockTrackStream}}
 
 	session := newTestSession(conn)
 
@@ -508,17 +498,16 @@ func TestSession_Subscribe_EncodeSubscribeMessageRemoteStreamError(t *testing.T)
 
 func TestSession_Subscribe_DecodeSubscribeOkStreamError(t *testing.T) {
 	mockTrackStream := &FakeQUICStream{}
-	mockTrackStream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
 
 	// Make Read fail with StreamError
 	strErr := &transport.StreamError{
 		ErrorCode: transport.StreamErrorCode(SubscribeErrorCodeInternal),
 		Remote:    false,
 	}
-	mockTrackStream.ReadFunc = func(p []byte) (int, error) { return 0, strErr }
+	mockTrackStream.Reads = []streamResult{{Err: strErr}}
 
 	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockTrackStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockTrackStream}}
 
 	session := newTestSession(conn)
 
@@ -536,13 +525,12 @@ func TestSession_Subscribe_DecodeSubscribeOkStreamError(t *testing.T) {
 
 func TestSession_Subscribe_DecodeSubscribeOkError(t *testing.T) {
 	mockTrackStream := &FakeQUICStream{}
-	mockTrackStream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
 
 	// Make Read fail with generic error
-	mockTrackStream.ReadFunc = func(p []byte) (int, error) { return 0, errors.New("read error") }
+	mockTrackStream.Reads = []streamResult{{Err: errors.New("read error")}}
 
 	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockTrackStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockTrackStream}}
 
 	session := newTestSession(conn)
 
@@ -577,20 +565,9 @@ func TestSession_HandleBiStreams_AcceptError(t *testing.T) {
 	conn := &FakeStreamConn{}
 	// Signal that AcceptStream/AcceptUniStream were attempted
 	acceptStreamCh := make(chan struct{}, 1)
-	conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) {
-		select {
-		case acceptStreamCh <- struct{}{}:
-		default:
-		}
-		return nil, errors.New("accept stream failed")
-	}
-	conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) {
-		select {
-		case acceptStreamCh <- struct{}{}:
-		default:
-		}
-		return nil, errors.New("accept stream failed")
-	}
+	conn.AcceptNotify = acceptStreamCh
+	conn.AcceptStreams = []biStreamResult{{Err: errors.New("accept stream failed")}}
+	conn.AcceptUniStreams = []recvStreamResult{{Err: errors.New("accept stream failed")}}
 
 	session := newTestSession(conn)
 
@@ -612,20 +589,9 @@ func TestSession_HandleBiStreams_AcceptError(t *testing.T) {
 func TestSession_HandleUniStreamsAcceptError(t *testing.T) {
 	conn := &FakeStreamConn{}
 	acceptStreamCh := make(chan struct{}, 1)
-	conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) {
-		select {
-		case acceptStreamCh <- struct{}{}:
-		default:
-		}
-		return nil, errors.New("accept uni stream failed")
-	}
-	conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) {
-		select {
-		case acceptStreamCh <- struct{}{}:
-		default:
-		}
-		return nil, errors.New("accept uni stream failed")
-	}
+	conn.AcceptNotify = acceptStreamCh
+	conn.AcceptStreams = []biStreamResult{{Err: errors.New("accept uni stream failed")}}
+	conn.AcceptUniStreams = []recvStreamResult{{Err: errors.New("accept uni stream failed")}}
 
 	session := newTestSession(conn)
 
@@ -645,10 +611,9 @@ func TestSession_HandleUniStreamsAcceptError(t *testing.T) {
 func TestSession_ConcurrentAccess(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		mockStream := &FakeQUICStream{}
-		mockStream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
 		conn := &FakeStreamConn{}
-		conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
-		conn.OpenUniStreamFunc = func() (transport.SendStream, error) { return &FakeQUICSendStream{}, nil }
+		conn.OpenStreams = []biStreamResult{{Stream: mockStream}}
+		conn.OpenUniStreams = []sendStreamResult{{Stream: &FakeQUICSendStream{}}}
 
 		session := newTestSession(conn)
 		defer func() { _ = session.CloseWithError(NoError, "") }()
@@ -717,23 +682,22 @@ func TestSession_AcceptAnnounce(t *testing.T) {
 			prefix: "/test/prefix/",
 			setupMocks: func(mockConn *FakeStreamConn, mockStream any) {
 				stream := mockStream.(*FakeQUICStream)
-				mockConn.OpenStreamFunc = func() (transport.Stream, error) { return stream, nil }
-				stream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
+				mockConn.OpenStreams = []biStreamResult{{Stream: stream}}
 			},
 			expectError: false,
 		},
 		"terminating session": {
 			prefix: "/test/prefix/",
 			setupMocks: func(mockConn *FakeStreamConn, mockStream any) {
-				mockConn.CloseWithErrorFunc = func(code transport.ConnErrorCode, reason string) error { return errors.New("close error") }
-				mockConn.OpenStreamFunc = func() (transport.Stream, error) { return nil, io.EOF }
+				mockConn.CloseErr = errors.New("close error")
+				mockConn.OpenStreams = []biStreamResult{{Err: io.EOF}}
 			},
 			expectError: true,
 		},
 		"open stream error": {
 			prefix: "/test/prefix/",
 			setupMocks: func(mockConn *FakeStreamConn, mockStream any) {
-				mockConn.OpenStreamFunc = func() (transport.Stream, error) { return nil, errors.New("open stream error") }
+				mockConn.OpenStreams = []biStreamResult{{Err: errors.New("open stream error")}}
 			},
 			expectError: true,
 		},
@@ -844,12 +808,10 @@ func TestSession_Stats_NoTransport(t *testing.T) {
 
 func TestSession_Stats_WithTransport(t *testing.T) {
 	sess, _ := newTestSessionWithConn(t, func(c *FakeStreamConn) {
-		c.ConnectionStatsFunc = func() quic.ConnectionStats {
-			return quic.ConnectionStats{
-				SmoothedRTT:   50 * time.Millisecond,
-				BytesSent:     1_000,
-				BytesReceived: 2_000,
-			}
+		c.Stats = quic.ConnectionStats{
+			SmoothedRTT:   50 * time.Millisecond,
+			BytesSent:     1_000,
+			BytesReceived: 2_000,
 		}
 	})
 
@@ -872,9 +834,7 @@ func TestSession_LazyMonitor_NoGoroutineBeforeProbe(t *testing.T) {
 	// probed must not run the background monitor goroutine. Verify by inspecting
 	// the live goroutine stacks — none should be blocked in bitrateTracker.monitor.
 	conn := &FakeStreamConn{}
-	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
-		return quic.ConnectionStats{BytesSent: 1}
-	}
+	conn.Stats = quic.ConnectionStats{BytesSent: 1}
 	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
@@ -892,18 +852,10 @@ func TestSession_Stats_EstimatedBitrateUpdatedByLazySampling(t *testing.T) {
 	// started; EstimatedBitrate is refreshed lazily by each Stats() call sampling
 	// ConnectionStats. The first Stats() sets the baseline, the second measures a
 	// non-zero rate — no background ticker is involved.
-	var mu sync.Mutex
-	var bytesSent uint64
 	conn := &FakeStreamConn{}
-	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
-		// Simulate ongoing traffic: each call advances BytesSent by 100 kB
-		// so that BitrateTracker sees a non-zero byte delta.
-		mu.Lock()
-		bytesSent += 100_000
-		n := bytesSent
-		mu.Unlock()
-		return quic.ConnectionStats{BytesSent: n}
-	}
+	// Simulate ongoing traffic: each sample advances BytesSent by 100 kB so
+	// that BitrateTracker sees a non-zero byte delta.
+	conn.StatsBytesSentStep = 100_000
 	cfg := &Config{ProbeInterval: 5 * time.Millisecond, ProbeMaxAge: 10 * time.Millisecond}
 	sess := newSession(conn, NewTrackMux(0), nil, cfg, nil, nil, nil, nil)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
@@ -956,7 +908,6 @@ func TestSession_ProcessBiStream_Announce(t *testing.T) {
 	// Create a mock stream for ANNOUNCE
 	mockStream := &FakeQUICStream{}
 	// Expect write/close operations for announcement writer init and close
-	mockStream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
 
 	// Prepare StreamType + AnnounceInterestMessage
 	var buf bytes.Buffer
@@ -967,24 +918,10 @@ func TestSession_ProcessBiStream_Announce(t *testing.T) {
 	assert.NoError(t, err)
 
 	data := buf.Bytes()
-	// Wrap the ReadFunc to signal when the message is read to detect processing start
+	// ReadNotify signals when the message is read, to detect processing start.
 	var readCh = make(chan struct{}, 1)
-	orig := func(p []byte) (int, error) {
-		if len(data) == 0 {
-			return 0, io.EOF
-		}
-		n := copy(p, data)
-		data = data[n:]
-		return n, nil
-	}
-	mockStream.ReadFunc = func(p []byte) (int, error) {
-		n, err := orig(p)
-		select {
-		case readCh <- struct{}{}:
-		default:
-		}
-		return n, err
-	}
+	mockStream.Reads = []streamResult{{Data: data}}
+	mockStream.ReadNotify = readCh
 
 	// This will block, so we run it in a goroutine
 	done := make(chan struct{})
@@ -1005,7 +942,7 @@ func TestSession_ProcessBiStream_Announce(t *testing.T) {
 
 func TestSession_ProcessBiStream_Subscribe(t *testing.T) {
 	conn := &FakeStreamConn{}
-	conn.OpenUniStreamFunc = func() (transport.SendStream, error) { return &FakeQUICSendStream{}, nil }
+	conn.OpenUniStreams = []sendStreamResult{{Stream: &FakeQUICSendStream{}}}
 
 	session := newTestSession(conn)
 	blockHandler := make(chan struct{})
@@ -1040,30 +977,10 @@ func TestSession_ProcessBiStream_Subscribe(t *testing.T) {
 
 	data := buf.Bytes()
 	readCh := make(chan struct{}, 1)
-	origRead := func(p []byte) (int, error) {
-		if len(data) == 0 {
-			return 0, io.EOF
-		}
-		n := copy(p, data)
-		data = data[n:]
-		return n, nil
-	}
-	mockStream.ReadFunc = func(p []byte) (int, error) {
-		n, err := origRead(p)
-		select {
-		case readCh <- struct{}{}:
-		default:
-		}
-		return n, err
-	}
+	mockStream.Reads = []streamResult{{Data: data}}
+	mockStream.ReadNotify = readCh
 	writeCh := make(chan struct{}, 1)
-	mockStream.WriteFunc = func(p []byte) (int, error) {
-		select {
-		case writeCh <- struct{}{}:
-		default:
-		}
-		return 0, nil
-	}
+	mockStream.WriteNotify = writeCh
 
 	// This will block in serveTrack, so we run it in a goroutine
 	done := make(chan struct{})
@@ -1121,14 +1038,7 @@ func TestSession_ProcessBiStream_InvalidStreamType(t *testing.T) {
 	buf.WriteByte(255)
 
 	data := buf.Bytes()
-	mockStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) == 0 {
-			return 0, io.EOF
-		}
-		n := copy(p, data)
-		data = data[n:]
-		return n, nil
-	}
+	mockStream.Reads = []streamResult{{Data: data}}
 
 	done := make(chan struct{})
 	go func() {
@@ -1165,9 +1075,7 @@ func TestSession_ProcessBiStream_DecodeStreamTypeError(t *testing.T) {
 	session := newTestSession(conn)
 
 	mockStream := &FakeQUICStream{}
-	mockStream.ReadFunc = func(p []byte) (int, error) {
-		return 0, io.ErrUnexpectedEOF
-	}
+	mockStream.Reads = []streamResult{{Err: io.ErrUnexpectedEOF}}
 
 	done := make(chan struct{})
 	go func() {
@@ -1196,14 +1104,7 @@ func TestSession_ProcessBiStream_DecodeAnnounceMessageError(t *testing.T) {
 	require.NoError(t, err)
 
 	data := buf.Bytes()
-	mockStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) > 0 {
-			n := copy(p, data)
-			data = data[n:]
-			return n, nil
-		}
-		return 0, io.ErrUnexpectedEOF
-	}
+	mockStream.Reads = []streamResult{{Data: data}, {Err: io.ErrUnexpectedEOF}}
 
 	session.processBiStream(mockStream)
 }
@@ -1220,14 +1121,7 @@ func TestSession_ProcessBiStream_DecodeSubscribeMessageError(t *testing.T) {
 	require.NoError(t, err)
 
 	data := buf.Bytes()
-	mockStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) > 0 {
-			n := copy(p, data)
-			data = data[n:]
-			return n, nil
-		}
-		return 0, io.ErrUnexpectedEOF
-	}
+	mockStream.Reads = []streamResult{{Data: data}, {Err: io.ErrUnexpectedEOF}}
 
 	session.processBiStream(mockStream)
 }
@@ -1259,14 +1153,7 @@ func TestSession_ProcessBiStream_Fetch(t *testing.T) {
 	require.NoError(t, req.Encode(&buf))
 
 	data := buf.Bytes()
-	mockStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) == 0 {
-			return 0, io.EOF
-		}
-		n := copy(p, data)
-		data = data[n:]
-		return n, nil
-	}
+	mockStream.Reads = []streamResult{{Data: data}}
 
 	session.processBiStream(mockStream)
 
@@ -1309,14 +1196,7 @@ func TestSession_ProcessBiStream_FetchTypedNilHandler(t *testing.T) {
 	require.NoError(t, req.Encode(&buf))
 
 	data := buf.Bytes()
-	mockStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) == 0 {
-			return 0, io.EOF
-		}
-		n := copy(p, data)
-		data = data[n:]
-		return n, nil
-	}
+	mockStream.Reads = []streamResult{{Data: data}}
 
 	session.processBiStream(mockStream)
 
@@ -1358,14 +1238,7 @@ func TestSession_ProcessBiStream_FetchHandlerPanic(t *testing.T) {
 	require.NoError(t, req.Encode(&buf))
 
 	data := buf.Bytes()
-	mockStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) == 0 {
-			return 0, io.EOF
-		}
-		n := copy(p, data)
-		data = data[n:]
-		return n, nil
-	}
+	mockStream.Reads = []streamResult{{Data: data}}
 
 	session.processBiStream(mockStream)
 
@@ -1391,16 +1264,14 @@ func TestSession_Probe(t *testing.T) {
 	probeStream := &FakeQUICStream{}
 
 	var written bytes.Buffer
-	probeStream.WriteFunc = func(p []byte) (int, error) {
-		return written.Write(p)
-	}
+	probeStream.WriteTo = &written
 
 	// Publisher sends one ProbeMessage then EOF.
 	var response bytes.Buffer
 	require.NoError(t, message.ProbeMessage{Bitrate: 250000}.Encode(&response))
-	probeStream.ReadFunc = response.Read
+	probeStream.ReadFrom = &response
 
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return probeStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: probeStream}}
 
 	session := newTestSession(conn)
 
@@ -1426,42 +1297,24 @@ func TestSession_Probe(t *testing.T) {
 
 func TestSession_ProcessBiStream_Probe(t *testing.T) {
 	conn := &FakeStreamConn{}
-	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
-		return quic.ConnectionStats{}
-	}
+	conn.Stats = quic.ConnectionStats{}
 
 	// Construct WITH the config — never mutate session.config after newSession:
 	// the lazily-started bitrate monitor reads probeInterval() concurrently.
 	session := newSession(conn, NewTrackMux(0), nil, &Config{ProbeInterval: 5 * time.Millisecond}, nil, nil, nil, nil)
 
-	probeStream := &FakeQUICStream{}
+	probeStream := &FakeQUICStream{ParentCtx: session.Context()}
 
-	received := make(chan message.ProbeMessage, 10)
-	probeStream.WriteFunc = func(p []byte) (int, error) {
-		var pm message.ProbeMessage
-		if err := pm.Decode(bytes.NewReader(p)); err == nil {
-			select {
-			case received <- pm:
-			default:
-			}
-		}
-		return len(p), nil
-	}
+	probeWritten := make(chan struct{}, 10)
+	probeStream.WriteNotify = probeWritten
 
 	// Subscriber sends StreamTypeProbe + ProbeMessage{Bitrate: targetBitrate}.
 	var incoming bytes.Buffer
 	require.NoError(t, message.StreamTypeProbe.Encode(&incoming))
 	require.NoError(t, message.ProbeMessage{Bitrate: 1000000}.Encode(&incoming))
 	data := incoming.Bytes()
-	probeStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) > 0 {
-			n := copy(p, data)
-			data = data[n:]
-			return n, nil
-		}
-		<-session.Context().Done()
-		return 0, io.EOF
-	}
+	// Stay readable until the session closes, so the stream remains registered.
+	probeStream.Reads = []streamResult{{Data: data}, {Block: true}}
 
 	done := make(chan struct{})
 	session.wg.Go(func() {
@@ -1469,13 +1322,14 @@ func TestSession_ProcessBiStream_Probe(t *testing.T) {
 		close(done)
 	})
 
-	// Wait for at least one ProbeMessage from the publisher.
+	// Wait for at least one write from the publisher.
 	select {
-	case <-received:
-		// Successfully received a probe response from publisher.
+	case <-probeWritten:
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("no probe message received")
 	}
+	assert.NotEmpty(t, decodeProbeMessages(t, probeStream.Written()),
+		"publisher should have written a decodable ProbeMessage")
 
 	_ = session.CloseWithError(NoError, "")
 	select {
@@ -1487,43 +1341,24 @@ func TestSession_ProcessBiStream_Probe(t *testing.T) {
 
 func TestSession_ProcessBiStream_ProbeMultipleMessages(t *testing.T) {
 	conn := &FakeStreamConn{}
-	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
-		return quic.ConnectionStats{}
-	}
+	conn.Stats = quic.ConnectionStats{}
 
 	session := newSession(conn, NewTrackMux(0), nil,
 		&Config{ProbeInterval: 5 * time.Millisecond, ProbeMaxAge: 15 * time.Millisecond},
 		nil, nil, nil, nil)
 
-	probeStream := &FakeQUICStream{}
+	probeStream := &FakeQUICStream{ParentCtx: session.Context()}
 
-	received := make(chan message.ProbeMessage, 20)
-	probeStream.WriteFunc = func(p []byte) (int, error) {
-		var pm message.ProbeMessage
-		if err := pm.Decode(bytes.NewReader(p)); err == nil {
-			select {
-			case received <- pm:
-			default:
-			}
-		}
-		return len(p), nil
-	}
+	probeWritten := make(chan struct{}, 20)
+	probeStream.WriteNotify = probeWritten
 
 	var incoming bytes.Buffer
 	require.NoError(t, message.StreamTypeProbe.Encode(&incoming))
 	require.NoError(t, message.ProbeMessage{Bitrate: 500000}.Encode(&incoming))
 	data := incoming.Bytes()
-	probeStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) > 0 {
-			n := copy(p, data)
-			data = data[n:]
-			return n, nil
-		}
-		// Block until session closes so the stream stays registered
-		// and runProbeResponder can keep writing measurements.
-		<-session.Context().Done()
-		return 0, io.EOF
-	}
+	// Block after the data so the stream stays registered and
+	// runProbeResponder can keep writing measurements.
+	probeStream.Reads = []streamResult{{Data: data}, {Block: true}}
 
 	done := make(chan struct{})
 	session.wg.Go(func() {
@@ -1537,19 +1372,17 @@ func TestSession_ProcessBiStream_ProbeMultipleMessages(t *testing.T) {
 	_ = session.CloseWithError(NoError, "")
 	<-done
 
-	assert.Greater(t, len(received), 1, "should have received multiple probe messages")
+	assert.Greater(t, len(decodeProbeMessages(t, probeStream.Written())), 1,
+		"should have received multiple probe messages")
 }
 
 func TestSession_ProcessBiStream_ProbeTargets(t *testing.T) {
 	conn := &FakeStreamConn{}
-	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
-		return quic.ConnectionStats{}
-	}
+	conn.Stats = quic.ConnectionStats{}
 
 	session := newTestSession(conn)
 
 	probeStream := &FakeQUICStream{}
-	probeStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
 
 	// Subscriber sends: StreamTypeProbe + initial target + one updated target.
 	var incoming bytes.Buffer
@@ -1559,19 +1392,8 @@ func TestSession_ProcessBiStream_ProbeTargets(t *testing.T) {
 	data := incoming.Bytes()
 
 	readCalled := make(chan struct{}, 1)
-	probeStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) > 0 {
-			n := copy(p, data)
-			data = data[n:]
-			return n, nil
-		}
-		// Signal that all data has been consumed.
-		select {
-		case readCalled <- struct{}{}:
-		default:
-		}
-		return 0, io.EOF
-	}
+	probeStream.ReadNotify = readCalled
+	probeStream.Reads = []streamResult{{Data: data}}
 
 	done := make(chan struct{})
 	go func() {
@@ -1609,18 +1431,11 @@ func TestSession_Probe_SecondCallReusesStream(t *testing.T) {
 	// Use conn.Context() as parent so that closing the session also cancels the
 	// stream context, allowing readProbeResults to exit cleanly.
 	probeStream := &FakeQUICStream{ParentCtx: conn.Context()}
-	probeStream.WriteFunc = func(p []byte) (int, error) { return written.Write(p) }
+	probeStream.WriteTo = &written
 	// Block reads so the stream stays open throughout the test.
-	probeStream.ReadFunc = func(p []byte) (int, error) {
-		<-probeStream.Context().Done()
-		return 0, io.EOF
-	}
+	probeStream.Reads = []streamResult{{Block: true}}
 
-	openCount := 0
-	conn.OpenStreamFunc = func() (transport.Stream, error) {
-		openCount++
-		return probeStream, nil
-	}
+	conn.OpenStreams = []biStreamResult{{Stream: probeStream}}
 
 	session := newTestSession(conn)
 
@@ -1634,7 +1449,7 @@ func TestSession_Probe_SecondCallReusesStream(t *testing.T) {
 	assert.Equal(t, ch1, ch2, "second Probe call should return the same channel")
 
 	// OpenStream must have been called exactly once.
-	assert.Equal(t, 1, openCount, "second Probe call must not open a new stream")
+	assert.Equal(t, 1, conn.OpenCalls(), "second Probe call must not open a new stream")
 
 	// Both ProbeMessages must have been written (after the StreamType header).
 	r := bytes.NewReader(written.Bytes())
@@ -1661,14 +1476,10 @@ func TestSession_Probe_ChannelClosedOnSessionClose(t *testing.T) {
 	probeStream := &FakeQUICStream{
 		ParentCtx: conn.Context(),
 	}
-	probeStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
 	// Block until the stream context is cancelled (which happens when the
 	// connection is closed and conn.Context() is cancelled).
-	probeStream.ReadFunc = func(p []byte) (int, error) {
-		<-probeStream.Context().Done()
-		return 0, context.Cause(probeStream.Context())
-	}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return probeStream, nil }
+	probeStream.Reads = []streamResult{{Block: true}}
+	conn.OpenStreams = []biStreamResult{{Stream: probeStream}}
 
 	session := newTestSession(conn)
 
@@ -1685,7 +1496,7 @@ func TestSession_Probe_ChannelClosedOnSessionClose(t *testing.T) {
 
 func TestSession_ProcessBiStream_ProbeReplacesExisting(t *testing.T) {
 	conn := &FakeStreamConn{}
-	conn.ConnectionStatsFunc = func() quic.ConnectionStats { return quic.ConnectionStats{} }
+	conn.Stats = quic.ConnectionStats{}
 
 	session := newTestSession(conn)
 
@@ -1697,23 +1508,10 @@ func TestSession_ProcessBiStream_ProbeReplacesExisting(t *testing.T) {
 
 	stream1Active := make(chan struct{})
 	stream1 := &FakeQUICStream{}
-	stream1.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
-	stream1.ReadFunc = func(p []byte) (int, error) {
-		if len(stream1Data) > 0 {
-			n := copy(p, stream1Data)
-			stream1Data = stream1Data[n:]
-			if len(stream1Data) == 0 {
-				select {
-				case stream1Active <- struct{}{}:
-				default:
-				}
-			}
-			return n, nil
-		}
-		// Block until cancelled by stream2 arrival.
-		<-stream1.Context().Done()
-		return 0, context.Cause(stream1.Context())
-	}
+	// Serve the data, signal once consumed, then block until stream2 arrives
+	// and cancels this stream.
+	stream1.ReadNotify = stream1Active
+	stream1.Reads = []streamResult{{Data: stream1Data}, {Block: true}}
 
 	stream1Done := make(chan struct{})
 	go func() {
@@ -1735,15 +1533,7 @@ func TestSession_ProcessBiStream_ProbeReplacesExisting(t *testing.T) {
 	stream2Data := stream2Buf.Bytes()
 
 	stream2 := &FakeQUICStream{}
-	stream2.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
-	stream2.ReadFunc = func(p []byte) (int, error) {
-		if len(stream2Data) > 0 {
-			n := copy(p, stream2Data)
-			stream2Data = stream2Data[n:]
-			return n, nil
-		}
-		return 0, io.EOF
-	}
+	stream2.Reads = []streamResult{{Data: stream2Data}}
 
 	stream2Done := make(chan struct{})
 	go func() {
@@ -1771,7 +1561,7 @@ func TestSession_ProcessBiStream_ProbeReplacesExisting(t *testing.T) {
 
 func TestSession_ProcessBiStream_ProbeDecodeError(t *testing.T) {
 	conn := &FakeStreamConn{}
-	conn.ConnectionStatsFunc = func() quic.ConnectionStats { return quic.ConnectionStats{} }
+	conn.Stats = quic.ConnectionStats{}
 
 	session := newTestSession(conn)
 
@@ -1785,27 +1575,9 @@ func TestSession_ProcessBiStream_ProbeDecodeError(t *testing.T) {
 	cancelWriteCalled := make(chan transport.StreamErrorCode, 1)
 
 	probeStream := &FakeQUICStream{}
-	probeStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
-	probeStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) > 0 {
-			n := copy(p, data)
-			data = data[n:]
-			return n, nil
-		}
-		return 0, errors.New("simulated read error")
-	}
-	probeStream.CancelReadFunc = func(code transport.StreamErrorCode) {
-		select {
-		case cancelReadCalled <- code:
-		default:
-		}
-	}
-	probeStream.CancelWriteFunc = func(code transport.StreamErrorCode) {
-		select {
-		case cancelWriteCalled <- code:
-		default:
-		}
-	}
+	probeStream.Reads = []streamResult{{Data: data}, {Err: errors.New("simulated read error")}}
+	probeStream.CancelReadNotify = cancelReadCalled
+	probeStream.CancelWriteNotify = cancelWriteCalled
 
 	done := make(chan struct{})
 	go func() {
@@ -1848,15 +1620,7 @@ func TestSession_ProcessBiStream_ProbeUnsupported(t *testing.T) {
 
 	data := incoming.Bytes()
 	probeStream := &FakeQUICStream{}
-	probeStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
-	probeStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) > 0 {
-			n := copy(p, data)
-			data = data[n:]
-			return n, nil
-		}
-		return 0, io.EOF
-	}
+	probeStream.Reads = []streamResult{{Data: data}}
 
 	done := make(chan struct{})
 	go func() {
@@ -1875,7 +1639,7 @@ func TestSession_ProcessBiStream_ProbeUnsupported(t *testing.T) {
 
 func TestSession_ProbeTargets_LatestValueSemantics(t *testing.T) {
 	conn := &FakeStreamConn{}
-	conn.ConnectionStatsFunc = func() quic.ConnectionStats { return quic.ConnectionStats{} }
+	conn.Stats = quic.ConnectionStats{}
 
 	session := newTestSession(conn)
 
@@ -1894,16 +1658,8 @@ func TestSession_ProbeTargets_LatestValueSemantics(t *testing.T) {
 	var bgOnce sync.Once
 	bgDone := make(chan struct{})
 	probeStream := &FakeQUICStream{}
-	probeStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
-	probeStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) > 0 {
-			n := copy(p, data)
-			data = data[n:]
-			return n, nil
-		}
-		bgOnce.Do(func() { close(bgDone) })
-		return 0, io.EOF
-	}
+	probeStream.Reads = []streamResult{{Data: data}}
+	bgOnce.Do(func() { close(bgDone) })
 
 	done := make(chan struct{})
 	go func() {
@@ -1949,7 +1705,7 @@ func TestSession_ProbeTargets_LatestValueSemantics(t *testing.T) {
 // update messages are sent on the stream.
 func TestSession_ProbeTargets_InitialMessageDelivered(t *testing.T) {
 	conn := &FakeStreamConn{}
-	conn.ConnectionStatsFunc = func() quic.ConnectionStats { return quic.ConnectionStats{} }
+	conn.Stats = quic.ConnectionStats{}
 
 	session := newTestSession(conn)
 
@@ -1960,18 +1716,9 @@ func TestSession_ProbeTargets_InitialMessageDelivered(t *testing.T) {
 	data := incoming.Bytes()
 
 	probeStream := &FakeQUICStream{ParentCtx: conn.Context()}
-	probeStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
-	probeStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) > 0 {
-			n := copy(p, data)
-			data = data[n:]
-			return n, nil
-		}
-		// Block until stream context is cancelled so handleProbeStream stays alive
-		// long enough for the test to read from ProbeTargets().
-		<-probeStream.Context().Done()
-		return 0, io.EOF
-	}
+	// Block after the data so handleProbeStream stays alive long enough for
+	// the test to read from ProbeTargets().
+	probeStream.Reads = []streamResult{{Data: data}, {Block: true}}
 
 	streamDone := make(chan struct{})
 	go func() {
@@ -2002,7 +1749,6 @@ func TestSession_ProcessUniStream_Group(t *testing.T) {
 
 	// Add a track reader
 	mockTrackStream := &FakeQUICStream{}
-	mockTrackStream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
 
 	substr := newTestSendSubscribeStreamFromStream(mockTrackStream, &SubscribeConfig{})
 	trackReader := newTrackReader("/test", "video", substr, func() {})
@@ -2023,14 +1769,7 @@ func TestSession_ProcessUniStream_Group(t *testing.T) {
 	assert.NoError(t, err)
 
 	data := buf.Bytes()
-	mockRecvStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) == 0 {
-			return 0, io.EOF
-		}
-		n := copy(p, data)
-		data = data[n:]
-		return n, nil
-	}
+	mockRecvStream.Reads = []streamResult{{Data: data}}
 	session.processUniStream(mockRecvStream)
 
 	// Verify group was enqueued
@@ -2059,14 +1798,7 @@ func TestSession_ProcessUniStream_UnknownSubscribeID(t *testing.T) {
 	assert.NoError(t, err)
 
 	data := buf.Bytes()
-	mockRecvStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) == 0 {
-			return 0, io.EOF
-		}
-		n := copy(p, data)
-		data = data[n:]
-		return n, nil
-	}
+	mockRecvStream.Reads = []streamResult{{Data: data}}
 
 	session.processUniStream(mockRecvStream)
 
@@ -2091,14 +1823,7 @@ func TestSession_ProcessUniStream_InvalidStreamType(t *testing.T) {
 	buf.WriteByte(254)
 
 	data := buf.Bytes()
-	mockRecvStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) == 0 {
-			return 0, io.EOF
-		}
-		n := copy(p, data)
-		data = data[n:]
-		return n, nil
-	}
+	mockRecvStream.Reads = []streamResult{{Data: data}}
 
 	done := make(chan struct{})
 	go func() {
@@ -2122,9 +1847,7 @@ func TestSession_ProcessUniStream_DecodeStreamTypeError(t *testing.T) {
 	session := newTestSession(conn)
 
 	mockRecvStream := &FakeQUICReceiveStream{}
-	mockRecvStream.ReadFunc = func(p []byte) (int, error) {
-		return 0, io.ErrUnexpectedEOF
-	}
+	mockRecvStream.Reads = []streamResult{{Err: io.ErrUnexpectedEOF}}
 
 	session.processUniStream(mockRecvStream)
 }
@@ -2141,14 +1864,7 @@ func TestSession_ProcessUniStream_DecodeGroupMessageError(t *testing.T) {
 	require.NoError(t, err)
 
 	data := buf.Bytes()
-	mockRecvStream.ReadFunc = func(p []byte) (int, error) {
-		if len(data) > 0 {
-			n := copy(p, data)
-			data = data[n:]
-			return n, nil
-		}
-		return 0, io.ErrUnexpectedEOF
-	}
+	mockRecvStream.Reads = []streamResult{{Data: data}, {Err: io.ErrUnexpectedEOF}}
 
 	session.processUniStream(mockRecvStream)
 }
@@ -2205,7 +1921,7 @@ func TestSession_AcceptAnnounce_OpenStreamApplicationError(t *testing.T) {
 		ErrorCode:    transport.ApplicationErrorCode(InternalSessionErrorCode),
 		ErrorMessage: "application error",
 	}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return nil, appErr }
+	conn.OpenStreams = []biStreamResult{{Err: appErr}}
 
 	session := newTestSession(conn)
 
@@ -2223,9 +1939,9 @@ func TestSession_AcceptAnnounce_EncodeStreamTypeError(t *testing.T) {
 	conn := &FakeStreamConn{}
 
 	mockAnnStream := &FakeQUICStream{}
-	mockAnnStream.WriteFunc = func(p []byte) (int, error) { return 0, errors.New("write error") }
+	mockAnnStream.Writes = []streamResult{{Err: errors.New("write error")}}
 
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockAnnStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockAnnStream}}
 
 	session := newTestSession(conn)
 
@@ -2246,9 +1962,9 @@ func TestSession_AcceptAnnounce_EncodeStreamTypeStreamError(t *testing.T) {
 		ErrorCode: transport.StreamErrorCode(AnnounceErrorCodeInternal),
 		Remote:    false,
 	}
-	mockAnnStream.WriteFunc = func(p []byte) (int, error) { return 0, strErr }
+	mockAnnStream.Writes = []streamResult{{Err: strErr}}
 
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockAnnStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockAnnStream}}
 
 	session := newTestSession(conn)
 
@@ -2266,22 +1982,14 @@ func TestSession_AcceptAnnounce_EncodePleaseMessageStreamError(t *testing.T) {
 	mockAnnStream := &FakeQUICStream{}
 
 	// Use WriteFunc for direct control
-	writeCallCount := 0
 	strErr := &transport.StreamError{
 		ErrorCode: transport.StreamErrorCode(AnnounceErrorCodeInternal),
 		Remote:    false,
 	}
-	mockAnnStream.WriteFunc = func(p []byte) (int, error) {
-		writeCallCount++
-		if writeCallCount == 1 {
-			// First write succeeds (StreamType)
-			return len(p), nil
-		}
-		// Second write fails (AnnounceInterestMessage)
-		return 0, strErr
-	}
+	// First write (StreamType) succeeds, second (AnnounceInterest) fails.
+	mockAnnStream.Writes = []streamResult{{}, {Err: strErr}}
 
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockAnnStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockAnnStream}}
 
 	session := newTestSession(conn)
 
@@ -2297,16 +2005,15 @@ func TestSession_AcceptAnnounce_DecodeInitMessageStreamError(t *testing.T) {
 	conn := &FakeStreamConn{}
 
 	mockAnnStream := &FakeQUICStream{}
-	mockAnnStream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
 
 	// Make Read fail with StreamError
 	strErr := &transport.StreamError{
 		ErrorCode: transport.StreamErrorCode(AnnounceErrorCodeInternal),
 		Remote:    false,
 	}
-	mockAnnStream.ReadFunc = func(p []byte) (int, error) { return 0, strErr }
+	mockAnnStream.Reads = []streamResult{{Err: strErr}}
 
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockAnnStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockAnnStream}}
 
 	session := newTestSession(conn)
 
@@ -2322,12 +2029,11 @@ func TestSession_AcceptAnnounce_DecodeInitMessageError(t *testing.T) {
 	conn := &FakeStreamConn{}
 
 	mockAnnStream := &FakeQUICStream{}
-	mockAnnStream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
 
 	// Make Read fail with generic error
-	mockAnnStream.ReadFunc = func(p []byte) (int, error) { return 0, errors.New("read error") }
+	mockAnnStream.Reads = []streamResult{{Err: errors.New("read error")}}
 
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockAnnStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockAnnStream}}
 
 	session := newTestSession(conn)
 
@@ -2341,11 +2047,6 @@ func TestSession_AcceptAnnounce_DecodeInitMessageError(t *testing.T) {
 
 func TestSession_CloseWithError_AlreadyTerminating(t *testing.T) {
 	conn := &FakeStreamConn{}
-	var closeCount int
-	conn.CloseWithErrorFunc = func(code transport.ConnErrorCode, reason string) error {
-		closeCount++
-		return nil
-	}
 
 	session := newTestSession(conn)
 
@@ -2358,8 +2059,8 @@ func TestSession_CloseWithError_AlreadyTerminating(t *testing.T) {
 	// The second call returns nil because terminating() is already true
 	assert.NoError(t, err2)
 
-	// Verify CloseWithError was only called once
-	assert.Equal(t, 1, closeCount)
+	// Verify CloseWithError reached the connection only once
+	assert.Len(t, conn.CloseCalls(), 1)
 }
 
 func TestSession_Terminate_WithApplicationError(t *testing.T) {
@@ -2368,7 +2069,7 @@ func TestSession_Terminate_WithApplicationError(t *testing.T) {
 		ErrorCode:    transport.ApplicationErrorCode(InternalSessionErrorCode),
 		ErrorMessage: "application error",
 	}
-	conn.CloseWithErrorFunc = func(code transport.ConnErrorCode, reason string) error { return appErr }
+	conn.CloseErr = appErr
 
 	session := newTestSession(conn)
 
@@ -2383,9 +2084,8 @@ func TestSession_Fetch(t *testing.T) {
 	conn := &FakeStreamConn{}
 
 	mockStream := &FakeQUICStream{}
-	mockStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
 
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockStream}}
 
 	session := newTestSession(conn)
 
@@ -2409,7 +2109,7 @@ func TestSession_Fetch_SetsPriority(t *testing.T) {
 
 	mockStream := &FakeQUICStream{}
 
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockStream}}
 
 	session := newTestSession(conn)
 
@@ -2450,9 +2150,7 @@ func TestSession_Fetch_ClosedSession(t *testing.T) {
 
 func TestSession_Fetch_OpenStreamError(t *testing.T) {
 	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) {
-		return nil, errors.New("open stream failed")
-	}
+	conn.OpenStreams = []biStreamResult{{Err: errors.New("open stream failed")}}
 
 	session := newTestSession(conn)
 
@@ -2475,7 +2173,7 @@ func TestSession_Fetch_OpenStreamApplicationError(t *testing.T) {
 	}
 
 	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return nil, appErr }
+	conn.OpenStreams = []biStreamResult{{Err: appErr}}
 
 	session := newTestSession(conn)
 
@@ -2495,10 +2193,10 @@ func TestSession_Fetch_OpenStreamApplicationError(t *testing.T) {
 
 func TestSession_Fetch_EncodeStreamTypeError(t *testing.T) {
 	mockStream := &FakeQUICStream{}
-	mockStream.WriteFunc = func(p []byte) (int, error) { return 0, errors.New("write error") }
+	mockStream.Writes = []streamResult{{Err: errors.New("write error")}}
 
 	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockStream}}
 
 	session := newTestSession(conn)
 
@@ -2520,10 +2218,10 @@ func TestSession_Fetch_EncodeStreamTypeRemoteStreamError(t *testing.T) {
 		Remote:    true,
 	}
 	mockStream := &FakeQUICStream{}
-	mockStream.WriteFunc = func(p []byte) (int, error) { return 0, strErr }
+	mockStream.Writes = []streamResult{{Err: strErr}}
 
 	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockStream}}
 
 	session := newTestSession(conn)
 
@@ -2543,17 +2241,11 @@ func TestSession_Fetch_EncodeStreamTypeRemoteStreamError(t *testing.T) {
 
 func TestSession_Fetch_EncodeFetchMessageError(t *testing.T) {
 	mockStream := &FakeQUICStream{}
-	writeCallCount := 0
-	mockStream.WriteFunc = func(p []byte) (int, error) {
-		writeCallCount++
-		if writeCallCount == 1 {
-			return len(p), nil // StreamType succeeds
-		}
-		return 0, errors.New("write error") // FetchMessage fails
-	}
+	// StreamType write succeeds, FetchMessage write fails.
+	mockStream.Writes = []streamResult{{}, {Err: errors.New("write error")}}
 
 	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockStream}}
 
 	session := newTestSession(conn)
 
@@ -2575,17 +2267,11 @@ func TestSession_Fetch_EncodeFetchMessageRemoteStreamError(t *testing.T) {
 		Remote:    true,
 	}
 	mockStream := &FakeQUICStream{}
-	writeCallCount := 0
-	mockStream.WriteFunc = func(p []byte) (int, error) {
-		writeCallCount++
-		if writeCallCount == 1 {
-			return len(p), nil // StreamType succeeds
-		}
-		return 0, strErr // FetchMessage fails with remote error
-	}
+	// StreamType write succeeds, FetchMessage write fails with a remote error.
+	mockStream.Writes = []streamResult{{}, {Err: strErr}}
 
 	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockStream}}
 
 	session := newTestSession(conn)
 
@@ -2615,9 +2301,7 @@ func TestSession_Probe_ClosedSession(t *testing.T) {
 
 func TestSession_Probe_OpenStreamError(t *testing.T) {
 	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) {
-		return nil, errors.New("open stream failed")
-	}
+	conn.OpenStreams = []biStreamResult{{Err: errors.New("open stream failed")}}
 
 	session := newTestSession(conn)
 
@@ -2634,7 +2318,7 @@ func TestSession_Probe_OpenStreamApplicationError(t *testing.T) {
 	}
 
 	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return nil, appErr }
+	conn.OpenStreams = []biStreamResult{{Err: appErr}}
 
 	session := newTestSession(conn)
 
@@ -2648,10 +2332,10 @@ func TestSession_Probe_OpenStreamApplicationError(t *testing.T) {
 
 func TestSession_Probe_EncodeStreamTypeError(t *testing.T) {
 	mockStream := &FakeQUICStream{}
-	mockStream.WriteFunc = func(p []byte) (int, error) { return 0, errors.New("write error") }
+	mockStream.Writes = []streamResult{{Err: errors.New("write error")}}
 
 	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockStream}}
 
 	session := newTestSession(conn)
 
@@ -2663,17 +2347,11 @@ func TestSession_Probe_EncodeStreamTypeError(t *testing.T) {
 
 func TestSession_Probe_EncodeProbeMessageError(t *testing.T) {
 	mockStream := &FakeQUICStream{}
-	writeCallCount := 0
-	mockStream.WriteFunc = func(p []byte) (int, error) {
-		writeCallCount++
-		if writeCallCount == 1 {
-			return len(p), nil // StreamType succeeds
-		}
-		return 0, errors.New("write error") // ProbeMessage fails
-	}
+	// StreamType write succeeds, ProbeMessage write fails.
+	mockStream.Writes = []streamResult{{}, {Err: errors.New("write error")}}
 
 	conn := &FakeStreamConn{}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockStream}}
 
 	session := newTestSession(conn)
 
@@ -2696,21 +2374,10 @@ func TestSession_Probe_EOFFromPublisher_NoStreamCancel(t *testing.T) {
 	require.NoError(t, message.ProbeMessage{Bitrate: 500000}.Encode(&response))
 
 	probeStream := &FakeQUICStream{ParentCtx: conn.Context()}
-	probeStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
-	probeStream.ReadFunc = response.Read // returns io.EOF after data is exhausted
-	probeStream.CancelReadFunc = func(code transport.StreamErrorCode) {
-		select {
-		case cancelReadCalled <- code:
-		default:
-		}
-	}
-	probeStream.CancelWriteFunc = func(code transport.StreamErrorCode) {
-		select {
-		case cancelWriteCalled <- code:
-		default:
-		}
-	}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return probeStream, nil }
+	probeStream.ReadFrom = &response // returns io.EOF after data is exhausted
+	probeStream.CancelReadNotify = cancelReadCalled
+	probeStream.CancelWriteNotify = cancelWriteCalled
+	conn.OpenStreams = []biStreamResult{{Stream: probeStream}}
 
 	session := newTestSession(conn)
 
@@ -2749,23 +2416,10 @@ func TestSession_Probe_ResponseDecodeError(t *testing.T) {
 	cancelWriteCalled := make(chan transport.StreamErrorCode, 1)
 
 	probeStream := &FakeQUICStream{ParentCtx: conn.Context()}
-	probeStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
-	probeStream.ReadFunc = func(p []byte) (int, error) {
-		return 0, errors.New("simulated decode error")
-	}
-	probeStream.CancelReadFunc = func(code transport.StreamErrorCode) {
-		select {
-		case cancelReadCalled <- code:
-		default:
-		}
-	}
-	probeStream.CancelWriteFunc = func(code transport.StreamErrorCode) {
-		select {
-		case cancelWriteCalled <- code:
-		default:
-		}
-	}
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return probeStream, nil }
+	probeStream.Reads = []streamResult{{Err: errors.New("simulated decode error")}}
+	probeStream.CancelReadNotify = cancelReadCalled
+	probeStream.CancelWriteNotify = cancelWriteCalled
+	conn.OpenStreams = []biStreamResult{{Stream: probeStream}}
 
 	session := newTestSession(conn)
 
@@ -2844,9 +2498,7 @@ func TestSession_processBiStream_logError(t *testing.T) {
 
 	// Create a stream that returns an immediate read error ->logError should fire
 	mockStream := &FakeQUICStream{
-		ReadFunc: func(p []byte) (int, error) {
-			return 0, errors.New("broken stream")
-		},
+		Reads: []streamResult{{Err: errors.New("broken stream")}},
 	}
 
 	conn := &FakeStreamConn{}
@@ -2867,9 +2519,7 @@ func TestSession_processUniStream_logError(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
 	mockStream := &FakeQUICReceiveStream{
-		ReadFunc: func(p []byte) (int, error) {
-			return 0, errors.New("broken uni stream")
-		},
+		Reads: []streamResult{{Err: errors.New("broken uni stream")}},
 	}
 
 	conn := &FakeStreamConn{}
@@ -2886,16 +2536,12 @@ func TestSession_processUniStream_logError(t *testing.T) {
 }
 
 func TestSession_Stats_EstimatedBitrateUpdatedEveryInterval(t *testing.T) {
-	var mu sync.Mutex
-	var bytesSent uint64
 	delta := uint64(100_000)
 
+	var mu sync.Mutex
+	var bytesSent uint64
+
 	conn := &FakeStreamConn{}
-	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
-		mu.Lock()
-		defer mu.Unlock()
-		return quic.ConnectionStats{BytesSent: bytesSent}
-	}
 
 	// Set a very large MaxAge so it doesn't trigger by age.
 	// Set a huge MaxDelta so changes don't trigger a notification.
@@ -2911,6 +2557,7 @@ func TestSession_Stats_EstimatedBitrateUpdatedEveryInterval(t *testing.T) {
 	mu.Lock()
 	bytesSent = 100_000
 	mu.Unlock()
+	conn.SetBytesSent(bytesSent)
 
 	// Ensure bytesSent increases for the measurements
 	// We'll use a slower ticker to reduce jitter impact
@@ -2922,7 +2569,9 @@ func TestSession_Stats_EstimatedBitrateUpdatedEveryInterval(t *testing.T) {
 			case <-ticker.C:
 				mu.Lock()
 				bytesSent += delta / 5 // Add 1/5 of delta every 2ms -> approx 1 delta every 10ms
+				n := bytesSent
 				mu.Unlock()
+				conn.SetBytesSent(n)
 			case <-time.After(500 * time.Millisecond):
 				return
 			}
@@ -2956,17 +2605,9 @@ func TestSession_ProbeMonitor_WritesBitrateBackOnInboundStream(t *testing.T) {
 	// (handleProbeStream → startProbeMonitorOnce) and asserts the
 	// monitor writes the locally-measured bitrate back to the prober over that
 	// stream.
-	var statsMu sync.Mutex
-	bytesSent := uint64(100_000)
-	conn := &FakeStreamConn{}
-	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
-		// Each call advances BytesSent so measureBitrate sees a non-zero delta.
-		statsMu.Lock()
-		bytesSent += 100_000
-		n := bytesSent
-		statsMu.Unlock()
-		return quic.ConnectionStats{BytesSent: n}
-	}
+	conn := &FakeStreamConn{Stats: quic.ConnectionStats{BytesSent: 100_000}}
+	// Each sample advances BytesSent so measureBitrate sees a non-zero delta.
+	conn.StatsBytesSentStep = 100_000
 	cfg := &Config{ProbeInterval: 5 * time.Millisecond, ProbeMaxAge: time.Hour, ProbeMaxDelta: 1000.0}
 	session := newSession(conn, NewTrackMux(0), nil, cfg, nil, nil, nil, nil)
 	t.Cleanup(func() { _ = session.CloseWithError(NoError, "") })
@@ -2983,20 +2624,9 @@ func TestSession_ProbeMonitor_WritesBitrateBackOnInboundStream(t *testing.T) {
 	var written bytes.Buffer
 	var writtenMu sync.Mutex
 	probeStream := &FakeQUICStream{}
-	probeStream.ReadFunc = func(p []byte) (int, error) {
-		if len(incomingData) > 0 {
-			n := copy(p, incomingData)
-			incomingData = incomingData[n:]
-			return n, nil
-		}
-		<-unblockRead
-		return 0, io.EOF
-	}
-	probeStream.WriteFunc = func(p []byte) (int, error) {
-		writtenMu.Lock()
-		defer writtenMu.Unlock()
-		return written.Write(p)
-	}
+	probeStream.ReadGate = unblockRead
+	probeStream.Reads = []streamResult{{Data: incomingData}, {Block: true}}
+	probeStream.WriteTo = &written
 
 	done := make(chan struct{})
 	go func() {
@@ -3033,12 +2663,9 @@ func TestSession_GetEstimatedBitrate_PassiveWhileMonitorRunning(t *testing.T) {
 	// getEstimatedBitrate/Stats() call must read the stored value passively and
 	// must NOT consume the byte-delta window (i.e. must not call ConnectionStats
 	// or advance sampleTime/bytesSent).
-	var statsCalls atomic.Int64
+
 	conn := &FakeStreamConn{}
-	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
-		statsCalls.Add(1)
-		return quic.ConnectionStats{BytesSent: 1}
-	}
+	conn.Stats = quic.ConnectionStats{BytesSent: 1}
 	tr := newBitrateTracker(&Config{}, conn)
 	tr.monitorRunning.Store(true)
 	tr.estimatedBitrate.Store(4242)
@@ -3046,18 +2673,14 @@ func TestSession_GetEstimatedBitrate_PassiveWhileMonitorRunning(t *testing.T) {
 	got := tr.getEstimatedBitrate()
 
 	assert.Equal(t, uint64(4242), got, "must return the monitor's stored value")
-	assert.Zero(t, statsCalls.Load(), "must not sample ConnectionStats while the monitor runs")
+	assert.Zero(t, conn.StatsCalls(), "must not sample ConnectionStats while the monitor runs")
 }
 
 func TestSession_GetEstimatedBitrate_LazySamplesWithoutMonitor(t *testing.T) {
 	// Without a monitor, getEstimatedBitrate samples ConnectionStats on demand:
 	// the first call sets the baseline (returns 0), the second measures a delta.
-	var bytesSent uint64
 	conn := &FakeStreamConn{}
-	conn.ConnectionStatsFunc = func() quic.ConnectionStats {
-		bytesSent += 100_000
-		return quic.ConnectionStats{BytesSent: bytesSent}
-	}
+	conn.StatsBytesSentStep = 100_000
 	tr := newBitrateTracker(&Config{}, conn)
 
 	assert.Zero(t, tr.getEstimatedBitrate(), "first sample sets the baseline")
@@ -3075,13 +2698,9 @@ func TestSession_Probe_ConcurrentAccess(t *testing.T) {
 	mockStream := &FakeQUICStream{
 		ParentCtx: conn.Context(),
 	}
-	mockStream.WriteFunc = func(p []byte) (int, error) { return len(p), nil }
-	mockStream.ReadFunc = func(p []byte) (int, error) {
-		<-mockStream.Context().Done()
-		return 0, io.EOF
-	}
+	mockStream.Reads = []streamResult{{Block: true}}
 
-	conn.OpenStreamFunc = func() (transport.Stream, error) { return mockStream, nil }
+	conn.OpenStreams = []biStreamResult{{Stream: mockStream}}
 
 	session := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil)
 
@@ -3154,55 +2773,36 @@ func TestSession_ProcessUniStream_TrackReadersRace(t *testing.T) {
 	for range iterations {
 		conn := &FakeStreamConn{}
 
-		// acceptStreamCh feeds exactly one GROUP uni stream per session.
-		acceptStreamCh := make(chan transport.ReceiveStream, 1)
-		conn.AcceptUniStreamFunc = func(ctx context.Context) (transport.ReceiveStream, error) {
-			select {
-			case s := <-acceptStreamCh:
-				return s, nil
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
-
-		session := newTestSession(conn)
-		t.Cleanup(func() { _ = session.CloseWithError(NoError, "") })
-
 		// A barrier the GROUP stream's Read blocks on until released; this lets us
 		// force processUniStream to reach the trackReaders read at :732 while the
 		// writer goroutine below is concurrently mutating the map.
 		releaseRead := make(chan struct{})
-		decodeDone := make(chan struct{})
+		decodeDone := make(chan struct{}, 1)
 
-		mockRecvStream := &FakeQUICReceiveStream{}
 		var buf bytes.Buffer
 		_ = message.StreamTypeGroup.Encode(&buf)
 		gm := message.GroupMessage{SubscribeID: 1, GroupSequence: 0}
 		_ = gm.Encode(&buf)
-		payload := buf.Bytes()
 
-		mockRecvStream.ReadFunc = func(p []byte) (int, error) {
-			// Block the very first Read (stream-type decode) until the writer is
-			// ramping up, then serve all bytes in one shot.
-			<-releaseRead
-			n := copy(p, payload)
-			payload = payload[n:]
-			if len(payload) == 0 {
-				close(decodeDone)
-				return n, io.EOF
-			}
-			return n, nil
+		// Park the very first Read (stream-type decode) until the writer is
+		// ramping up, then serve all bytes in one shot.
+		mockRecvStream := &FakeQUICReceiveStream{
+			ReadGate:    releaseRead,
+			DrainNotify: decodeDone,
+			Reads:       []streamResult{{Block: true}, {Data: buf.Bytes()}},
 		}
 
-		// Hand the stream to handleUniStreams -> processUniStream (real goroutine).
-		acceptStreamCh <- mockRecvStream
+		// handleUniStreams -> processUniStream picks the stream up in a real goroutine.
+		conn.AcceptUniStreams = []recvStreamResult{{Stream: mockRecvStream}, {Block: true}}
+
+		session := newTestSession(conn)
+		t.Cleanup(func() { _ = session.CloseWithError(NoError, "") })
 
 		// Mutate trackReaders from another goroutine, overlapping the read at :732.
 		writerDone := make(chan struct{})
 		go func() {
 			defer close(writerDone)
 			mockTrackStream := &FakeQUICStream{}
-			mockTrackStream.WriteFunc = func(p []byte) (int, error) { return 0, nil }
 			substr := newTestSendSubscribeStreamFromStream(mockTrackStream, &SubscribeConfig{})
 			reader := newTrackReader("/test", "video", substr, func() {})
 			// Add then repeatedly remove/re-add the same id to maximize write

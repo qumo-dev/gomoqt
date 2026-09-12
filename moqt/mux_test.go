@@ -1319,7 +1319,7 @@ func TestMux_ServeAnnouncements_SlowSubscriber_NoDeadlock(t *testing.T) {
 		// There should be some writes if announcements are made.
 		// Due to timing, we may have zero writes if no announcements were received
 		// by the writer before it exited, so we just verify it doesn't exceed requests.
-		writeCount := atomic.LoadInt32(&writeCalls)
+		writeCount := int32(mockStream.WriteCalls())
 		assert.LessOrEqual(t, writeCount, int32(count), "expected write calls not to exceed announces")
 	})
 }

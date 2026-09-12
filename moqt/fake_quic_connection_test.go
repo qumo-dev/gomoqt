@@ -81,6 +81,8 @@ type FakeStreamConn struct {
 	openIdx      int
 	openUniIdx   int
 
+	openCalls  int
+	statsCalls int
 	closeCalls []closeCall
 
 	ctx         context.Context
@@ -169,6 +171,7 @@ func (m *FakeStreamConn) AcceptUniStream(ctx context.Context) (transport.Receive
 
 func (m *FakeStreamConn) OpenStream() (transport.Stream, error) {
 	m.mu.Lock()
+	m.openCalls++
 	if m.closeErr != nil {
 		err := m.closeErr
 		m.mu.Unlock()
@@ -279,6 +282,21 @@ func (m *FakeStreamConn) CloseWithError(code transport.ConnErrorCode, reason str
 	return closeErr
 }
 
+// SetBytesSent overwrites the BytesSent the connection reports, for tests that
+// drive traffic growth on their own schedule rather than per sample.
+func (m *FakeStreamConn) SetBytesSent(n uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Stats.BytesSent = n
+}
+
+// OpenCalls returns how many times a bidirectional stream open was requested.
+func (m *FakeStreamConn) OpenCalls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.openCalls
+}
+
 // CloseCalls returns the CloseWithError invocations, in order.
 func (m *FakeStreamConn) CloseCalls() []closeCall {
 	m.mu.Lock()
@@ -298,8 +316,16 @@ func (m *FakeStreamConn) Context() context.Context {
 func (m *FakeStreamConn) ConnectionStats() quicgo.ConnectionStats {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.statsCalls++
 	m.Stats.BytesSent += m.StatsBytesSentStep
 	return m.Stats
+}
+
+// StatsCalls returns how many times ConnectionStats has been sampled.
+func (m *FakeStreamConn) StatsCalls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.statsCalls
 }
 
 type FakeWebTransportSession struct {

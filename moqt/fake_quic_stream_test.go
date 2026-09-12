@@ -100,6 +100,10 @@ type FakeQUICStream struct {
 	SetReadDeadlineErr  error
 	SetWriteDeadlineErr error
 
+	// ReadGate, when set, also releases a read parked on a Block entry, so a
+	// test can decide when the peer speaks again.
+	ReadGate <-chan struct{}
+
 	// WriteDelay stalls every Write, modelling a slow consumer. Under
 	// testing/synctest this advances virtual time rather than real time.
 	WriteDelay time.Duration
@@ -167,16 +171,38 @@ func (f *FakeQUICStream) Read(p []byte) (int, error) {
 	f.syncQueues()
 	if f.reads.blocking() {
 		f.ensureUnblock()
+		f.ensureContext()
 		unblock := f.unblock
+		ctx := f.ctx
+		gate := f.ReadGate
 		f.mu.Unlock()
 
-		<-unblock
+		// Wake on an explicit cancel/close, on the stream context being
+		// cancelled (how production tears these streams down), or on a gate
+		// the test controls.
+		select {
+		case <-unblock:
+		case <-ctx.Done():
+		case <-gate:
+		}
 
 		f.mu.Lock()
-		defer f.mu.Unlock()
 		if f.cancelReadErr != nil {
-			return 0, f.cancelReadErr
+			err := f.cancelReadErr
+			f.mu.Unlock()
+			return 0, err
 		}
+		// A Block entry with more behind it is a pause, not an ending: step
+		// past it and serve what follows. A trailing Block ends the stream.
+		if f.reads.idx < len(f.reads.entries)-1 {
+			f.reads.idx++
+			f.reads.off = 0
+			n, err := f.reads.readInto(p)
+			f.mu.Unlock()
+			signal(f.ReadNotify)
+			return n, err
+		}
+		f.mu.Unlock()
 		return 0, io.EOF
 	}
 	notify := f.ReadNotify
