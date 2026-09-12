@@ -2,23 +2,27 @@ package moqt
 
 import (
 	"net/http"
+	"sync"
 )
 
 var _ http.ResponseWriter = (*FakeHTTPResponseWriter)(nil)
 
 // FakeHTTPResponseWriter is a fake implementation of http.ResponseWriter.
+// Written bytes and the status code are recorded for assertions.
 type FakeHTTPResponseWriter struct {
-	HeaderFunc      func() http.Header
-	WriteFunc       func(data []byte) (int, error)
-	WriteHeaderFunc func(statusCode int)
+	mu sync.Mutex
 
-	header http.Header
+	// WriteErr is returned by Write; the zero value means the write succeeds.
+	WriteErr error
+
+	header     http.Header
+	written    []byte
+	statusCode int
 }
 
 func (m *FakeHTTPResponseWriter) Header() http.Header {
-	if m.HeaderFunc != nil {
-		return m.HeaderFunc()
-	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.header == nil {
 		m.header = make(http.Header)
 	}
@@ -26,14 +30,33 @@ func (m *FakeHTTPResponseWriter) Header() http.Header {
 }
 
 func (m *FakeHTTPResponseWriter) Write(data []byte) (int, error) {
-	if m.WriteFunc != nil {
-		return m.WriteFunc(data)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.WriteErr != nil {
+		return 0, m.WriteErr
 	}
+	m.written = append(m.written, data...)
 	return len(data), nil
 }
 
 func (m *FakeHTTPResponseWriter) WriteHeader(statusCode int) {
-	if m.WriteHeaderFunc != nil {
-		m.WriteHeaderFunc(statusCode)
-	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.statusCode = statusCode
+}
+
+// Written returns a copy of every byte passed to a successful Write.
+func (m *FakeHTTPResponseWriter) Written() []byte {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]byte, len(m.written))
+	copy(out, m.written)
+	return out
+}
+
+// StatusCode returns the status code passed to WriteHeader, or 0 if unset.
+func (m *FakeHTTPResponseWriter) StatusCode() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.statusCode
 }

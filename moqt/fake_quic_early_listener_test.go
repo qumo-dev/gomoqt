@@ -8,19 +8,31 @@ import (
 
 var _ QUICListener = (*FakeEarlyListener)(nil)
 
+// connResult is one queued outcome for a listener accept.
+type connResult struct {
+	Conn StreamConn
+	Err  error
+}
+
 // FakeEarlyListener is a fake implementation of QUICListener that models
 // quic-go Listener/EarlyListener semantics:
 //   - Close() always returns nil, is idempotent (first-writer-wins)
 //   - After Close(), Accept() returns the close error (ErrServerClosed by default)
+//
+// Accepts is a results queue: entries are returned in order and the last entry
+// repeats once exhausted. An empty queue blocks until Close or ctx cancellation,
+// which is the usual shape for a listener under test.
 type FakeEarlyListener struct {
-	AcceptFunc func(ctx context.Context) (StreamConn, error)
-	CloseFunc  func() error
-	AddrFunc   func() net.Addr
+	Accepts []connResult
 
-	mu       sync.Mutex
-	closed   bool
-	closeErr error         // set by first Close() call
-	closeCh  chan struct{} // signalled on Close
+	// AddrValue overrides the reported listen address.
+	AddrValue net.Addr
+
+	mu        sync.Mutex
+	acceptIdx int
+	closed    bool
+	closeErr  error         // set by first Close() call
+	closeCh   chan struct{} // signalled on Close
 }
 
 func (m *FakeEarlyListener) initCloseCh() {
@@ -30,14 +42,17 @@ func (m *FakeEarlyListener) initCloseCh() {
 }
 
 func (m *FakeEarlyListener) Accept(ctx context.Context) (StreamConn, error) {
-	if m.AcceptFunc != nil {
-		return m.AcceptFunc(ctx)
-	}
 	m.mu.Lock()
 	if m.closed {
 		err := m.closeErr
 		m.mu.Unlock()
 		return nil, err
+	}
+	if len(m.Accepts) > 0 {
+		r := m.Accepts[min(m.acceptIdx, len(m.Accepts)-1)]
+		m.acceptIdx++
+		m.mu.Unlock()
+		return r.Conn, r.Err
 	}
 	m.initCloseCh()
 	ch := m.closeCh
@@ -56,8 +71,10 @@ func (m *FakeEarlyListener) Accept(ctx context.Context) (StreamConn, error) {
 }
 
 func (m *FakeEarlyListener) Addr() net.Addr {
-	if m.AddrFunc != nil {
-		return m.AddrFunc()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.AddrValue != nil {
+		return m.AddrValue
 	}
 	return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080}
 }
@@ -66,21 +83,15 @@ func (m *FakeEarlyListener) Addr() net.Addr {
 //   - First call stores ErrServerClosed and signals Accept to return
 //   - Subsequent calls are no-ops
 //   - Always returns nil (like quic-go)
-//
-// If CloseFunc is set, it is called instead (for tests that need custom behavior).
 func (m *FakeEarlyListener) Close() error {
-	if m.CloseFunc != nil {
-		return m.CloseFunc()
-	}
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.closed {
-		m.mu.Unlock()
 		return nil
 	}
 	m.closed = true
 	m.closeErr = ErrServerClosed
 	m.initCloseCh()
 	close(m.closeCh)
-	m.mu.Unlock()
 	return nil
 }
