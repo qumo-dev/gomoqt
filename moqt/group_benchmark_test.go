@@ -9,11 +9,11 @@ import (
 )
 
 func newBenchmarkReceiveStream(reader io.Reader) *FakeQUICReceiveStream {
-	return &FakeQUICReceiveStream{ReadFunc: reader.Read}
+	return &FakeQUICReceiveStream{ReadFrom: reader}
 }
 
 func newBenchmarkSendStream(writer io.Writer) *FakeQUICSendStream {
-	return &FakeQUICSendStream{WriteFunc: writer.Write}
+	return &FakeQUICSendStream{WriteTo: writer}
 }
 
 // loopReader is an io.Reader that yields src's bytes forever, wrapping around

@@ -160,7 +160,7 @@ func TestTrackReader_AcceptDrop(t *testing.T) {
 	}).Encode(&buf))
 
 	mockStream := &FakeQUICStream{
-		ReadFunc: buf.Read,
+		ReadFrom: &buf,
 	}
 
 	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
@@ -212,7 +212,7 @@ func TestTrackReader_Drops(t *testing.T) {
 	}).Encode(&buf))
 
 	mockStream := &FakeQUICStream{
-		ReadFunc: buf.Read,
+		ReadFrom: &buf,
 	}
 
 	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/quic-go/quic-go"
-	"github.com/qumo-dev/gomoqt/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,10 +28,10 @@ func TestDialer_Dial_HTTPSRoutesToDialWebTransport(t *testing.T) {
 			assert.Nil(t, tlsConfig)
 
 			conn := &FakeWebTransportSession{}
-			conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) { return nil, context.Canceled }
-			conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) { return nil, context.Canceled }
-			conn.LocalAddrFunc = func() net.Addr { return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443} }
-			conn.RemoteAddrFunc = func() net.Addr { return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443} }
+			conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
+			conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+			conn.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+			conn.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
 
 			return &http.Response{StatusCode: http.StatusOK}, conn, nil
 		},
@@ -94,10 +93,10 @@ func TestDialer_DialWebTransport_DefaultPath(t *testing.T) {
 		DialWebTransportFunc: func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config) (*http.Response, WebTransportSession, error) {
 			recordedTarget = addr
 			conn := &FakeWebTransportSession{}
-			conn.AcceptStreamFunc = func(context.Context) (transport.Stream, error) { return nil, context.Canceled }
-			conn.AcceptUniStreamFunc = func(context.Context) (transport.ReceiveStream, error) { return nil, context.Canceled }
-			conn.LocalAddrFunc = func() net.Addr { return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443} }
-			conn.RemoteAddrFunc = func() net.Addr { return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443} }
+			conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
+			conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+			conn.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+			conn.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
 			return &http.Response{StatusCode: http.StatusOK}, conn, nil
 		},
 	}

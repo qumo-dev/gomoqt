@@ -922,14 +922,8 @@ func TestMux_ServeAnnouncements_InitSendsExistingAnnouncements(t *testing.T) {
 			// Allow write calls (init + potential active messages)
 			writeCh := make(chan struct{}, 1)
 			mockStream := &FakeQUICStream{
-				ParentCtx: streamCtx,
-				WriteFunc: func(p []byte) (int, error) {
-					select {
-					case writeCh <- struct{}{}:
-					default:
-					}
-					return 0, nil
-				},
+				ParentCtx:   streamCtx,
+				WriteNotify: writeCh,
 			}
 
 			aw := newAnnouncementWriter(mockStream, tc.writerPrefix, 0, 0, nil)
@@ -983,13 +977,7 @@ func TestMux_ServeAnnouncements_AncestorAndDescendantReceive_AnnounceBefore(t *t
 		defer cancelR()
 		rootStream.ParentCtx = rootCtx
 		rootWriteCh := make(chan struct{}, 1)
-		rootStream.WriteFunc = func(p []byte) (int, error) {
-			select {
-			case rootWriteCh <- struct{}{}:
-			default:
-			}
-			return 0, nil
-		}
+		rootStream.WriteNotify = rootWriteCh
 		rootAW := newAnnouncementWriter(rootStream, "/", 0, 0, nil)
 
 		// Descendant writer (prefix /share/)
@@ -998,13 +986,7 @@ func TestMux_ServeAnnouncements_AncestorAndDescendantReceive_AnnounceBefore(t *t
 		defer cancelS()
 		shareStream.ParentCtx = shareCtx
 		shareWriteCh := make(chan struct{}, 1)
-		shareStream.WriteFunc = func(p []byte) (int, error) {
-			select {
-			case shareWriteCh <- struct{}{}:
-			default:
-			}
-			return 0, nil
-		}
+		shareStream.WriteNotify = shareWriteCh
 		shareAW := newAnnouncementWriter(shareStream, "/share/", 0, 0, nil)
 
 		var wg sync.WaitGroup
@@ -1119,9 +1101,7 @@ func TestMux_ServeAnnouncements_InitWriteError_ClosesWithInternalError(t *testin
 		}
 
 		mockStream := &FakeQUICStream{
-			WriteFunc: func(p []byte) (int, error) {
-				return 0, streamError
-			},
+			Writes: []streamResult{{Err: streamError}},
 		}
 
 		aw := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil)
@@ -1182,13 +1162,8 @@ func TestMux_ServeAnnouncements_SendAnnouncementWriteError_ClosesWithInternalErr
 		streamErr := &transport.StreamError{StreamID: transport.StreamID(2), ErrorCode: transport.StreamErrorCode(99)}
 		writeCh := make(chan struct{}, 1)
 		mockStream := &FakeQUICStream{
-			WriteFunc: func(p []byte) (int, error) {
-				select {
-				case writeCh <- struct{}{}:
-				default:
-				}
-				return 0, streamErr
-			},
+			WriteNotify: writeCh,
+			Writes:      []streamResult{{Err: streamErr}},
 		}
 
 		aw := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil)
@@ -1253,14 +1228,8 @@ func TestMux_ServeAnnouncements_ContextCancel_StopsLoop(t *testing.T) {
 		// allow Write if init happens
 		writeCh := make(chan struct{}, 1)
 		mockStream := &FakeQUICStream{
-			ParentCtx: streamCtx,
-			WriteFunc: func(p []byte) (int, error) {
-				select {
-				case writeCh <- struct{}{}:
-				default:
-				}
-				return 0, nil
-			},
+			ParentCtx:   streamCtx,
+			WriteNotify: writeCh,
 		}
 
 		aw := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil)
@@ -1316,14 +1285,9 @@ func TestMux_ServeAnnouncements_SlowSubscriber_NoDeadlock(t *testing.T) {
 		streamCtx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		writeCalls := int32(0)
 		mockStream := &FakeQUICStream{
-			ParentCtx: streamCtx,
-			WriteFunc: func(p []byte) (int, error) {
-				atomic.AddInt32(&writeCalls, 1)
-				time.Sleep(50 * time.Millisecond) // slow write
-				return 0, nil
-			},
+			ParentCtx:  streamCtx,
+			WriteDelay: 50 * time.Millisecond, // slow write
 		}
 
 		aw := newAnnouncementWriter(mockStream, "/slow/", 0, 0, nil)
@@ -1355,7 +1319,7 @@ func TestMux_ServeAnnouncements_SlowSubscriber_NoDeadlock(t *testing.T) {
 		// There should be some writes if announcements are made.
 		// Due to timing, we may have zero writes if no announcements were received
 		// by the writer before it exited, so we just verify it doesn't exceed requests.
-		writeCount := atomic.LoadInt32(&writeCalls)
+		writeCount := int32(mockStream.WriteCalls())
 		assert.LessOrEqual(t, writeCount, int32(count), "expected write calls not to exceed announces")
 	})
 }
@@ -1378,14 +1342,8 @@ func TestMux_ServeAnnouncements_MultipleListeners_ReceiveAnnouncement(t *testing
 		ctx1, cancel1 := context.WithCancel(context.Background())
 		writeCh1 := make(chan struct{}, 1)
 		mock1 := &FakeQUICStream{
-			ParentCtx: ctx1,
-			WriteFunc: func(p []byte) (int, error) {
-				select {
-				case writeCh1 <- struct{}{}:
-				default:
-				}
-				return 0, nil
-			},
+			ParentCtx:   ctx1,
+			WriteNotify: writeCh1,
 		}
 		aw1 := newAnnouncementWriter(mock1, "/multi/", 0, 0, nil)
 
@@ -1393,14 +1351,8 @@ func TestMux_ServeAnnouncements_MultipleListeners_ReceiveAnnouncement(t *testing
 		ctx2, cancel2 := context.WithCancel(context.Background())
 		writeCh2 := make(chan struct{}, 1)
 		mock2 := &FakeQUICStream{
-			ParentCtx: ctx2,
-			WriteFunc: func(p []byte) (int, error) {
-				select {
-				case writeCh2 <- struct{}{}:
-				default:
-				}
-				return 0, nil
-			},
+			ParentCtx:   ctx2,
+			WriteNotify: writeCh2,
 		}
 		aw2 := newAnnouncementWriter(mock2, "/multi/", 0, 0, nil)
 
@@ -1474,10 +1426,7 @@ func TestMux_Announce_ClosesBusySubscriber(t *testing.T) {
 
 		// Prepare a real AnnouncementWriter and serveAnnouncements
 		mockStream := &FakeQUICStream{
-			WriteFunc: func(p []byte) (int, error) {
-				time.Sleep(50 * time.Millisecond)
-				return 0, nil
-			},
+			WriteDelay: 50 * time.Millisecond,
 		}
 
 		aw := newAnnouncementWriter(mockStream, "/busy/", 0, 0, nil)
@@ -1527,14 +1476,8 @@ func TestMux_Publish_InitSendsExistingAnnouncements(t *testing.T) {
 	defer cancel()
 	writeCh := make(chan struct{}, 1)
 	mockStream := &FakeQUICStream{
-		ParentCtx: streamCtx,
-		WriteFunc: func(p []byte) (int, error) {
-			select {
-			case writeCh <- struct{}{}:
-			default:
-			}
-			return 0, nil
-		},
+		ParentCtx:   streamCtx,
+		WriteNotify: writeCh,
 	}
 
 	aw := newAnnouncementWriter(mockStream, "/pubinit/", 0, 0, nil)
@@ -1579,14 +1522,8 @@ func TestMux_Publish_AfterServeAnnouncements_SendsAnnouncement(t *testing.T) {
 	defer cancel()
 	writeCh := make(chan struct{}, 1)
 	mockStream := &FakeQUICStream{
-		ParentCtx: streamCtx,
-		WriteFunc: func(p []byte) (int, error) {
-			select {
-			case writeCh <- struct{}{}:
-			default:
-			}
-			return 0, nil
-		},
+		ParentCtx:   streamCtx,
+		WriteNotify: writeCh,
 	}
 
 	aw := newAnnouncementWriter(mockStream, "/pubafter/", 0, 0, nil)
@@ -1642,14 +1579,8 @@ func TestMux_PublishFunc_InitSendsExistingAnnouncements(t *testing.T) {
 	defer cancel()
 	writeCh := make(chan struct{}, 1)
 	mockStream := &FakeQUICStream{
-		ParentCtx: streamCtx,
-		WriteFunc: func(p []byte) (int, error) {
-			select {
-			case writeCh <- struct{}{}:
-			default:
-			}
-			return 0, nil
-		},
+		ParentCtx:   streamCtx,
+		WriteNotify: writeCh,
 	}
 
 	aw := newAnnouncementWriter(mockStream, "/pubfuncinit/", 0, 0, nil)
@@ -1694,14 +1625,8 @@ func TestMux_PublishFunc_AfterServeAnnouncements_SendsAnnouncement(t *testing.T)
 	defer cancel()
 	writeCh := make(chan struct{}, 1)
 	mockStream := &FakeQUICStream{
-		ParentCtx: streamCtx,
-		WriteFunc: func(p []byte) (int, error) {
-			select {
-			case writeCh <- struct{}{}:
-			default:
-			}
-			return 0, nil
-		},
+		ParentCtx:   streamCtx,
+		WriteNotify: writeCh,
 	}
 
 	aw := newAnnouncementWriter(mockStream, "/pubfuncafter/", 0, 0, nil)
@@ -1762,13 +1687,7 @@ func TestMux_ServeAnnouncements_ConcurrentAnnounce_NoDeadlock(t *testing.T) {
 			cancels = append(cancels, cancel)
 			ms.ParentCtx = cctx
 			ready := make(chan struct{}, 1)
-			ms.WriteFunc = func(p []byte) (int, error) {
-				select {
-				case ready <- struct{}{}:
-				default:
-				}
-				return 0, nil
-			}
+			ms.WriteNotify = ready
 			mocks = append(mocks, ms)
 			aw := newAnnouncementWriter(ms, "/race/", 0, 0, nil)
 			aws = append(aws, aw)
@@ -2257,13 +2176,7 @@ func TestMux_ServeAnnouncements_AncestorAndDescendantReceive(t *testing.T) {
 		defer cancelR()
 		rootStream.ParentCtx = rootCtx
 		rootWriteCh := make(chan struct{}, 1)
-		rootStream.WriteFunc = func(p []byte) (int, error) {
-			select {
-			case rootWriteCh <- struct{}{}:
-			default:
-			}
-			return 0, nil
-		}
+		rootStream.WriteNotify = rootWriteCh
 		rootAW := newAnnouncementWriter(rootStream, "/", 0, 0, nil)
 
 		// Descendant writer (prefix /share/)
@@ -2272,13 +2185,7 @@ func TestMux_ServeAnnouncements_AncestorAndDescendantReceive(t *testing.T) {
 		defer cancelS()
 		shareStream.ParentCtx = shareCtx
 		shareWriteCh := make(chan struct{}, 1)
-		shareStream.WriteFunc = func(p []byte) (int, error) {
-			select {
-			case shareWriteCh <- struct{}{}:
-			default:
-			}
-			return 0, nil
-		}
+		shareStream.WriteNotify = shareWriteCh
 		shareAW := newAnnouncementWriter(shareStream, "/share/", 0, 0, nil)
 
 		var wg sync.WaitGroup

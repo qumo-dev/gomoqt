@@ -93,6 +93,12 @@ type SendStream interface {
 
 	// Context returns the stream's context, canceled when the stream is closed.
 	Context() context.Context
+
+	// SetPriority sets the QUIC scheduling priority for data sent on the
+	// stream, per RFC 9218: urgency is clipped to 0-7 with lower values
+	// scheduled first; incremental controls round-robin vs. strict ordering
+	// within a level.
+	SetPriority(urgency int8, incremental bool)
 }
 
 // ReceiveStream is a unidirectional stream for receiving data.

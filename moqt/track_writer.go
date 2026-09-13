@@ -341,6 +341,9 @@ func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequen
 		return nil, err
 	}
 
+	urgency, incremental := urgencyFor(w.TrackConfig().Priority)
+	stream.SetPriority(urgency, incremental)
+
 	err = message.StreamTypeGroup.Encode(stream)
 	if err != nil {
 		if strErr, ok := errors.AsType[*transport.StreamError](err); ok {

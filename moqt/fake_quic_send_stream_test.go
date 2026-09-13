@@ -3,6 +3,7 @@ package moqt
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -13,19 +14,47 @@ var _ transport.SendStream = (*FakeQUICSendStream)(nil)
 
 // FakeQUICSendStream is a fake implementation of SendStream for testing.
 // Models quic-go behavior: Close and CancelWrite cancel Context().
+//
+// Write behavior is driven by the Writes results queue: entries are returned in
+// order and the last entry repeats once exhausted; an empty queue means every
+// write succeeds. Bytes passed to a successful Write are recorded and readable
+// via Written.
 type FakeQUICSendStream struct {
 	mu sync.Mutex
 
-	WriteFunc            func(p []byte) (int, error)
-	CloseFunc            func() error
-	CancelWriteFunc      func(transport.StreamErrorCode)
-	ParentCtx            context.Context // optional parent context
-	SetWriteDeadlineFunc func(time.Time) error
+	Writes []streamResult
+
+	// WriteTo backs the stream with a real sink, for cases a finite queue
+	// cannot express — typically a discard sink in a benchmark. It applies
+	// only when the Writes queue is empty; an explicit queue wins over the
+	// sink. Bytes routed to WriteTo are NOT also recorded for Written, so a
+	// benchmark sink does not grow an ever-larger capture buffer; use Written
+	// or WriteTo, not both.
+	WriteTo io.Writer
+
+	ParentCtx context.Context // optional parent context
+
+	// Error overrides; zero value means the call succeeds.
+	CloseErr            error
+	SetWriteDeadlineErr error
+
+	// Notification channels, for tests that must observe a call as it happens.
+	// Each send is non-blocking, so an unbuffered channel with no reader is safe.
+	WriteNotify       chan<- struct{}
+	CancelWriteNotify chan<- transport.StreamErrorCode
+
+	writes           resultQueue
+	written          []byte
+	cancelWriteCodes []transport.StreamErrorCode
 
 	ctx            context.Context
 	cancelCause    context.CancelCauseFunc
 	closed         bool  // true after Close
 	cancelWriteErr error // non-nil after CancelWrite
+
+	prioritySet         bool
+	priorityUrgency     int8
+	priorityIncremental bool
 }
 
 func (m *FakeQUICSendStream) ensureContext() {
@@ -39,41 +68,98 @@ func (m *FakeQUICSendStream) ensureContext() {
 }
 
 func (m *FakeQUICSendStream) Write(p []byte) (int, error) {
-	if m.WriteFunc != nil {
-		return m.WriteFunc(p)
+	m.mu.Lock()
+	if m.writes.entries == nil && m.Writes != nil {
+		m.writes.entries = m.Writes
+	}
+	err := m.writes.advance()
+	sink := m.WriteTo
+	if len(m.writes.entries) > 0 {
+		sink = nil // an explicit queue result wins over the sink
+	}
+	if err == nil && sink == nil {
+		// A sink owns the bytes; recording them too would make every
+		// discard-backed benchmark grow an unbounded capture buffer.
+		m.written = append(m.written, p...)
+	}
+	notify := m.WriteNotify
+	m.mu.Unlock()
+
+	if notify != nil {
+		select {
+		case notify <- struct{}{}:
+		default:
+		}
+	}
+	if err != nil {
+		return 0, err
+	}
+	if sink != nil {
+		return sink.Write(p)
 	}
 	return len(p), nil
 }
 
-func (m *FakeQUICSendStream) CancelWrite(code transport.StreamErrorCode) {
-	if m.CancelWriteFunc != nil {
-		m.CancelWriteFunc(code)
-		return
-	}
+// Written returns a copy of every byte passed to a successful Write.
+func (m *FakeQUICSendStream) Written() []byte {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]byte, len(m.written))
+	copy(out, m.written)
+	return out
+}
+
+func (m *FakeQUICSendStream) CancelWrite(code transport.StreamErrorCode) {
+	m.mu.Lock()
+	m.cancelWriteCodes = append(m.cancelWriteCodes, code)
 	if m.closed || m.cancelWriteErr != nil {
+		notify := m.CancelWriteNotify
 		m.mu.Unlock()
+		if notify != nil {
+			select {
+			case notify <- code:
+			default:
+			}
+		}
 		return
 	}
 	m.cancelWriteErr = &transport.StreamError{ErrorCode: code}
 	m.ensureContext()
 	cancel := m.cancelCause
+	notify := m.CancelWriteNotify
 	m.mu.Unlock()
+
 	cancel(m.cancelWriteErr)
+	if notify != nil {
+		select {
+		case notify <- code:
+		default:
+		}
+	}
+}
+
+// CancelWriteCodes returns the codes passed to CancelWrite, in order.
+func (m *FakeQUICSendStream) CancelWriteCodes() []transport.StreamErrorCode {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]transport.StreamErrorCode, len(m.cancelWriteCodes))
+	copy(out, m.cancelWriteCodes)
+	return out
 }
 
 func (m *FakeQUICSendStream) SetWriteDeadline(t time.Time) error {
-	if m.SetWriteDeadlineFunc != nil {
-		return m.SetWriteDeadlineFunc(t)
-	}
-	return nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.SetWriteDeadlineErr
 }
 
 func (m *FakeQUICSendStream) Close() error {
-	if m.CloseFunc != nil {
-		return m.CloseFunc()
-	}
 	m.mu.Lock()
+	if m.CloseErr != nil {
+		err := m.CloseErr
+		m.mu.Unlock()
+		return err
+	}
 	if m.closed {
 		m.mu.Unlock()
 		return nil
@@ -95,4 +181,20 @@ func (m *FakeQUICSendStream) Context() context.Context {
 	defer m.mu.Unlock()
 	m.ensureContext()
 	return m.ctx
+}
+
+func (m *FakeQUICSendStream) SetPriority(urgency int8, incremental bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.prioritySet = true
+	m.priorityUrgency = urgency
+	m.priorityIncremental = incremental
+}
+
+// LastPriority reports the urgency/incremental values from the most recent
+// SetPriority call, and whether SetPriority was ever called.
+func (m *FakeQUICSendStream) LastPriority() (urgency int8, incremental bool, ok bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.priorityUrgency, m.priorityIncremental, m.prioritySet
 }

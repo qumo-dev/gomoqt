@@ -131,9 +131,6 @@ func BenchmarkTrackWriter_OpenGroup(b *testing.B) {
 				defer streamMu.Unlock()
 
 				mockSendStream := &FakeQUICSendStream{}
-				mockSendStream.WriteFunc = func(p []byte) (int, error) {
-					return len(p), nil
-				}
 				return mockSendStream, nil
 			}
 
@@ -177,9 +174,6 @@ func BenchmarkTrackWriter_ConcurrentOpenGroup(b *testing.B) {
 			// matching quic-go's non-serializing OpenUniStream semantics.
 			openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 				mockSendStream := &FakeQUICSendStream{}
-				mockSendStream.WriteFunc = func(p []byte) (int, error) {
-					return len(p), nil
-				}
 				return mockSendStream, nil
 			}
 
@@ -215,9 +209,6 @@ func BenchmarkTrackWriter_ActiveGroupManagement(b *testing.B) {
 
 			openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
 				mockSendStream := &FakeQUICSendStream{}
-				mockSendStream.WriteFunc = func(p []byte) (int, error) {
-					return len(p), nil
-				}
 				return mockSendStream, nil
 			}
 
@@ -315,11 +306,7 @@ func BenchmarkTrackWriter_CloseWithActiveGroups(b *testing.B) {
 				substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
 				openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
-					mockSendStream := &FakeQUICSendStream{}
-					mockSendStream.WriteFunc = func(p []byte) (int, error) {
-						return len(p), nil
-					}
-					return mockSendStream, nil
+					return &FakeQUICSendStream{}, nil
 				}
 
 				writer := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {})

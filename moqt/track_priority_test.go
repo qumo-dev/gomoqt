@@ -83,3 +83,52 @@ func TestTrackPriority_Overflow(t *testing.T) {
 	underflow := minPriority - 1
 	assert.Equal(t, TrackPriority(255), underflow)
 }
+
+func TestUrgencyFor(t *testing.T) {
+	tests := map[string]struct {
+		priority        TrackPriority
+		wantUrgency     int8
+		wantIncremental bool
+	}{
+		"zero (lowest priority) maps to the least urgent bucket": {
+			priority:        0,
+			wantUrgency:     7,
+			wantIncremental: true,
+		},
+		"minimum nonzero priority still maps to the least urgent bucket": {
+			priority:        1,
+			wantUrgency:     7,
+			wantIncremental: true,
+		},
+		"maximum priority maps to the most urgent bucket": {
+			priority:        255,
+			wantUrgency:     0,
+			wantIncremental: true,
+		},
+		"mid-range priority falls between the extremes": {
+			priority:        128,
+			wantUrgency:     4,
+			wantIncremental: true,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			urgency, incremental := urgencyFor(tt.priority)
+			assert.Equal(t, tt.wantUrgency, urgency)
+			assert.Equal(t, tt.wantIncremental, incremental)
+		})
+	}
+}
+
+func TestUrgencyFor_MonotonicWithPriority(t *testing.T) {
+	// Higher TrackPriority (more important) must never produce a higher
+	// (less important) urgency than a lower TrackPriority, across the full
+	// range including the 0/1 boundary.
+	prevUrgency, _ := urgencyFor(0)
+	for p := 1; p <= 255; p++ {
+		urgency, _ := urgencyFor(TrackPriority(p))
+		assert.LessOrEqual(t, urgency, prevUrgency)
+		prevUrgency = urgency
+	}
+}
