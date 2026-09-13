@@ -343,3 +343,94 @@ func TestEventTimelineRecord_MarshalJSON(t *testing.T) {
 		})
 	}
 }
+
+// --- Template (draft-ietf-moq-msf-01 §5.2.15 / §7.4) -----------------------
+
+func TestTemplate_RoundTrip(t *testing.T) {
+	tmpl := Template{
+		StartMediaTime: 0,
+		DeltaMediaTime: 2002,
+		StartLocation:  Location{GroupID: 0, ObjectID: 0},
+		DeltaLocation:  Location{GroupID: 1, ObjectID: 0},
+		StartWallclock: 1759924158381,
+		DeltaWallclock: 2002,
+	}
+
+	data, err := json.Marshal(tmpl)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[0,2002,[0,0],[1,0],1759924158381,2002]`, string(data))
+
+	var decoded Template
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	assert.Equal(t, tmpl, decoded)
+}
+
+func TestTemplate_UnmarshalJSON_InvalidLength(t *testing.T) {
+	tests := map[string]string{
+		"too few":  `[0,2002,[0,0],[1,0],1759924158381]`,
+		"too many": `[0,2002,[0,0],[1,0],1759924158381,2002,1]`,
+		"empty":    `[]`,
+	}
+
+	for name, input := range tests {
+		t.Run(name, func(t *testing.T) {
+			var tmpl Template
+			err := json.Unmarshal([]byte(input), &tmpl)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "exactly 6 items")
+		})
+	}
+}
+
+func TestTemplate_Entry(t *testing.T) {
+	tmpl := Template{
+		StartMediaTime: 100,
+		DeltaMediaTime: 1000,
+		StartLocation:  Location{GroupID: 5, ObjectID: 2},
+		DeltaLocation:  Location{GroupID: 1, ObjectID: 1},
+		StartWallclock: 1000000,
+		DeltaWallclock: 1000,
+	}
+
+	// n=0 returns the start values unchanged.
+	zero := tmpl.Entry(0)
+	assert.Equal(t, int64(100), zero.MediaTime)
+	assert.Equal(t, uint64(5), zero.Location.GroupID)
+	assert.Equal(t, uint64(2), zero.Location.ObjectID)
+	assert.Equal(t, int64(1000000), zero.Wallclock)
+
+	// n=1 increments by exactly one delta step.
+	one := tmpl.Entry(1)
+	assert.Equal(t, int64(1100), one.MediaTime)
+	assert.Equal(t, uint64(6), one.Location.GroupID)
+	assert.Equal(t, uint64(3), one.Location.ObjectID)
+	assert.Equal(t, int64(1001000), one.Wallclock)
+
+	// n=3 scales linearly.
+	three := tmpl.Entry(3)
+	assert.Equal(t, int64(3100), three.MediaTime)
+	assert.Equal(t, uint64(8), three.Location.GroupID)
+	assert.Equal(t, uint64(5), three.Location.ObjectID)
+	assert.Equal(t, int64(1003000), three.Wallclock)
+}
+
+func TestTemplate_Clone_Nil(t *testing.T) {
+	var tmpl *Template
+	assert.Nil(t, tmpl.Clone())
+}
+
+func TestTemplate_Clone_RoundTrip(t *testing.T) {
+	tmpl := &Template{
+		StartMediaTime: 1,
+		DeltaMediaTime: 2,
+		StartLocation:  Location{GroupID: 3, ObjectID: 4},
+		DeltaLocation:  Location{GroupID: 5, ObjectID: 6},
+		StartWallclock: 7,
+		DeltaWallclock: 8,
+	}
+	clone := tmpl.Clone()
+	require.NotNil(t, clone)
+	assert.Equal(t, *tmpl, *clone)
+	clone.DeltaMediaTime = 999
+	assert.Equal(t, int64(2), tmpl.DeltaMediaTime, "original must not be mutated")
+}

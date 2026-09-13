@@ -187,7 +187,7 @@ func TestParseCatalogString_RoundTrip(t *testing.T) {
 }
 
 func TestParseCatalog_RejectsDeltaJSON(t *testing.T) {
-	_, err := ParseCatalog([]byte(`{"deltaUpdate": true, "addTracks": [{"name": "video", "packaging": "loc", "isLive": true}]}`))
+	_, err := ParseCatalog([]byte(`{"deltaUpdate": [{"op":"add","tracks":[{"name": "video", "packaging": "loc", "isLive": true}]}]}`))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "delta catalog fields are not allowed")
 }
@@ -200,9 +200,10 @@ func TestParseCatalog_RejectsTrailingJSON(t *testing.T) {
 
 func TestParseCatalogDelta_RoundTrip(t *testing.T) {
 	input := `{
-		"deltaUpdate": true,
-		"addTracks": [
-			{"name": "video", "packaging": "loc", "isLive": true}
+		"deltaUpdate": [
+			{"op": "add", "tracks": [
+				{"name": "video", "packaging": "loc", "isLive": true}
+			]}
 		]
 	}`
 
@@ -217,9 +218,10 @@ func TestParseCatalogDelta_RoundTrip(t *testing.T) {
 
 func TestParseCatalogDelta_ValidJSON(t *testing.T) {
 	input := []byte(`{
-		"deltaUpdate": true,
-		"addTracks": [
-			{"name": "video", "packaging": "loc", "isLive": true}
+		"deltaUpdate": [
+			{"op": "add", "tracks": [
+				{"name": "video", "packaging": "loc", "isLive": true}
+			]}
 		]
 	}`)
 
@@ -234,9 +236,10 @@ func TestParseCatalogDelta_ValidJSON(t *testing.T) {
 
 func TestParseCatalogDelta_InvalidJSON(t *testing.T) {
 	input := []byte(`{
-		"deltaUpdate": true,
-		"addTracks": [
-			{"name": "video", "packaging": "loc", "isLive": true
+		"deltaUpdate": [
+			{"op": "add", "tracks": [
+				{"name": "video", "packaging": "loc", "isLive": true
+			]}
 		]
 	}`)
 
@@ -251,9 +254,28 @@ func TestParseCatalogDelta_RejectsIndependentJSON(t *testing.T) {
 }
 
 func TestParseCatalogDelta_RejectsTrailingJSON(t *testing.T) {
-	_, err := ParseCatalogDelta([]byte(`{"deltaUpdate":true,"addTracks":[{"name":"video","packaging":"loc","isLive":true}]} {"extra":2}`))
+	_, err := ParseCatalogDelta([]byte(`{"deltaUpdate":[{"op":"add","tracks":[{"name":"video","packaging":"loc","isLive":true}]}]} {"extra":2}`))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "after top-level value")
+}
+
+// Repeated same-type ops are legal in draft-01 and must accumulate, not
+// overwrite. encoding/json resets a destination slice before appending, so the
+// decoder must unmarshal into a fresh slice and append (see decodeDeltaOps).
+func TestParseCatalogDelta_RepeatedSameTypeOpsAccumulate(t *testing.T) {
+	delta, err := ParseCatalogDeltaString(`{
+		"deltaUpdate": [
+			{"op": "add", "tracks": [{"name": "a", "packaging": "loc", "isLive": true}]},
+			{"op": "remove", "tracks": [{"name": "old"}]},
+			{"op": "add", "tracks": [{"name": "b", "packaging": "loc", "isLive": true}]}
+		]
+	}`)
+	require.NoError(t, err)
+	require.Len(t, delta.AddTracks, 2)
+	assert.Equal(t, "a", delta.AddTracks[0].Name)
+	assert.Equal(t, "b", delta.AddTracks[1].Name)
+	require.Len(t, delta.RemoveTracks, 1)
+	assert.Equal(t, "old", delta.RemoveTracks[0].Name)
 }
 
 func TestCatalogApplyDelta_PreservesDeclaredOperationOrder(t *testing.T) {
@@ -264,9 +286,10 @@ func TestCatalogApplyDelta_PreservesDeclaredOperationOrder(t *testing.T) {
 
 	var delta CatalogDelta
 	require.NoError(t, json.Unmarshal([]byte(`{
-		"deltaUpdate": true,
-		"removeTracks": [{"name": "video"}],
-		"addTracks": [{"name": "video", "packaging": "loc", "isLive": true, "bitrate": 2000}]
+		"deltaUpdate": [
+			{"op": "remove", "tracks": [{"name": "video"}]},
+			{"op": "add", "tracks": [{"name": "video", "packaging": "loc", "isLive": true, "bitrate": 2000}]}
+		]
 	}`), &delta))
 
 	updated, err := base.ApplyDelta(delta)
@@ -405,8 +428,9 @@ func TestCatalogApplyDelta_RejectsChangingDefaultNamespaceForInheritedTracks(t *
 func TestCatalogDeltaValidate_RemoveTracksRejectExtraFields(t *testing.T) {
 	var delta CatalogDelta
 	require.NoError(t, json.Unmarshal([]byte(`{
-		"deltaUpdate": true,
-		"removeTracks": [{"name": "video", "codec": "av01"}]
+		"deltaUpdate": [
+			{"op": "remove", "tracks": [{"name": "video", "codec": "av01"}]}
+		]
 	}`), &delta))
 
 	err := delta.Validate()
@@ -457,7 +481,7 @@ func TestTrackRoundTrip_AllFields(t *testing.T) {
 		Label:         "HD",
 		RenderGroup:   new(int64(1)),
 		AltGroup:      new(int64(2)),
-		InitData:      "AAAA",
+		InitRef:       "init1",
 		Depends:       []string{"audio"},
 		TemporalID:    new(int64(3)),
 		SpatialID:     new(int64(1)),
@@ -492,7 +516,7 @@ func TestTrackRoundTrip_AllFields(t *testing.T) {
 	assert.Equal(t, "HD", decoded.Label)
 	assert.Equal(t, int64(1), *decoded.RenderGroup)
 	assert.Equal(t, int64(2), *decoded.AltGroup)
-	assert.Equal(t, "AAAA", decoded.InitData)
+	assert.Equal(t, "init1", decoded.InitRef)
 	assert.Equal(t, []string{"audio"}, decoded.Depends)
 	assert.Equal(t, int64(3), *decoded.TemporalID)
 	assert.Equal(t, int64(1), *decoded.SpatialID)
@@ -632,7 +656,7 @@ func TestTrack_applyOverrides_AllFields(t *testing.T) {
 		presentFields: map[string]struct{}{
 			"namespace": {}, "name": {}, "packaging": {}, "eventType": {},
 			"role": {}, "isLive": {}, "targetLatency": {}, "label": {},
-			"renderGroup": {}, "altGroup": {}, "initData": {}, "depends": {},
+			"renderGroup": {}, "altGroup": {}, "initRef": {}, "depends": {},
 			"temporalId": {}, "spatialId": {}, "codec": {}, "mimeType": {},
 			"framerate": {}, "timescale": {}, "bitrate": {}, "width": {},
 			"height": {}, "samplerate": {}, "channelConfig": {}, "displayWidth": {},
@@ -648,7 +672,7 @@ func TestTrack_applyOverrides_AllFields(t *testing.T) {
 		Label:         "SD",
 		RenderGroup:   new(int64(5)),
 		AltGroup:      new(int64(3)),
-		InitData:      "BBBB",
+		InitRef:       "init1",
 		Depends:       []string{"sub"},
 		TemporalID:    new(int64(2)),
 		SpatialID:     new(int64(0)),
@@ -680,7 +704,7 @@ func TestTrack_applyOverrides_AllFields(t *testing.T) {
 	assert.Equal(t, "SD", base.Label)
 	assert.Equal(t, int64(5), *base.RenderGroup)
 	assert.Equal(t, int64(3), *base.AltGroup)
-	assert.Equal(t, "BBBB", base.InitData)
+	assert.Equal(t, "init1", base.InitRef)
 	assert.Equal(t, []string{"sub"}, base.Depends)
 	assert.Equal(t, int64(2), *base.TemporalID)
 	assert.Equal(t, int64(0), *base.SpatialID)
@@ -879,7 +903,7 @@ func TestTrack_hasField_MateriallySet(t *testing.T) {
 		Label:         "HD",
 		RenderGroup:   new(int64(1)),
 		AltGroup:      new(int64(1)),
-		InitData:      "AA",
+		InitRef:       "init1",
 		Depends:       []string{"a"},
 		TemporalID:    new(int64(0)),
 		SpatialID:     new(int64(0)),
@@ -900,7 +924,7 @@ func TestTrack_hasField_MateriallySet(t *testing.T) {
 
 	fields := []string{
 		"namespace", "name", "packaging", "eventType", "role", "isLive",
-		"targetLatency", "label", "renderGroup", "altGroup", "initData",
+		"targetLatency", "label", "renderGroup", "altGroup", "initRef",
 		"depends", "temporalId", "spatialId", "codec", "mimeType",
 		"framerate", "timescale", "bitrate", "width", "height",
 		"samplerate", "channelConfig", "displayWidth", "displayHeight",
@@ -988,12 +1012,12 @@ func TestCatalogDelta_MarshalJSON_RoundTrip(t *testing.T) {
 
 	data, err := json.Marshal(delta)
 	require.NoError(t, err)
-	assert.Contains(t, string(data), `"deltaUpdate":true`)
+	assert.Contains(t, string(data), `"deltaUpdate"`)
 	assert.Contains(t, string(data), `"generatedAt":42`)
 	assert.Contains(t, string(data), `"isComplete":true`)
-	assert.Contains(t, string(data), `"addTracks"`)
-	assert.Contains(t, string(data), `"removeTracks"`)
-	assert.Contains(t, string(data), `"cloneTracks"`)
+	assert.Contains(t, string(data), `"op":"add"`)
+	assert.Contains(t, string(data), `"op":"remove"`)
+	assert.Contains(t, string(data), `"op":"clone"`)
 	assert.Contains(t, string(data), `"custom":true`)
 
 	var decoded CatalogDelta
@@ -1014,7 +1038,7 @@ func TestCatalogDelta_MarshalJSON_EmptyDelta(t *testing.T) {
 	delta := CatalogDelta{}
 	data, err := json.Marshal(delta)
 	require.NoError(t, err)
-	assert.Equal(t, `{"deltaUpdate":true}`, string(data))
+	assert.Equal(t, `{"deltaUpdate":[]}`, string(data))
 }
 
 func TestTrackRef_MarshalJSON_RoundTrip(t *testing.T) {
@@ -1291,7 +1315,7 @@ func TestCatalogDelta_UnmarshalJSON(t *testing.T) {
 		check       func(*testing.T, CatalogDelta)
 	}{
 		"valid base delta": {
-			input:   `{"deltaUpdate": true, "addTracks": [{"name": "video", "packaging": "loc", "isLive": true}]}`,
+			input:   `{"deltaUpdate": [{"op":"add","tracks":[{"name": "video", "packaging": "loc", "isLive": true}]}]}`,
 			wantErr: false,
 			check: func(t *testing.T, d CatalogDelta) {
 				require.Len(t, d.AddTracks, 1)
@@ -1300,7 +1324,7 @@ func TestCatalogDelta_UnmarshalJSON(t *testing.T) {
 			},
 		},
 		"valid delta with extra fields": {
-			input:   `{"deltaUpdate": true, "addTracks": [{"name": "video", "packaging": "loc", "isLive": true}], "custom_field": "custom_value", "another_field": 123}`,
+			input:   `{"deltaUpdate": [{"op":"add","tracks":[{"name": "video", "packaging": "loc", "isLive": true}]}], "custom_field": "custom_value", "another_field": 123}`,
 			wantErr: false,
 			check: func(t *testing.T, d CatalogDelta) {
 				require.Len(t, d.AddTracks, 1)
@@ -1335,19 +1359,20 @@ func TestCatalogDelta_UnmarshalJSON(t *testing.T) {
 func TestCatalogDelta_UnmarshalJSON_MissingDeltaUpdate(t *testing.T) {
 	_, err := ParseCatalogDelta([]byte(`{"addTracks":[{"name":"video","packaging":"loc","isLive":true}]}`))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "deltaUpdate=true")
+	assert.Contains(t, err.Error(), "delta catalog must include a deltaUpdate array")
 }
 
 func TestCatalogDelta_UnmarshalJSON_DeltaUpdateFalse(t *testing.T) {
 	_, err := ParseCatalogDelta([]byte(`{"deltaUpdate":false}`))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "deltaUpdate=true")
+	assert.Contains(t, err.Error(), "deltaUpdate must be an array of operation objects")
 }
 
 func TestCatalogDelta_UnmarshalJSON_CloneTracks(t *testing.T) {
 	input := `{
-		"deltaUpdate": true,
-		"cloneTracks": [{"name": "video-720", "parentName": "video-1080", "width": 1280}]
+		"deltaUpdate": [
+			{"op": "clone", "tracks": [{"name": "video-720", "parentName": "video-1080", "width": 1280}]}
+		]
 	}`
 
 	delta, err := ParseCatalogDeltaString(input)
@@ -1361,8 +1386,9 @@ func TestCatalogDelta_UnmarshalJSON_CloneTracks(t *testing.T) {
 
 func TestCatalogDelta_UnmarshalJSON_ExtraFields(t *testing.T) {
 	input := `{
-		"deltaUpdate": true,
-		"addTracks": [{"name": "video", "packaging": "loc", "isLive": true}],
+		"deltaUpdate": [
+			{"op": "add", "tracks": [{"name": "video", "packaging": "loc", "isLive": true}]}
+		],
 		"com.example.ext": 42
 	}`
 
@@ -1448,7 +1474,7 @@ func TestTrack_UnmarshalJSON_FieldErrors(t *testing.T) {
 		"label":         `{"label": 123}`,
 		"renderGroup":   `{"renderGroup": "notnum"}`,
 		"altGroup":      `{"altGroup": "notnum"}`,
-		"initData":      `{"initData": 123}`,
+		"initRef":       `{"initRef": 123}`,
 		"depends":       `{"depends": "notarray"}`,
 		"temporalId":    `{"temporalId": "notnum"}`,
 		"spatialId":     `{"spatialId": "notnum"}`,
@@ -1522,8 +1548,8 @@ func TestCatalogDelta_UnmarshalJSON_IndependentFields(t *testing.T) {
 	tests := map[string]struct {
 		input string
 	}{
-		"version field": {`{"deltaUpdate": true, "version": 1}`},
-		"tracks field":  {`{"deltaUpdate": true, "tracks": []}`},
+		"version field": {`{"deltaUpdate": [{"op":"add","tracks":[]}], "version": 1}`},
+		"tracks field":  {`{"deltaUpdate": [{"op":"add","tracks":[]}], "tracks": []}`},
 	}
 
 	for name, tt := range tests {
@@ -1539,12 +1565,12 @@ func TestCatalogDelta_UnmarshalJSON_FieldErrors(t *testing.T) {
 	tests := map[string]struct {
 		input string
 	}{
-		"bad deltaUpdate":  {`{"deltaUpdate": "not-a-bool"}`},
-		"bad generatedAt":  {`{"deltaUpdate": true, "generatedAt": "not-a-number"}`},
-		"bad isComplete":   {`{"deltaUpdate": true, "isComplete": "not-a-bool"}`},
-		"bad addTracks":    {`{"deltaUpdate": true, "addTracks": "not-an-array"}`},
-		"bad removeTracks": {`{"deltaUpdate": true, "removeTracks": "not-an-array"}`},
-		"bad cloneTracks":  {`{"deltaUpdate": true, "cloneTracks": "not-an-array"}`},
+		"bad deltaUpdate":  {`{"deltaUpdate": "not-an-array"}`},
+		"bad generatedAt":  {`{"deltaUpdate": [{"op":"add","tracks":[]}], "generatedAt": "not-a-number"}`},
+		"bad isComplete":   {`{"deltaUpdate": [{"op":"add","tracks":[]}], "isComplete": "not-a-bool"}`},
+		"bad addTracks":    {`{"deltaUpdate": [{"op":"add","tracks":"not-an-array"}]}`},
+		"bad removeTracks": {`{"deltaUpdate": [{"op":"remove","tracks":"not-an-array"}]}`},
+		"bad cloneTracks":  {`{"deltaUpdate": [{"op":"clone","tracks":"not-an-array"}]}`},
 	}
 
 	for name, tt := range tests {
@@ -1745,9 +1771,10 @@ func TestBroadcast_SetCatalog_KeepsActiveRemovesStale(t *testing.T) {
 
 func TestParseCatalogDeltaString(t *testing.T) {
 	input := `{
-		"deltaUpdate": true,
-		"addTracks": [
-			{"name": "video", "packaging": "loc", "isLive": true}
+		"deltaUpdate": [
+			{"op": "add", "tracks": [
+				{"name": "video", "packaging": "loc", "isLive": true}
+			]}
 		]
 	}`
 
@@ -1815,4 +1842,290 @@ func TestTrackRef_Validate(t *testing.T) {
 			assert.Equal(t, tc.expected, problems)
 		})
 	}
+}
+
+// --- draft-01 new field coverage -------------------------------------------
+
+func TestTrackRoundTrip_NewFields(t *testing.T) {
+	target := int64(500)
+	min := int64(100)
+	max := int64(2000)
+	track := Track{
+		Namespace:        "live/demo",
+		Name:             "video",
+		Packaging:        PackagingLOC,
+		IsLive:           new(true),
+		InitRef:          "init1",
+		Buffers:          &Buffers{Target: &target, Min: &min, Max: &max},
+		AvgBitrate:       new(int64(2500000)),
+		MaxGopDuration:   new(int64(1000)),
+		MaxGroupDuration: new(int64(2000)),
+		ParentNamespace:  "live/parent",
+		ConnectionURI:    "moqt://example.com/live",
+		Token:            "tok",
+		EncryptionScheme: "cenc",
+		CipherSuite:      "AES_256_GCM",
+		KeyID:            "k1",
+		TrackBaseKey:     "base64key",
+		AuthInfo:         map[string]json.RawMessage{"bearer": json.RawMessage(`"xyz"`)},
+		Accessibility:    []AccessibilityDescriptor{{Scheme: "cea", Value: "608"}},
+	}
+
+	data, err := json.Marshal(track)
+	require.NoError(t, err)
+
+	var decoded Track
+	require.NoError(t, json.Unmarshal(data, &decoded))
+
+	assert.Equal(t, "init1", decoded.InitRef)
+	require.NotNil(t, decoded.Buffers)
+	require.NotNil(t, decoded.Buffers.Target)
+	assert.Equal(t, target, *decoded.Buffers.Target)
+	assert.Equal(t, "cenc", decoded.EncryptionScheme)
+	assert.Equal(t, "AES_256_GCM", decoded.CipherSuite)
+	assert.Equal(t, "k1", decoded.KeyID)
+	assert.Equal(t, "base64key", decoded.TrackBaseKey)
+	assert.Equal(t, "moqt://example.com/live", decoded.ConnectionURI)
+	assert.Equal(t, "tok", decoded.Token)
+	require.Len(t, decoded.Accessibility, 1)
+	assert.Equal(t, "cea", decoded.Accessibility[0].Scheme)
+	assert.Equal(t, "608", decoded.Accessibility[0].Value)
+	assert.Contains(t, decoded.AuthInfo, "bearer")
+}
+
+func TestCatalog_NewPackagingAndRoleConstants(t *testing.T) {
+	assert.True(t, PackagingMoqLog.IsKnown())
+	assert.True(t, PackagingMoqMetrics.IsKnown())
+	assert.Equal(t, "moqlog", PackagingMoqLog.String())
+	assert.Equal(t, "moqmetrics", PackagingMoqMetrics.String())
+
+	assert.True(t, RoleLog.IsKnown())
+	assert.True(t, RoleMetrics.IsKnown())
+	assert.Equal(t, "log", RoleLog.String())
+	assert.Equal(t, "metrics", RoleMetrics.String())
+}
+
+func TestCatalog_PublishTracksAndInitDataList_RoundTrip(t *testing.T) {
+	target := int64(100)
+	catalog := Catalog{
+		Version: 1,
+		PublishTracks: []Track{{
+			Name:          "logs",
+			Packaging:     PackagingMoqLog,
+			IsLive:        new(true),
+			ConnectionURI: "moqt://example.com/log",
+		}},
+		InitDataList: []InitDataRef{
+			{ID: "init1", Type: "inline", Data: "AAAA"},
+		},
+		Tracks: []Track{{
+			Name:      "video",
+			Packaging: PackagingLOC,
+			IsLive:    new(true),
+			InitRef:   "init1",
+			Buffers:   &Buffers{Target: &target},
+		}},
+	}
+
+	data, err := json.Marshal(catalog)
+	require.NoError(t, err)
+
+	var decoded Catalog
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	require.Len(t, decoded.PublishTracks, 1)
+	assert.Equal(t, "logs", decoded.PublishTracks[0].Name)
+	assert.Equal(t, PackagingMoqLog, decoded.PublishTracks[0].Packaging)
+	require.Len(t, decoded.InitDataList, 1)
+	assert.Equal(t, "init1", decoded.InitDataList[0].ID)
+	assert.Equal(t, "inline", decoded.InitDataList[0].Type)
+	assert.Equal(t, "AAAA", decoded.InitDataList[0].Data)
+
+	require.NoError(t, decoded.Validate())
+}
+
+func TestCatalogValidate_CipherSuiteRequiredWithEncryptionScheme(t *testing.T) {
+	catalog := Catalog{
+		Version: 1,
+		Tracks: []Track{{
+			Name:             "video",
+			Packaging:        PackagingLOC,
+			IsLive:           new(true),
+			EncryptionScheme: "cenc",
+			CipherSuite:      "", // missing
+		}},
+	}
+
+	err := catalog.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cipherSuite is required when encryptionScheme is set")
+}
+
+func TestCatalogValidate_EncryptionWithCipherSuiteIsValid(t *testing.T) {
+	catalog := Catalog{
+		Version: 1,
+		Tracks: []Track{{
+			Name:             "video",
+			Packaging:        PackagingLOC,
+			IsLive:           new(true),
+			EncryptionScheme: "cenc",
+			CipherSuite:      "AES_256_GCM",
+		}},
+	}
+
+	assert.NoError(t, catalog.Validate())
+}
+
+func TestCatalogValidate_DanglingInitRef(t *testing.T) {
+	catalog := Catalog{
+		Version: 1,
+		InitDataList: []InitDataRef{
+			{ID: "init1", Type: "inline", Data: "AAAA"},
+		},
+		Tracks: []Track{{
+			Name:      "video",
+			Packaging: PackagingLOC,
+			IsLive:    new(true),
+			InitRef:   "nonexistent",
+		}},
+	}
+
+	err := catalog.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "initRef")
+	assert.Contains(t, err.Error(), "does not match any initDataList id")
+}
+
+func TestCatalogValidate_ValidInitRef(t *testing.T) {
+	catalog := Catalog{
+		Version: 1,
+		InitDataList: []InitDataRef{
+			{ID: "init1", Type: "inline", Data: "AAAA"},
+		},
+		Tracks: []Track{{
+			Name:      "video",
+			Packaging: PackagingLOC,
+			IsLive:    new(true),
+			InitRef:   "init1",
+		}},
+	}
+
+	assert.NoError(t, catalog.Validate())
+}
+
+func TestCatalogValidate_DuplicateInitDataListIDs(t *testing.T) {
+	catalog := Catalog{
+		Version: 1,
+		InitDataList: []InitDataRef{
+			{ID: "init1", Type: "inline", Data: "AAAA"},
+			{ID: "init1", Type: "inline", Data: "BBBB"},
+		},
+		Tracks: []Track{{
+			Name:      "video",
+			Packaging: PackagingLOC,
+			IsLive:    new(true),
+			InitRef:   "init1",
+		}},
+	}
+
+	err := catalog.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate init id")
+}
+
+func TestCatalogValidate_BadInitDataListType(t *testing.T) {
+	catalog := Catalog{
+		Version: 1,
+		InitDataList: []InitDataRef{
+			{ID: "init1", Type: "url", Data: "x"},
+		},
+	}
+
+	err := catalog.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `type must be "inline"`)
+}
+
+func TestCatalogValidate_InitDataListMissingID(t *testing.T) {
+	catalog := Catalog{
+		Version: 1,
+		InitDataList: []InitDataRef{
+			{Type: "inline", Data: "x"},
+		},
+	}
+
+	err := catalog.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "id is required")
+}
+
+func TestInitDataRef_RoundTrip(t *testing.T) {
+	ref := InitDataRef{
+		ID:   "init1",
+		Type: "inline",
+		Data: "AAAA",
+		ExtraFields: map[string]json.RawMessage{
+			"custom": json.RawMessage(`42`),
+		},
+	}
+
+	data, err := json.Marshal(ref)
+	require.NoError(t, err)
+
+	var decoded InitDataRef
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	assert.Equal(t, "init1", decoded.ID)
+	assert.Equal(t, "inline", decoded.Type)
+	assert.Equal(t, "AAAA", decoded.Data)
+	assert.Contains(t, decoded.ExtraFields, "custom")
+}
+
+func TestBuffers_RoundTrip(t *testing.T) {
+	target := int64(500)
+	min := int64(100)
+	max := int64(2000)
+	b := Buffers{
+		Target: &target,
+		Min:    &min,
+		Max:    &max,
+		ExtraFields: map[string]json.RawMessage{
+			"unknown": json.RawMessage(`"x"`),
+		},
+	}
+
+	data, err := json.Marshal(b)
+	require.NoError(t, err)
+
+	var decoded Buffers
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	require.NotNil(t, decoded.Target)
+	assert.Equal(t, target, *decoded.Target)
+	require.NotNil(t, decoded.Min)
+	assert.Equal(t, min, *decoded.Min)
+	require.NotNil(t, decoded.Max)
+	assert.Equal(t, max, *decoded.Max)
+	assert.Contains(t, decoded.ExtraFields, "unknown")
+}
+
+func TestBuffers_Clone_Nil(t *testing.T) {
+	var b *Buffers
+	assert.Nil(t, b.Clone())
+}
+
+func TestAccessibilityDescriptor_RoundTrip(t *testing.T) {
+	desc := AccessibilityDescriptor{
+		Scheme: "cea",
+		Value:  "708",
+		ExtraFields: map[string]json.RawMessage{
+			"channel": json.RawMessage(`3`),
+		},
+	}
+
+	data, err := json.Marshal(desc)
+	require.NoError(t, err)
+
+	var decoded AccessibilityDescriptor
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	assert.Equal(t, "cea", decoded.Scheme)
+	assert.Equal(t, "708", decoded.Value)
+	assert.Contains(t, decoded.ExtraFields, "channel")
 }

@@ -1,4 +1,4 @@
-// Package msf implements the MOQT Streaming Format (MSF) draft-ietf-moq-msf-00.
+// Package msf implements the MOQT Streaming Format (MSF) draft-ietf-moq-msf-01.
 //
 // The package provides a self-contained representation of MSF catalog objects
 // and timeline records, along with validation and delta-application logic.

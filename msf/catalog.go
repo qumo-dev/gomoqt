@@ -17,9 +17,15 @@ const (
 	PackagingMediaTimeline Packaging = "mediatimeline"
 	// PackagingEventTimeline identifies an event timeline track.
 	PackagingEventTimeline Packaging = "eventtimeline"
+	// PackagingMoqLog identifies a MoQ log publish track (draft-ietf-moq-msf-01, [MOQLOG]).
+	PackagingMoqLog Packaging = "moqlog"
+	// PackagingMoqMetrics identifies a MoQ metrics publish track (draft-ietf-moq-msf-01, [MOQMETRICS]).
+	PackagingMoqMetrics Packaging = "moqmetrics"
 	// PackagingCMAF identifies CMAF-packaged media content.
+	// Non-spec extension retained for backward compatibility.
 	PackagingCMAF Packaging = "cmaf"
 	// PackagingLegacy identifies legacy timestamp+payload packaging.
+	// Non-spec extension retained for backward compatibility.
 	PackagingLegacy Packaging = "legacy"
 )
 
@@ -28,9 +34,9 @@ const inheritedNamespaceSentinel = "\x00catalog"
 type deltaOperationKind string
 
 const (
-	deltaOperationAdd    deltaOperationKind = "addTracks"
-	deltaOperationRemove deltaOperationKind = "removeTracks"
-	deltaOperationClone  deltaOperationKind = "cloneTracks"
+	deltaOperationAdd    deltaOperationKind = "add"
+	deltaOperationRemove deltaOperationKind = "remove"
+	deltaOperationClone  deltaOperationKind = "clone"
 )
 
 // ValidationError contains one or more validation problems.
@@ -49,7 +55,7 @@ func (p Packaging) String() string {
 // IsKnown reports whether the packaging value is one of the package constants.
 func (p Packaging) IsKnown() bool {
 	switch p {
-	case PackagingLOC, PackagingMediaTimeline, PackagingEventTimeline, PackagingCMAF, PackagingLegacy:
+	case PackagingLOC, PackagingMediaTimeline, PackagingEventTimeline, PackagingMoqLog, PackagingMoqMetrics, PackagingCMAF, PackagingLegacy:
 		return true
 	default:
 		return false
@@ -72,6 +78,10 @@ const (
 	RoleSubtitle Role = "subtitle"
 	// RoleSignLanguage identifies a sign-language video track.
 	RoleSignLanguage Role = "signlanguage"
+	// RoleLog identifies a log publishing track (draft-ietf-moq-msf-01, [MOQLOG]).
+	RoleLog Role = "log"
+	// RoleMetrics identifies a metrics publishing track (draft-ietf-moq-msf-01, [MOQMETRICS]).
+	RoleMetrics Role = "metrics"
 )
 
 // String returns the role value as it should appear in JSON.
@@ -82,11 +92,54 @@ func (r Role) String() string {
 // IsKnown reports whether the role value is one of the package constants.
 func (r Role) IsKnown() bool {
 	switch r {
-	case RoleVideo, RoleAudio, RoleAudioDescription, RoleCaption, RoleSubtitle, RoleSignLanguage:
+	case RoleVideo, RoleAudio, RoleAudioDescription, RoleCaption, RoleSubtitle, RoleSignLanguage, RoleLog, RoleMetrics:
 		return true
 	default:
 		return false
 	}
+}
+
+// InitDataRef represents a single entry in the catalog's Initialization Data
+// List (draft-ietf-moq-msf-01 §5.1.7). Tracks reference an entry by its ID via
+// the initRef track attribute. This version of the specification defines a
+// single allowed Type, "inline", whose Data is base64-encoded init data.
+type InitDataRef struct {
+	// ID is the unique-within-catalog reference for this init data.
+	ID string `json:"-"`
+	// Type identifies how Data is interpreted; only "inline" is defined.
+	Type string `json:"-"`
+	// Data holds the init payload (base64 when Type == "inline").
+	Data string `json:"-"`
+
+	// ExtraFields stores unknown JSON properties for round-tripping.
+	ExtraFields map[string]json.RawMessage `json:"-"`
+}
+
+// Buffers represents a track's target jitter-buffer configuration
+// (draft-ietf-moq-msf-01 §5.2.9) in integer milliseconds. Keys are optional;
+// unknown keys are preserved in ExtraFields per the spec's "MUST be ignored".
+type Buffers struct {
+	// Target is the target buffer in milliseconds.
+	Target *int64 `json:"-"`
+	// Min is the minimum buffer in milliseconds.
+	Min *int64 `json:"-"`
+	// Max is the maximum buffer in milliseconds.
+	Max *int64 `json:"-"`
+
+	// ExtraFields stores unknown JSON properties for round-tripping.
+	ExtraFields map[string]json.RawMessage `json:"-"`
+}
+
+// AccessibilityDescriptor describes an embedded accessibility feature of a
+// track (draft-ietf-moq-msf-01 §5.2.44), such as CEA-608/CEA-708 captions.
+type AccessibilityDescriptor struct {
+	// Scheme identifies the accessibility scheme (e.g. a URN).
+	Scheme string `json:"-"`
+	// Value specifies the accessibility channels or features available.
+	Value string `json:"-"`
+
+	// ExtraFields stores unknown JSON properties for round-tripping.
+	ExtraFields map[string]json.RawMessage `json:"-"`
 }
 
 // Error returns the aggregated validation problems as a single error string.
@@ -108,7 +161,7 @@ func newValidationError(problems []string) error {
 }
 
 // Catalog represents an independent MSF catalog object as defined in
-// draft-ietf-moq-msf-00.
+// draft-ietf-moq-msf-01.
 //
 // Delta updates are modeled separately by CatalogDelta so that the type system
 // can distinguish a complete catalog snapshot from a set of incremental
@@ -127,6 +180,12 @@ type Catalog struct {
 
 	// Tracks holds the complete set of track descriptions in the catalog.
 	Tracks []Track `json:"-"`
+	// PublishTracks holds tracks to which subscribers may publish data, such as
+	// logs or metrics (draft-ietf-moq-msf-01 §5.1.5).
+	PublishTracks []Track `json:"-"`
+	// InitDataList holds referenced initialization data entries; tracks point
+	// at an entry by ID via the initRef attribute (draft-ietf-moq-msf-01 §5.1.7).
+	InitDataList []InitDataRef `json:"-"`
 
 	// ExtraFields stores any JSON properties that don't correspond to the
 	// explicit fields above; they are preserved when re-encoding the catalog.
@@ -169,8 +228,14 @@ type Track struct {
 	RenderGroup *int64 `json:"-"`
 	// Alternate group for quality switching.
 	AltGroup *int64 `json:"-"`
-	// Base64-encoded initialization data (e.g. codec config).
-	InitData string `json:"-"`
+	// InitRef points at the id of an entry in the catalog InitDataList
+	// (draft-ietf-moq-msf-01 §5.2.13). Replaces the draft-00 inline initData.
+	InitRef string `json:"-"`
+	// Buffers is the optional target jitter-buffer configuration.
+	Buffers *Buffers `json:"-"`
+	// Template is the optional media-timeline template for fixed-duration
+	// segments (draft-ietf-moq-msf-01 §5.2.15 / §7.4).
+	Template *Template `json:"-"`
 	// List of track names this track depends on.
 	Depends []string
 	// Temporal and spatial identifiers for H.264/AV1 layers, optional.
@@ -183,7 +248,14 @@ type Track struct {
 	// Frame rate, timescale, and bitrate all optional and pointer-typed.
 	Framerate *int64 `json:"-"`
 	Timescale *int64 `json:"-"`
-	Bitrate   *int64 `json:"-"`
+	// Bitrate is the maximum bitrate in bits per second (draft-ietf-moq-msf-01 §5.2.22).
+	Bitrate *int64 `json:"-"`
+	// AvgBitrate is the average bitrate over the track lifetime (§5.2.23).
+	AvgBitrate *int64 `json:"-"`
+	// MaxGopDuration is the maximum duration between random access points, in ms (§5.2.24).
+	MaxGopDuration *int64 `json:"-"`
+	// MaxGroupDuration is the maximum duration of any MOQT Group, in ms (§5.2.25).
+	MaxGroupDuration *int64 `json:"-"`
 	// Spatial dimensions; pointers so zero width/height can be distinguished
 	// from the field being absent.
 	Width  *int64 `json:"-"`
@@ -196,8 +268,27 @@ type Track struct {
 	DisplayHeight *int64 `json:"-"`
 	// Language tag, optional.
 	Language string `json:"-"`
+	// ParentNamespace names the source track namespace for clone operations
+	// (draft-ietf-moq-msf-01 §5.2.34).
+	ParentNamespace string `json:"-"`
 	// TrackDuration in milliseconds; must not be set when IsLive is true.
 	TrackDuration *int64 `json:"-"`
+	// ConnectionURI is the MOQT endpoint URI for a publish track (§5.2.36).
+	ConnectionURI string `json:"-"`
+	// Token is an auth/credential token for the track, e.g. for publish tracks (§5.2.37).
+	Token string `json:"-"`
+	// EncryptionScheme identifies the encryption scheme protecting the track (§5.2.38).
+	EncryptionScheme string `json:"-"`
+	// CipherSuite identifies the AEAD cipher suite; required when EncryptionScheme is set (§5.2.39).
+	CipherSuite string `json:"-"`
+	// KeyID identifies the key material used for encryption (§5.2.40).
+	KeyID string `json:"-"`
+	// TrackBaseKey is the base64-encoded base key material for the track (§5.2.41).
+	TrackBaseKey string `json:"-"`
+	// AuthInfo signals that authorization is required, keyed by scheme (§5.2.42).
+	AuthInfo map[string]json.RawMessage `json:"-"`
+	// Accessibility lists embedded accessibility features (§5.2.44).
+	Accessibility []AccessibilityDescriptor `json:"-"`
 
 	// ExtraFields stores unknown JSON key/values for round-tripping.
 	ExtraFields map[string]json.RawMessage `json:"-"`
@@ -229,11 +320,13 @@ func (c Catalog) Clone() Catalog {
 	clone := c
 	clone.GeneratedAt = cloneInt64Ptr(c.GeneratedAt)
 	clone.Tracks = cloneTracks(c.Tracks)
+	clone.PublishTracks = cloneTracks(c.PublishTracks)
+	clone.InitDataList = cloneInitDataRefs(c.InitDataList)
 	clone.ExtraFields = cloneRawMessages(c.ExtraFields)
 	return clone
 }
 
-// Validate checks whether the catalog satisfies the package's MSF draft-00 rules.
+// Validate checks whether the catalog satisfies the package's MSF draft-01 rules.
 func (c Catalog) Validate() error {
 	var problems []string
 
@@ -243,6 +336,14 @@ func (c Catalog) Validate() error {
 	for i := range c.Tracks {
 		if errs := c.Tracks[i].validate(""); len(errs) > 0 {
 			prefix := "tracks[" + itoa(i) + "]: "
+			for _, err := range errs {
+				problems = append(problems, prefix+err)
+			}
+		}
+	}
+	for i := range c.PublishTracks {
+		if errs := c.PublishTracks[i].validate(""); len(errs) > 0 {
+			prefix := "publishTracks[" + itoa(i) + "]: "
 			for _, err := range errs {
 				problems = append(problems, prefix+err)
 			}
@@ -277,6 +378,40 @@ func (c Catalog) Validate() error {
 			if !isDuplicate {
 				seen[i] = id
 			}
+		}
+	}
+
+	// Validate the Initialization Data List: unique ids, known type, and that
+	// every track initRef resolves to a declared entry (draft-ietf-moq-msf-01 §5.1.7/§5.2.13).
+	initIDs := make(map[string]struct{}, len(c.InitDataList))
+	for i, ref := range c.InitDataList {
+		if ref.Type != "" && ref.Type != "inline" {
+			problems = append(problems, "initDataList["+itoa(i)+"]: type must be \"inline\"")
+		}
+		if ref.ID == "" {
+			problems = append(problems, "initDataList["+itoa(i)+"]: id is required")
+			continue
+		}
+		if _, ok := initIDs[ref.ID]; ok {
+			problems = append(problems, fmt.Sprintf("initDataList[%d]: duplicate init id %q", i, ref.ID))
+			continue
+		}
+		initIDs[ref.ID] = struct{}{}
+	}
+	if len(initIDs) > 0 {
+		checkRef := func(prefix, ref string) {
+			if ref == "" {
+				return
+			}
+			if _, ok := initIDs[ref]; !ok {
+				problems = append(problems, fmt.Sprintf("%s: initRef %q does not match any initDataList id", prefix, ref))
+			}
+		}
+		for i := range c.Tracks {
+			checkRef("tracks["+itoa(i)+"]", c.Tracks[i].InitRef)
+		}
+		for i := range c.PublishTracks {
+			checkRef("publishTracks["+itoa(i)+"]", c.PublishTracks[i].InitRef)
 		}
 	}
 
@@ -390,7 +525,7 @@ func (c *Catalog) removeTrack(track TrackRef) error {
 
 // cloneTrack creates a new track by cloning an existing parent and applying overrides.
 func (c *Catalog) cloneTrack(track TrackClone) error {
-	parentID := TrackID{Namespace: track.effectiveNamespace(c.DefaultNamespace), Name: track.ParentName}
+	parentID := TrackID{Namespace: track.parentEffectiveNamespace(c.DefaultNamespace), Name: track.ParentName}
 	parent, _, ok := c.findTrack(parentID)
 	if !ok {
 		return fmt.Errorf("msf: cannot clone unknown parent track %q", parentID.String())
@@ -427,7 +562,7 @@ var (
 	_ json.Unmarshaler = (*Catalog)(nil)
 )
 
-// MarshalJSON encodes the independent catalog in the draft-00 JSON shape.
+// MarshalJSON encodes the independent catalog in the draft-01 JSON shape.
 func (c Catalog) MarshalJSON() ([]byte, error) {
 	obj := make(map[string]any, len(c.ExtraFields)+2)
 	for key, raw := range c.ExtraFields {
@@ -444,6 +579,12 @@ func (c Catalog) MarshalJSON() ([]byte, error) {
 	}
 	if len(c.Tracks) > 0 {
 		obj["tracks"] = c.Tracks
+	}
+	if len(c.PublishTracks) > 0 {
+		obj["publishTracks"] = c.PublishTracks
+	}
+	if len(c.InitDataList) > 0 {
+		obj["initDataList"] = c.InitDataList
 	}
 	return json.Marshal(obj)
 }
@@ -478,7 +619,15 @@ func (c *Catalog) UnmarshalJSON(data []byte) error {
 			if err := json.Unmarshal(entry.Value, &c.Tracks); err != nil {
 				return err
 			}
-		case "deltaUpdate", "addTracks", "removeTracks", "cloneTracks":
+		case "publishTracks":
+			if err := json.Unmarshal(entry.Value, &c.PublishTracks); err != nil {
+				return err
+			}
+		case "initDataList":
+			if err := json.Unmarshal(entry.Value, &c.InitDataList); err != nil {
+				return err
+			}
+		case "deltaUpdate":
 			return fmt.Errorf("msf: delta catalog fields are not allowed in an independent catalog")
 		default:
 			c.ExtraFields[entry.Key] = cloneRawMessage(entry.Value)
@@ -501,17 +650,26 @@ func (t Track) Clone() Track {
 	clone.TargetLatency = cloneInt64Ptr(t.TargetLatency)
 	clone.RenderGroup = cloneInt64Ptr(t.RenderGroup)
 	clone.AltGroup = cloneInt64Ptr(t.AltGroup)
+	clone.Buffers = t.Buffers.Clone()
+	clone.Template = t.Template.Clone()
 	clone.TemporalID = cloneInt64Ptr(t.TemporalID)
 	clone.SpatialID = cloneInt64Ptr(t.SpatialID)
 	clone.Framerate = cloneInt64Ptr(t.Framerate)
 	clone.Timescale = cloneInt64Ptr(t.Timescale)
 	clone.Bitrate = cloneInt64Ptr(t.Bitrate)
+	clone.AvgBitrate = cloneInt64Ptr(t.AvgBitrate)
+	clone.MaxGopDuration = cloneInt64Ptr(t.MaxGopDuration)
+	clone.MaxGroupDuration = cloneInt64Ptr(t.MaxGroupDuration)
 	clone.Width = cloneInt64Ptr(t.Width)
 	clone.Height = cloneInt64Ptr(t.Height)
 	clone.SampleRate = cloneInt64Ptr(t.SampleRate)
 	clone.DisplayWidth = cloneInt64Ptr(t.DisplayWidth)
 	clone.DisplayHeight = cloneInt64Ptr(t.DisplayHeight)
 	clone.TrackDuration = cloneInt64Ptr(t.TrackDuration)
+	if t.AuthInfo != nil {
+		clone.AuthInfo = cloneRawMessages(t.AuthInfo)
+	}
+	clone.Accessibility = cloneAccessibility(t.Accessibility)
 	return clone
 }
 
@@ -583,10 +741,20 @@ func (t Track) validate(path string) []string {
 		if t.IsLive == nil {
 			problems = append(problems, prefix+"isLive is required for loc tracks")
 		}
+	case PackagingMoqLog, PackagingMoqMetrics:
+		if t.EventType != "" {
+			problems = append(problems, prefix+"eventType must not be set for "+string(t.Packaging)+" tracks")
+		}
 	default:
 		if t.EventType != "" {
 			problems = append(problems, prefix+"eventType must only be set for eventtimeline tracks")
 		}
+	}
+
+	// Encryption: cipherSuite MUST be present when encryptionScheme is specified
+	// (draft-ietf-moq-msf-01 §5.2.39).
+	if t.EncryptionScheme != "" && t.CipherSuite == "" {
+		problems = append(problems, prefix+"cipherSuite is required when encryptionScheme is set")
 	}
 
 	return problems
@@ -624,8 +792,14 @@ func (t *Track) applyOverrides(override Track) {
 	if override.hasField("altGroup") {
 		t.AltGroup = cloneInt64Ptr(override.AltGroup)
 	}
-	if override.hasField("initData") {
-		t.InitData = override.InitData
+	if override.hasField("initRef") {
+		t.InitRef = override.InitRef
+	}
+	if override.hasField("buffers") {
+		t.Buffers = override.Buffers.Clone()
+	}
+	if override.hasField("template") {
+		t.Template = override.Template.Clone()
 	}
 	if override.hasField("depends") {
 		t.Depends = slices.Clone(override.Depends)
@@ -651,6 +825,15 @@ func (t *Track) applyOverrides(override Track) {
 	if override.hasField("bitrate") {
 		t.Bitrate = cloneInt64Ptr(override.Bitrate)
 	}
+	if override.hasField("avgBitrate") {
+		t.AvgBitrate = cloneInt64Ptr(override.AvgBitrate)
+	}
+	if override.hasField("maxGopDuration") {
+		t.MaxGopDuration = cloneInt64Ptr(override.MaxGopDuration)
+	}
+	if override.hasField("maxGroupDuration") {
+		t.MaxGroupDuration = cloneInt64Ptr(override.MaxGroupDuration)
+	}
 	if override.hasField("width") {
 		t.Width = cloneInt64Ptr(override.Width)
 	}
@@ -672,8 +855,35 @@ func (t *Track) applyOverrides(override Track) {
 	if override.hasField("lang") {
 		t.Language = override.Language
 	}
+	if override.hasField("parentNamespace") {
+		t.ParentNamespace = override.ParentNamespace
+	}
 	if override.hasField("trackDuration") {
 		t.TrackDuration = cloneInt64Ptr(override.TrackDuration)
+	}
+	if override.hasField("connectionUri") {
+		t.ConnectionURI = override.ConnectionURI
+	}
+	if override.hasField("token") {
+		t.Token = override.Token
+	}
+	if override.hasField("encryptionScheme") {
+		t.EncryptionScheme = override.EncryptionScheme
+	}
+	if override.hasField("cipherSuite") {
+		t.CipherSuite = override.CipherSuite
+	}
+	if override.hasField("keyId") {
+		t.KeyID = override.KeyID
+	}
+	if override.hasField("trackBaseKey") {
+		t.TrackBaseKey = override.TrackBaseKey
+	}
+	if override.hasField("authInfo") {
+		t.AuthInfo = cloneRawMessages(override.AuthInfo)
+	}
+	if override.hasField("accessibility") {
+		t.Accessibility = cloneAccessibility(override.Accessibility)
 	}
 	if t.presentFields == nil {
 		t.presentFields = make(map[string]struct{})
@@ -730,8 +940,14 @@ func (t Track) marshalObject() map[string]any {
 	if t.AltGroup != nil {
 		obj["altGroup"] = *t.AltGroup
 	}
-	if t.InitData != "" {
-		obj["initData"] = t.InitData
+	if t.InitRef != "" {
+		obj["initRef"] = t.InitRef
+	}
+	if t.Buffers != nil {
+		obj["buffers"] = t.Buffers
+	}
+	if t.Template != nil {
+		obj["template"] = t.Template
 	}
 	if t.Depends != nil {
 		obj["depends"] = t.Depends
@@ -757,6 +973,15 @@ func (t Track) marshalObject() map[string]any {
 	if t.Bitrate != nil {
 		obj["bitrate"] = *t.Bitrate
 	}
+	if t.AvgBitrate != nil {
+		obj["avgBitrate"] = *t.AvgBitrate
+	}
+	if t.MaxGopDuration != nil {
+		obj["maxGopDuration"] = *t.MaxGopDuration
+	}
+	if t.MaxGroupDuration != nil {
+		obj["maxGroupDuration"] = *t.MaxGroupDuration
+	}
 	if t.Width != nil {
 		obj["width"] = *t.Width
 	}
@@ -778,13 +1003,40 @@ func (t Track) marshalObject() map[string]any {
 	if t.Language != "" {
 		obj["lang"] = t.Language
 	}
+	if t.ParentNamespace != "" {
+		obj["parentNamespace"] = t.ParentNamespace
+	}
 	if t.TrackDuration != nil {
 		obj["trackDuration"] = *t.TrackDuration
+	}
+	if t.ConnectionURI != "" {
+		obj["connectionUri"] = t.ConnectionURI
+	}
+	if t.Token != "" {
+		obj["token"] = t.Token
+	}
+	if t.EncryptionScheme != "" {
+		obj["encryptionScheme"] = t.EncryptionScheme
+	}
+	if t.CipherSuite != "" {
+		obj["cipherSuite"] = t.CipherSuite
+	}
+	if t.KeyID != "" {
+		obj["keyId"] = t.KeyID
+	}
+	if t.TrackBaseKey != "" {
+		obj["trackBaseKey"] = t.TrackBaseKey
+	}
+	if t.AuthInfo != nil {
+		obj["authInfo"] = cloneRawMessages(t.AuthInfo)
+	}
+	if t.Accessibility != nil {
+		obj["accessibility"] = t.Accessibility
 	}
 	return obj
 }
 
-// MarshalJSON encodes the track using the draft-00 object form.
+// MarshalJSON encodes the track using the draft-01 object form.
 func (t Track) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t.marshalObject())
 }
@@ -842,10 +1094,22 @@ func (t *Track) unmarshalObject(raw map[string]json.RawMessage) error {
 			if err := json.Unmarshal(value, &t.AltGroup); err != nil {
 				return err
 			}
-		case "initData":
-			if err := json.Unmarshal(value, &t.InitData); err != nil {
+		case "initRef":
+			if err := json.Unmarshal(value, &t.InitRef); err != nil {
 				return err
 			}
+		case "buffers":
+			var v Buffers
+			if err := json.Unmarshal(value, &v); err != nil {
+				return err
+			}
+			t.Buffers = &v
+		case "template":
+			var v Template
+			if err := json.Unmarshal(value, &v); err != nil {
+				return err
+			}
+			t.Template = &v
 		case "depends":
 			if err := json.Unmarshal(value, &t.Depends); err != nil {
 				return err
@@ -878,6 +1142,18 @@ func (t *Track) unmarshalObject(raw map[string]json.RawMessage) error {
 			if err := json.Unmarshal(value, &t.Bitrate); err != nil {
 				return err
 			}
+		case "avgBitrate":
+			if err := json.Unmarshal(value, &t.AvgBitrate); err != nil {
+				return err
+			}
+		case "maxGopDuration":
+			if err := json.Unmarshal(value, &t.MaxGopDuration); err != nil {
+				return err
+			}
+		case "maxGroupDuration":
+			if err := json.Unmarshal(value, &t.MaxGroupDuration); err != nil {
+				return err
+			}
 		case "width":
 			if err := json.Unmarshal(value, &t.Width); err != nil {
 				return err
@@ -906,8 +1182,45 @@ func (t *Track) unmarshalObject(raw map[string]json.RawMessage) error {
 			if err := json.Unmarshal(value, &t.Language); err != nil {
 				return err
 			}
+		case "parentNamespace":
+			if err := json.Unmarshal(value, &t.ParentNamespace); err != nil {
+				return err
+			}
 		case "trackDuration":
 			if err := json.Unmarshal(value, &t.TrackDuration); err != nil {
+				return err
+			}
+		case "connectionUri":
+			if err := json.Unmarshal(value, &t.ConnectionURI); err != nil {
+				return err
+			}
+		case "token":
+			if err := json.Unmarshal(value, &t.Token); err != nil {
+				return err
+			}
+		case "encryptionScheme":
+			if err := json.Unmarshal(value, &t.EncryptionScheme); err != nil {
+				return err
+			}
+		case "cipherSuite":
+			if err := json.Unmarshal(value, &t.CipherSuite); err != nil {
+				return err
+			}
+		case "keyId":
+			if err := json.Unmarshal(value, &t.KeyID); err != nil {
+				return err
+			}
+		case "trackBaseKey":
+			if err := json.Unmarshal(value, &t.TrackBaseKey); err != nil {
+				return err
+			}
+		case "authInfo":
+			t.AuthInfo = make(map[string]json.RawMessage)
+			if err := json.Unmarshal(value, &t.AuthInfo); err != nil {
+				return err
+			}
+		case "accessibility":
+			if err := json.Unmarshal(value, &t.Accessibility); err != nil {
 				return err
 			}
 		default:
@@ -953,8 +1266,12 @@ func (t Track) hasField(field string) bool {
 		return t.RenderGroup != nil
 	case "altGroup":
 		return t.AltGroup != nil
-	case "initData":
-		return t.InitData != ""
+	case "initRef":
+		return t.InitRef != ""
+	case "buffers":
+		return t.Buffers != nil
+	case "template":
+		return t.Template != nil
 	case "depends":
 		return t.Depends != nil
 	case "temporalId":
@@ -971,6 +1288,12 @@ func (t Track) hasField(field string) bool {
 		return t.Timescale != nil
 	case "bitrate":
 		return t.Bitrate != nil
+	case "avgBitrate":
+		return t.AvgBitrate != nil
+	case "maxGopDuration":
+		return t.MaxGopDuration != nil
+	case "maxGroupDuration":
+		return t.MaxGroupDuration != nil
 	case "width":
 		return t.Width != nil
 	case "height":
@@ -985,8 +1308,26 @@ func (t Track) hasField(field string) bool {
 		return t.DisplayHeight != nil
 	case "lang":
 		return t.Language != ""
+	case "parentNamespace":
+		return t.ParentNamespace != ""
 	case "trackDuration":
 		return t.TrackDuration != nil
+	case "connectionUri":
+		return t.ConnectionURI != ""
+	case "token":
+		return t.Token != ""
+	case "encryptionScheme":
+		return t.EncryptionScheme != ""
+	case "cipherSuite":
+		return t.CipherSuite != ""
+	case "keyId":
+		return t.KeyID != ""
+	case "trackBaseKey":
+		return t.TrackBaseKey != ""
+	case "authInfo":
+		return t.AuthInfo != nil
+	case "accessibility":
+		return t.Accessibility != nil
 	default:
 		return false
 	}
@@ -1095,3 +1436,206 @@ func itoa(i int) string {
 	// Fallback for larger numbers
 	return fmt.Sprint(i)
 }
+
+// --- InitDataRef -----------------------------------------------------------
+
+// Clone returns a deep copy of the init-data reference.
+func (r InitDataRef) Clone() InitDataRef {
+	clone := r
+	clone.ExtraFields = cloneRawMessages(r.ExtraFields)
+	return clone
+}
+
+// MarshalJSON encodes the init-data reference as the draft-01 object form.
+func (r InitDataRef) MarshalJSON() ([]byte, error) {
+	obj := make(map[string]any, len(r.ExtraFields)+3)
+	for key, raw := range r.ExtraFields {
+		obj[key] = cloneRawMessage(raw)
+	}
+	if r.ID != "" {
+		obj["id"] = r.ID
+	}
+	if r.Type != "" {
+		obj["type"] = r.Type
+	}
+	if r.Data != "" {
+		obj["data"] = r.Data
+	}
+	return json.Marshal(obj)
+}
+
+// UnmarshalJSON decodes the init-data reference, preserving unknown keys.
+func (r *InitDataRef) UnmarshalJSON(data []byte) error {
+	*r = InitDataRef{ExtraFields: make(map[string]json.RawMessage)}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	for key, value := range raw {
+		switch key {
+		case "id":
+			if err := json.Unmarshal(value, &r.ID); err != nil {
+				return err
+			}
+		case "type":
+			if err := json.Unmarshal(value, &r.Type); err != nil {
+				return err
+			}
+		case "data":
+			if err := json.Unmarshal(value, &r.Data); err != nil {
+				return err
+			}
+		default:
+			r.ExtraFields[key] = cloneRawMessage(value)
+		}
+	}
+	return nil
+}
+
+// cloneInitDataRefs returns a deep copy of an InitDataRef slice.
+func cloneInitDataRefs(in []InitDataRef) []InitDataRef {
+	if in == nil {
+		return nil
+	}
+	out := make([]InitDataRef, len(in))
+	for i, ref := range in {
+		out[i] = ref.Clone()
+	}
+	return out
+}
+
+// --- Buffers ---------------------------------------------------------------
+
+// Clone returns a deep copy of the buffers configuration. Safe on a nil receiver.
+func (b *Buffers) Clone() *Buffers {
+	if b == nil {
+		return nil
+	}
+	clone := *b
+	clone.Target = cloneInt64Ptr(b.Target)
+	clone.Min = cloneInt64Ptr(b.Min)
+	clone.Max = cloneInt64Ptr(b.Max)
+	clone.ExtraFields = cloneRawMessages(b.ExtraFields)
+	return &clone
+}
+
+// MarshalJSON encodes the buffers object, preserving unknown keys.
+func (b Buffers) MarshalJSON() ([]byte, error) {
+	obj := make(map[string]any, len(b.ExtraFields)+3)
+	for key, raw := range b.ExtraFields {
+		obj[key] = cloneRawMessage(raw)
+	}
+	if b.Target != nil {
+		obj["target"] = *b.Target
+	}
+	if b.Min != nil {
+		obj["min"] = *b.Min
+	}
+	if b.Max != nil {
+		obj["max"] = *b.Max
+	}
+	return json.Marshal(obj)
+}
+
+// UnmarshalJSON decodes the buffers object, preserving unknown keys.
+func (b *Buffers) UnmarshalJSON(data []byte) error {
+	*b = Buffers{ExtraFields: make(map[string]json.RawMessage)}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	for key, value := range raw {
+		switch key {
+		case "target":
+			var v int64
+			if err := json.Unmarshal(value, &v); err != nil {
+				return err
+			}
+			b.Target = &v
+		case "min":
+			var v int64
+			if err := json.Unmarshal(value, &v); err != nil {
+				return err
+			}
+			b.Min = &v
+		case "max":
+			var v int64
+			if err := json.Unmarshal(value, &v); err != nil {
+				return err
+			}
+			b.Max = &v
+		default:
+			b.ExtraFields[key] = cloneRawMessage(value)
+		}
+	}
+	return nil
+}
+
+// --- AccessibilityDescriptor -----------------------------------------------
+
+// Clone returns a deep copy of the accessibility descriptor.
+func (a AccessibilityDescriptor) Clone() AccessibilityDescriptor {
+	clone := a
+	clone.ExtraFields = cloneRawMessages(a.ExtraFields)
+	return clone
+}
+
+// MarshalJSON encodes the accessibility descriptor, preserving unknown keys.
+func (a AccessibilityDescriptor) MarshalJSON() ([]byte, error) {
+	obj := make(map[string]any, len(a.ExtraFields)+2)
+	for key, raw := range a.ExtraFields {
+		obj[key] = cloneRawMessage(raw)
+	}
+	if a.Scheme != "" {
+		obj["scheme"] = a.Scheme
+	}
+	if a.Value != "" {
+		obj["value"] = a.Value
+	}
+	return json.Marshal(obj)
+}
+
+// UnmarshalJSON decodes the accessibility descriptor, preserving unknown keys.
+func (a *AccessibilityDescriptor) UnmarshalJSON(data []byte) error {
+	*a = AccessibilityDescriptor{ExtraFields: make(map[string]json.RawMessage)}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	for key, value := range raw {
+		switch key {
+		case "scheme":
+			if err := json.Unmarshal(value, &a.Scheme); err != nil {
+				return err
+			}
+		case "value":
+			if err := json.Unmarshal(value, &a.Value); err != nil {
+				return err
+			}
+		default:
+			a.ExtraFields[key] = cloneRawMessage(value)
+		}
+	}
+	return nil
+}
+
+// cloneAccessibility returns a deep copy of an AccessibilityDescriptor slice.
+func cloneAccessibility(in []AccessibilityDescriptor) []AccessibilityDescriptor {
+	if in == nil {
+		return nil
+	}
+	out := make([]AccessibilityDescriptor, len(in))
+	for i, desc := range in {
+		out[i] = desc.Clone()
+	}
+	return out
+}
+
+var (
+	_ json.Marshaler   = InitDataRef{}
+	_ json.Unmarshaler = (*InitDataRef)(nil)
+	_ json.Marshaler   = Buffers{}
+	_ json.Unmarshaler = (*Buffers)(nil)
+	_ json.Marshaler   = AccessibilityDescriptor{}
+	_ json.Unmarshaler = (*AccessibilityDescriptor)(nil)
+)
