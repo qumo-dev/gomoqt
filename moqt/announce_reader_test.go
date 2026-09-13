@@ -55,7 +55,7 @@ func TestAnnouncementReader_ReceiveAnnouncement(t *testing.T) {
 				require.NoError(t, err)
 
 				data := append([]byte(nil), buf.Bytes()...)
-				mockStream := &FakeQUICStream{Reads: []streamResult{{Data: data}}}
+				mockStream := &FakeQUICStream{Reads: []streamResult{{Data: data}, {Err: io.EOF}}}
 				ras := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
 				return ras
 			}(),
@@ -180,8 +180,7 @@ func TestAnnouncementReader_Close(t *testing.T) {
 }
 
 func TestAnnouncementReader_CloseWithError(t *testing.T) {
-	mockStream := &FakeQUICStream{
-	}
+	mockStream := &FakeQUICStream{}
 
 	ras := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
 
@@ -197,8 +196,7 @@ func TestAnnouncementReader_CloseWithError(t *testing.T) {
 }
 
 func TestAnnouncementReader_CloseWithError_MultipleClose(t *testing.T) {
-	mockStream := &FakeQUICStream{
-	}
+	mockStream := &FakeQUICStream{}
 
 	ras := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})
 
@@ -264,7 +262,7 @@ func TestAnnouncementReader_ConcurrentAccess(t *testing.T) {
 
 	data := append([]byte(nil), buf.Bytes()...)
 	mockStream := &FakeQUICStream{
-		Reads: []streamResult{{Data: data}},
+		Reads: []streamResult{{Data: data}, {Err: io.EOF}},
 	}
 
 	ras := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"})

@@ -9,9 +9,14 @@ import (
 var _ QUICListener = (*FakeEarlyListener)(nil)
 
 // connResult is one queued outcome for a listener accept.
+// Block parks the call until Close or ctx cancellation, modelling a listener
+// that has no further connection to hand out — use it as the trailing entry so
+// a serve loop stops after the queued connections instead of re-accepting the
+// repeated last entry forever.
 type connResult struct {
-	Conn StreamConn
-	Err  error
+	Conn  StreamConn
+	Err   error
+	Block bool
 }
 
 // FakeEarlyListener is a fake implementation of QUICListener that models
@@ -20,8 +25,8 @@ type connResult struct {
 //   - After Close(), Accept() returns the close error (ErrServerClosed by default)
 //
 // Accepts is a results queue: entries are returned in order and the last entry
-// repeats once exhausted. An empty queue blocks until Close or ctx cancellation,
-// which is the usual shape for a listener under test.
+// repeats once exhausted. An empty queue, like a Block entry, parks until Close
+// or ctx cancellation, which is the usual shape for a listener under test.
 type FakeEarlyListener struct {
 	Accepts []connResult
 
@@ -51,8 +56,10 @@ func (m *FakeEarlyListener) Accept(ctx context.Context) (StreamConn, error) {
 	if len(m.Accepts) > 0 {
 		r := m.Accepts[min(m.acceptIdx, len(m.Accepts)-1)]
 		m.acceptIdx++
-		m.mu.Unlock()
-		return r.Conn, r.Err
+		if !r.Block {
+			m.mu.Unlock()
+			return r.Conn, r.Err
+		}
 	}
 	m.initCloseCh()
 	ch := m.closeCh

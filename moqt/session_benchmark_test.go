@@ -36,7 +36,12 @@ func BenchmarkSession_Subscribe(b *testing.B) {
 			// Every opened stream completes the subscribe handshake: the single
 			// queue entry repeats, so each Read re-serves the whole SUBSCRIBE_OK.
 			conn.OpenStreams = []biStreamResult{
-				{Stream: &FakeQUICStream{Reads: []streamResult{{Data: benchmarkSubscribeOk(b), Err: io.EOF}}}},
+				{Stream: &FakeQUICStream{
+					Reads: []streamResult{{Data: benchmarkSubscribeOk(b), Err: io.EOF}},
+					// Discard the subscribe writes: recording every iteration's
+					// bytes would show up as growing allocs/op.
+					WriteTo: io.Discard,
+				}},
 			}
 
 			session := newTestSession(conn)
@@ -74,7 +79,12 @@ func BenchmarkSession_ConcurrentSubscribe(b *testing.B) {
 			// The fake is mutex-guarded, so one shared stream serves every
 			// concurrent open; its single queue entry repeats per Read.
 			conn.OpenStreams = []biStreamResult{
-				{Stream: &FakeQUICStream{Reads: []streamResult{{Data: benchmarkSubscribeOk(b), Err: io.EOF}}}},
+				{Stream: &FakeQUICStream{
+					Reads: []streamResult{{Data: benchmarkSubscribeOk(b), Err: io.EOF}},
+					// Discard the subscribe writes: recording every iteration's
+					// bytes would show up as growing allocs/op.
+					WriteTo: io.Discard,
+				}},
 			}
 
 			session := newTestSession(conn)

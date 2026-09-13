@@ -39,6 +39,8 @@ func (q *resultQueue) next() (streamResult, bool) {
 }
 
 // readInto copies the current entry into p, advancing once it is consumed.
+// An entry carrying both Data and Err yields its error only with the final
+// chunk, so a caller buffer smaller than Data cannot truncate the data.
 func (q *resultQueue) readInto(p []byte) (int, error) {
 	r, ok := q.next()
 	if !ok {
@@ -46,11 +48,17 @@ func (q *resultQueue) readInto(p []byte) (int, error) {
 	}
 	n := copy(p, r.Data[min(q.off, len(r.Data)):])
 	q.off += n
-	if q.off >= len(r.Data) {
-		q.idx++
-		q.off = 0
+	if q.off < len(r.Data) {
+		return n, nil
 	}
+	q.idx++
+	q.off = 0
 	return n, r.Err
+}
+
+// drained reports whether every queued entry has been consumed at least once.
+func (q *resultQueue) drained() bool {
+	return q.idx >= len(q.entries)
 }
 
 // blocking reports whether the current entry parks the caller.
@@ -88,7 +96,10 @@ type FakeQUICStream struct {
 
 	// ReadFrom/WriteTo back the stream with a real io source/sink, for cases a
 	// finite queue cannot express — an endless generator, or a discard sink in
-	// a benchmark. They apply only once the corresponding queue is exhausted.
+	// a benchmark. They apply only when the corresponding queue is empty; an
+	// explicit queue wins over the sink. Bytes routed to WriteTo are NOT also
+	// recorded for Written, so a benchmark sink does not grow an ever-larger
+	// capture buffer; use Written or WriteTo, not both.
 	ReadFrom io.Reader
 	WriteTo  io.Writer
 
@@ -114,6 +125,10 @@ type FakeQUICStream struct {
 	WriteNotify       chan<- struct{}
 	CancelReadNotify  chan<- transport.StreamErrorCode
 	CancelWriteNotify chan<- transport.StreamErrorCode
+	// DrainNotify is signalled once every queued read has been consumed, which
+	// is what a test means by "the stream has been fully read" — ReadNotify
+	// fires on every Read, including the first.
+	DrainNotify chan<- struct{}
 
 	reads  resultQueue
 	writes resultQueue
@@ -197,7 +212,7 @@ func (f *FakeQUICStream) Read(p []byte) (int, error) {
 		if f.reads.idx < len(f.reads.entries)-1 {
 			f.reads.idx++
 			f.reads.off = 0
-			n, err := f.reads.readInto(p)
+			n, err := f.readQueueLocked(p)
 			f.mu.Unlock()
 			signal(f.ReadNotify)
 			return n, err
@@ -213,9 +228,19 @@ func (f *FakeQUICStream) Read(p []byte) (int, error) {
 		signal(notify)
 		return n, err
 	}
-	n, err := f.reads.readInto(p)
+	n, err := f.readQueueLocked(p)
 	f.mu.Unlock()
 	signal(notify)
+	return n, err
+}
+
+// readQueueLocked serves the queue and signals DrainNotify once it is
+// exhausted. Must be called with f.mu held.
+func (f *FakeQUICStream) readQueueLocked(p []byte) (int, error) {
+	n, err := f.reads.readInto(p)
+	if f.reads.drained() {
+		signal(f.DrainNotify)
+	}
 	return n, err
 }
 
@@ -259,7 +284,9 @@ func (f *FakeQUICStream) Write(p []byte) (int, error) {
 	if len(f.writes.entries) > 0 {
 		sink = nil // an explicit queue result wins over the sink
 	}
-	if err == nil {
+	if err == nil && sink == nil {
+		// A sink owns the bytes; recording them too would make every
+		// discard-backed benchmark grow an unbounded capture buffer.
 		f.written = append(f.written, p...)
 	}
 	notify := f.WriteNotify

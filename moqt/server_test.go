@@ -390,11 +390,8 @@ func TestServer_ListenAndServeTLS_InvalidKeyPair(t *testing.T) {
 }
 
 func TestServer_Close_ClosesListenersAndWTServer(t *testing.T) {
-	// FakeWebTransportServer has no call-tracking for Close (Server.Close
-	// discards its return value), so we can no longer observe the Close call
-	// directly; this test now only verifies the listener side and that
-	// Server.Close itself succeeds.
-	s := &Server{WebTransportServer: &FakeWebTransportServer{}}
+	wts := &FakeWebTransportServer{}
+	s := &Server{WebTransportServer: wts}
 	s.init()
 
 	ln := &FakeEarlyListener{}
@@ -404,6 +401,7 @@ func TestServer_Close_ClosesListenersAndWTServer(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, s.shuttingDown())
 	assert.True(t, ln.closed)
+	assert.Equal(t, 1, wts.CloseCalls(), "Server.Close must close the WebTransport server")
 }
 
 // TestServer_Close_ReturnsWithActiveSession is a regression test for #181:
@@ -690,12 +688,6 @@ func TestWebTransportHandler_Fallback_NoHandler(t *testing.T) {
 }
 
 func TestServer_ServeQUICListener_AcceptsAndServesConn(t *testing.T) {
-	// FakeEarlyListener's Accepts queue has no way to express "return this
-	// connection once, then block" (connResult has no Block field, unlike
-	// biStreamResult), so the queue keeps repeating the single entry until the
-	// listener is closed. ServeNotify uses a non-blocking, buffered send, so
-	// the repeated dispatch is harmless (later notifications are dropped)
-	// rather than the close(served) panic a plain channel would hit.
 	served := make(chan StreamConn, 1)
 	s := &Server{
 		WebTransportServer: &FakeWebTransportServer{
@@ -706,8 +698,11 @@ func TestServer_ServeQUICListener_AcceptsAndServesConn(t *testing.T) {
 	conn := &FakeStreamConn{}
 	conn.TLSState = &tls.ConnectionState{NegotiatedProtocol: NextProtoH3}
 
+	// Hand out the connection exactly once, then park: without the trailing
+	// Block the repeated last entry would re-accept the same connection in a
+	// tight loop, spawning an unbounded number of serve goroutines.
 	ln := &FakeEarlyListener{
-		Accepts: []connResult{{Conn: conn}},
+		Accepts: []connResult{{Conn: conn}, {Block: true}},
 	}
 
 	errCh := make(chan error, 1)

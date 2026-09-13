@@ -26,7 +26,10 @@ type FakeQUICSendStream struct {
 
 	// WriteTo backs the stream with a real sink, for cases a finite queue
 	// cannot express — typically a discard sink in a benchmark. It applies
-	// only once the Writes queue is exhausted.
+	// only when the Writes queue is empty; an explicit queue wins over the
+	// sink. Bytes routed to WriteTo are NOT also recorded for Written, so a
+	// benchmark sink does not grow an ever-larger capture buffer; use Written
+	// or WriteTo, not both.
 	WriteTo io.Writer
 
 	ParentCtx context.Context // optional parent context
@@ -74,7 +77,9 @@ func (m *FakeQUICSendStream) Write(p []byte) (int, error) {
 	if len(m.writes.entries) > 0 {
 		sink = nil // an explicit queue result wins over the sink
 	}
-	if err == nil {
+	if err == nil && sink == nil {
+		// A sink owns the bytes; recording them too would make every
+		// discard-backed benchmark grow an unbounded capture buffer.
 		m.written = append(m.written, p...)
 	}
 	notify := m.WriteNotify

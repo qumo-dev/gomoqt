@@ -1263,9 +1263,6 @@ func TestSession_Probe(t *testing.T) {
 
 	probeStream := &FakeQUICStream{}
 
-	var written bytes.Buffer
-	probeStream.WriteTo = &written
-
 	// Publisher sends one ProbeMessage then EOF.
 	var response bytes.Buffer
 	require.NoError(t, message.ProbeMessage{Bitrate: 250000}.Encode(&response))
@@ -1284,7 +1281,7 @@ func TestSession_Probe(t *testing.T) {
 	assert.Equal(t, uint64(250000), got.Bitrate)
 
 	// Verify subscriber wrote StreamTypeProbe + ProbeMessage{Bitrate:1000000}.
-	r := bytes.NewReader(written.Bytes())
+	r := bytes.NewReader(probeStream.Written())
 	var streamType message.StreamType
 	require.NoError(t, streamType.Decode(r))
 	assert.Equal(t, message.StreamTypeProbe, streamType)
@@ -1391,9 +1388,11 @@ func TestSession_ProcessBiStream_ProbeTargets(t *testing.T) {
 	require.NoError(t, message.ProbeMessage{Bitrate: 1000000}.Encode(&incoming))
 	data := incoming.Bytes()
 
-	readCalled := make(chan struct{}, 1)
-	probeStream.ReadNotify = readCalled
-	probeStream.Reads = []streamResult{{Data: data}}
+	// DrainNotify, not ReadNotify: the test needs "both targets decoded", and
+	// ReadNotify would already fire on the first read of the first target.
+	readDrained := make(chan struct{}, 1)
+	probeStream.DrainNotify = readDrained
+	probeStream.Reads = []streamResult{{Data: data}, {Err: io.EOF}}
 
 	done := make(chan struct{})
 	go func() {
@@ -1403,7 +1402,7 @@ func TestSession_ProcessBiStream_ProbeTargets(t *testing.T) {
 
 	// Wait until the stream has been fully consumed.
 	select {
-	case <-readCalled:
+	case <-readDrained:
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("stream was not consumed")
 	}
@@ -1427,11 +1426,9 @@ func TestSession_ProcessBiStream_ProbeTargets(t *testing.T) {
 func TestSession_Probe_SecondCallReusesStream(t *testing.T) {
 	conn := &FakeStreamConn{}
 
-	var written bytes.Buffer
 	// Use conn.Context() as parent so that closing the session also cancels the
 	// stream context, allowing readProbeResults to exit cleanly.
 	probeStream := &FakeQUICStream{ParentCtx: conn.Context()}
-	probeStream.WriteTo = &written
 	// Block reads so the stream stays open throughout the test.
 	probeStream.Reads = []streamResult{{Block: true}}
 
@@ -1452,7 +1449,7 @@ func TestSession_Probe_SecondCallReusesStream(t *testing.T) {
 	assert.Equal(t, 1, conn.OpenCalls(), "second Probe call must not open a new stream")
 
 	// Both ProbeMessages must have been written (after the StreamType header).
-	r := bytes.NewReader(written.Bytes())
+	r := bytes.NewReader(probeStream.Written())
 	var streamType message.StreamType
 	require.NoError(t, streamType.Decode(r))
 	assert.Equal(t, message.StreamTypeProbe, streamType)
@@ -1506,11 +1503,8 @@ func TestSession_ProcessBiStream_ProbeReplacesExisting(t *testing.T) {
 	require.NoError(t, message.ProbeMessage{Bitrate: 500000}.Encode(&stream1Buf))
 	stream1Data := stream1Buf.Bytes()
 
-	stream1Active := make(chan struct{})
 	stream1 := &FakeQUICStream{}
-	// Serve the data, signal once consumed, then block until stream2 arrives
-	// and cancels this stream.
-	stream1.ReadNotify = stream1Active
+	// Serve the data, then block until stream2 arrives and cancels this stream.
 	stream1.Reads = []streamResult{{Data: stream1Data}, {Block: true}}
 
 	stream1Done := make(chan struct{})
@@ -1519,12 +1513,14 @@ func TestSession_ProcessBiStream_ProbeReplacesExisting(t *testing.T) {
 		close(stream1Done)
 	}()
 
-	// Wait until stream1 is fully consumed (registered as incomingProbeStream).
-	select {
-	case <-stream1Active:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("stream1 initial data was not consumed")
-	}
+	// Wait for the effect, not for a read: stream2 must not arrive before
+	// stream1 is the registered incoming probe stream, or there is nothing for
+	// it to replace.
+	require.Eventually(t, func() bool {
+		session.incomingProbeMu.Lock()
+		defer session.incomingProbeMu.Unlock()
+		return session.incomingProbeStream == stream1
+	}, 500*time.Millisecond, time.Millisecond, "stream1 was not registered as the incoming probe stream")
 
 	// stream2: sends StreamTypeProbe + initial ProbeMessage, then EOF.
 	var stream2Buf bytes.Buffer
@@ -1653,13 +1649,13 @@ func TestSession_ProbeTargets_LatestValueSemantics(t *testing.T) {
 	require.NoError(t, message.ProbeMessage{Bitrate: 1200000}.Encode(&incoming))
 
 	data := incoming.Bytes()
-	// bgDone fires when the background goroutine has consumed all update messages
-	// and hits EOF on the next read.
-	var bgOnce sync.Once
-	bgDone := make(chan struct{})
+	// bgDone fires when the background goroutine has consumed every queued
+	// update. The trailing EOF entry is what ends the stream afterwards: a
+	// lone data entry would repeat forever instead.
+	bgDone := make(chan struct{}, 1)
 	probeStream := &FakeQUICStream{}
-	probeStream.Reads = []streamResult{{Data: data}}
-	bgOnce.Do(func() { close(bgDone) })
+	probeStream.DrainNotify = bgDone
+	probeStream.Reads = []streamResult{{Data: data}, {Err: io.EOF}}
 
 	done := make(chan struct{})
 	go func() {
@@ -2621,12 +2617,12 @@ func TestSession_ProbeMonitor_WritesBitrateBackOnInboundStream(t *testing.T) {
 	incomingData := incoming.Bytes()
 	unblockRead := make(chan struct{})
 
-	var written bytes.Buffer
-	var writtenMu sync.Mutex
+	// Capture through the fake's own mutex-guarded recorder: the monitor writes
+	// from its goroutine while the assertion below reads, and a bare
+	// bytes.Buffer behind WriteTo would be a data race.
 	probeStream := &FakeQUICStream{}
 	probeStream.ReadGate = unblockRead
 	probeStream.Reads = []streamResult{{Data: incomingData}, {Block: true}}
-	probeStream.WriteTo = &written
 
 	done := make(chan struct{})
 	go func() {
@@ -2641,11 +2637,7 @@ func TestSession_ProbeMonitor_WritesBitrateBackOnInboundStream(t *testing.T) {
 	// The first monitor writeback carries Bitrate=0 (the baseline tick); a
 	// subsequent tick must write back a non-zero measured bitrate.
 	assert.Eventually(t, func() bool {
-		writtenMu.Lock()
-		snapshot := make([]byte, written.Len())
-		copy(snapshot, written.Bytes())
-		writtenMu.Unlock()
-		for r := bytes.NewReader(snapshot); ; {
+		for r := bytes.NewReader(probeStream.Written()); ; {
 			var pm message.ProbeMessage
 			if err := pm.Decode(r); err != nil {
 				break

@@ -15,7 +15,8 @@ type FakeWebTransportServer struct {
 	// ServeNotify receives each served connection. Sends are non-blocking.
 	ServeNotify chan<- StreamConn
 
-	served []StreamConn
+	served     []StreamConn
+	closeCalls int
 }
 
 func (m *FakeWebTransportServer) ServeQUICConn(conn StreamConn) error {
@@ -43,8 +44,17 @@ func (m *FakeWebTransportServer) Served() []StreamConn {
 	return out
 }
 
+// CloseCalls returns how many times Close has been called. Server.Close
+// discards the returned error, so this is the only way to observe the call.
+func (m *FakeWebTransportServer) CloseCalls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.closeCalls
+}
+
 func (m *FakeWebTransportServer) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.closeCalls++
 	return m.CloseErr
 }

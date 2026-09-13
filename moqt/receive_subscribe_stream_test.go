@@ -48,13 +48,15 @@ func TestNewReceiveSubscribeStream(t *testing.T) {
 // (i.e. must not start a background reader). The stream is touched only when the
 // publisher opts into updates by calling readUpdate.
 func TestReceiveSubscribeStream_ConstructorReadsNothing(t *testing.T) {
-	// The fake's results queue has no call counter, so a background reader
-	// is proven absent indirectly: queue a real SUBSCRIBE_UPDATE, wait past
-	// any window a rogue reader would have consumed it in, then confirm
-	// readUpdate() still observes the untouched message.
+	// A background reader is proven absent indirectly: queue exactly one real
+	// SUBSCRIBE_UPDATE followed by EOF, wait past any window a rogue reader
+	// would have consumed it in, then confirm readUpdate() still observes the
+	// untouched message. The EOF terminator is load-bearing — without it the
+	// queue repeats its last entry, a consumed update would simply be
+	// re-served, and the test could never fail.
 	buf := &bytes.Buffer{}
 	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 9}.Encode(buf))
-	mockStream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}}}
+	mockStream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
 
 	rss := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 	t.Cleanup(func() { _ = rss.closeWithError(SubscribeErrorCodeInternal) })
@@ -110,7 +112,7 @@ func TestReceiveSubscribeStream_ReadUpdate(t *testing.T) {
 	// and makes it the current TrackConfig.
 	buf := &bytes.Buffer{}
 	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 5}.Encode(buf))
-	mockStream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}}}
+	mockStream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
 
 	rss := newReceiveSubscribeStream(SubscribeID(123), mockStream, &SubscribeConfig{Priority: TrackPriority(1)})
 
@@ -125,7 +127,7 @@ func TestReceiveSubscribeStream_ReadUpdate_Sequence(t *testing.T) {
 	buf := &bytes.Buffer{}
 	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 1}.Encode(buf))
 	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 2}.Encode(buf))
-	mockStream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}}}
+	mockStream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
 
 	rss := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
@@ -185,7 +187,7 @@ func TestReceiveSubscribeStream_ReadUpdate_ConcurrentIsSerialized(t *testing.T) 
 	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 2}.Encode(buf))
 	// FakeQUICStream.Read is internally mutex-serialized, so no extra locking
 	// is needed here to make concurrent Read calls safe.
-	mockStream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}}}
+	mockStream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
 
 	rss := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
