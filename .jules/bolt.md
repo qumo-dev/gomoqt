@@ -24,3 +24,6 @@
 ## YYYY-MM-DD - Avoid Map Initialization Overhead for Small Lists
 **Learning:** For finding duplicates or validating uniqueness in very small slices (e.g., N <= 16), an O(N^2) nested loop comparison against a stack-allocated array is measurably faster than using a `map[T]struct{}`. Even if escape analysis optimizes the map to the stack, the nested loop avoids map initialization and element hashing overhead on the happy path.
 **Action:** Provide a fast-path fallback using a small, stack-allocated array and O(N^2) loop for uniqueness detection on small bounded items before falling back to a map.
+## 2026-07-20 - Correct bounds tracking in array duplicate detection
+**Learning:** When optimizing duplicate detection using a fixed-size stack array and an O(N^2) loop, if duplicates are skipped, a dedicated counter (e.g., `numSeen`) must be used to track the actual number of unique items added to the array. Using the outer loop index (`i`) for the inner loop bounds will diverge from the true array length if duplicates exist, causing subsequent comparisons against zero-initialized elements or array bounds violations.
+**Action:** Always maintain a separate counter variable for the actual length of a stack array being incrementally populated when elements can be skipped.
