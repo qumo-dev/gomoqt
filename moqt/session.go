@@ -83,6 +83,7 @@ type Session struct {
 	outgoingProbeMu     sync.Mutex
 	outgoingProbeStream transport.Stream
 	probeResponseCh     chan ProbeResult
+	probeChannelsMu     sync.Mutex
 
 	// incoming probe stream state (publisher side)
 	incomingProbeMu     sync.Mutex
@@ -363,8 +364,10 @@ func (s *Session) CloseWithError(code SessionErrorCode, msg string) error {
 	// Wait for finishing handling streams
 	s.wg.Wait()
 
+	s.probeChannelsMu.Lock()
 	close(s.probeResponseCh)
 	close(s.probeTargetsCh)
+	s.probeChannelsMu.Unlock()
 
 	return nil
 }
@@ -685,15 +688,7 @@ func (sess *Session) Probe(targetBitrate uint64) (<-chan ProbeResult, error) {
 				}
 				sess.bitrateTracker.record(pm.Bitrate, time.Now())
 
-				// Update the latest probe result, dropping it if the channel buffer is full (i.e. the previous value has not been consumed).
-				select {
-				case <-sess.probeResponseCh:
-				default:
-				}
-				select {
-				case sess.probeResponseCh <- ProbeResult{Bitrate: pm.Bitrate}:
-				default:
-				}
+				sess.notifyProbe(sess.probeResponseCh, ProbeResult{Bitrate: pm.Bitrate})
 
 				select {
 				case <-streamCtx.Done():
@@ -1145,38 +1140,32 @@ func (sess *Session) handleProbeStream(stream transport.Stream) error {
 			return err
 		}
 
-		// Update the latest probe target, dropping it if the channel buffer is full (i.e. the previous value has not been consumed).
-		select {
-		case <-sess.probeTargetsCh:
-		default:
-		}
-		select {
-		case sess.probeTargetsCh <- ProbeResult{Bitrate: pm.Bitrate}:
-		default:
-		}
+		sess.notifyProbe(sess.probeTargetsCh, ProbeResult{Bitrate: pm.Bitrate})
 	}
 }
 
 func (sess *Session) notifyResults(bitrate uint64) {
+	sess.notifyProbe(sess.probeResponseCh, ProbeResult{Bitrate: bitrate})
+}
+
+func (sess *Session) notifyProbe(ch chan ProbeResult, result ProbeResult) {
+	sess.probeChannelsMu.Lock()
+	defer sess.probeChannelsMu.Unlock()
+	if sess.terminating() {
+		return
+	}
 	select {
-	case <-sess.probeResponseCh:
+	case <-ch:
 	default:
 	}
 	select {
-	case sess.probeResponseCh <- ProbeResult{Bitrate: bitrate}:
+	case ch <- result:
 	default:
 	}
 }
 
 func (sess *Session) notifyTargets(bitrate uint64) {
-	select {
-	case <-sess.probeTargetsCh:
-	default:
-	}
-	select {
-	case sess.probeTargetsCh <- ProbeResult{Bitrate: bitrate}:
-	default:
-	}
+	sess.notifyProbe(sess.probeTargetsCh, ProbeResult{Bitrate: bitrate})
 }
 
 // startProbeMonitorOnce starts the bitrate monitor goroutine the first time a
