@@ -292,12 +292,13 @@ Deno.test({
 	sanitizeResources: false,
 	fn: async (t) => {
 		await t.step("constructor and ready sends client message", async () => {
-			const mock = new MockWebTransportSession({});
+			const mock = new MockWebTransportSession({ protocol: "moq-lite-05" });
 
 			const session = new Session({ transport: mock });
 			await session.ready;
 
 			assertInstanceOf(session, Session);
+			assertEquals(session.protocol, "moq-lite-05");
 			await session.close();
 		});
 

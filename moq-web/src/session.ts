@@ -138,6 +138,13 @@ export class Session {
 	 * raw close object is intentionally not exposed.
 	 */
 	readonly closed: Promise<MOQCloseInfo>;
+	/**
+	 * The negotiated MOQ protocol identifier, such as `moq-lite-05`.
+	 *
+	 * This is available after {@link ready} resolves and is useful for
+	 * diagnostics and version-gated application behavior.
+	 */
+	readonly protocol: string;
 	#resolveClosed!: (info: MOQCloseInfo) => void;
 	#webtransport: StreamConn;
 	#ctx: Context;
@@ -175,6 +182,7 @@ export class Session {
 
 	constructor(options: SessionInit) {
 		this.#webtransport = options.transport;
+		this.protocol = this.#webtransport.protocol;
 		this.mux = options.mux ?? DefaultTrackMux;
 		this.#fetchHandler = options.fetchHandler;
 		this.#onGoaway = options.onGoaway;
