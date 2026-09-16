@@ -11,99 +11,6 @@ import (
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
-var errGroupOpenSchedulerClosed = errors.New("group open scheduler is closed")
-
-type groupOpenScheduler struct {
-	mu      sync.Mutex
-	waiters []*groupOpenWaiter
-	closed  bool
-}
-
-type groupOpenWaiter struct {
-	ready       chan struct{}
-	readyClosed bool
-	closed      bool
-}
-
-func (s *groupOpenScheduler) reserve() *groupOpenWaiter {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	waiter := &groupOpenWaiter{ready: make(chan struct{})}
-	if s.closed {
-		waiter.closed = true
-		waiter.readyClosed = true
-		close(waiter.ready)
-		return waiter
-	}
-	if len(s.waiters) == 0 {
-		waiter.readyClosed = true
-		close(waiter.ready)
-	}
-	s.waiters = append(s.waiters, waiter)
-	return waiter
-}
-
-func (s *groupOpenScheduler) wait(ctx context.Context, waiter *groupOpenWaiter) error {
-	select {
-	case <-waiter.ready:
-		s.mu.Lock()
-		closed := waiter.closed
-		s.mu.Unlock()
-		if closed {
-			return errGroupOpenSchedulerClosed
-		}
-		return nil
-	case <-ctx.Done():
-		s.mu.Lock()
-		for i, candidate := range s.waiters {
-			if candidate != waiter {
-				continue
-			}
-			s.waiters = append(s.waiters[:i], s.waiters[i+1:]...)
-			if i == 0 && len(s.waiters) > 0 {
-				s.waiters[0].readyClosed = true
-				close(s.waiters[0].ready)
-			}
-			break
-		}
-		s.mu.Unlock()
-		return context.Cause(ctx)
-	}
-}
-
-func (s *groupOpenScheduler) complete(waiter *groupOpenWaiter) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i, candidate := range s.waiters {
-		if candidate != waiter {
-			continue
-		}
-		s.waiters = append(s.waiters[:i], s.waiters[i+1:]...)
-		if i == 0 && len(s.waiters) > 0 {
-			s.waiters[0].readyClosed = true
-			close(s.waiters[0].ready)
-		}
-		return
-	}
-}
-
-func (s *groupOpenScheduler) close() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return
-	}
-	s.closed = true
-	for _, waiter := range s.waiters {
-		waiter.closed = true
-		if !waiter.readyClosed {
-			waiter.readyClosed = true
-			close(waiter.ready)
-		}
-	}
-	s.waiters = nil
-}
-
 type groupWriterManager struct {
 	mu           sync.Mutex
 	activeGroups map[*GroupWriter]struct{}
@@ -185,13 +92,9 @@ type TrackWriter struct {
 	groupManager *groupWriterManager
 
 	mu sync.RWMutex
-	// openMu serializes sequence allocation with ordered-open reservation.
-	// It does not serialize stream opening or group frame writes.
-	openMu sync.Mutex
 
 	// groupSequence is atomically incremented for each OpenGroup call
 	groupSequence atomic.Uint64
-	openScheduler groupOpenScheduler
 
 	openUniStreamFunc func(context.Context) (transport.SendStream, error)
 
@@ -214,7 +117,6 @@ func (w *TrackWriter) Close() error {
 	if w.groupManager != nil {
 		groupManager := w.groupManager
 		w.groupManager = nil
-		w.openScheduler.close()
 
 		activeGroups := groupManager.activeGroups
 
@@ -251,7 +153,6 @@ func (w *TrackWriter) CloseWithError(code SubscribeErrorCode) {
 	if w.groupManager != nil {
 		groupManager := w.groupManager
 		w.groupManager = nil
-		w.openScheduler.close()
 
 		activeGroups := groupManager.activeGroups
 
@@ -282,17 +183,9 @@ func (w *TrackWriter) CloseWithError(code SubscribeErrorCode) {
 // ctx is done, instead of failing. Pass w.Context() to bound the open to the
 // track's lifetime, or a deadline-bearing context to drop a group under
 // pressure rather than wait.
-//
-// When the subscriber requests Ordered, concurrently opened groups are
-// admitted to stream creation in OpenGroup/OpenGroupAt reservation order.
-// Ordering covers the group stream type and group header only; frame writes
-// remain concurrent after OpenGroup returns.
 func (w *TrackWriter) OpenGroup(ctx context.Context) (*GroupWriter, error) {
-	w.openMu.Lock()
 	seq := GroupSequence(w.groupSequence.Add(1))
-	waiter := w.reserveOrderedOpen()
-	w.openMu.Unlock()
-	return w.openGroupWithSequence(ctx, seq, waiter)
+	return w.openGroupWithSequence(ctx, seq)
 }
 
 // OpenGroupAt opens a new group with the specified sequence number.
@@ -301,7 +194,6 @@ func (w *TrackWriter) OpenGroup(ctx context.Context) (*GroupWriter, error) {
 //
 // ctx controls cancellation and backpressure the same way as OpenGroup.
 func (w *TrackWriter) OpenGroupAt(ctx context.Context, seq GroupSequence) (*GroupWriter, error) {
-	w.openMu.Lock()
 	// Advance the internal counter to avoid collisions with subsequent
 	// OpenGroup calls. CAS loop ensures correctness under concurrency.
 	for {
@@ -314,17 +206,13 @@ func (w *TrackWriter) OpenGroupAt(ctx context.Context, seq GroupSequence) (*Grou
 			break
 		}
 	}
-	waiter := w.reserveOrderedOpen()
-	w.openMu.Unlock()
-	return w.openGroupWithSequence(ctx, seq, waiter)
+	return w.openGroupWithSequence(ctx, seq)
 }
 
 // SkipGroups skips the next n group sequences without opening them.
 // This is useful when you need to intentionally create gaps in the sequence,
 // for example, when dropping groups due to packet loss or priority decisions.
 func (w *TrackWriter) SkipGroups(n uint64) {
-	w.openMu.Lock()
-	defer w.openMu.Unlock()
 	w.groupSequence.Add(n)
 }
 
@@ -413,26 +301,10 @@ func (w *TrackWriter) ReadUpdate() (*SubscribeConfig, error) {
 	return w.subscribeStream.readUpdate()
 }
 
-func (w *TrackWriter) reserveOrderedOpen() *groupOpenWaiter {
-	if !w.TrackConfig().Ordered {
-		return nil
-	}
-	return w.openScheduler.reserve()
-}
-
 // openGroupWithSequence is the internal implementation for opening a group with a specific sequence.
-func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequence, waiter *groupOpenWaiter) (*GroupWriter, error) {
+func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequence) (*GroupWriter, error) {
 	if ctx.Done() == nil {
 		ctx = w.Context()
-	}
-	if waiter != nil {
-		if err := w.openScheduler.wait(ctx, waiter); err != nil {
-			if errors.Is(err, errGroupOpenSchedulerClosed) {
-				return nil, ErrClosedSession
-			}
-			return nil, err
-		}
-		defer w.openScheduler.complete(waiter)
 	}
 
 	// Avoid accessing s.ctx directly; it can be nil if the receiveSubscribeStream
@@ -474,7 +346,14 @@ func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequen
 		return nil, err
 	}
 
-	urgency, incremental := urgencyFor(w.TrackConfig().Priority)
+	config := w.TrackConfig()
+	urgency, incremental := urgencyFor(config.Priority)
+	if config.Ordered {
+		// Ordered is a non-blocking transport hint. RFC 9218's
+		// non-incremental mode lets the transport prefer completing this
+		// group stream without serializing OpenGroup or frame writes.
+		incremental = false
+	}
 	stream.SetPriority(urgency, incremental)
 
 	err = message.StreamTypeGroup.Encode(stream)

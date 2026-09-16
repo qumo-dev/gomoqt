@@ -6,7 +6,6 @@ import (
 	"errors"
 	"sync"
 	"testing"
-	"testing/synctest"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
 	"github.com/qumo-dev/gomoqt/transport"
@@ -161,6 +160,33 @@ func TestTrackWriter_OpenGroup_SetsPriority(t *testing.T) {
 	assert.True(t, ok, "SetPriority should have been called")
 	assert.Equal(t, wantUrgency, gotUrgency)
 	assert.Equal(t, wantIncremental, gotIncremental)
+}
+
+func TestTrackWriter_OpenGroup_OrderedSetsNonIncrementalPriority(t *testing.T) {
+	mockStream := &FakeQUICStream{}
+	substr := newReceiveSubscribeStream(
+		SubscribeID(1),
+		mockStream,
+		&SubscribeConfig{Priority: 200, Ordered: true},
+	)
+
+	var mockSendStream *FakeQUICSendStream
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
+		mockSendStream = &FakeQUICSendStream{}
+		return mockSendStream, nil
+	}
+
+	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {})
+
+	group, err := sender.OpenGroup(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, group)
+
+	wantUrgency, _ := urgencyFor(200)
+	gotUrgency, gotIncremental, ok := mockSendStream.LastPriority()
+	assert.True(t, ok, "SetPriority should have been called")
+	assert.Equal(t, wantUrgency, gotUrgency)
+	assert.False(t, gotIncremental)
 }
 
 func TestTrackWriter_ContextCancellation(t *testing.T) {
@@ -740,54 +766,5 @@ func TestTrackWriter_OpenGroup_GroupErrorStreamWriteFailures(t *testing.T) {
 		var groupErr *GroupError
 		require.ErrorAs(t, err, &groupErr)
 		assert.Same(t, streamErr, groupErr.StreamError)
-	})
-}
-
-func TestTrackWriter_OpenGroup_OrderedAdmission(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		substr := newReceiveSubscribeStream(
-			SubscribeID(1),
-			&FakeQUICStream{},
-			&SubscribeConfig{Ordered: true},
-		)
-		firstStarted := make(chan struct{})
-		secondStarted := make(chan struct{})
-		releaseFirst := make(chan struct{})
-		var streamNumber int
-
-		openUniStreamFunc := func(context.Context) (transport.SendStream, error) {
-			streamNumber++
-			if streamNumber == 1 {
-				close(firstStarted)
-				<-releaseFirst
-			} else {
-				close(secondStarted)
-			}
-			return &FakeQUICSendStream{}, nil
-		}
-		sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {})
-		results := make(chan error, 2)
-
-		go func() {
-			_, err := sender.OpenGroup(context.Background())
-			results <- err
-		}()
-		<-firstStarted
-
-		go func() {
-			_, err := sender.OpenGroup(context.Background())
-			results <- err
-		}()
-		synctest.Wait()
-		select {
-		case <-secondStarted:
-			assert.Fail(t, "second group started before the first group was released")
-		default:
-		}
-
-		close(releaseFirst)
-		synctest.Wait()
-		assert.NoError(t, <-results)
-		assert.NoError(t, <-results)
 	})
 }
