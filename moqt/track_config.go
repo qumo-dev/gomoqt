@@ -16,7 +16,6 @@ type SubscribeConfig struct {
 	// still written concurrently.
 	Ordered bool
 
-
 	MaxLatency uint64
 	StartGroup GroupSequence
 	EndGroup   GroupSequence

@@ -303,10 +303,6 @@ func (w *TrackWriter) ReadUpdate() (*SubscribeConfig, error) {
 
 // openGroupWithSequence is the internal implementation for opening a group with a specific sequence.
 func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequence) (*GroupWriter, error) {
-	if ctx.Done() == nil {
-		ctx = w.Context()
-	}
-
 	// Avoid accessing s.ctx directly; it can be nil if the receiveSubscribeStream
 	// has been cleared during Close(). Instead, capture the receiveSubscribeStream
 	// under lock and validate its context below.
@@ -331,8 +327,8 @@ func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequen
 		return nil, err
 	}
 
-	if w.groupManager == nil {
-		return nil, ErrClosedSession
+	if ctx.Done() == nil {
+		ctx = w.Context()
 	}
 
 	stream, err := w.openUniStreamFunc(ctx)
