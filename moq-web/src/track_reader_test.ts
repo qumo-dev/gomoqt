@@ -31,7 +31,7 @@ Deno.test("TrackReader", async (t) => {
 	);
 
 	await t.step(
-		"TrackReader.update proxies to subscribeStream update and readInfo returns info",
+		"TrackReader.update proxies to subscribeStream update",
 		async () => {
 			const [ctx] = withCancelCause(background());
 			const stream = new MockStream({});
@@ -41,7 +41,7 @@ Deno.test("TrackReader", async (t) => {
 				trackName: "name",
 				subscriberPriority: 0,
 			});
-			const ok = new SubscribeOkMessage({});
+			const ok = new SubscribeOkMessage({ group: 7 });
 			const sss = new SendSubscribeStream(ctx, stream, subscribe, ok);
 			const queue = new Queue<[any, any]>();
 			const onClose = () => {};
@@ -54,7 +54,8 @@ Deno.test("TrackReader", async (t) => {
 				endGroup: 0,
 			});
 			assertEquals(err, undefined);
-			assertEquals(tr.readInfo(), sss.info);
+			assertEquals(tr.resolvedStart, 7);
+			assertEquals(tr.ended, false);
 		},
 	);
 

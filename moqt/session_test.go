@@ -21,9 +21,20 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
 func newTestSession(conn StreamConn) *Session {
-	return newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil)
+	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{}, nil)
+	markPeerSetupReceived(sess, message.ProbeLevelReport)
+	return sess
+}
+
+// markPeerSetupReceived simulates receipt of the peer's SETUP message so
+// tests can exercise capability-gated APIs (e.g. Probe) without a Setup
+// Stream round trip.
+func markPeerSetupReceived(sess *Session, probeLevel uint64) {
+	if sess.peerSetupReceived.CompareAndSwap(false, true) {
+		sess.peerProbeLevel = probeLevel
+		close(sess.peerSetupCh)
+	}
 }
 
 func newTestSessionWithConn(tb testing.TB, opts ...func(*FakeStreamConn)) (*Session, *FakeStreamConn) {
@@ -74,7 +85,7 @@ func TestNewSession(t *testing.T) {
 			conn.TLSState = &tls.ConnectionState{NegotiatedProtocol: NextProtoMOQ}
 			conn.OpenStreams = []biStreamResult{{Err: io.EOF}}
 
-			session := newSession(conn, tt.mux, nil, nil, nil, nil, nil, nil)
+			session := newSession(conn, tt.mux, nil, nil, nil, nil, nil, sessionSetup{}, nil)
 
 			if tt.expectOK {
 				assert.NotNil(t, session, "newSession should not return nil")
@@ -117,7 +128,7 @@ func TestNewSessionWithNilMux(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			conn := &FakeStreamConn{}
 
-			session := newSession(conn, tt.mux, nil, nil, nil, nil, nil, nil)
+			session := newSession(conn, tt.mux, nil, nil, nil, nil, nil, sessionSetup{}, nil)
 
 			if tt.expectDefault {
 				assert.Equal(t, DefaultMux, session.mux, "should use DefaultMux when nil mux is provided")
@@ -139,7 +150,7 @@ func TestNewSession_ConfigIsCloned(t *testing.T) {
 	conn := &FakeStreamConn{}
 	cfg := &Config{ProbeInterval: 50 * time.Millisecond}
 
-	session := newSession(conn, nil, nil, cfg, nil, nil, nil, nil)
+	session := newSession(conn, nil, nil, cfg, nil, nil, nil, sessionSetup{}, nil)
 	defer session.CloseWithError(InternalSessionErrorCode, "terminate reason")
 
 	// mutate the original after newSession
@@ -237,13 +248,7 @@ func TestSession_Subscribe(t *testing.T) {
 			// Create a separate mock for the track stream that responds to the SUBSCRIBE protocol
 			mockTrackStream := &FakeQUICStream{}
 			// Create a SubscribeOkMessage response
-			subok := message.SubscribeOkMessage{
-				PublisherPriority:   7,
-				PublisherOrdered:    1,
-				PublisherMaxLatency: 500,
-				StartGroup:          5,
-				EndGroup:            10,
-			}
+			subok := message.SubscribeOkMessage{Group: 1}
 			var buf bytes.Buffer
 			_, _ = buf.Write([]byte{byte(message.MessageTypeSubscribeOk)})
 			err := subok.Encode(&buf)
@@ -291,8 +296,8 @@ func TestSession_Subscribe_SubscribeDropAsFirstResponse(t *testing.T) {
 
 	var response bytes.Buffer
 	require.NoError(t, message.SubscribeDropMessage{
-		StartGroup: 1,
-		EndGroup:   2,
+		GroupStart: 1,
+		GroupEnd:   2,
 		ErrorCode:  0,
 	}.Encode(&response))
 	responseData := append([]byte{byte(message.MessageTypeSubscribeDrop)}, response.Bytes()...)
@@ -303,7 +308,7 @@ func TestSession_Subscribe_SubscribeDropAsFirstResponse(t *testing.T) {
 	reader, err := session.Subscribe(context.Background(), "/test", "video", &SubscribeConfig{})
 	require.Error(t, err)
 	assert.Nil(t, reader)
-	assert.ErrorContains(t, err, "unexpected SUBSCRIBE_DROP message received")
+	assert.ErrorContains(t, err, "unexpected SUBSCRIBE_DROP message before SUBSCRIBE_OK")
 
 	_ = session.CloseWithError(NoError, "")
 }
@@ -423,7 +428,7 @@ func TestSession_Subscribe_NilConfig(t *testing.T) {
 	mockTrackStream := &FakeQUICStream{}
 
 	// Create a SubscribeOkMessage response
-	subok := message.SubscribeOkMessage{}
+	subok := message.SubscribeOkMessage{Group: 1}
 	var buf bytes.Buffer
 	_, _ = buf.Write([]byte{byte(message.MessageTypeSubscribeOk)})
 	err := subok.Encode(&buf)
@@ -796,7 +801,7 @@ func TestSession_Stats_NoTransport(t *testing.T) {
 	// noStatsConn does not implement probeStatsProvider.
 	// Transport-derived fields must be zero values.
 	conn := noStatsConn{}
-	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil)
+	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{}, nil)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 	stats := sess.Stats()
@@ -835,7 +840,7 @@ func TestSession_LazyMonitor_NoGoroutineBeforeProbe(t *testing.T) {
 	// the live goroutine stacks — none should be blocked in bitrateTracker.monitor.
 	conn := &FakeStreamConn{}
 	conn.Stats = quic.ConnectionStats{BytesSent: 1}
-	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil)
+	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{}, nil)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 	// Let newSession's own goroutines (handleBiStreams, handleUniStreams) settle.
@@ -857,7 +862,7 @@ func TestSession_Stats_EstimatedBitrateUpdatedByLazySampling(t *testing.T) {
 	// that BitrateTracker sees a non-zero byte delta.
 	conn.StatsBytesSentStep = 100_000
 	cfg := &Config{ProbeInterval: 5 * time.Millisecond, ProbeMaxAge: 10 * time.Millisecond}
-	sess := newSession(conn, NewTrackMux(0), nil, cfg, nil, nil, nil, nil)
+	sess := newSession(conn, NewTrackMux(0), nil, cfg, nil, nil, nil, sessionSetup{}, nil)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 	assert.Eventually(t, func() bool {
@@ -909,11 +914,11 @@ func TestSession_ProcessBiStream_Announce(t *testing.T) {
 	mockStream := &FakeQUICStream{}
 	// Expect write/close operations for announcement writer init and close
 
-	// Prepare StreamType + AnnounceInterestMessage
+	// Prepare StreamType + AnnounceRequestMessage
 	var buf bytes.Buffer
 	err := message.StreamTypeAnnounce.Encode(&buf)
 	assert.NoError(t, err)
-	apm := message.AnnounceInterestMessage{BroadcastPathPrefix: "/test/prefix/"}
+	apm := message.AnnounceRequestMessage{BroadcastPathPrefix: "/test/prefix/"}
 	err = apm.Encode(&buf)
 	assert.NoError(t, err)
 
@@ -969,8 +974,8 @@ func TestSession_ProcessBiStream_Subscribe(t *testing.T) {
 		SubscriberPriority:   7,
 		SubscriberOrdered:    1,
 		SubscriberMaxLatency: 500,
-		StartGroup:           5,
-		EndGroup:             10,
+		GroupStart:           5,
+		GroupEnd:             10,
 	}
 	err = sm.Encode(&buf)
 	assert.NoError(t, err)
@@ -1092,7 +1097,7 @@ func TestSession_ProcessBiStream_DecodeStreamTypeError(t *testing.T) {
 	assert.False(t, session.terminating(), "Session should not terminate after bi-stream decode error")
 }
 
-func TestSession_ProcessBiStream_DecodeAnnounceMessageError(t *testing.T) {
+func TestSession_ProcessBiStream_DecodeAnnounceBroadcastMessageError(t *testing.T) {
 	conn := &FakeStreamConn{}
 
 	session := newTestSession(conn)
@@ -1298,7 +1303,7 @@ func TestSession_ProcessBiStream_Probe(t *testing.T) {
 
 	// Construct WITH the config — never mutate session.config after newSession:
 	// the lazily-started bitrate monitor reads probeInterval() concurrently.
-	session := newSession(conn, NewTrackMux(0), nil, &Config{ProbeInterval: 5 * time.Millisecond}, nil, nil, nil, nil)
+	session := newSession(conn, NewTrackMux(0), nil, &Config{ProbeInterval: 5 * time.Millisecond}, nil, nil, nil, sessionSetup{}, nil)
 
 	probeStream := &FakeQUICStream{ParentCtx: session.Context()}
 
@@ -1342,7 +1347,7 @@ func TestSession_ProcessBiStream_ProbeMultipleMessages(t *testing.T) {
 
 	session := newSession(conn, NewTrackMux(0), nil,
 		&Config{ProbeInterval: 5 * time.Millisecond, ProbeMaxAge: 15 * time.Millisecond},
-		nil, nil, nil, nil)
+		nil, nil, nil, sessionSetup{}, nil)
 
 	probeStream := &FakeQUICStream{ParentCtx: session.Context()}
 
@@ -1609,7 +1614,7 @@ func TestSession_ProcessBiStream_ProbeUnsupported(t *testing.T) {
 	// never started.  handleProbeStream still registers the stream and reads
 	// PROBE messages; with no PROBE data it hits EOF immediately and returns nil.
 	conn := &noStatsConn{}
-	session := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil)
+	session := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{}, nil)
 
 	var incoming bytes.Buffer
 	require.NoError(t, message.StreamTypeProbe.Encode(&incoming))
@@ -1982,7 +1987,7 @@ func TestSession_AcceptAnnounce_EncodePleaseMessageStreamError(t *testing.T) {
 		ErrorCode: transport.StreamErrorCode(AnnounceErrorCodeInternal),
 		Remote:    false,
 	}
-	// First write (StreamType) succeeds, second (AnnounceInterest) fails.
+	// First write (StreamType) succeeds, second (AnnounceRequest) fails.
 	mockAnnStream.Writes = []streamResult{{}, {Err: strErr}}
 
 	conn.OpenStreams = []biStreamResult{{Stream: mockAnnStream}}
@@ -2546,7 +2551,7 @@ func TestSession_Stats_EstimatedBitrateUpdatedEveryInterval(t *testing.T) {
 		ProbeMaxAge:   1 * time.Hour,
 		ProbeMaxDelta: 1000.0, // 100000% change needed for notification
 	}
-	sess := newSession(conn, NewTrackMux(0), nil, cfg, nil, nil, nil, nil)
+	sess := newSession(conn, NewTrackMux(0), nil, cfg, nil, nil, nil, sessionSetup{}, nil)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 	// Initial tick to initialize tracker baseline
@@ -2605,7 +2610,7 @@ func TestSession_ProbeMonitor_WritesBitrateBackOnInboundStream(t *testing.T) {
 	// Each sample advances BytesSent so measureBitrate sees a non-zero delta.
 	conn.StatsBytesSentStep = 100_000
 	cfg := &Config{ProbeInterval: 5 * time.Millisecond, ProbeMaxAge: time.Hour, ProbeMaxDelta: 1000.0}
-	session := newSession(conn, NewTrackMux(0), nil, cfg, nil, nil, nil, nil)
+	session := newSession(conn, NewTrackMux(0), nil, cfg, nil, nil, nil, sessionSetup{}, nil)
 	t.Cleanup(func() { _ = session.CloseWithError(NoError, "") })
 
 	// Inbound probe stream: StreamTypeProbe + one ProbeMessage, then block so
@@ -2694,7 +2699,8 @@ func TestSession_Probe_ConcurrentAccess(t *testing.T) {
 
 	conn.OpenStreams = []biStreamResult{{Stream: mockStream}}
 
-	session := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil)
+	session := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{}, nil)
+	markPeerSetupReceived(session, message.ProbeLevelReport)
 
 	// Test concurrent access to Probe (receiving peer measurements)
 	results, _ := session.Probe(1000000)

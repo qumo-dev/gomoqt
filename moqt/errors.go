@@ -17,6 +17,16 @@ var (
 
 	// ErrServerClosed is returned when the server has been closed.
 	ErrServerClosed = errors.New("moqt: server closed")
+
+	// ErrProbeNotSupported is returned by Session.Probe when the peer did
+	// not advertise the Probe capability in its SETUP message.
+	ErrProbeNotSupported = errors.New("moqt: peer does not support probing")
+
+	// ErrTimestampOutOfRange is returned when a frame's timestamp delta
+	// relative to the previous frame cannot be encoded in a 62-bit varint.
+	// This cannot arise from a well-formed publisher but guards a relay
+	// re-publishing frames reconstructed from a malicious upstream.
+	ErrTimestampOutOfRange = errors.New("moqt: frame timestamp delta out of range")
 )
 
 /*

@@ -12,8 +12,8 @@ Deno.test("SubscribeMessage - encode/decode roundtrip - multiple scenarios", asy
 			subscriberPriority: 1,
 			subscriberOrdered: 1,
 			subscriberMaxLatency: 100,
-			startGroup: 5,
-			endGroup: 10,
+			groupStart: 5,
+			groupEnd: 10,
 		},
 		"large values": {
 			subscribeId: 1000000,
@@ -22,8 +22,8 @@ Deno.test("SubscribeMessage - encode/decode roundtrip - multiple scenarios", asy
 			subscriberPriority: 255,
 			subscriberOrdered: 0,
 			subscriberMaxLatency: 0,
-			startGroup: 0,
-			endGroup: 0,
+			groupStart: 0,
+			groupEnd: 0,
 		},
 		"zero values": {
 			subscribeId: 0,
@@ -32,8 +32,8 @@ Deno.test("SubscribeMessage - encode/decode roundtrip - multiple scenarios", asy
 			subscriberPriority: 0,
 			subscriberOrdered: 0,
 			subscriberMaxLatency: 0,
-			startGroup: 0,
-			endGroup: 0,
+			groupStart: 0,
+			groupEnd: 0,
 		},
 		"single character paths": {
 			subscribeId: 1,
@@ -42,8 +42,8 @@ Deno.test("SubscribeMessage - encode/decode roundtrip - multiple scenarios", asy
 			subscriberPriority: 1,
 			subscriberOrdered: 1,
 			subscriberMaxLatency: 500,
-			startGroup: 0,
-			endGroup: 20,
+			groupStart: 0,
+			groupEnd: 20,
 		},
 	};
 
@@ -94,14 +94,14 @@ Deno.test("SubscribeMessage - encode/decode roundtrip - multiple scenarios", asy
 				`subscriberMaxLatency mismatch for ${caseName}`,
 			);
 			assertEquals(
-				decodedMessage.startGroup,
-				input.startGroup,
-				`startGroup mismatch for ${caseName}`,
+				decodedMessage.groupStart,
+				input.groupStart,
+				`groupStart mismatch for ${caseName}`,
 			);
 			assertEquals(
-				decodedMessage.endGroup,
-				input.endGroup,
-				`endGroup mismatch for ${caseName}`,
+				decodedMessage.groupEnd,
+				input.groupEnd,
+				`groupEnd mismatch for ${caseName}`,
 			);
 		});
 	}

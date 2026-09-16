@@ -13,12 +13,12 @@ import (
 *   Subscriber Priority (8)
 *   Subscriber Ordered (8)
 *   Subscriber Max Latency (varint)
-*   Start Group (varint)
-*   End Group (varint)
+*   Group Start (varint)
+*   Group End (varint)
 * }
 *
 * Broadcast Path and Track Name are length-prefixed UTF-8 strings.
-* Start Group and End Group use 0 for the default/latest and unbounded values.
+*   Group Start and End Group use 0 for the default/latest and unbounded values.
  */
 type SubscribeMessage struct {
 	SubscribeID          uint64
@@ -27,8 +27,8 @@ type SubscribeMessage struct {
 	SubscriberPriority   uint8
 	SubscriberOrdered    uint8
 	SubscriberMaxLatency uint64
-	StartGroup           uint64
-	EndGroup             uint64
+	GroupStart           uint64
+	GroupEnd             uint64
 }
 
 func (s SubscribeMessage) Len() int {
@@ -40,8 +40,8 @@ func (s SubscribeMessage) Len() int {
 	l += 1 // SubscriberPriority (uint8)
 	l += 1 // SubscriberOrdered (uint8)
 	l += VarintLen(s.SubscriberMaxLatency)
-	l += VarintLen(s.StartGroup)
-	l += VarintLen(s.EndGroup)
+	l += VarintLen(s.GroupStart)
+	l += VarintLen(s.GroupEnd)
 
 	return l
 }
@@ -59,8 +59,8 @@ func (s SubscribeMessage) Encode(w io.Writer) error {
 	b = append(b, s.SubscriberPriority)
 	b = append(b, s.SubscriberOrdered)
 	b, _ = WriteVarint(b, s.SubscriberMaxLatency)
-	b, _ = WriteVarint(b, s.StartGroup)
-	b, _ = WriteVarint(b, s.EndGroup)
+	b, _ = WriteVarint(b, s.GroupStart)
+	b, _ = WriteVarint(b, s.GroupEnd)
 
 	_, err := w.Write(b)
 	return err
@@ -122,14 +122,14 @@ func (s *SubscribeMessage) Decode(src io.Reader) error {
 	if err != nil {
 		return err
 	}
-	s.StartGroup = num
+	s.GroupStart = num
 	b = b[n:]
 
 	num, n, err = ReadVarint(b)
 	if err != nil {
 		return err
 	}
-	s.EndGroup = num
+	s.GroupEnd = num
 	b = b[n:]
 
 	if len(b) != 0 {

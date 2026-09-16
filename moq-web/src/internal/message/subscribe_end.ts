@@ -1,15 +1,29 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
 import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
 
-export interface AnnounceInitMessageInit {
-	suffixes?: string[];
+export interface SubscribeEndMessageInit {
+	group?: number;
 }
 
-export class AnnounceInitMessage {
-	suffixes: string[];
+/**
+ * SUBSCRIBE_END message (type 0x1), sent by the publisher to signal that
+ * no group after the given sequence will be produced. The type varint is
+ * written by the caller before `encode` / consumed before `decode`.
+ *
+ * ```text
+ * SUBSCRIBE_END Message {
+ *   Type (i) = 0x1
+ *   Message Length (i)
+ *   Group (i)
+ * }
+ * ```
+ */
+export class SubscribeEndMessage {
+	/** Absolute sequence of the last group that may be delivered (inclusive). */
+	group: number;
 
-	constructor(init: AnnounceInitMessageInit = {}) {
-		this.suffixes = init.suffixes ?? [];
+	constructor(init: SubscribeEndMessageInit = {}) {
+		this.group = init.group ?? 0;
 	}
 
 	/**
@@ -17,7 +31,7 @@ export class AnnounceInitMessage {
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
 		const e = new MessageEncoder();
-		e.stringArray(this.suffixes);
+		e.varint(this.group);
 		const [, err] = await w.write(e.frame());
 		return err;
 	}
@@ -34,7 +48,7 @@ export class AnnounceInitMessage {
 		if (err2) return err2;
 
 		const d = new MessageDecoder(buf);
-		this.suffixes = d.stringArray();
+		this.group = d.varint();
 
 		return undefined;
 	}

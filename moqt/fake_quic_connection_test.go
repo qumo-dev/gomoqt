@@ -219,7 +219,27 @@ func (m *FakeStreamConn) OpenStreamSync(ctx context.Context) (transport.Stream, 
 }
 
 func (m *FakeStreamConn) OpenUniStreamSync(ctx context.Context) (transport.SendStream, error) {
-	return m.OpenUniStream()
+	m.mu.Lock()
+	if m.closeErr != nil {
+		err := m.closeErr
+		m.mu.Unlock()
+		return nil, err
+	}
+	if len(m.OpenUniStreams) == 0 {
+		m.mu.Unlock()
+		return &FakeQUICSendStream{}, nil
+	}
+	r := m.OpenUniStreams[min(m.openUniIdx, len(m.OpenUniStreams)-1)]
+	m.openUniIdx++
+	m.mu.Unlock()
+
+	if r.Block {
+		return nil, m.waitDone()
+	}
+	if r.Stream == nil && r.Err == nil {
+		return &FakeQUICSendStream{}, nil
+	}
+	return r.Stream, r.Err
 }
 
 func (m *FakeStreamConn) LocalAddr() net.Addr {

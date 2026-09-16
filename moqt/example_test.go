@@ -190,8 +190,6 @@ func ExampleTrackMux_publish() {
 //
 // A TrackWriter is handed to a TrackHandler for each subscriber. Within it you:
 //
-//   - optionally call WriteInfo once to publish priority/ordering/latency hints
-//     (these influence how the network schedules this track relative to others);
 //   - open one GroupWriter per group with OpenGroup (or OpenGroupAt to pin a
 //     specific sequence);
 //   - WriteFrame into the group for each payload;
@@ -204,9 +202,6 @@ func ExampleTrackWriter() {
 
 	moqt.PublishFunc(ctx, "/demo/track", func(tw *moqt.TrackWriter) {
 		defer tw.Close()
-
-		// Advertise publisher-side parameters to the subscriber.
-		_ = tw.WriteInfo(moqt.PublishInfo{Priority: moqt.TrackPriority(5)})
 
 		frame := moqt.NewFrame(4096)
 		for range 10 {

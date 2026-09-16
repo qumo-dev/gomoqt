@@ -8,8 +8,8 @@ export interface SubscribeMessageInit {
 	subscriberPriority?: number;
 	subscriberOrdered?: number;
 	subscriberMaxLatency?: number;
-	startGroup?: number;
-	endGroup?: number;
+	groupStart?: number;
+	groupEnd?: number;
 }
 
 export class SubscribeMessage {
@@ -19,8 +19,8 @@ export class SubscribeMessage {
 	subscriberPriority: number;
 	subscriberOrdered: number;
 	subscriberMaxLatency: number;
-	startGroup: number;
-	endGroup: number;
+	groupStart: number;
+	groupEnd: number;
 
 	constructor(init: SubscribeMessageInit = {}) {
 		this.subscribeId = init.subscribeId ?? 0;
@@ -29,8 +29,8 @@ export class SubscribeMessage {
 		this.subscriberPriority = init.subscriberPriority ?? 0;
 		this.subscriberOrdered = init.subscriberOrdered ?? 0;
 		this.subscriberMaxLatency = init.subscriberMaxLatency ?? 0;
-		this.startGroup = init.startGroup ?? 0;
-		this.endGroup = init.endGroup ?? 0;
+		this.groupStart = init.groupStart ?? 0;
+		this.groupEnd = init.groupEnd ?? 0;
 	}
 
 	/**
@@ -44,8 +44,8 @@ export class SubscribeMessage {
 		e.uint8(this.subscriberPriority);
 		e.uint8(this.subscriberOrdered);
 		e.varint(this.subscriberMaxLatency);
-		e.varint(this.startGroup);
-		e.varint(this.endGroup);
+		e.varint(this.groupStart);
+		e.varint(this.groupEnd);
 		const [, err] = await w.write(e.frame());
 		return err;
 	}
@@ -75,8 +75,8 @@ export class SubscribeMessage {
 		this.subscriberPriority = d.uint8();
 		this.subscriberOrdered = d.uint8();
 		this.subscriberMaxLatency = d.varint();
-		this.startGroup = d.varint();
-		this.endGroup = d.varint();
+		this.groupStart = d.varint();
+		this.groupEnd = d.varint();
 
 		return undefined;
 	}

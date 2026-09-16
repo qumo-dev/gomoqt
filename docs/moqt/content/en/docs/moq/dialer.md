@@ -123,8 +123,8 @@ You can also use transport-specific methods directly:
 	// WebTransport
 	sess, err := dialer.DialWebTransport(ctx, "host:port", "/path", mux)
 
-	// Native QUIC
-	sess, err := dialer.DialQUIC(ctx, "host:port", mux)
+	// Native QUIC (path is conveyed via the SETUP Path parameter)
+	sess, err := dialer.DialQUIC(ctx, "host:port", "/path", mux)
 ```
 
 > [!NOTE] Note: Nil TrackMux
@@ -132,4 +132,4 @@ You can also use transport-specific methods directly:
 > Ensure that the `mux` is properly configured for your use case to avoid unexpected behavior.
 
 > [!NOTE] Note: ALPN Negotiation
-> For native QUIC connections, the dialer automatically sets the ALPN token to `moq-lite-04` (`moqt.NextProtoMOQ`) if `TLSConfig.NextProtos` is not configured.
+> For native QUIC connections, the dialer automatically sets the ALPN token to `moq-lite-05` (`moqt.NextProtoMOQ`) if `TLSConfig.NextProtos` is not configured.

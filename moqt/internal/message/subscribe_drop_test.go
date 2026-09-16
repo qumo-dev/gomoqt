@@ -11,8 +11,8 @@ import (
 func TestSubscribeDropMessage_EncodeDecode(t *testing.T) {
 	t.Run("valid_message", func(t *testing.T) {
 		original := SubscribeDropMessage{
-			StartGroup: 42,
-			EndGroup:   43,
+			GroupStart: 42,
+			GroupEnd:   43,
 			ErrorCode:  3,
 		}
 
@@ -24,15 +24,15 @@ func TestSubscribeDropMessage_EncodeDecode(t *testing.T) {
 		err = decoded.Decode(&buf)
 		require.NoError(t, err)
 
-		assert.Equal(t, original.StartGroup, decoded.StartGroup)
-		assert.Equal(t, original.EndGroup, decoded.EndGroup)
+		assert.Equal(t, original.GroupStart, decoded.GroupStart)
+		assert.Equal(t, original.GroupEnd, decoded.GroupEnd)
 		assert.Equal(t, original.ErrorCode, decoded.ErrorCode)
 	})
 
 	t.Run("zero_values", func(t *testing.T) {
 		original := SubscribeDropMessage{
-			StartGroup: 0,
-			EndGroup:   0,
+			GroupStart: 0,
+			GroupEnd:   0,
 			ErrorCode:  1,
 		}
 
@@ -44,8 +44,8 @@ func TestSubscribeDropMessage_EncodeDecode(t *testing.T) {
 		err = decoded.Decode(&buf)
 		require.NoError(t, err)
 
-		assert.Equal(t, uint64(0), decoded.StartGroup)
-		assert.Equal(t, uint64(0), decoded.EndGroup)
+		assert.Equal(t, uint64(0), decoded.GroupStart)
+		assert.Equal(t, uint64(0), decoded.GroupEnd)
 		assert.Equal(t, uint64(1), decoded.ErrorCode)
 	})
 
@@ -53,8 +53,8 @@ func TestSubscribeDropMessage_EncodeDecode(t *testing.T) {
 		// Max varint value in MOQ (62-bit limit)
 		maxVal := uint64(1<<62) - 1
 		original := SubscribeDropMessage{
-			StartGroup: maxVal,
-			EndGroup:   maxVal,
+			GroupStart: maxVal,
+			GroupEnd:   maxVal,
 			ErrorCode:  maxVal,
 		}
 
@@ -66,8 +66,8 @@ func TestSubscribeDropMessage_EncodeDecode(t *testing.T) {
 		err = decoded.Decode(&buf)
 		require.NoError(t, err)
 
-		assert.Equal(t, maxVal, decoded.StartGroup)
-		assert.Equal(t, maxVal, decoded.EndGroup)
+		assert.Equal(t, maxVal, decoded.GroupStart)
+		assert.Equal(t, maxVal, decoded.GroupEnd)
 		assert.Equal(t, maxVal, decoded.ErrorCode)
 	})
 }
@@ -116,8 +116,8 @@ func TestSubscribeDropMessage_DecodeErrors(t *testing.T) {
 		var buf bytes.Buffer
 		buf.WriteByte(0x05) // length varint = 5
 		buf.WriteByte(0x01) // type = 1
-		buf.WriteByte(0x00) // StartGroup = 0
-		buf.WriteByte(0x01) // EndGroup = 1
+		buf.WriteByte(0x00) // GroupStart = 0
+		buf.WriteByte(0x01) // GroupEnd = 1
 		buf.WriteByte(0x02) // ErrorCode = 2
 		buf.WriteByte(0xFF) // extra byte inside the message body
 		src := bytes.NewReader(buf.Bytes())

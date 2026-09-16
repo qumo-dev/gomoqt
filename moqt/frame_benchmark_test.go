@@ -25,7 +25,7 @@ func BenchmarkFrame_Encode(b *testing.B) {
 
 			for i := 0; i < b.N; i++ {
 				buf.Reset()
-				_ = frame.encode(&buf)
+				_ = frame.encode(&buf, 0)
 			}
 		})
 	}
@@ -43,7 +43,7 @@ func BenchmarkFrame_Decode(b *testing.B) {
 			frame.Write(data)
 
 			var buf bytes.Buffer
-			_ = frame.encode(&buf)
+			_ = frame.encode(&buf, 0)
 			encodedData := buf.Bytes()
 
 			reader := bytes.NewReader(encodedData)
@@ -57,7 +57,7 @@ func BenchmarkFrame_Decode(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				reader.Reset(encodedData)
 				decodeFrame.Reset()
-				err := decodeFrame.decode(reader)
+				err := decodeFrame.decode(reader, 0)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -166,7 +166,7 @@ func BenchmarkFrame_EncodeOptimized(b *testing.B) {
 
 			for i := 0; i < b.N; i++ {
 				buf.Reset()
-				_ = frame.encode(buf)
+				_ = frame.encode(buf, 0)
 			}
 		})
 	}

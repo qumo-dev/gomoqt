@@ -3,7 +3,7 @@ title: Session
 weight: 3
 ---
 
-A MoQ Session is established when a client dials a server (via `moqt.Dialer`) or a server accepts a connection (via `moqt.Handler`). The session manages subscriptions, announcements, fetches, and probes over the underlying QUIC connection.
+A MOQ Session is established when a client dials a server (via `moqt.Dialer`) or a server accepts a connection (via `moqt.Handler`). The session manages subscriptions, announcements, fetches, and probes over the underlying QUIC connection.
 
 ## Implementation
 
@@ -29,13 +29,34 @@ func (s *Session) RemoteAddr() net.Addr
 
 Outgoing requests such as subscribing to tracks, fetching specific groups, probing bitrate, or discovering available tracks are handled by the session.
 
+## Request path
+
+How a handler learns the request path depends on the transport binding — the path
+is resolved *above* the session, never stored on `Session` itself:
+
+- **WebTransport:** the path is the HTTP request's `r.URL.Path`, available in your
+  `http.Handler` before the session is upgraded.
+- **Native QUIC:** native QUIC has no handshake-time request URI, so the path is
+  conveyed inside the client's SETUP message. A server-side router reads it before
+  constructing the session and stashes it on the connection context. Recover it with:
+
+```go
+func (h *HandlerImpl) ServeMOQ(sess *moqt.Session) {
+    path, ok := moqt.PathFromContext(sess.Context())
+    // path == "/live/alice" for a client that dialed moqt://host/live/alice
+}
+```
+
+`PathFromContext` returns `("", false)` on the client side and for WebTransport
+sessions.
+
 ## Connection State
 
 After a session is established, you can retrieve connection metadata via `ConnectionState()`:
 
 ```go
     state := sess.ConnectionState()
-    fmt.Println("Protocol version:", state.Version) // e.g., "moq-lite-04"
+    fmt.Println("Protocol version:", state.Version) // e.g., "moq-lite-05"
     fmt.Println("TLS state:", state.TLS)
 ```
 
@@ -43,7 +64,7 @@ The `ConnectionState` struct contains:
 
 | Field     | Type                      | Description                                 |
 |-----------|---------------------------|---------------------------------------------|
-| `Version` | `string`                  | The negotiated MoQ protocol version (e.g., `"moq-lite-04"`) |
+| `Version` | `string`                  | The negotiated MOQ protocol version (e.g., `"moq-lite-05"`) |
 | `TLS`     | `*tls.ConnectionState`     | TLS connection state when available          |
 
 ## Connection Statistics
@@ -120,4 +141,4 @@ func (s *Session) CloseWithError(code SessionErrorCode, msg string) error
 - `code`: Error code (e.g., from built-in codes)
 - `msg`: Descriptive message
 
-Prefer reserved error codes for standard reasons. See [Built-in Error Codes](../errors/#built-in-error-codes) for details.
+Prefer reserved error codes for standard reasons. See [Built-in Error Codes](errors/#built-in-error-codes) for details.

@@ -59,28 +59,27 @@ func (aw *AnnouncementWriter) logError(msg string, err error, args ...any) {
 }
 
 // shouldExclude returns true if the announcement should be skipped because
-// its HopIDs contain the excludeHop value.
+// its hop path — including this node's own Hop ID, which is the implicit
+// trailing entry carried by ANNOUNCE_OK — contains the excludeHop value.
 func (aw *AnnouncementWriter) shouldExclude(ann *Announcement) bool {
 	if aw.excludeHop == 0 {
 		return false
 	}
+	if aw.excludeHop == aw.localHopID {
+		return true
+	}
 	return slices.Contains(ann.HopIDs(), aw.excludeHop)
 }
 
-// buildHopIDs returns the HopIDs to encode in the outgoing ANNOUNCE message.
-// If localHopID is non-zero, it is appended to the announcement's existing HopIDs.
+// buildHopIDs returns the Hop ID list to encode in the outgoing
+// ANNOUNCE_BROADCAST message. This node's own Hop ID is NOT included: it is
+// carried once in ANNOUNCE_OK as the implicit trailing entry, and the spec
+// forbids repeating it as the last entry of the broadcast's list.
 func (aw *AnnouncementWriter) buildHopIDs(ann *Announcement) []uint64 {
-	ids := ann.HopIDs()
-	if aw.localHopID == 0 {
-		return ids
-	}
-	result := make([]uint64, len(ids)+1)
-	copy(result, ids)
-	result[len(ids)] = aw.localHopID
-	return result
+	return ann.HopIDs()
 }
 
-// init snapshots the currently active announcements, sends an ACTIVE AnnounceMessage
+// init snapshots the currently active announcements, sends an ACTIVE AnnounceBroadcastMessage
 // for each active track suffix on the announce stream, and sets up end handlers.
 func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) error {
 	var err error
@@ -116,8 +115,24 @@ func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) err
 		aw.actives = actives
 		aw.mu.Unlock()
 
+		// ANNOUNCE_OK is sent exactly once, before any ANNOUNCE_BROADCAST,
+		// carrying this node's Hop ID and the size of the initial set.
+		err = message.AnnounceOkMessage{
+			HopID:       aw.localHopID,
+			ActiveCount: uint64(len(actives)),
+		}.Encode(aw.stream)
+		if err != nil {
+			if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
+				err = &AnnounceError{StreamError: strErr}
+			}
+			aw.mu.Lock()
+			aw.initErr = err
+			aw.mu.Unlock()
+			return
+		}
+
 		for sfx, active := range actives {
-			err = message.AnnounceMessage{
+			err = message.AnnounceBroadcastMessage{
 				AnnounceStatus:      message.ACTIVE,
 				BroadcastPathSuffix: sfx,
 				HopIDs:              aw.buildHopIDs(active.announcement),
@@ -156,7 +171,7 @@ func (aw *AnnouncementWriter) registerEndHandler(sfx suffix, ann *Announcement) 
 		current, exists := aw.actives[sfx]
 		if exists && current.announcement == ann {
 			delete(aw.actives, sfx)
-			err := message.AnnounceMessage{
+			err := message.AnnounceBroadcastMessage{
 				AnnounceStatus:      message.ENDED,
 				BroadcastPathSuffix: sfx,
 			}.Encode(aw.stream)
@@ -173,7 +188,7 @@ func (aw *AnnouncementWriter) registerEndHandler(sfx suffix, ann *Announcement) 
 		aw.mu.Lock()
 		defer aw.mu.Unlock()
 		delete(aw.actives, sfx)
-		if err := (message.AnnounceMessage{
+		if err := (message.AnnounceBroadcastMessage{
 			AnnounceStatus:      message.ENDED,
 			BroadcastPathSuffix: sfx,
 		}).Encode(aw.stream); err != nil {
@@ -246,7 +261,7 @@ func (aw *AnnouncementWriter) SendAnnouncement(announcement *Announcement) error
 	}
 
 	// Encode and send ACTIVE announcement
-	err := message.AnnounceMessage{
+	err := message.AnnounceBroadcastMessage{
 		AnnounceStatus:      message.ACTIVE,
 		BroadcastPathSuffix: suffix,
 		HopIDs:              aw.buildHopIDs(announcement),

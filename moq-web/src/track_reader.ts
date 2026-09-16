@@ -1,5 +1,4 @@
 import { GroupReader } from "./group_stream.ts";
-import type { Info } from "./info.ts";
 import type { Context } from "@okdaichi/golikejs/context";
 import { ContextCancelledError, watchPromise } from "@okdaichi/golikejs/context";
 import type { SendSubscribeStream, SubscribeDrop, TrackConfig } from "./subscribe_stream.ts";
@@ -90,9 +89,14 @@ export class TrackReader {
 		return this.#subscribeStream.update(config);
 	}
 
-	/** Read the latest publisher {@link Info} for this track. */
-	readInfo(): Info {
-		return this.#subscribeStream.info;
+	/** The absolute start group resolved by SUBSCRIBE_OK (0 until received). */
+	get resolvedStart(): number {
+		return this.#subscribeStream.resolvedStart;
+	}
+
+	/** Whether the publisher signaled SUBSCRIBE_END for this track. */
+	get ended(): boolean {
+		return this.#subscribeStream.ended;
 	}
 
 	async closeWithError(code: number): Promise<void> {

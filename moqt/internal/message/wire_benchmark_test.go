@@ -98,8 +98,8 @@ func BenchmarkSubscribeMessage_Encode(b *testing.B) {
 		SubscriberPriority:   128,
 		SubscriberOrdered:    1,
 		SubscriberMaxLatency: 1 << 21,
-		StartGroup:           1 << 20,
-		EndGroup:             1 << 28,
+		GroupStart:           1 << 20,
+		GroupEnd:             1 << 28,
 	}
 
 	b.ReportAllocs()
@@ -120,8 +120,8 @@ func BenchmarkSubscribeMessage_Decode(b *testing.B) {
 		SubscriberPriority:   128,
 		SubscriberOrdered:    1,
 		SubscriberMaxLatency: 1 << 21,
-		StartGroup:           1 << 20,
-		EndGroup:             1 << 28,
+		GroupStart:           1 << 20,
+		GroupEnd:             1 << 28,
 	}
 	encoded := encodeMessage(msg)
 	repeating := tile(encoded)
@@ -145,10 +145,10 @@ func BenchmarkSubscribeMessage_Decode(b *testing.B) {
 	}
 }
 
-// --- AnnounceMessage ---
+// --- AnnounceBroadcastMessage ---
 
-func BenchmarkAnnounceMessage_Encode(b *testing.B) {
-	msg := message.AnnounceMessage{
+func BenchmarkAnnounceBroadcastMessage_Encode(b *testing.B) {
+	msg := message.AnnounceBroadcastMessage{
 		AnnounceStatus:      message.ACTIVE,
 		BroadcastPathSuffix: "eu-west/cluster-a/publisher-42",
 		HopIDs: []uint64{
@@ -169,8 +169,8 @@ func BenchmarkAnnounceMessage_Encode(b *testing.B) {
 	}
 }
 
-func BenchmarkAnnounceMessage_Decode(b *testing.B) {
-	msg := message.AnnounceMessage{
+func BenchmarkAnnounceBroadcastMessage_Decode(b *testing.B) {
+	msg := message.AnnounceBroadcastMessage{
 		AnnounceStatus:      message.ACTIVE,
 		BroadcastPathSuffix: "eu-west/cluster-a/publisher-42",
 		HopIDs: []uint64{
@@ -184,14 +184,14 @@ func BenchmarkAnnounceMessage_Decode(b *testing.B) {
 	repeating := tile(encoded)
 	reader := bytes.NewReader(repeating)
 
-	var decoded message.AnnounceMessage
+	var decoded message.AnnounceBroadcastMessage
 
 	b.SetBytes(int64(len(encoded)))
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		decoded = message.AnnounceMessage{}
+		decoded = message.AnnounceBroadcastMessage{}
 		if err := decoded.Decode(reader); err != nil {
 			if err == io.EOF {
 				reader.Reset(repeating)
@@ -202,10 +202,10 @@ func BenchmarkAnnounceMessage_Decode(b *testing.B) {
 	}
 }
 
-// --- AnnounceInterestMessage ---
+// --- AnnounceRequestMessage ---
 
-func BenchmarkAnnounceInterestMessage_Encode(b *testing.B) {
-	msg := message.AnnounceInterestMessage{
+func BenchmarkAnnounceRequestMessage_Encode(b *testing.B) {
+	msg := message.AnnounceRequestMessage{
 		BroadcastPathPrefix: "eu-west/cluster-a",
 		ExcludeHop:          1 << 28,
 	}
@@ -220,8 +220,8 @@ func BenchmarkAnnounceInterestMessage_Encode(b *testing.B) {
 	}
 }
 
-func BenchmarkAnnounceInterestMessage_Decode(b *testing.B) {
-	msg := message.AnnounceInterestMessage{
+func BenchmarkAnnounceRequestMessage_Decode(b *testing.B) {
+	msg := message.AnnounceRequestMessage{
 		BroadcastPathPrefix: "eu-west/cluster-a",
 		ExcludeHop:          1 << 28,
 	}
@@ -229,14 +229,14 @@ func BenchmarkAnnounceInterestMessage_Decode(b *testing.B) {
 	repeating := tile(encoded)
 	reader := bytes.NewReader(repeating)
 
-	var decoded message.AnnounceInterestMessage
+	var decoded message.AnnounceRequestMessage
 
 	b.SetBytes(int64(len(encoded)))
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		decoded = message.AnnounceInterestMessage{}
+		decoded = message.AnnounceRequestMessage{}
 		if err := decoded.Decode(reader); err != nil {
 			if err == io.EOF {
 				reader.Reset(repeating)
@@ -300,11 +300,7 @@ func BenchmarkFetchMessage_Decode(b *testing.B) {
 
 func BenchmarkSubscribeOkMessage_Encode(b *testing.B) {
 	msg := message.SubscribeOkMessage{
-		PublisherPriority:   64,
-		PublisherOrdered:    1,
-		PublisherMaxLatency: 1 << 21,
-		StartGroup:          1 << 20,
-		EndGroup:            1 << 28,
+		Group: 1 << 20,
 	}
 
 	b.ReportAllocs()
@@ -319,11 +315,7 @@ func BenchmarkSubscribeOkMessage_Encode(b *testing.B) {
 
 func BenchmarkSubscribeOkMessage_Decode(b *testing.B) {
 	msg := message.SubscribeOkMessage{
-		PublisherPriority:   64,
-		PublisherOrdered:    1,
-		PublisherMaxLatency: 1 << 21,
-		StartGroup:          1 << 20,
-		EndGroup:            1 << 28,
+		Group: 1 << 20,
 	}
 	encoded := encodeMessage(msg)
 	repeating := tile(encoded)
@@ -354,8 +346,8 @@ func BenchmarkSubscribeUpdateMessage_Encode(b *testing.B) {
 		SubscriberPriority:   128,
 		SubscriberOrdered:    1,
 		SubscriberMaxLatency: 1 << 21,
-		StartGroup:           1 << 20,
-		EndGroup:             1 << 28,
+		GroupStart:           1 << 20,
+		GroupEnd:             1 << 28,
 	}
 
 	b.ReportAllocs()
@@ -373,8 +365,8 @@ func BenchmarkSubscribeUpdateMessage_Decode(b *testing.B) {
 		SubscriberPriority:   128,
 		SubscriberOrdered:    1,
 		SubscriberMaxLatency: 1 << 21,
-		StartGroup:           1 << 20,
-		EndGroup:             1 << 28,
+		GroupStart:           1 << 20,
+		GroupEnd:             1 << 28,
 	}
 	encoded := encodeMessage(msg)
 	repeating := tile(encoded)
@@ -402,8 +394,8 @@ func BenchmarkSubscribeUpdateMessage_Decode(b *testing.B) {
 
 func BenchmarkSubscribeDropMessage_Encode(b *testing.B) {
 	msg := message.SubscribeDropMessage{
-		StartGroup: 1 << 20,
-		EndGroup:   1 << 28,
+		GroupStart: 1 << 20,
+		GroupEnd:   1 << 28,
 		ErrorCode:  1 << 10,
 	}
 
@@ -419,8 +411,8 @@ func BenchmarkSubscribeDropMessage_Encode(b *testing.B) {
 
 func BenchmarkSubscribeDropMessage_Decode(b *testing.B) {
 	msg := message.SubscribeDropMessage{
-		StartGroup: 1 << 20,
-		EndGroup:   1 << 28,
+		GroupStart: 1 << 20,
+		GroupEnd:   1 << 28,
 		ErrorCode:  1 << 10,
 	}
 	encoded := encodeMessage(msg)

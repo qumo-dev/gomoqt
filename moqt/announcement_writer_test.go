@@ -359,8 +359,15 @@ func TestAnnouncementWriter_SendAnnouncement_EncodesHops(t *testing.T) {
 	require.NoError(t, err)
 
 	written := aw.stream.(*FakeQUICStream).Written()
-	var decoded message.AnnounceMessage
-	require.NoError(t, decoded.Decode(bytes.NewReader(written)))
+	r := bytes.NewReader(written)
+
+	// init writes ANNOUNCE_OK first, carrying this node's Hop ID.
+	var okMsg message.AnnounceOkMessage
+	require.NoError(t, okMsg.Decode(r))
+	assert.Equal(t, uint64(0), okMsg.ActiveCount)
+
+	var decoded message.AnnounceBroadcastMessage
+	require.NoError(t, decoded.Decode(r))
 	assert.Equal(t, message.ACTIVE, decoded.AnnounceStatus)
 	assert.Equal(t, "stream1", decoded.BroadcastPathSuffix)
 	assert.Empty(t, decoded.HopIDs)
@@ -392,8 +399,10 @@ func TestAnnouncementWriter_SendAnnouncement_WriteError(t *testing.T) {
 			})
 			ann, _ := NewAnnouncement(context.Background(), BroadcastPath("/test/stream1"))
 
+			// init fails while writing ANNOUNCE_OK; SendAnnouncement then
+			// surfaces the stored init error.
 			err := aw.init(map[*Announcement]struct{}{})
-			require.NoError(t, err)
+			assert.Error(t, err)
 
 			err = aw.SendAnnouncement(ann)
 

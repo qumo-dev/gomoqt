@@ -5,22 +5,22 @@ import (
 )
 
 /*
- *	ANNOUNCE_INTEREST Message {
+ *	ANNOUNCE_REQUEST Message {
  *	  Message Length (i)
  *	  Broadcast Path Prefix (s),
  *	  Exclude Hop (i),
  *	}
  */
-type AnnounceInterestMessage struct {
+type AnnounceRequestMessage struct {
 	BroadcastPathPrefix string
 	ExcludeHop          uint64
 }
 
-func (aim AnnounceInterestMessage) Len() int {
+func (aim AnnounceRequestMessage) Len() int {
 	return StringLen(aim.BroadcastPathPrefix) + VarintLen(aim.ExcludeHop)
 }
 
-func (aim AnnounceInterestMessage) Encode(w io.Writer) error {
+func (aim AnnounceRequestMessage) Encode(w io.Writer) error {
 	msgLen := aim.Len()
 	b := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
 
@@ -33,7 +33,7 @@ func (aim AnnounceInterestMessage) Encode(w io.Writer) error {
 	return err
 }
 
-func (aim *AnnounceInterestMessage) Decode(src io.Reader) error {
+func (aim *AnnounceRequestMessage) Decode(src io.Reader) error {
 	num, err := ReadMessageLength(src)
 	if err != nil {
 		return err

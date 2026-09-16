@@ -7,31 +7,30 @@ import (
 
 var ErrInvalidSubscribeDropMessageType = errors.New("invalid message type for SubscribeDropMessage")
 
-const MessageTypeSubscribeDrop uint64 = 0x1
-
 // SubscribeDropMessage is sent by the publisher when a subscription range
-// cannot be served.
+// cannot be served. Group Start and Group End are plain absolute sequences,
+// not the +1 form used in SUBSCRIBE.
 //
 // Wire format:
 //
 //	SUBSCRIBE_DROP Message {
-//	  Type (varint) = 0x1
+//	  Type (varint) = 0x2
 //	  Message Length (varint)
-//	  Start Group (varint)
-//	  End Group (varint)
+//	  Group Start (varint)
+//	  Group End (varint)
 //	  Error Code (varint)
 //	}
 type SubscribeDropMessage struct {
-	StartGroup uint64
-	EndGroup   uint64
+	GroupStart uint64
+	GroupEnd   uint64
 	ErrorCode  uint64
 }
 
 func (sdm SubscribeDropMessage) Len() int {
 	var l int
 
-	l += VarintLen(sdm.StartGroup)
-	l += VarintLen(sdm.EndGroup)
+	l += VarintLen(sdm.GroupStart)
+	l += VarintLen(sdm.GroupEnd)
 	l += VarintLen(sdm.ErrorCode)
 
 	return l
@@ -42,8 +41,8 @@ func (sdm SubscribeDropMessage) Encode(w io.Writer) error {
 	b := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
 
 	b, _ = WriteMessageLength(b, uint64(msgLen))
-	b, _ = WriteVarint(b, sdm.StartGroup)
-	b, _ = WriteVarint(b, sdm.EndGroup)
+	b, _ = WriteVarint(b, sdm.GroupStart)
+	b, _ = WriteVarint(b, sdm.GroupEnd)
 	b, _ = WriteVarint(b, sdm.ErrorCode)
 
 	_, err := w.Write(b)
@@ -71,14 +70,14 @@ func (sdm *SubscribeDropMessage) Decode(src io.Reader) error {
 	if err != nil {
 		return err
 	}
-	sdm.StartGroup = num
+	sdm.GroupStart = num
 	b = b[n:]
 
 	num, n, err = ReadVarint(b)
 	if err != nil {
 		return err
 	}
-	sdm.EndGroup = num
+	sdm.GroupEnd = num
 	b = b[n:]
 
 	num, n, err = ReadVarint(b)

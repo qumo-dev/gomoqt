@@ -125,7 +125,6 @@ func newRelayFixture(tb testing.TB, ctx context.Context, numEdges int) (*relayFi
 // relayCarryHandler publishes a steady stream of 128-byte frames until ctx is done.
 func relayCarryHandler(tw *TrackWriter) {
 	ctx := tw.Context()
-	_ = tw.WriteInfo(PublishInfo{})
 	frame := NewFrame(128)
 	data := make([]byte, 128)
 	for i := range data {

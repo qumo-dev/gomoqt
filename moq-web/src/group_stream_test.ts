@@ -31,8 +31,8 @@ Deno.test("GroupWriter", async (t) => {
 			frame.write(data);
 			const err = await gw.writeFrame(frame);
 			assertEquals(err, undefined);
-			// two writes: length prefix + payload
-			assertEquals(writeSpy.calls.length, 2);
+			// three writes: timestamp delta + length prefix + payload
+			assertEquals(writeSpy.calls.length, 3);
 			const allData = buf.bytes();
 			assertEquals(
 				allData.subarray(allData.length - 3),
@@ -153,6 +153,7 @@ Deno.test("GroupReader", async (t) => {
 			const payload = new Uint8Array([10, 20, 30]);
 			// use Buffer from golikejs/bytes to collect encoded bytes
 			const buf = new Buffer(new ArrayBuffer(0));
+			await writeVarint(buf, 0); // timestamp delta
 			await writeVarint(buf, payload.length);
 			buf.write(payload);
 			const data = buf.bytes();
@@ -247,7 +248,8 @@ Deno.test("GroupReader", async (t) => {
 	await t.step("readFrame rejects a frame larger than MAX_FRAME_SIZE", async () => {
 		// A length one byte over the limit is rejected before any allocation, so
 		// the stream needs only the length prefix (no payload follows).
-		const lenBuf = Buffer.make(8);
+		const lenBuf = Buffer.make(9);
+		await writeVarint(lenBuf, 0); // timestamp delta
 		await writeVarint(lenBuf, MAX_FRAME_SIZE + 1);
 		const lenBytes = new Uint8Array(lenBuf.bytes());
 
@@ -273,7 +275,8 @@ Deno.test("GroupReader", async (t) => {
 	await t.step(
 		"readFrame returns error when readFull returns EOFError due to insufficient data",
 		async () => {
-			const lenBuf = new Uint8Array([0x04]);
+			// timestamp delta (0) followed by a length that exceeds the data
+			const lenBuf = new Uint8Array([0x00, 0x04]);
 			const dataBuf = new Uint8Array([1, 2]);
 			const total = new Uint8Array([...lenBuf, ...dataBuf]);
 			const readable = new ReadableStream<Uint8Array>({
@@ -312,6 +315,7 @@ Deno.test("GroupReader", async (t) => {
 
 			// Encode both frames
 			for (const payload of payloads) {
+				await writeVarint(buf, 0); // timestamp delta
 				await writeVarint(buf, payload.length);
 				buf.write(payload);
 			}
@@ -372,6 +376,7 @@ Deno.test("GroupReader", async (t) => {
 		// encode buffers using Buffer
 		const buf = new Buffer(new ArrayBuffer(0));
 		for (const pl of payloads) {
+			await writeVarint(buf, 0); // timestamp delta
 			await writeVarint(buf, pl.length);
 			buf.write(pl);
 		}

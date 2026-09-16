@@ -2,8 +2,8 @@ import { Session } from "./session.ts";
 import type { ConnectInit } from "./options.ts";
 import { WebTransportSession } from "./internal/webtransport/mod.ts";
 
-/** ALPN protocol identifier for MOQ Lite draft-04. */
-export const ALPN = "moq-lite-04";
+/** ALPN protocol identifier for MOQ Lite draft-05. */
+export const ALPN = "moq-lite-05";
 
 const DefaultWebTransportOptions: WebTransportOptions = {
 	allowPooling: false,

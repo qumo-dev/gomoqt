@@ -31,6 +31,10 @@ type GroupReader struct {
 	stream     transport.ReceiveStream
 	frameCount int64
 
+	// prevTimestamp is the previous frame's timestamp on this stream,
+	// used to resolve the next frame's delta-encoded timestamp.
+	prevTimestamp uint64
+
 	groupManager *groupReaderManager
 }
 
@@ -45,7 +49,7 @@ func (s *GroupReader) ReadFrame(frame *Frame) error {
 	if frame == nil {
 		panic("nil frame")
 	}
-	err := frame.decode(s.stream)
+	err := frame.decode(s.stream, s.prevTimestamp)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
 			return err
@@ -62,6 +66,7 @@ func (s *GroupReader) ReadFrame(frame *Frame) error {
 		return err
 	}
 
+	s.prevTimestamp = frame.Timestamp
 	s.frameCount++
 
 	return nil

@@ -7,28 +7,33 @@ import (
 
 var ErrInvalidSubscribeOkMessageType = errors.New("invalid message type for SubscribeOkMessage")
 
-// SubscribeOkMessage is the publisher response to SUBSCRIBE.
-// The first encoded field is a type tag, fixed to 0x0 for SUBSCRIBE_OK.
+// Type tags for messages sent by the publisher on the Subscribe Stream.
+// The type varint is written by the caller before Encode / consumed before Decode.
+const (
+	MessageTypeSubscribeOk   uint64 = 0x0
+	MessageTypeSubscribeEnd  uint64 = 0x1
+	MessageTypeSubscribeDrop uint64 = 0x2
+)
+
+// SubscribeOkMessage confirms a subscription and resolves its absolute
+// start group. It is the first message the publisher sends on the
+// Subscribe Stream, once the start group is known.
+//
+// Wire format:
+//
+//	SUBSCRIBE_OK Message {
+//	  Type (i) = 0x0
+//	  Message Length (i)
+//	  Group (i)
+//	}
 type SubscribeOkMessage struct {
-	PublisherPriority   uint8
-	PublisherOrdered    uint8
-	PublisherMaxLatency uint64
-	StartGroup          uint64
-	EndGroup            uint64
+	// Group is the absolute sequence number of the first group that will
+	// be delivered (plain absolute sequence, not the +1 form of SUBSCRIBE).
+	Group uint64
 }
 
-const MessageTypeSubscribeOk uint64 = 0x0
-
 func (som SubscribeOkMessage) Len() int {
-	var l int
-
-	l += 1 // PublisherPriority (uint8)
-	l += 1 // PublisherOrdered (uint8)
-	l += VarintLen(som.PublisherMaxLatency)
-	l += VarintLen(som.StartGroup)
-	l += VarintLen(som.EndGroup)
-
-	return l
+	return VarintLen(som.Group)
 }
 
 func (som SubscribeOkMessage) Encode(w io.Writer) error {
@@ -36,11 +41,7 @@ func (som SubscribeOkMessage) Encode(w io.Writer) error {
 	b := make([]byte, 0, msgLen+VarintLen(uint64(msgLen)))
 
 	b, _ = WriteMessageLength(b, uint64(msgLen))
-	b = append(b, som.PublisherPriority)
-	b = append(b, som.PublisherOrdered)
-	b, _ = WriteVarint(b, som.PublisherMaxLatency)
-	b, _ = WriteVarint(b, som.StartGroup)
-	b, _ = WriteVarint(b, som.EndGroup)
+	b, _ = WriteVarint(b, som.Group)
 
 	_, err := w.Write(b)
 
@@ -63,32 +64,11 @@ func (som *SubscribeOkMessage) Decode(src io.Reader) error {
 		return err
 	}
 
-	if len(b) < 2 {
-		return ErrMessageTooShort
-	}
-	som.PublisherPriority = b[0]
-	som.PublisherOrdered = b[1]
-	b = b[2:]
-
 	num, n, err := ReadVarint(b)
 	if err != nil {
 		return err
 	}
-	som.PublisherMaxLatency = num
-	b = b[n:]
-
-	num, n, err = ReadVarint(b)
-	if err != nil {
-		return err
-	}
-	som.StartGroup = num
-	b = b[n:]
-
-	num, n, err = ReadVarint(b)
-	if err != nil {
-		return err
-	}
-	som.EndGroup = num
+	som.Group = num
 	b = b[n:]
 
 	if len(b) != 0 {

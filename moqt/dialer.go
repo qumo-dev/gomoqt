@@ -63,7 +63,7 @@ func (d *Dialer) Dial(ctx context.Context, urlStr string, mux *TrackMux) (*Sessi
 	case "https":
 		return d.DialWebTransport(ctx, parsedURL.Host, parsedURL.Path, mux)
 	case "moqt":
-		return d.DialQUIC(ctx, parsedURL.Host, mux)
+		return d.DialQUIC(ctx, parsedURL.Host, parsedURL.Path, mux)
 	default:
 		return nil, ErrInvalidScheme
 	}
@@ -111,13 +111,18 @@ func (d *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *T
 	)
 	connLogger.Info("connection established")
 
-	return newSession(conn, mux, nil, d.Config, d.FetchHandler, d.OnGoaway, d.Logger, nil), nil
+	// WebTransport: the request path is bound by the HTTP handshake
+	// (path argument above), so Session carries no path state.
+	return newSession(conn, mux, nil, d.Config, d.FetchHandler, d.OnGoaway, d.Logger, sessionSetup{}, nil), nil
 }
 
 // DialQUIC establishes a new session over native QUIC by dialing the provided
 // address and negotiating the transport protocol. This uses the QUIC dial
 // function configured on the Dialer (DialQUICFunc) if present.
-func (d *Dialer) DialQUIC(ctx context.Context, addr string, mux *TrackMux) (*Session, error) {
+// `path` is the request path conveyed to the server via the SETUP Path
+// parameter, since the native QUIC binding has no request URI of its own.
+// An empty path defaults to "/".
+func (d *Dialer) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux) (*Session, error) {
 	dialTimeout := d.Config.setupTimeout()
 	dialCtx, cancelDial := context.WithTimeout(ctx, dialTimeout)
 	defer cancelDial()
@@ -143,5 +148,11 @@ func (d *Dialer) DialQUIC(ctx context.Context, addr string, mux *TrackMux) (*Ses
 		return nil, err
 	}
 
-	return newSession(conn, mux, nil, d.Config, d.FetchHandler, d.OnGoaway, d.Logger, nil), nil
+	if path == "" {
+		path = "/"
+	}
+	// Native QUIC has no handshake-time request URI, so the client conveys the
+	// request path via the SETUP Path parameter. setupPath drives that.
+	return newSession(conn, mux, nil, d.Config, d.FetchHandler, d.OnGoaway, d.Logger,
+		sessionSetup{setupPath: path}, nil), nil
 }

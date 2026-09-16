@@ -33,6 +33,11 @@ type GroupWriter struct {
 
 	frameCount uint64 // Number of frames sent on this stream
 
+	// prevTimestamp is the previous frame's timestamp on this stream,
+	// used to delta-encode the next frame (the first frame is encoded
+	// relative to 0).
+	prevTimestamp uint64
+
 	groupManager *groupWriterManager
 }
 
@@ -47,11 +52,12 @@ func (sgs *GroupWriter) WriteFrame(frame *Frame) error {
 		return nil
 	}
 
-	err := frame.encode(sgs.stream)
+	err := frame.encode(sgs.stream, sgs.prevTimestamp)
 	if err != nil {
 		return err
 	}
 
+	sgs.prevTimestamp = frame.Timestamp
 	sgs.frameCount++
 
 	return nil

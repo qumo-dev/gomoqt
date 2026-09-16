@@ -9,34 +9,34 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAnnounceMessage_EncodeDecode(t *testing.T) {
+func TestAnnounceBroadcastMessage_EncodeDecode(t *testing.T) {
 	tests := map[string]struct {
-		input   message.AnnounceMessage
+		input   message.AnnounceBroadcastMessage
 		wantErr bool
 	}{
 		"valid message": {
-			input: message.AnnounceMessage{
+			input: message.AnnounceBroadcastMessage{
 				AnnounceStatus:      message.AnnounceStatus(1),
 				BroadcastPathSuffix: "path/to/track",
 				HopIDs:              []uint64{},
 			},
 		},
 		"empty wildcard parameters": {
-			input: message.AnnounceMessage{
+			input: message.AnnounceBroadcastMessage{
 				AnnounceStatus:      message.AnnounceStatus(1),
 				BroadcastPathSuffix: "",
 				HopIDs:              []uint64{},
 			},
 		},
 		"max values": {
-			input: message.AnnounceMessage{
+			input: message.AnnounceBroadcastMessage{
 				AnnounceStatus:      message.AnnounceStatus(^byte(0)),
 				BroadcastPathSuffix: "very/long/path",
 				HopIDs:              []uint64{1, 2, 3},
 			},
 		},
 		"with hop ids": {
-			input: message.AnnounceMessage{
+			input: message.AnnounceBroadcastMessage{
 				AnnounceStatus:      message.ACTIVE,
 				BroadcastPathSuffix: "test",
 				HopIDs:              []uint64{100, 200},
@@ -57,7 +57,7 @@ func TestAnnounceMessage_EncodeDecode(t *testing.T) {
 			require.NoError(t, err)
 
 			// Decode
-			var decoded message.AnnounceMessage
+			var decoded message.AnnounceBroadcastMessage
 			err = decoded.Decode(&buf)
 			require.NoError(t, err)
 
@@ -67,16 +67,16 @@ func TestAnnounceMessage_EncodeDecode(t *testing.T) {
 	}
 }
 
-func TestAnnounceMessage_DecodeErrors(t *testing.T) {
+func TestAnnounceBroadcastMessage_DecodeErrors(t *testing.T) {
 	t.Run("read message length error", func(t *testing.T) {
-		var am message.AnnounceMessage
+		var am message.AnnounceBroadcastMessage
 		src := bytes.NewReader([]byte{}) // empty, should cause error
 		err := am.Decode(src)
 		assert.Error(t, err)
 	})
 
 	t.Run("read full error", func(t *testing.T) {
-		var am message.AnnounceMessage
+		var am message.AnnounceBroadcastMessage
 		// Write length but not enough data
 		var buf bytes.Buffer
 		buf.WriteByte(0x80 | 10) // varint for 10
@@ -87,7 +87,7 @@ func TestAnnounceMessage_DecodeErrors(t *testing.T) {
 	})
 
 	t.Run("read varint error", func(t *testing.T) {
-		var am message.AnnounceMessage
+		var am message.AnnounceBroadcastMessage
 		var buf bytes.Buffer
 		buf.WriteByte(0x80 | 1) // length 1
 		buf.WriteByte(0x00)
@@ -98,7 +98,7 @@ func TestAnnounceMessage_DecodeErrors(t *testing.T) {
 	})
 
 	t.Run("read string error", func(t *testing.T) {
-		var am message.AnnounceMessage
+		var am message.AnnounceBroadcastMessage
 		var buf bytes.Buffer
 		buf.WriteByte(0x80 | 2) // length 2
 		buf.WriteByte(0x00)
@@ -110,7 +110,7 @@ func TestAnnounceMessage_DecodeErrors(t *testing.T) {
 	})
 
 	t.Run("extra data", func(t *testing.T) {
-		var am message.AnnounceMessage
+		var am message.AnnounceBroadcastMessage
 		// Manually construct data with extra bytes after valid data
 		var buf bytes.Buffer
 		buf.WriteByte(0x05) // length varint = 5

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"time"
@@ -18,19 +19,10 @@ func main() {
 	addr := flag.String("addr", "https://localhost:9000", "server URL for MOQ (https://host:port for WebTransport, moqt://host:port for native QUIC)")
 	flag.Parse()
 
-	goawayCh := make(chan string, 1)
-
 	client := &moqt.Dialer{
 		TLSConfig: &tls.Config{InsecureSkipVerify: true}, // interop uses local self-signed certs
 		Config: &moqt.Config{
 			SetupTimeout: 10 * time.Second,
-		},
-		OnGoaway: func(newSessionURI string) {
-			fmt.Printf("Received GOAWAY (newSessionURI: %s)\n", newSessionURI)
-			select {
-			case goawayCh <- newSessionURI:
-			default:
-			}
 		},
 	}
 
@@ -128,28 +120,27 @@ func main() {
 	fmt.Print("Probing server bitrate...")
 	probeCh, err := sess.Probe(1_000_000)
 	if err != nil {
-		fmt.Printf("failed\n  Error: %v\n", err)
-		return
+		if errors.Is(err, moqt.ErrProbeNotSupported) {
+			fmt.Println("skipped (peer does not advertise probing)")
+		} else {
+			fmt.Printf("failed\n  Error: %v\n", err)
+			return
+		}
+	} else {
+		probeResult, ok := <-probeCh
+		if !ok {
+			fmt.Printf("failed\n  Error: probe stream closed without result\n")
+			return
+		}
+		fmt.Printf("ok (measured: %d bps)\n", probeResult.Bitrate)
 	}
-	probeResult, ok := <-probeCh
-	if !ok {
-		fmt.Printf("failed\n  Error: probe stream closed without result\n")
-		return
-	}
-	fmt.Printf("ok (measured: %d bps)\n", probeResult.Bitrate)
 
-	// Channel to signal that the publish handler has completed
-	doneCh := make(chan struct{}, 1)
-
-	// Publish to the interop broadcast so server can discover it
-	// Register the handler BEFORE dialing so it's ready when server requests announcements
+	// Register the client broadcast after completing the server flow. This
+	// lets the server finish its initial announcement and subscription flow
+	// before it discovers and subscribes to the client broadcast.
+	doneCh := make(chan struct{})
 	mux.PublishFunc(context.Background(), "/interop/client", func(tw *moqt.TrackWriter) {
-		defer func() {
-			select {
-			case doneCh <- struct{}{}:
-			default:
-			}
-		}()
+		defer close(doneCh)
 
 		fmt.Print("Opening group...")
 		ctx, cancel := context.WithTimeout(context.Background(), openTimeout)
@@ -174,20 +165,11 @@ func main() {
 		fmt.Println("ok")
 	})
 
-	// Wait for the handler to cleanup
+	// Keep the session alive until the server has subscribed and received the
+	// client frame, or until the session is closed.
 	select {
 	case <-doneCh:
-		// Handler completed normally
-	case <-time.After(5 * time.Second):
-		fmt.Println("publish handler did not complete in time")
-	}
-
-	// Wait for GOAWAY from server
-	fmt.Print("Waiting for GOAWAY...")
-	select {
-	case uri := <-goawayCh:
-		fmt.Printf("ok (newSessionURI: %s)\n", uri)
-	case <-time.After(10 * time.Second):
-		fmt.Println("failed (timed out)")
+	case <-sess.Context().Done():
+		fmt.Println("client publish canceled before completion")
 	}
 }

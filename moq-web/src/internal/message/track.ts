@@ -1,18 +1,30 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
 import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
 
-export interface AnnounceInterestMessageInit {
-	prefix?: string;
-	excludeHop?: number;
+export interface TrackMessageInit {
+	broadcastPath?: string;
+	trackName?: string;
 }
 
-export class AnnounceInterestMessage {
-	prefix: string;
-	excludeHop: number;
+/**
+ * TRACK message, sent by a subscriber as the first message on a Track
+ * Stream to request a track's immutable publisher properties.
+ *
+ * ```text
+ * TRACK Message {
+ *   Message Length (i)
+ *   Broadcast Path (s)
+ *   Track Name (s)
+ * }
+ * ```
+ */
+export class TrackMessage {
+	broadcastPath: string;
+	trackName: string;
 
-	constructor(init: AnnounceInterestMessageInit = {}) {
-		this.prefix = init.prefix ?? "";
-		this.excludeHop = init.excludeHop ?? 0;
+	constructor(init: TrackMessageInit = {}) {
+		this.broadcastPath = init.broadcastPath ?? "";
+		this.trackName = init.trackName ?? "";
 	}
 
 	/**
@@ -20,8 +32,8 @@ export class AnnounceInterestMessage {
 	 */
 	async encode(w: Writer): Promise<Error | undefined> {
 		const e = new MessageEncoder();
-		e.string(this.prefix);
-		e.varint(this.excludeHop);
+		e.string(this.broadcastPath);
+		e.string(this.trackName);
 		const [, err] = await w.write(e.frame());
 		return err;
 	}
@@ -38,9 +50,8 @@ export class AnnounceInterestMessage {
 		if (err2) return err2;
 
 		const d = new MessageDecoder(buf);
-
-		this.prefix = d.string();
-		this.excludeHop = d.varint();
+		this.broadcastPath = d.string();
+		this.trackName = d.string();
 
 		return undefined;
 	}
