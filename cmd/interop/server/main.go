@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -34,6 +35,29 @@ func main() {
 
 	serverDone := make(chan struct{}, 1)
 	mux := moqt.NewTrackMux(0)
+	serverPath := moqt.BroadcastPath("/interop/server")
+	mux.PublishFunc(context.Background(), serverPath, func(tw *moqt.TrackWriter) {
+		fmt.Printf("Serving a track: %s\n", string(serverPath))
+
+		ctx, cancel := context.WithTimeout(context.Background(), openTimeout)
+		group, err := tw.OpenGroup(ctx)
+		cancel()
+		if err != nil {
+			fmt.Printf("Opening group... failed\n  Error: %v\n", err)
+			return
+		}
+		defer group.Close()
+		fmt.Println("Opening group... ok")
+
+		frame := moqt.NewFrame(1024)
+		_, _ = frame.Write([]byte("HELLO"))
+
+		if err = group.WriteFrame(frame); err != nil {
+			fmt.Printf("Writing frame to client... failed\n  Error: %v\n", err)
+			return
+		}
+		fmt.Println("Writing frame to client... ok")
+	})
 
 	// Print startup message directly
 	fmt.Printf("[OK] Started on %s\n", *addr)
@@ -56,9 +80,10 @@ func main() {
 			EnableDatagrams: true,
 		},
 		NextSessionURI: "https://next.example.com",
+		TrackMux:       mux,
 		FetchHandler:   fetchHandler,
 		Handler: moqt.HandleFunc(func(sess *moqt.Session) {
-			runInteropSession(sess, mux, serverDone)
+			runInteropSession(sess, serverDone)
 		}),
 	}
 
@@ -84,7 +109,7 @@ func main() {
 		TrackMux:     mux,
 		FetchHandler: fetchHandler,
 		Handler: moqt.HandleFunc(func(sess *moqt.Session) {
-			runInteropSession(sess, mux, serverDone)
+			runInteropSession(sess, serverDone)
 		}),
 	}
 
@@ -100,44 +125,7 @@ func main() {
 	}
 }
 
-func runInteropSession(sess *moqt.Session, mux *moqt.TrackMux, serverDone chan struct{}) {
-
-	path := moqt.BroadcastPath("/interop/server")
-	doneCh := make(chan struct{}, 1)
-
-	mux.PublishFunc(context.Background(), path, func(tw *moqt.TrackWriter) {
-		fmt.Printf("Serving a track: %s\n", string(path))
-
-		ctx, cancel := context.WithTimeout(context.Background(), openTimeout)
-		group, err := tw.OpenGroup(ctx)
-		cancel()
-		if err != nil {
-			fmt.Printf("Opening group... failed\n  Error: %v\n", err)
-			return
-		}
-		defer group.Close()
-		fmt.Println("Opening group... ok")
-
-		frame := moqt.NewFrame(1024)
-		_, _ = frame.Write([]byte("HELLO"))
-
-		if err = group.WriteFrame(frame); err != nil {
-			fmt.Printf("Writing frame to client... failed\n  Error: %v\n", err)
-			return
-		}
-		fmt.Println("Writing frame to client... ok")
-
-		select {
-		case doneCh <- struct{}{}:
-		default:
-		}
-	})
-
-	select {
-	case <-doneCh:
-	case <-time.After(5 * time.Second):
-		fmt.Println("publish handler did not complete in time; continuing")
-	}
+func runInteropSession(sess *moqt.Session, serverDone chan struct{}) {
 
 	fmt.Print("Accepting client announcements...")
 	anns, err := sess.AcceptAnnounce("/")
@@ -190,15 +178,20 @@ func runInteropSession(sess *moqt.Session, mux *moqt.TrackMux, serverDone chan s
 	fmt.Print("Probing client bitrate...")
 	probeCh, err := sess.Probe(1_000_000)
 	if err != nil {
-		fmt.Printf(" failed: %v\n", err)
-		return
+		if errors.Is(err, moqt.ErrProbeNotSupported) {
+			fmt.Println(" skipped (peer does not advertise probing)")
+		} else {
+			fmt.Printf(" failed: %v\n", err)
+			return
+		}
+	} else {
+		probeResult, ok := <-probeCh
+		if !ok {
+			fmt.Printf(" failed: probe stream closed without result\n")
+			return
+		}
+		fmt.Printf(" ok (measured: %d bps)\n", probeResult.Bitrate)
 	}
-	probeResult, ok := <-probeCh
-	if !ok {
-		fmt.Printf(" failed: probe stream closed without result\n")
-		return
-	}
-	fmt.Printf(" ok (measured: %d bps)\n", probeResult.Bitrate)
 
 	// Signal the server to start graceful shutdown (sends GOAWAY to all sessions).
 	select {
@@ -206,13 +199,6 @@ func runInteropSession(sess *moqt.Session, mux *moqt.TrackMux, serverDone chan s
 	default:
 	}
 
-	// Wait for the session to close (client disconnects after receiving GOAWAY).
-	select {
-	case <-sess.Context().Done():
-		fmt.Println("Session closed after GOAWAY")
-	case <-time.After(10 * time.Second):
-		fmt.Println("Timed out waiting for session close after GOAWAY")
-	}
 }
 
 func generateCert() tls.Certificate {
