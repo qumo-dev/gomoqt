@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -174,31 +173,8 @@ func runInteropSession(sess *moqt.Session, serverDone chan struct{}) {
 	}
 	fmt.Printf(" ok (payload: %s)\n", string(frame.Body()))
 
-	// Probe client bitrate (server → client direction)
-	fmt.Print("Probing client bitrate...")
-	probeCh, err := sess.Probe(1_000_000)
-	if err != nil {
-		if errors.Is(err, moqt.ErrProbeNotSupported) {
-			fmt.Println(" skipped (peer does not advertise probing)")
-		} else {
-			fmt.Printf(" failed: %v\n", err)
-			return
-		}
-	} else {
-		probeResult, ok := <-probeCh
-		if !ok {
-			fmt.Printf(" failed: probe stream closed without result\n")
-			return
-		}
-		fmt.Printf(" ok (measured: %d bps)\n", probeResult.Bitrate)
-	}
-
 	// Signal the server to start graceful shutdown (sends GOAWAY to all sessions).
-	select {
-	case serverDone <- struct{}{}:
-	default:
-	}
-
+	serverDone <- struct{}{}
 }
 
 func generateCert() tls.Certificate {

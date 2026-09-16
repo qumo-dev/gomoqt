@@ -19,19 +19,10 @@ func main() {
 	addr := flag.String("addr", "https://localhost:9000", "server URL for MOQ (https://host:port for WebTransport, moqt://host:port for native QUIC)")
 	flag.Parse()
 
-	goawayCh := make(chan string, 1)
-
 	client := &moqt.Dialer{
 		TLSConfig: &tls.Config{InsecureSkipVerify: true}, // interop uses local self-signed certs
 		Config: &moqt.Config{
 			SetupTimeout: 10 * time.Second,
-		},
-		OnGoaway: func(newSessionURI string) {
-			fmt.Printf("Received GOAWAY (newSessionURI: %s)\n", newSessionURI)
-			select {
-			case goawayCh <- newSessionURI:
-			default:
-			}
 		},
 	}
 
@@ -147,14 +138,9 @@ func main() {
 	// Register the client broadcast after completing the server flow. This
 	// lets the server finish its initial announcement and subscription flow
 	// before it discovers and subscribes to the client broadcast.
-	doneCh := make(chan struct{}, 1)
+	doneCh := make(chan struct{})
 	mux.PublishFunc(context.Background(), "/interop/client", func(tw *moqt.TrackWriter) {
-		defer func() {
-			select {
-			case doneCh <- struct{}{}:
-			default:
-			}
-		}()
+		defer close(doneCh)
 
 		fmt.Print("Opening group...")
 		ctx, cancel := context.WithTimeout(context.Background(), openTimeout)
@@ -179,20 +165,11 @@ func main() {
 		fmt.Println("ok")
 	})
 
-	// Wait for the handler to cleanup
+	// Keep the session alive until the server has subscribed and received the
+	// client frame, or until the session is closed.
 	select {
 	case <-doneCh:
-		// Handler completed normally
-	case <-time.After(5 * time.Second):
-		fmt.Println("publish handler did not complete in time")
-	}
-
-	// Wait for GOAWAY from server
-	fmt.Print("Waiting for GOAWAY...")
-	select {
-	case uri := <-goawayCh:
-		fmt.Printf("ok (newSessionURI: %s)\n", uri)
-	case <-time.After(2 * time.Second):
-		fmt.Println("skipped (GOAWAY was not observed before transport shutdown)")
+	case <-sess.Context().Done():
+		fmt.Println("client publish canceled before completion")
 	}
 }
