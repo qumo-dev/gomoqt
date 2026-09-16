@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **moqt:** QUIC stream priority scheduling driven by `SubscriberPriority` (SUBSCRIBE/SUBSCRIBE_UPDATE) using RFC 9218 urgency via quic-go `SetPriority` on group streams and FETCH streams. `transport.SendStream` gains `SetPriority(urgency, incremental)` across both QUIC and WebTransport backends, with `TrackPriority` (0–255) linearly mapped to RFC 9218 urgency (0–7).
+- **moqt:** Ordered subscriptions now admit group streams in reservation order, serializing stream creation and group headers while keeping frame writes concurrent.
 
 ### Changed
 
