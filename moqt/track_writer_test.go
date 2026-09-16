@@ -155,7 +155,7 @@ func TestTrackWriter_OpenGroup_SetsPriority(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, group)
 
-	wantUrgency, wantIncremental := urgencyFor(200)
+	wantUrgency, wantIncremental := urgencyFor(200, false)
 	gotUrgency, gotIncremental, ok := mockSendStream.LastPriority()
 	assert.True(t, ok, "SetPriority should have been called")
 	assert.Equal(t, wantUrgency, gotUrgency)
@@ -182,7 +182,7 @@ func TestTrackWriter_OpenGroup_OrderedSetsNonIncrementalPriority(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, group)
 
-	wantUrgency, _ := urgencyFor(200)
+	wantUrgency, _ := urgencyFor(200, true)
 	gotUrgency, gotIncremental, ok := mockSendStream.LastPriority()
 	assert.True(t, ok, "SetPriority should have been called")
 	assert.Equal(t, wantUrgency, gotUrgency)

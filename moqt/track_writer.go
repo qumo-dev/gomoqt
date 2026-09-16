@@ -343,14 +343,7 @@ func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequen
 	}
 
 	config := w.TrackConfig()
-	urgency, incremental := urgencyFor(config.Priority)
-	if config.Ordered {
-		// Ordered is a non-blocking transport hint. RFC 9218's
-		// non-incremental mode lets the transport prefer completing this
-		// group stream without serializing OpenGroup or frame writes.
-		incremental = false
-	}
-	stream.SetPriority(urgency, incremental)
+	stream.SetPriority(urgencyFor(config.Priority, config.Ordered))
 
 	err = message.StreamTypeGroup.Encode(stream)
 	if err != nil {
