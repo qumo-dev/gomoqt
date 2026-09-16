@@ -155,11 +155,38 @@ func TestTrackWriter_OpenGroup_SetsPriority(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, group)
 
-	wantUrgency, wantIncremental := urgencyFor(200)
+	wantUrgency, wantIncremental := urgencyFor(200, false)
 	gotUrgency, gotIncremental, ok := mockSendStream.LastPriority()
 	assert.True(t, ok, "SetPriority should have been called")
 	assert.Equal(t, wantUrgency, gotUrgency)
 	assert.Equal(t, wantIncremental, gotIncremental)
+}
+
+func TestTrackWriter_OpenGroup_OrderedSetsNonIncrementalPriority(t *testing.T) {
+	mockStream := &FakeQUICStream{}
+	substr := newReceiveSubscribeStream(
+		SubscribeID(1),
+		mockStream,
+		&SubscribeConfig{Priority: 200, Ordered: true},
+	)
+
+	var mockSendStream *FakeQUICSendStream
+	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
+		mockSendStream = &FakeQUICSendStream{}
+		return mockSendStream, nil
+	}
+
+	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {})
+
+	group, err := sender.OpenGroup(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, group)
+
+	wantUrgency, _ := urgencyFor(200, true)
+	gotUrgency, gotIncremental, ok := mockSendStream.LastPriority()
+	assert.True(t, ok, "SetPriority should have been called")
+	assert.Equal(t, wantUrgency, gotUrgency)
+	assert.False(t, gotIncremental)
 }
 
 func TestTrackWriter_ContextCancellation(t *testing.T) {

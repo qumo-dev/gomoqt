@@ -184,7 +184,6 @@ func (w *TrackWriter) CloseWithError(code SubscribeErrorCode) {
 // track's lifetime, or a deadline-bearing context to drop a group under
 // pressure rather than wait.
 func (w *TrackWriter) OpenGroup(ctx context.Context) (*GroupWriter, error) {
-	// Atomically increment and get the next sequence
 	seq := GroupSequence(w.groupSequence.Add(1))
 	return w.openGroupWithSequence(ctx, seq)
 }
@@ -343,8 +342,8 @@ func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequen
 		return nil, err
 	}
 
-	urgency, incremental := urgencyFor(w.TrackConfig().Priority)
-	stream.SetPriority(urgency, incremental)
+	config := w.TrackConfig()
+	stream.SetPriority(urgencyFor(config.Priority, config.Ordered))
 
 	err = message.StreamTypeGroup.Encode(stream)
 	if err != nil {

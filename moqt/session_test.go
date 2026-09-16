@@ -1171,7 +1171,7 @@ func TestSession_ProcessBiStream_Fetch(t *testing.T) {
 	require.NotNil(t, gotWriter)
 	assert.Equal(t, GroupSequence(req.GroupSequence), gotWriter.GroupSequence())
 
-	wantUrgency, wantIncremental := urgencyFor(TrackPriority(req.Priority))
+	wantUrgency, wantIncremental := urgencyFor(TrackPriority(req.Priority), false)
 	gotUrgency, gotIncremental, ok := mockStream.LastPriority()
 	assert.True(t, ok, "SetPriority should have been called")
 	assert.Equal(t, wantUrgency, gotUrgency)
@@ -2124,7 +2124,7 @@ func TestSession_Fetch_SetsPriority(t *testing.T) {
 	_, err := session.Fetch(req)
 	require.NoError(t, err)
 
-	wantUrgency, wantIncremental := urgencyFor(200)
+	wantUrgency, wantIncremental := urgencyFor(200, false)
 	gotUrgency, gotIncremental, ok := mockStream.LastPriority()
 	assert.True(t, ok, "SetPriority should have been called")
 	assert.Equal(t, wantUrgency, gotUrgency)

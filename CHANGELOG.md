@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **moqt:** QUIC stream priority scheduling driven by `SubscriberPriority` (SUBSCRIBE/SUBSCRIBE_UPDATE) using RFC 9218 urgency via quic-go `SetPriority` on group streams and FETCH streams. `transport.SendStream` gains `SetPriority(urgency, incremental)` across both QUIC and WebTransport backends, with `TrackPriority` (0–255) linearly mapped to RFC 9218 urgency (0–7).
+- **moqt:** Ordered subscriptions now map to the RFC 9218 `incremental` bit: group streams of an ordered subscription are opened non-incremental, asking the transport to schedule them in stream-ID order instead of round-robin. `OpenGroup`/`OpenGroupAt` stay non-blocking and frame writes stay concurrent.
 
 ### Changed
 
