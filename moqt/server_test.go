@@ -603,6 +603,24 @@ func TestServer_handleNativeQUIC_CallsHandlerOnValidSetup(t *testing.T) {
 	assert.True(t, called)
 }
 
+// TestServer_handleNativeQUIC_HandlerSeesSetupPath verifies the end-to-end
+// contract the Path parameter exists for: the path a client puts in its SETUP
+// reaches the handler as Session.Path. Nothing else asserts that the router's
+// learned path survives into the Session.
+func TestServer_handleNativeQUIC_HandlerSeesSetupPath(t *testing.T) {
+	var got string
+	s := &Server{
+		Handler: HandleFunc(func(sess *Session) {
+			got = sess.Path()
+		}),
+	}
+
+	conn := newTestNativeQUICConn(t, withClientSetup("/live/alice"))
+
+	require.NoError(t, s.handleNativeQUIC(conn))
+	assert.Equal(t, "/live/alice", got)
+}
+
 // TestServer_handleNativeQUIC_RejectsMissingPath verifies the router rejects a
 // SETUP that omits the mandatory Path parameter (native QUIC has no other way
 // to convey the request path).
@@ -660,6 +678,43 @@ func TestWebTransportHandler_ServeHTTP_UpgradeSuccess(t *testing.T) {
 
 	u.ServeHTTP(w, r)
 	assert.True(t, handlerCalled)
+}
+
+// TestWebTransportHandler_ServeHTTP_HandlerSeesRequestPath verifies the
+// WebTransport half of Session.Path: the handler observes the HTTP request's
+// path, the same value a native-QUIC handler gets from the SETUP Path
+// parameter, so a handler serving both bindings has one way to ask.
+func TestWebTransportHandler_ServeHTTP_HandlerSeesRequestPath(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		url  string
+		want string
+	}{
+		{name: "Path", url: "https://example.com/live/alice", want: "/live/alice"},
+		{name: "EmptyPathDefaultsToRoot", url: "https://example.com", want: "/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got string
+			u := &WebTransportHandler{
+				TrackMux: NewTrackMux(0),
+				UpgradeFunc: func(w http.ResponseWriter, r *http.Request) (WebTransportSession, error) {
+					sess := &FakeWebTransportSession{}
+					sess.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
+					sess.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+					return sess, nil
+				},
+				Handler: HandleFunc(func(sess *Session) {
+					got = sess.Path()
+				}),
+			}
+
+			r, _ := http.NewRequest(http.MethodGet, tc.url, nil)
+			r.TLS = &tls.ConnectionState{}
+
+			u.ServeHTTP(&FakeHTTPResponseWriter{}, r)
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
 
 func TestWebTransportHandler_ServeHTTP_UpgradeSuccessWithConnManager(t *testing.T) {

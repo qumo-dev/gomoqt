@@ -343,6 +343,15 @@ func (u *WebTransportHandler) upgradeWebTransport(w http.ResponseWriter, r *http
 	return defaultUpgrader.Upgrade(w, r)
 }
 
+// requestPath returns the WebTransport request's path, rooted at "/" so it
+// matches the native-QUIC binding, which rejects any SETUP Path that is not.
+func requestPath(r *http.Request) string {
+	if r.URL == nil || r.URL.Path == "" {
+		return "/"
+	}
+	return r.URL.Path
+}
+
 // ServeHTTP upgrades an incoming HTTP request to a WebTransport session and
 // dispatches it to the configured handler. If the upgrade fails, it falls back
 // to FallbackHandler or returns a 400 response.
@@ -366,10 +375,12 @@ func (u *WebTransportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		manager = v.(*connManager)
 	}
 
-	// WebTransport: the request path is already resolved by the HTTP
-	// handshake (r.URL.Path), so Session needs no path/role state. Handlers
-	// read the path from r.URL.Path.
-	sess := newSession(conn, u.TrackMux, manager, u.Config, u.FetchHandler, nil, u.Logger, sessionSetup{}, nil)
+	// WebTransport resolves the request path in the HTTP handshake, so hand it
+	// to the Session (which exposes it as Session.Path, the same way the
+	// native-QUIC router does with the path from SETUP). A WebTransport
+	// endpoint must not send a SETUP Path parameter, so sendPath stays false.
+	sess := newSession(conn, u.TrackMux, manager, u.Config, u.FetchHandler, nil, u.Logger,
+		sessionSetup{path: requestPath(r)}, nil)
 	// Ensure the session is cleaned up (conn removed from the manager) when
 	// the Handler returns, even if it did not call CloseWithError itself (e.g.
 	// the peer closed the connection). Idempotent.
@@ -414,12 +425,11 @@ func (s *Server) handleNativeQUIC(conn StreamConn) error {
 		return fmt.Errorf("native QUIC setup: missing or invalid Path parameter")
 	}
 
-	// Stash the path on the connection context for handlers (mirrors WT's
-	// r.URL.Path) and hand Session the decoded SETUP so it seeds peer-probe
-	// state without re-reading the consumed stream.
-	conn = withPathContext(conn, path)
+	// Hand the Session the learned path (exposed as Session.Path, mirroring
+	// WebTransport's r.URL.Path) along with the decoded SETUP, so it seeds
+	// peer-probe state without re-reading the consumed stream.
 	sess := newSession(conn, s.TrackMux, s.connManager, s.Config, s.FetchHandler, nil, s.Logger,
-		sessionSetup{peerSetup: &sm}, s.Counters)
+		sessionSetup{path: path, peerSetup: &sm}, s.Counters)
 	if s.Counters != nil {
 		s.Counters.NativeSessions.Add(1)
 	}

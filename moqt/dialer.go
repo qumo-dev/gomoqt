@@ -111,9 +111,26 @@ func (d *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *T
 	)
 	connLogger.Info("connection established")
 
-	// WebTransport: the request path is bound by the HTTP handshake
-	// (path argument above), so Session carries no path state.
-	return newSession(conn, mux, nil, d.Config, d.FetchHandler, d.OnGoaway, d.Logger, sessionSetup{}, nil), nil
+	// WebTransport binds the request path in the HTTP handshake, so the peer
+	// learns it from the request URI and this endpoint must not send a SETUP
+	// Path parameter. Record the path that was actually dialed — when host
+	// already carries a scheme the path argument is not part of target — so
+	// Session.Path agrees with the connection.
+	return newSession(conn, mux, nil, d.Config, d.FetchHandler, d.OnGoaway, d.Logger,
+		sessionSetup{path: dialedPath(target, path)}, nil), nil
+}
+
+// dialedPath returns the request path of the URL actually dialed, falling back
+// to fallback when target is unparsable. The result is always rooted at "/".
+func dialedPath(target, fallback string) string {
+	path := fallback
+	if u, err := url.Parse(target); err == nil {
+		path = u.Path
+	}
+	if path == "" {
+		return "/"
+	}
+	return path
 }
 
 // DialQUIC establishes a new session over native QUIC by dialing the provided
@@ -151,8 +168,8 @@ func (d *Dialer) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux)
 	if path == "" {
 		path = "/"
 	}
-	// Native QUIC has no handshake-time request URI, so the client conveys the
-	// request path via the SETUP Path parameter. setupPath drives that.
+	// Native QUIC has no handshake-time request URI, so the client is the one
+	// role that conveys the request path in its own SETUP. sendPath drives that.
 	return newSession(conn, mux, nil, d.Config, d.FetchHandler, d.OnGoaway, d.Logger,
-		sessionSetup{setupPath: path}, nil), nil
+		sessionSetup{path: path, sendPath: true}, nil), nil
 }
