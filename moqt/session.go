@@ -20,14 +20,20 @@ const (
 	moqtVersion = "moq-lite-05"
 )
 
-// sessionSetup carries the two pieces of binding-specific SETUP state that a
-// Session cannot derive itself. Both fields are optional; the zero value is a
-// WebTransport server (sends no Path, reads the peer SETUP itself).
+// sessionSetup carries the binding-specific SETUP state that a Session cannot
+// derive itself. Every field is optional; the zero value is a session with an
+// unknown path that sends no Path parameter and reads the peer SETUP itself.
 type sessionSetup struct {
-	// setupPath is the Path parameter this endpoint sends in its own outgoing
-	// SETUP. Set only by the native-QUIC client (whose binding has no
-	// handshake-time request URI); empty means "do not send Path".
-	setupPath string
+	// path is the session's request path, resolved by the binding before the
+	// Session exists: from r.URL.Path for WebTransport, from the SETUP Path
+	// parameter for native QUIC, and from the dialed URL on either client.
+	// It backs Session.Path.
+	path string
+	// sendPath reports whether this endpoint must convey path in its own
+	// outgoing SETUP. True only for the native-QUIC client, whose binding has
+	// no handshake-time request URI; every other role is prohibited from
+	// sending the parameter, so path is carried but not transmitted.
+	sendPath bool
 	// peerSetup is the peer's SETUP message, pre-decoded by the native-QUIC
 	// router on the server side. The router consumes the client's Setup Stream
 	// to learn the request path (above Session), then hands the decoded message
@@ -66,8 +72,11 @@ type Session struct {
 
 	connManager *connManager
 
-	// setupPath is the Path sent in our outgoing SETUP (native-QUIC client only).
-	setupPath string
+	// path is the session's request path, resolved by the binding (see
+	// sessionSetup.path). sendPath reports whether it must also be conveyed in
+	// our outgoing SETUP, which only the native-QUIC client does.
+	path     string
+	sendPath bool
 
 	// localProbeLevel is the Probe capability advertised in our SETUP.
 	localProbeLevel uint64
@@ -122,7 +131,8 @@ func newSession(
 		fetchHandler:    fetchHandler,
 		onGoaway:        onGoaway,
 		logger:          logger,
-		setupPath:       setup.setupPath,
+		path:            setup.path,
+		sendPath:        setup.sendPath,
 		trackReaders:    make(map[SubscribeID]*TrackReader),
 		trackWriters:    make(map[SubscribeID]*TrackWriter),
 		connManager:     manager,
@@ -173,6 +183,20 @@ func newSession(
 	return sess
 }
 
+// Path returns the session's request path, such as "/live/alice" for a client
+// that dialed "moqt://host/live/alice" or "https://host/live/alice".
+//
+// The path is resolved by the transport binding before the session exists —
+// from the HTTP request's URL for WebTransport, and from the client's SETUP
+// Path parameter for native QUIC — so it is available immediately and is
+// identical on both bindings and on both sides of a session. Every Dialer and
+// Server entry point supplies a path rooted at "/", defaulting to "/" when the
+// dialed URL carries none; Path is empty only for a session constructed without
+// a binding-supplied path.
+func (sess *Session) Path() string {
+	return sess.path
+}
+
 // openSetupStream sends this endpoint's SETUP message on a unidirectional
 // Setup Stream and closes it (FIN), per moq-lite-05. A client on a binding
 // without a request URI (native QUIC) includes the Path parameter.
@@ -192,10 +216,13 @@ func (sess *Session) openSetupStream() {
 		sm.AddProbe(sess.localProbeLevel)
 	}
 	// Only the native-QUIC client conveys a request path via SETUP; its
-	// binding has no handshake-time request URI. setupPath is empty for every
-	// other role (WebTransport both directions; native-QUIC server).
-	if path := sess.setupPath; path != "" {
-		sm.AddPath(path)
+	// binding has no handshake-time request URI. Every other role (WebTransport
+	// both directions; native-QUIC server) knows its path but must not send it.
+	// No emptiness guard: every producer of sendPath roots the path first, and
+	// omitting a parameter that is mandatory on this binding should fail at
+	// the peer rather than pass silently.
+	if sess.sendPath {
+		sm.AddPath(sess.path)
 	}
 
 	if err := sm.Encode(stream); err != nil {

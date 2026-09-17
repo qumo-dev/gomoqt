@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **moqt: Breaking:** `PathFromContext` is removed and replaced by
+  **`Session.Path() string`**. A handler now reads the session's request path
+  the same way on both bindings — `sess.Path()` — instead of `PathFromContext`
+  for native QUIC and `r.URL.Path` for WebTransport. `PathFromContext` shipped
+  in v0.18.0 with the draft-05 migration and had no caller in this repository
+  or in qumo, so nothing depended on it in practice.
+
+  The mechanism was the weakest one available for the job: it carried a value
+  that is mandatory on its binding (`handleNativeQUIC` rejects a SETUP whose
+  Path is missing or not rooted at `/`) and known before the `Session` exists,
+  yet delivered it untyped through `context.Value`, behind a `pathContextConn`
+  wrapper whose only purpose was to override `Context()`, and required an `ok`
+  check for a value that was always present. The path now rides the existing
+  `sessionSetup` struct — the same channel the native-QUIC *client* already used
+  to carry its outgoing path — so `moqt/path_context.go` is deleted outright.
+  `sessionSetup.setupPath` splits into `path` (the session's request path, set
+  on every binding and in both roles) and `sendPath` (whether this endpoint must
+  also transmit it in its own SETUP, true only for the native-QUIC client). The
+  wire behavior is unchanged: WebTransport endpoints and the native-QUIC server
+  still send no Path parameter, and receiving one is still a protocol violation.
+
+  `Session.Path` is populated in all four roles, so it is symmetric where
+  `PathFromContext` was not (it returned `("", false)` for every WebTransport
+  session and every client). It is always rooted at `/`. On the WebTransport
+  client it reports the path of the URL actually dialed rather than the `path`
+  argument, which `DialWebTransport` ignores when `host` already carries a
+  scheme — so `Path` cannot disagree with the connection.
+
+  Two defects found reviewing this change are fixed here rather than left for
+  the follow-up. `dialedPath` fell back to the `path` argument when the target
+  was unparsable — but in the branch where `host` already carries a scheme that
+  argument is the one `DialWebTransport` discards, so `Session.Path` could
+  report a path the connection never used (confirmed: target
+  `https://exa mple.com/from-host`, `Path()` `/from-arg`), reachable through the
+  `DialWebTransportFunc` extension point. The fallback is now supplied only by
+  the branch that owns it. And `DialQUIC` rooted only an *empty* path, so
+  `DialQUIC(ctx, addr, "live/alice", mux)` both broke `Session.Path`'s
+  documented "rooted at `/`" contract and sent an unrooted SETUP Path that the
+  peer rejects as invalid — an opaque remote teardown instead of a local error.
+  It now roots the value, as `url.Parse` would for the equivalent URL.
+
+  Test coverage follows the behavior rather than the accessor. The removed
+  `TestPathContext_RoundTrips` exercised `context.WithValue` in isolation; the
+  end-to-end contract the Path parameter exists for — a path a client sends
+  reaching the handler — was asserted nowhere, and
+  `TestServer_handleNativeQUIC_CallsHandlerOnValidSetup` dialed `/live` while
+  checking only that the handler ran. New tests cover the handler observing the
+  path on both bindings (`..._HandlerSeesSetupPath`,
+  `..._HandlerSeesRequestPath`), `Session.Path` after `Dial` on both schemes
+  including the default-`/` and already-has-a-scheme branches
+  (`TestDialer_Dial_PopulatesSessionPath`), and that a WebTransport session
+  still omits the Path parameter while exposing the path via `Session.Path`.
+
 ### Fixed
 
 - **moq-web:** Narrowed `@qumo/moq`'s public API surface to match `moqt`'s exposure: `SendSubscribeStream`, `ReceiveSubscribeStream`, `SubscribeResponse`, `readSubscribeResponse`, and the `MESSAGE_TYPE_SUBSCRIBE_*` wire-message constants were re-exported from `mod.ts` via a blanket `export * from "./subscribe_stream.ts"`, even though their Go counterparts (`sendSubscribeStream`, `receiveSubscribeStream`, `subscribeResponse`, `readSubscribeResponse`) are unexported and unreachable outside the `moqt` package. `mod.ts` now re-exports only `TrackConfig`/`SubscribeDrop` (the two types with an exported Go equivalent, `SubscribeConfig`/`SubscribeDrop`) by name; the implementation classes stay reachable via relative import for `session.ts`/`track_reader.ts`/`track_writer.ts` and their tests, just not from the package entrypoint. Same fix for `BiStreamType`/`UniStreamType`/`BiStreamTypes`/`UniStreamTypes` (Go's equivalent, `message.StreamType`, lives entirely in `moqt/internal/message`) and `BitrateTrackerConfig` (its `BitrateTracker` class was already module-private; only the config type was, inconsistently, still exported — Go's `bitrateTracker`/`newBitrateTracker` are unexported with no public config type at all). Verified the four leaked symbols are unreachable via `import ... from "./mod.ts"` (a `@ts-expect-error`-guarded import check) while `TrackConfig`/`SubscribeDrop`/`Session`/`TrackReader`/`TrackWriter` remain reachable; `deno check`, `deno lint`, and the full test suite (206 passed, 528 steps) are unaffected since every internal consumer already imported these symbols by relative path, not through `mod.ts`.
