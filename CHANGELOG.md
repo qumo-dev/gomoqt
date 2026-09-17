@@ -37,6 +37,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   argument, which `DialWebTransport` ignores when `host` already carries a
   scheme — so `Path` cannot disagree with the connection.
 
+  Two defects found reviewing this change are fixed here rather than left for
+  the follow-up. `dialedPath` fell back to the `path` argument when the target
+  was unparsable — but in the branch where `host` already carries a scheme that
+  argument is the one `DialWebTransport` discards, so `Session.Path` could
+  report a path the connection never used (confirmed: target
+  `https://exa mple.com/from-host`, `Path()` `/from-arg`), reachable through the
+  `DialWebTransportFunc` extension point. The fallback is now supplied only by
+  the branch that owns it. And `DialQUIC` rooted only an *empty* path, so
+  `DialQUIC(ctx, addr, "live/alice", mux)` both broke `Session.Path`'s
+  documented "rooted at `/`" contract and sent an unrooted SETUP Path that the
+  peer rejects as invalid — an opaque remote teardown instead of a local error.
+  It now roots the value, as `url.Parse` would for the equivalent URL.
+
   Test coverage follows the behavior rather than the accessor. The removed
   `TestPathContext_RoundTrips` exercised `context.WithValue` in isolation; the
   end-to-end contract the Path parameter exists for — a path a client sends

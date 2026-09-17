@@ -92,11 +92,17 @@ func (d *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *T
 		}
 	}
 	target := host
+	// fallback is the path to report if target turns out to be unparsable. It
+	// is only sound in the branch below, where target is built from path; when
+	// host already carries a scheme, the path argument is not part of target,
+	// so reporting it would be the very disagreement this tracking prevents.
+	fallback := "/"
 	if !strings.Contains(target, "://") {
 		if path == "" {
 			path = "/"
 		}
 		target = "https://" + host + path
+		fallback = path
 	}
 
 	_, conn, err := dialer(dialCtx, target, nil, d.TLSConfig)
@@ -117,20 +123,20 @@ func (d *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *T
 	// already carries a scheme the path argument is not part of target — so
 	// Session.Path agrees with the connection.
 	return newSession(conn, mux, nil, d.Config, d.FetchHandler, d.OnGoaway, d.Logger,
-		sessionSetup{path: dialedPath(target, path)}, nil), nil
+		sessionSetup{path: dialedPath(target, fallback)}, nil), nil
 }
 
-// dialedPath returns the request path of the URL actually dialed, falling back
-// to fallback when target is unparsable. The result is always rooted at "/".
+// dialedPath returns the request path of the URL actually dialed. fallback is
+// used only when target cannot be parsed, so callers must pass a path that is
+// genuinely part of target, or "/" when none is. The result is rooted at "/".
 func dialedPath(target, fallback string) string {
-	path := fallback
-	if u, err := url.Parse(target); err == nil {
-		path = u.Path
+	if u, err := url.Parse(target); err == nil && u.Path != "" {
+		return u.Path
 	}
-	if path == "" {
+	if fallback == "" {
 		return "/"
 	}
-	return path
+	return fallback
 }
 
 // DialQUIC establishes a new session over native QUIC by dialing the provided
@@ -165,8 +171,15 @@ func (d *Dialer) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux)
 		return nil, err
 	}
 
-	if path == "" {
+	// Root the path, as url.Parse would for the equivalent "moqt://" URL. Left
+	// unrooted it would break Session.Path's documented contract and be sent
+	// verbatim as the SETUP Path parameter, which the peer rejects — surfacing
+	// as an opaque remote teardown rather than a local error.
+	switch {
+	case path == "":
 		path = "/"
+	case path[0] != '/':
+		path = "/" + path
 	}
 	// Native QUIC has no handshake-time request URI, so the client is the one
 	// role that conveys the request path in its own SETUP. sendPath drives that.

@@ -218,7 +218,10 @@ func (sess *Session) openSetupStream() {
 	// Only the native-QUIC client conveys a request path via SETUP; its
 	// binding has no handshake-time request URI. Every other role (WebTransport
 	// both directions; native-QUIC server) knows its path but must not send it.
-	if sess.sendPath && sess.path != "" {
+	// No emptiness guard: every producer of sendPath roots the path first, and
+	// omitting a parameter that is mandatory on this binding should fail at
+	// the peer rather than pass silently.
+	if sess.sendPath {
 		sm.AddPath(sess.path)
 	}
 

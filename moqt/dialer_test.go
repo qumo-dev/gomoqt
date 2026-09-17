@@ -245,3 +245,69 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 		assert.Equal(t, "/", sess.Path())
 	})
 }
+
+// TestDialer_DialWebTransport_UnparsableTargetDoesNotReportIgnoredPath pins the
+// fallback in dialedPath. When host already carries a scheme, DialWebTransport
+// discards the path argument; if the target is then unparsable, Session.Path
+// must not report that discarded argument — it would disagree with the
+// connection, which is the disagreement the tracking exists to prevent.
+// Reachable through DialWebTransportFunc, a documented extension point that may
+// accept targets net/url rejects.
+func TestDialer_DialWebTransport_UnparsableTargetDoesNotReportIgnoredPath(t *testing.T) {
+	var target string
+	d := &Dialer{
+		Config: &Config{SetupTimeout: 50 * time.Millisecond},
+		DialWebTransportFunc: func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config) (*http.Response, WebTransportSession, error) {
+			target = addr
+			conn := &FakeWebTransportSession{}
+			conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
+			conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+			conn.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+			conn.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
+			return &http.Response{StatusCode: http.StatusOK}, conn, nil
+		},
+	}
+
+	// A space in the authority makes url.Parse fail.
+	sess, err := d.DialWebTransport(context.Background(), "https://exa mple.com/from-host", "/from-arg", nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
+
+	assert.Equal(t, "https://exa mple.com/from-host", target)
+	assert.NotEqual(t, "/from-arg", sess.Path(), "must not report the discarded path argument")
+	assert.Equal(t, "/", sess.Path())
+}
+
+// TestDialer_DialQUIC_RootsPath verifies a non-empty unrooted path is rooted,
+// as url.Parse would for the equivalent "moqt://" URL. Left unrooted it would
+// break Session.Path's documented contract and be sent verbatim as the SETUP
+// Path parameter, which the peer rejects.
+func TestDialer_DialQUIC_RootsPath(t *testing.T) {
+	newDialer := func() *Dialer {
+		return &Dialer{
+			Config: &Config{SetupTimeout: 50 * time.Millisecond},
+			DialQUICFunc: func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (StreamConn, error) {
+				conn := &FakeStreamConn{}
+				conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
+				conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+				return conn, nil
+			},
+		}
+	}
+
+	for _, tc := range []struct{ name, in, want string }{
+		{name: "Unrooted", in: "live/alice", want: "/live/alice"},
+		{name: "Rooted", in: "/live/alice", want: "/live/alice"},
+		{name: "Empty", in: "", want: "/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sess, err := newDialer().DialQUIC(context.Background(), "example.com:9000", tc.in, nil)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
+
+			assert.Equal(t, tc.want, sess.Path())
+			require.NotEmpty(t, sess.Path())
+			assert.Equal(t, byte('/'), sess.Path()[0], "the SETUP Path parameter must be rooted")
+		})
+	}
+}
