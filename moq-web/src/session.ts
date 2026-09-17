@@ -1086,7 +1086,7 @@ export class Session {
 	}
 }
 
-export interface BitrateTrackerConfig {
+interface BitrateTrackerConfig {
 	intervalMs: number;
 	maxAgeMs: number;
 	maxDelta: number;
