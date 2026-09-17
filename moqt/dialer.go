@@ -52,6 +52,10 @@ type Dialer struct {
 // Dial establishes a new session to the specified URL using either WebTransport (https scheme) or QUIC (moqt scheme).
 // The provided TrackMux is used to route incoming service tracks if non-nil.
 // Dial returns the newly created Session or an error.
+//
+// Dial is the preferred entry point. DialWebTransport and DialQUIC are
+// deprecated: they take a host and a path that Dial derives from the URL, so
+// they carry no information the URL does not.
 func (d *Dialer) Dial(ctx context.Context, urlStr string, mux *TrackMux) (*Session, error) {
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
@@ -72,6 +76,14 @@ func (d *Dialer) Dial(ctx context.Context, urlStr string, mux *TrackMux) (*Sessi
 // DialWebTransport establishes a new session over WebTransport (HTTP/3).
 // It performs the WebTransport handshake and initializes a MOQ session.
 // `host` should be host:port and `path` is the path used for session setup.
+//
+// Deprecated: Use Dial with an "https" URL, which carries the same information
+// in one argument: Dial(ctx, "https://"+host+path, mux). This method will be
+// removed in a future release.
+//
+// Note that `host` is also accepted as a full URL, in which case `path` is
+// silently ignored — an ambiguity that Dial does not have. Prefer Dial even
+// before migrating fully.
 func (d *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *TrackMux) (*Session, error) {
 	var baseLogger *slog.Logger
 	if d.Logger != nil {
@@ -144,7 +156,14 @@ func dialedPath(target, fallback string) string {
 // function configured on the Dialer (DialQUICFunc) if present.
 // `path` is the request path conveyed to the server via the SETUP Path
 // parameter, since the native QUIC binding has no request URI of its own.
-// An empty path defaults to "/".
+// It is rooted at "/" if it is not already, and an empty path defaults to "/".
+//
+// Deprecated: Use Dial with a "moqt" URL, which carries the same information in
+// one argument: Dial(ctx, "moqt://"+addr+path, mux). The two are equivalent —
+// `addr` is a host:port and `path` is rooted at "/", so the URL form loses
+// nothing, and it works for an already-resolved address (including an IPv6
+// literal such as "[::1]:4433"). This method will be removed in a future
+// release.
 func (d *Dialer) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux) (*Session, error) {
 	dialTimeout := d.Config.setupTimeout()
 	dialCtx, cancelDial := context.WithTimeout(ctx, dialTimeout)

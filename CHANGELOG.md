@@ -62,6 +62,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`TestDialer_Dial_PopulatesSessionPath`), and that a WebTransport session
   still omits the Path parameter while exposing the path via `Session.Path`.
 
+### Deprecated
+
+- **moqt:** `Dialer.DialWebTransport` and `Dialer.DialQUIC` are deprecated in
+  favor of `Dialer.Dial`, and will be removed in a future release. Both take a
+  `host` and a `path` that `Dial` derives from the URL and the callee
+  immediately rejoins, so the pair carries no information the URL does not —
+  while the TypeScript client already exposes exactly one URL-shaped entry point
+  (`connect(url)`, with the older `dial` deprecated in its favor since v0.18.0).
+  This release only marks them; they still work unchanged, so code compiles with
+  a migration hint rather than an error.
+
+  ```go
+  -sess, err := d.DialWebTransport(ctx, "host:4443", "/live", mux)
+  +sess, err := d.Dial(ctx, "https://host:4443/live", mux)
+
+  -sess, err := d.DialQUIC(ctx, "host:4433", "/live", mux)
+  +sess, err := d.Dial(ctx, "moqt://host:4433/live", mux)
+  ```
+
+  `DialQUIC`'s substitution is exact: `addr` is a host:port and `path` is rooted
+  at `/`, so the URL form loses nothing, and it works for an already-resolved
+  address — including an IPv6 literal, which `url.Parse` handles
+  (`moqt://[::1]:4433/live`). This matters for peer-dialing code that resolves
+  addresses itself before connecting.
+
+  `DialWebTransport` additionally accepts a full URL as `host`, in which case it
+  **silently ignores its own `path` argument** — an ambiguity `Dial` does not
+  have, and a reason to migrate rather than wait for the removal.
+
+  Callers that need to replace the handshake rather than the URL handling should
+  use `Dialer.DialQUICFunc` / `Dialer.DialWebTransportFunc`, which `Dial` honors.
+
 ### Fixed
 
 - **moq-web:** Narrowed `@qumo/moq`'s public API surface to match `moqt`'s exposure: `SendSubscribeStream`, `ReceiveSubscribeStream`, `SubscribeResponse`, `readSubscribeResponse`, and the `MESSAGE_TYPE_SUBSCRIBE_*` wire-message constants were re-exported from `mod.ts` via a blanket `export * from "./subscribe_stream.ts"`, even though their Go counterparts (`sendSubscribeStream`, `receiveSubscribeStream`, `subscribeResponse`, `readSubscribeResponse`) are unexported and unreachable outside the `moqt` package. `mod.ts` now re-exports only `TrackConfig`/`SubscribeDrop` (the two types with an exported Go equivalent, `SubscribeConfig`/`SubscribeDrop`) by name; the implementation classes stay reachable via relative import for `session.ts`/`track_reader.ts`/`track_writer.ts` and their tests, just not from the package entrypoint. Same fix for `BiStreamType`/`UniStreamType`/`BiStreamTypes`/`UniStreamTypes` (Go's equivalent, `message.StreamType`, lives entirely in `moqt/internal/message`) and `BitrateTrackerConfig` (its `BitrateTracker` class was already module-private; only the config type was, inconsistently, still exported — Go's `bitrateTracker`/`newBitrateTracker` are unexported with no public config type at all). Verified the four leaked symbols are unreachable via `import ... from "./mod.ts"` (a `@ts-expect-error`-guarded import check) while `TrackConfig`/`SubscribeDrop`/`Session`/`TrackReader`/`TrackWriter` remain reachable; `deno check`, `deno lint`, and the full test suite (206 passed, 528 steps) are unaffected since every internal consumer already imported these symbols by relative path, not through `mod.ts`.
