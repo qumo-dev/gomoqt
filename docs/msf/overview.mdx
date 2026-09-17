@@ -1,0 +1,48 @@
+---
+title: "MSF"
+---
+
+MSF (MOQT Streaming Format, [draft-ietf-moq-msf-01](https://datatracker.ietf.org/doc/html/draft-ietf-moq-msf-01)) defines how media content is organized, described, and delivered over the MoQ transport protocol.
+
+While MoQ itself provides the transport primitives — broadcasts, tracks, groups, and frames — MSF defines the standard format for describing what media is available and how to consume it.
+
+```go
+import "github.com/qumo-dev/gomoqt/msf"
+```
+
+## Catalog
+
+A **catalog** is a JSON document that describes the complete set of tracks available in a broadcast. Subscribers read the catalog to discover available media before opening individual subscriptions.
+
+A catalog describes:
+- **Track identities** — namespace and name for each track
+- **Media parameters** — codec, bitrate, resolution, sample rate, etc.
+- **Packaging mode** — how media data is packed into MoQ groups and frames (LOC, CMAF, media timeline, event timeline)
+- **Content roles** — video, audio, caption, subtitle, etc.
+- **Dependencies** — which tracks depend on other tracks (e.g., enhancement layers)
+
+Catalogs are delivered as a reserved track (typically named `"catalog"`) within the broadcast, so they can be subscribed to like any other track.
+
+<Columns cols={2}>
+    <Card title="Catalog" icon="file-lines" href="/msf/catalog">Parse, validate, and inspect catalog snapshots</Card>
+    <Card title="Catalog Delta" icon="refresh" href="/msf/catalog_delta">Incremental catalog updates</Card>
+</Columns>
+
+## Timeline
+
+MSF defines **timeline records** that map media timestamps to MoQ group/object locations:
+
+- **Media Timeline** — maps media presentation timestamps to `[groupID, objectID]` locations with wallclock times
+- **Event Timeline** — records events indexed by wallclock time, object location, or media time, carrying arbitrary JSON payloads
+
+<Columns cols={2}>
+    <Card title="Timeline" icon="clock" href="/msf/timeline">Location, media timeline, and event timeline records</Card>
+</Columns>
+
+## Broadcast
+
+`msf.Broadcast` is an optional helper that integrates an MSF catalog with `moqt.TrackHandler` routing, managing the catalog snapshot and per-track handlers together.
+
+<Columns cols={2}>
+    <Card title="Broadcast" icon="arrow-up-right-from-square" href="/msf/broadcast">Catalog-aware track handler routing</Card>
+</Columns>

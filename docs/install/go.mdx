@@ -1,0 +1,51 @@
+---
+title: "Go"
+---
+
+## Building Go Applications
+
+### Prerequisites
+
+- Go 1.27 or later (recommended)
+- Git (required for building from source)
+- (Optional, recommended) Local certificate tool mkcert (for TLS usage)
+
+<Steps>
+
+<Step title="Initialize Go module">
+
+If you haven't already, initialize a Go module in your project directory.
+
+```bash
+go mod init [module_name]
+```
+
+</Step>
+<Step title="Get gomoqt">
+
+Download the package in your Go environment.
+
+```bash
+go get github.com/qumo-dev/gomoqt
+```
+
+</Step>
+<Step title="Importing packages">
+
+gomoqt provides the following packages, which can be imported into your Go application. `moqt` is the main package and the only one most applications need:
+
+| Import Path                              | Description                                                                 |
+|:-----------------------------------------|:----------------------------------------------------------------------------|
+| `github.com/qumo-dev/gomoqt/moqt`        | Main package implementing the core logic for Media over QUIC.               |
+| `github.com/qumo-dev/gomoqt/msf`         | MOQT Streaming Format — catalogs, catalog deltas, and timeline records.     |
+| `github.com/qumo-dev/gomoqt/transport`   | Abstraction and interface definitions for the QUIC/WebTransport layer used by `moqt`.<br />Wraps `quic-go/quic-go` and `okdaichi/webtransport-go`, which `moqt` uses by default. |
+
+**Example of importing the `moqt` package**:
+
+```go
+import (
+	"github.com/qumo-dev/gomoqt/moqt"
+)
+```
+</Step>
+</Steps>
