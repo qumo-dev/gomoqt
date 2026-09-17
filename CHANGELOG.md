@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.18.0] - 2026-09-17
+
+> **Dual release.** `v0.18.0` ships both packages at the same version: the Go module (`moqt`, consumed via `go get github.com/qumo-dev/gomoqt@v0.18.0`) and the TypeScript package (`@qumo/moq` on JSR). Minor-bumped from `v0.17.0` because this release carries a **breaking protocol change**: the wire protocol moves from MoQ Lite draft-04 to draft-05 (SETUP negotiation, ANNOUNCE_REQUEST/ANNOUNCE_OK, TRACK metadata, SUBSCRIBE_END, timestamp deltas, the `moq-lite-05` ALPN token), so this release does not interoperate with draft-04 peers.
+
 ### Added
 
 - **docs:** Documented `Session.TrackInfo` and `TrackInfoProvider`, both added by the draft-05 migration but never covered on the documentation site. `Session.TrackInfo` opens a Track Stream and requests a track's immutable publisher properties (TRACK_INFO) — priority, ordering, max latency, timescale — without subscribing; `TrackInfoProvider` is the optional interface the handler registered with `mux.Publish` for a broadcast path implements to answer those requests with real values instead of the zero-valued default. New "Track Info" sections on `moq/session.mdx` and `moq/produce_track.mdx`, cross-linked. Explains that TRACK_INFO is intentionally out-of-band from the MSF catalog (`msf.Track` has no `Priority`/`Ordered` fields to source it from), that `msf.Broadcast` does not implement `TrackInfoProvider` itself, and that the type assertion runs against the object registered with `mux.Publish` — not the per-track handler passed to `RegisterTrack`, which implementing `TrackInfoProvider` on has no effect. Documents the fix as composition: embed `*msf.Broadcast` in a wrapper that adds `TrackInfo`, and publish the wrapper. Notes that `msf.Track`'s spec-defined `TargetLatency`/`Timescale` already carry the same meaning as `PublishInfo.MaxLatency`/`Timescale` and can be forwarded, while `Priority`/`Ordered` have no catalog equivalent (tracked as a possible vendor extension in #420). All example code was verified to compile against the current API.
