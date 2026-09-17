@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **docs:** Documented `Session.TrackInfo` and `TrackInfoProvider`, both added by the draft-05 migration but never covered on the documentation site. `Session.TrackInfo` opens a Track Stream and requests a track's immutable publisher properties (TRACK_INFO) — priority, ordering, max latency, timescale — without subscribing; `TrackInfoProvider` is the optional interface a `TrackHandler` implements to answer those requests with real values instead of the zero-valued default. New "Track Info" sections on `moq/session.mdx` and `moq/produce_track.mdx`, cross-linked. Notes that `msf.Broadcast` does not implement `TrackInfoProvider` itself. The added example code was verified to compile against the current API.
+
 - **moqt:** QUIC stream priority scheduling driven by `SubscriberPriority` (SUBSCRIBE/SUBSCRIBE_UPDATE) using RFC 9218 urgency via quic-go `SetPriority` on group streams and FETCH streams. `transport.SendStream` gains `SetPriority(urgency, incremental)` across both QUIC and WebTransport backends, with `TrackPriority` (0–255) linearly mapped to RFC 9218 urgency (0–7).
 - **moqt:** Ordered subscriptions now map to the RFC 9218 `incremental` bit: group streams of an ordered subscription are opened non-incremental, asking the transport to schedule them in stream-ID order instead of round-robin. `OpenGroup`/`OpenGroupAt` stay non-blocking and frame writes stay concurrent.
 

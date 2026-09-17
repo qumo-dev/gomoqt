@@ -200,3 +200,34 @@ To abort a track and indicate that no more groups will exist due to an error, ca
   The subscribe error code is used to indicate the reason for closing the track subscription. It helps the publisher understand why the subscription finished.
 
 If any groups belong to the track, they will be closed automatically with an error code `moqt.PublishAbortedErrorCode` when the track is closed. This ensures that all resources are released properly and no data is lost.
+
+## Track Info
+
+A subscriber can ask about a track's immutable publisher properties — priority, ordering preference, max latency, and timescale — via `Session.TrackInfo`, without subscribing to it. By default, `TrackMux` answers TRACK_INFO requests with zero-valued properties (zero priority, unordered, no retention, `DefaultTimescale`).
+
+To advertise real properties, implement `TrackInfoProvider` on your `TrackHandler`:
+
+```go
+type trackHandler struct{}
+
+var _ moqt.TrackHandler = (*trackHandler)(nil)
+var _ moqt.TrackInfoProvider = (*trackHandler)(nil)
+
+func (h *trackHandler) ServeTrack(tw *moqt.TrackWriter) {
+	defer tw.Close()
+	// Handle track subscription
+}
+
+// TrackInfo returns the publisher properties for the named track and
+// whether the track exists.
+func (h *trackHandler) TrackInfo(name moqt.TrackName) (moqt.PublishInfo, bool) {
+	return moqt.PublishInfo{
+		Priority:   128,
+		Ordered:    true,
+		MaxLatency: 2000,
+		Timescale:  1000,
+	}, true
+}
+```
+
+`msf.Broadcast` does not implement `TrackInfoProvider` itself, so tracks registered through it report the default zero-valued properties unless the handler you pass to `RegisterTrack` implements `TrackInfoProvider` directly.

@@ -16,6 +16,7 @@ type Session struct {
 func (s *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackName, config *SubscribeConfig) (*TrackReader, error)
 func (s *Session) AcceptAnnounce(prefix string) (*AnnouncementReader, error)
 func (s *Session) Fetch(req *FetchRequest) (*GroupReader, error)
+func (s *Session) TrackInfo(ctx context.Context, path BroadcastPath, name TrackName) (*PublishInfo, error)
 func (s *Session) Probe(targetBitrate uint64) (<-chan ProbeResult, error)
 func (s *Session) ProbeTargets() <-chan ProbeResult
 func (s *Session) Stats() SessionStats
@@ -86,6 +87,26 @@ fmt.Printf("bytes received=%d\n", stats.BytesReceived)
 | `RTT`            | `time.Duration`| Smoothed round-trip time from the underlying transport. Zero when unavailable. |
 | `BytesSent`      | `uint64`       | Total bytes sent on the underlying connection. Zero when unavailable. |
 | `BytesReceived`  | `uint64`       | Total bytes received on the underlying connection. Zero when unavailable. |
+
+## Track Info
+
+`Session.TrackInfo` opens a Track Stream and requests a track's immutable
+publisher properties (TRACK_INFO) — priority, ordering preference, max
+latency, and the `Timescale` needed to interpret frame timestamps — without
+subscribing to it. The returned properties are fixed for the lifetime of the
+track and should be cached by the caller.
+
+```go
+info, err := sess.TrackInfo(ctx, "/live/alice", "video")
+if err != nil {
+	// Handle error
+}
+fmt.Println("Timescale:", info.Timescale)
+```
+
+A publisher can customize the properties a subscriber sees in TRACK_INFO by
+implementing `TrackInfoProvider` on its `TrackHandler`; see
+[Producing a Track](/moq/produce_track#track-info).
 
 The values are zero when the current transport does not expose the corresponding metrics, such as some WebTransport browser sessions.
 
