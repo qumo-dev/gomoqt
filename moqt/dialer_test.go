@@ -304,3 +304,90 @@ func TestDialer_Dial_QUICRejectsQuery(t *testing.T) {
 	assert.Nil(t, sess)
 	assert.False(t, dialed, "the connection must not be opened")
 }
+
+// TestDialer_Dial_DropsUserinfo verifies userinfo does not reach the dialed
+// target. It reaches neither binding's wire format, and the pre-collapse code
+// dropped it when it rebuilt the target from host and path; dialing the parsed
+// URL verbatim would otherwise hand credentials to a caller-supplied
+// DialWebTransportFunc and to anything logging the target.
+func TestDialer_Dial_DropsUserinfo(t *testing.T) {
+	var target string
+	d := &Dialer{
+		Config: &Config{SetupTimeout: 50 * time.Millisecond},
+		DialWebTransportFunc: func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config) (*http.Response, WebTransportSession, error) {
+			target = addr
+			conn := &FakeWebTransportSession{}
+			conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
+			conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+			conn.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+			conn.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
+			return &http.Response{StatusCode: http.StatusOK}, conn, nil
+		},
+	}
+
+	sess, err := d.Dial(context.Background(), "https://user:hunter2@example.com:443/live", nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
+
+	assert.Equal(t, "https://example.com:443/live", target)
+	assert.NotContains(t, target, "hunter2")
+}
+
+// TestDialer_Dial_BareQuestionMarkIsNotAQuery verifies a trailing "?" is treated
+// as no query on both bindings: url.Parse reports it as ForceQuery with an empty
+// RawQuery, which would otherwise dial a stray "?" on https while the moqt guard
+// let it through.
+func TestDialer_Dial_BareQuestionMarkIsNotAQuery(t *testing.T) {
+	t.Run("WebTransportDoesNotDialIt", func(t *testing.T) {
+		var target string
+		d := &Dialer{
+			Config: &Config{SetupTimeout: 50 * time.Millisecond},
+			DialWebTransportFunc: func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config) (*http.Response, WebTransportSession, error) {
+				target = addr
+				conn := &FakeWebTransportSession{}
+				conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
+				conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+				conn.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+				conn.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
+				return &http.Response{StatusCode: http.StatusOK}, conn, nil
+			},
+		}
+
+		sess, err := d.Dial(context.Background(), "https://example.com:443/live?", nil)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
+
+		assert.Equal(t, "https://example.com:443/live", target)
+	})
+
+	t.Run("NativeQUICAcceptsIt", func(t *testing.T) {
+		d := &Dialer{
+			Config: &Config{SetupTimeout: 50 * time.Millisecond},
+			DialQUICFunc: func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (StreamConn, error) {
+				conn := &FakeStreamConn{}
+				conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
+				conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+				return conn, nil
+			},
+		}
+
+		sess, err := d.Dial(context.Background(), "moqt://example.com:9000/live?", nil)
+		require.NoError(t, err, "a bare ? carries no query and must not be rejected")
+		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
+
+		assert.Equal(t, "/live", sess.Path())
+	})
+}
+
+// TestDialer_Dial_QueryErrorDoesNotLeakQuery verifies the rejection does not
+// echo the query back. It is present by construction in that error and commonly
+// carries a credential, and errors are routinely logged.
+func TestDialer_Dial_QueryErrorDoesNotLeakQuery(t *testing.T) {
+	d := &Dialer{Config: &Config{SetupTimeout: 50 * time.Millisecond}}
+
+	_, err := d.Dial(context.Background(), "moqt://example.com:9000/live?token=hunter2", nil)
+	require.ErrorIs(t, err, ErrQueryNotSupported)
+	assert.NotContains(t, err.Error(), "hunter2")
+	assert.NotContains(t, err.Error(), "token")
+	assert.Contains(t, err.Error(), "moqt://example.com:9000/live")
+}

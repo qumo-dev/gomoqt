@@ -57,9 +57,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   +sess, err := d.Dial(ctx, "moqt://host:4433/live", mux)
   ```
 
+  Dialing the parsed URL verbatim also required tightening what "verbatim"
+  means. Userinfo is cleared: it reaches neither binding's wire format and the
+  old string concatenation dropped it, so preserving it would newly hand
+  credentials to a caller-supplied `DialWebTransportFunc` and to anything
+  logging the target. A bare `?` (`url.URL.ForceQuery`, with an empty
+  `RawQuery`) is normalized away, so it is not dialed as a stray `?` on https
+  while slipping past the moqt guard. And the rejection reports only
+  `scheme://host/path` — the query is present by construction in that error and
+  commonly carries a token.
+
   The three dialer tests that exercised the removed methods now go through
-  `Dial`, and new tests cover query preservation, fragment stripping, and the
-  rejected `moqt` query.
+  `Dial`, and new tests cover query preservation, fragment stripping, the
+  rejected `moqt` query, dropped userinfo, the bare `?` on both bindings, and
+  that the rejection does not echo the query.
 
 - **moqt: Breaking:** `PathFromContext` is removed and replaced by
   **`Session.Path() string`**. A handler now reads the session's request path
@@ -84,10 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   `Session.Path` is populated in all four roles, so it is symmetric where
   `PathFromContext` was not (it returned `("", false)` for every WebTransport
-  session and every client). It is always rooted at `/`. On the WebTransport
-  client it reports the path of the URL actually dialed rather than the `path`
-  argument, which `DialWebTransport` ignores when `host` already carries a
-  scheme — so `Path` cannot disagree with the connection.
+  session and every client). It is always rooted at `/`, and reports the path of
+  the URL actually dialed, so it cannot disagree with the connection.
 
   Test coverage follows the behavior rather than the accessor. The removed
   `TestPathContext_RoundTrips` exercised `context.WithValue` in isolation; the
@@ -97,9 +106,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checking only that the handler ran. New tests cover the handler observing the
   path on both bindings (`..._HandlerSeesSetupPath`,
   `..._HandlerSeesRequestPath`), `Session.Path` after `Dial` on both schemes
-  including the default-`/` and already-has-a-scheme branches
-  (`TestDialer_Dial_PopulatesSessionPath`), and that a WebTransport session
-  still omits the Path parameter while exposing the path via `Session.Path`.
+  including the default-`/` case (`TestDialer_Dial_PopulatesSessionPath`), and
+  that a WebTransport session still omits the Path parameter while exposing the
+  path via `Session.Path`.
 
 ### Fixed
 

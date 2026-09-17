@@ -59,10 +59,16 @@ type Dialer struct {
 // path is dialed as "/".
 //
 // A query is carried only by "https", where it belongs to the HTTP request URI
-// the server receives. Native QUIC conveys only a path in its SETUP message and
-// has nowhere to put a query, so a "moqt" URL carrying one returns
+// the server receives. On native QUIC the path travels as the moq-lite SETUP
+// Path parameter, whose value is defined as a URI path (draft-lcurley-moq-lite-05),
+// with no place for a query — so a "moqt" URL carrying one returns
 // ErrQueryNotSupported rather than connecting to an endpoint the caller did not
-// ask for. A fragment is client-side only and is never sent on either binding.
+// ask for. Note this is narrower than draft-ietf-moq-transport, whose "moqt"
+// URI grammar admits a query and whose PATH parameter carries it appended to
+// the path; gomoqt speaks moq-lite, so that form is not representable here.
+//
+// Userinfo and a fragment are client-side only and are never sent on either
+// binding.
 //
 // The provided TrackMux is used to route incoming service tracks if non-nil.
 func (d *Dialer) Dial(ctx context.Context, rawURL string, mux *TrackMux) (*Session, error) {
@@ -76,6 +82,15 @@ func (d *Dialer) Dial(ctx context.Context, rawURL string, mux *TrackMux) (*Sessi
 	// server rejects a SETUP Path that is not).
 	target := *parsed
 	target.Fragment, target.RawFragment = "", ""
+	// Userinfo reaches neither binding's wire format, and the pre-collapse code
+	// dropped it when it rebuilt the target from host and path. Clear it so it
+	// cannot reach a caller-supplied DialWebTransportFunc, or a log line.
+	target.User = nil
+	// A bare "?" carries no query. Treat it as absent on both bindings, rather
+	// than dialing a trailing "?" on one and rejecting the URL on the other.
+	if target.RawQuery == "" {
+		target.ForceQuery = false
+	}
 	if target.Path == "" {
 		target.Path = "/"
 	}
@@ -85,7 +100,11 @@ func (d *Dialer) Dial(ctx context.Context, rawURL string, mux *TrackMux) (*Sessi
 		return d.dialWebTransport(ctx, &target, mux)
 	case "moqt":
 		if target.RawQuery != "" {
-			return nil, fmt.Errorf("%w: %q", ErrQueryNotSupported, rawURL)
+			// Report the endpoint without the query: it is present by
+			// construction here, commonly carries a token, and errors are
+			// routinely logged.
+			return nil, fmt.Errorf("%w: %s://%s%s", ErrQueryNotSupported,
+				target.Scheme, target.Host, target.Path)
 		}
 		return d.dialQUIC(ctx, target.Host, target.Path, mux)
 	default:
@@ -142,9 +161,8 @@ func (d *Dialer) dialWebTransport(ctx context.Context, target *url.URL, mux *Tra
 // function configured on the Dialer (DialQUICFunc) if present.
 //
 // path is the request path conveyed to the server via the SETUP Path parameter,
-// since the native QUIC binding has no request URI of its own. Dial normalizes
-// it; an empty path still defaults to "/" so the server cannot reject a session
-// this package constructed.
+// since the native QUIC binding has no request URI of its own. Dial is the only
+// caller and has already normalized it to a rooted, non-empty path.
 func (d *Dialer) dialQUIC(ctx context.Context, addr, path string, mux *TrackMux) (*Session, error) {
 	dialTimeout := d.Config.setupTimeout()
 	dialCtx, cancelDial := context.WithTimeout(ctx, dialTimeout)
@@ -171,9 +189,6 @@ func (d *Dialer) dialQUIC(ctx context.Context, addr, path string, mux *TrackMux)
 		return nil, err
 	}
 
-	if path == "" {
-		path = "/"
-	}
 	// Native QUIC has no handshake-time request URI, so the client is the one
 	// role that conveys the request path in its own SETUP. sendPath drives that.
 	return newSession(conn, mux, nil, d.Config, d.FetchHandler, d.OnGoaway, d.Logger,

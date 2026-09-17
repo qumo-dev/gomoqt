@@ -7,8 +7,9 @@
 // Use a Dialer to create client sessions from a URL. Dial is the only entry
 // point: it selects the transport from the URL scheme — https for WebTransport
 // and moqt for native QUIC — and the URL's path selects the server-side
-// endpoint. To bypass URL handling entirely, set Dialer.DialQUICFunc or
-// Dialer.DialWebTransportFunc and perform the handshake yourself.
+// endpoint. Setting Dialer.DialQUICFunc or Dialer.DialWebTransportFunc replaces
+// the handshake Dial performs — useful to supply your own QUIC connection — but
+// Dial still parses the URL and selects the transport from it.
 //
 // Native QUIC client example:
 //
