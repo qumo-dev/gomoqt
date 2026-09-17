@@ -156,10 +156,10 @@ func TestDialer_DialWebTransport_CustomDialError(t *testing.T) {
 	assert.Nil(t, sess)
 }
 
-// TestDialer_Dial_PopulatesSessionPath verifies Session.Path reports the path
+// TestDialer_Dial_PopulatesSessionPath verifies Session.RequestPath reports the path
 // that was actually dialed, on both bindings. The DialWebTransport case also
 // pins the host-already-carries-a-scheme branch, where the path argument is not
-// part of the dialed target and Session.Path must follow the target, not it.
+// part of the dialed target and Session.RequestPath must follow the target, not it.
 func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 	newWebTransportDialer := func(recordTarget *string) *Dialer {
 		return &Dialer{
@@ -183,7 +183,7 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 		assert.Equal(t, "https://example.com:443/live/alice", target)
-		assert.Equal(t, "/live/alice", sess.Path())
+		assert.Equal(t, "/live/alice", sess.RequestPath())
 	})
 
 	t.Run("WebTransportNoPathDefaultsToRoot", func(t *testing.T) {
@@ -193,20 +193,20 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 		assert.Equal(t, "https://example.com:443/", target)
-		assert.Equal(t, "/", sess.Path())
+		assert.Equal(t, "/", sess.RequestPath())
 	})
 
 	t.Run("WebTransportHostCarryingSchemeIgnoresPathArgument", func(t *testing.T) {
 		var target string
 		d := newWebTransportDialer(&target)
 		// The path argument is dropped when host already carries a scheme;
-		// Session.Path must report the target that was dialed.
+		// Session.RequestPath must report the target that was dialed.
 		sess, err := d.DialWebTransport(context.Background(), "https://example.com:443/from-host", "/from-arg", nil)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 		assert.Equal(t, "https://example.com:443/from-host", target)
-		assert.Equal(t, "/from-host", sess.Path())
+		assert.Equal(t, "/from-host", sess.RequestPath())
 	})
 
 	t.Run("NativeQUIC", func(t *testing.T) {
@@ -224,7 +224,7 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
-		assert.Equal(t, "/live/alice", sess.Path())
+		assert.Equal(t, "/live/alice", sess.RequestPath())
 	})
 
 	t.Run("NativeQUICNoPathDefaultsToRoot", func(t *testing.T) {
@@ -242,13 +242,13 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
-		assert.Equal(t, "/", sess.Path())
+		assert.Equal(t, "/", sess.RequestPath())
 	})
 }
 
 // TestDialer_DialWebTransport_UnparsableTargetDoesNotReportIgnoredPath pins the
 // fallback in dialedPath. When host already carries a scheme, DialWebTransport
-// discards the path argument; if the target is then unparsable, Session.Path
+// discards the path argument; if the target is then unparsable, Session.RequestPath
 // must not report that discarded argument — it would disagree with the
 // connection, which is the disagreement the tracking exists to prevent.
 // Reachable through DialWebTransportFunc, a documented extension point that may
@@ -274,13 +274,13 @@ func TestDialer_DialWebTransport_UnparsableTargetDoesNotReportIgnoredPath(t *tes
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 	assert.Equal(t, "https://exa mple.com/from-host", target)
-	assert.NotEqual(t, "/from-arg", sess.Path(), "must not report the discarded path argument")
-	assert.Equal(t, "/", sess.Path())
+	assert.NotEqual(t, "/from-arg", sess.RequestPath(), "must not report the discarded path argument")
+	assert.Equal(t, "/", sess.RequestPath())
 }
 
 // TestDialer_DialQUIC_RootsPath verifies a non-empty unrooted path is rooted,
 // as url.Parse would for the equivalent "moqt://" URL. Left unrooted it would
-// break Session.Path's documented contract and be sent verbatim as the SETUP
+// break Session.RequestPath's documented contract and be sent verbatim as the SETUP
 // Path parameter, which the peer rejects.
 func TestDialer_DialQUIC_RootsPath(t *testing.T) {
 	newDialer := func() *Dialer {
@@ -305,9 +305,9 @@ func TestDialer_DialQUIC_RootsPath(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
-			assert.Equal(t, tc.want, sess.Path())
-			require.NotEmpty(t, sess.Path())
-			assert.Equal(t, byte('/'), sess.Path()[0], "the SETUP Path parameter must be rooted")
+			assert.Equal(t, tc.want, sess.RequestPath())
+			require.NotEmpty(t, sess.RequestPath())
+			assert.Equal(t, byte('/'), sess.RequestPath()[0], "the SETUP Path parameter must be rooted")
 		})
 	}
 }

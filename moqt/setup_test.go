@@ -73,7 +73,7 @@ func TestSession_OpenSetupStream_WebTransportClientOmitsPath(t *testing.T) {
 	sm := decodeSetupBytes(t, wait())
 	_, ok := sm.Path()
 	assert.False(t, ok, "the Path parameter is prohibited on a binding with a request URI")
-	assert.Equal(t, "/live", sess.Path(), "the path is still observable via Session.Path")
+	assert.Equal(t, "/live", sess.RequestPath(), "the path is still observable via Session.RequestPath")
 }
 
 func TestSession_OpenSetupStream_ServerOmitsPath(t *testing.T) {
