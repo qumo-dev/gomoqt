@@ -4,7 +4,7 @@ contact_links:
     about: "Use Discussions for implementation and usage questions"
 
   - name: "📚 Documentation"
-    url: https://qumo-dev.github.io/gomoqt/
+    url: https://gomoqt.mintlify.site/
     about: "Project documentation"
 
   - name: "🔐 Security Report"
