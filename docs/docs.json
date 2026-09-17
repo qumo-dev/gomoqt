@@ -1,0 +1,107 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "gomoqt",
+  "description": "Fast, simply designed MoQ implementation for building scalable real-time apps.",
+  "colors": {
+    "primary": "#10B981",
+    "light": "#34D399",
+    "dark": "#059669"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get Started",
+        "icon": "rocket",
+        "pages": [
+          "index",
+          "introduction",
+          "install/overview",
+          "install/go",
+          "install/ts",
+          "demo"
+        ]
+      },
+      {
+        "group": "MoQ",
+        "icon": "tower-broadcast",
+        "pages": [
+          "moq/overview",
+          "moq/dialer",
+          "moq/server",
+          "moq/session",
+          "moq/track_group_frame",
+          "moq/produce_track",
+          "moq/consume_track",
+          "moq/publish",
+          "moq/announce_discover",
+          "moq/subscribe",
+          "moq/fetch",
+          "moq/probe",
+          "moq/migrate",
+          "moq/relay",
+          "moq/errors"
+        ]
+      },
+      {
+        "group": "MSF",
+        "icon": "sitemap",
+        "pages": [
+          "msf/overview",
+          "msf/catalog",
+          "msf/catalog_delta",
+          "msf/timeline",
+          "msf/broadcast"
+        ]
+      },
+      {
+        "group": "Project",
+        "icon": "circle-info",
+        "pages": ["about"]
+      }
+    ],
+    "global": {
+      "anchors": [
+        {
+          "anchor": "pkg.go.dev",
+          "href": "https://pkg.go.dev/github.com/qumo-dev/gomoqt",
+          "icon": "golang"
+        },
+        {
+          "anchor": "JSR (@qumo/moq)",
+          "href": "https://jsr.io/@qumo/moq",
+          "icon": "js"
+        },
+        {
+          "anchor": "MoQ-Lite Spec",
+          "href": "https://www.ietf.org/archive/id/draft-lcurley-moq-lite-05.html",
+          "icon": "file-lines"
+        }
+      ]
+    }
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Sponsor",
+        "href": "https://github.com/sponsors/qumo-dev"
+      }
+    ],
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/qumo-dev/gomoqt"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/qumo-dev/gomoqt",
+      "x": "https://x.com/OD47215",
+      "discord": "https://discordapp.com/users/daichi0828"
+    }
+  },
+  "seo": {
+    "metatags": {
+      "og:image": "/images/og-image.png"
+    }
+  }
+}

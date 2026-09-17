@@ -9,7 +9,7 @@
 **/.serena
 
 # Build staff
-**/docs/moqt/public
+**/.mint/
 **/dist/
 **/*.exe
 
