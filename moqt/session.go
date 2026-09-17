@@ -302,58 +302,58 @@ func (sess *Session) waitPeerSetup() error {
 	}
 }
 
-func (s *Session) terminating() bool {
-	return s.isTerminating.Load()
+func (sess *Session) terminating() bool {
+	return sess.isTerminating.Load()
 }
 
-func (s *Session) logError(msg string, err error, args ...any) {
-	if s == nil || err == nil {
+func (sess *Session) logError(msg string, err error, args ...any) {
+	if sess == nil || err == nil {
 		return
 	}
 
-	if s.logger != nil {
-		s.logger.Error(msg, append(args, "error", err)...)
+	if sess.logger != nil {
+		sess.logger.Error(msg, append(args, "error", err)...)
 	}
 }
 
 // Context returns the session's context which is canceled when the session
 // terminates. Use it to observe session lifecycle and cancellation.
-func (s *Session) Context() context.Context {
-	return s.ctx
+func (sess *Session) Context() context.Context {
+	return sess.ctx
 }
 
 // ConnectionState returns connection metadata for the session.
-func (s *Session) ConnectionState() ConnectionState {
+func (sess *Session) ConnectionState() ConnectionState {
 	return ConnectionState{
 		Version: moqtVersion,
-		TLS:     s.conn.TLS(),
+		TLS:     sess.conn.TLS(),
 	}
 }
 
 // LocalAddr returns the local network address.
-func (s *Session) LocalAddr() net.Addr {
-	if s == nil || s.conn == nil {
+func (sess *Session) LocalAddr() net.Addr {
+	if sess == nil || sess.conn == nil {
 		return nil
 	}
-	return s.conn.LocalAddr()
+	return sess.conn.LocalAddr()
 }
 
 // RemoteAddr returns the remote network address of the peer.
-func (s *Session) RemoteAddr() net.Addr {
-	if s == nil || s.conn == nil {
+func (sess *Session) RemoteAddr() net.Addr {
+	if sess == nil || sess.conn == nil {
 		return nil
 	}
-	return s.conn.RemoteAddr()
+	return sess.conn.RemoteAddr()
 }
 
 // Stats returns a point-in-time snapshot of the session's operational metrics.
 // It never returns an error; fields that cannot be measured on the current
 // transport (e.g. RTT on a WebTransport/Browser session) are zero.
-func (s *Session) Stats() SessionStats {
+func (sess *Session) Stats() SessionStats {
 	var stats SessionStats
-	stats.EstimatedBitrate = s.bitrateTracker.getEstimatedBitrate()
+	stats.EstimatedBitrate = sess.bitrateTracker.getEstimatedBitrate()
 
-	if provider, ok := s.conn.(probeStatsProvider); ok {
+	if provider, ok := sess.conn.(probeStatsProvider); ok {
 		cs := provider.ConnectionStats()
 		stats.RTT = cs.SmoothedRTT
 		stats.BytesSent = cs.BytesSent
@@ -364,23 +364,23 @@ func (s *Session) Stats() SessionStats {
 }
 
 // CloseWithError closes the session with an error code and message.
-func (s *Session) CloseWithError(code SessionErrorCode, msg string) error {
-	if s.terminating() {
+func (sess *Session) CloseWithError(code SessionErrorCode, msg string) error {
+	if sess.terminating() {
 		return nil
 	}
-	s.isTerminating.Store(true)
+	sess.isTerminating.Store(true)
 
 	// Always remove the conn from the manager exactly once, even if the
 	// underlying conn.CloseWithError fails (e.g. the peer already closed it).
 	// Without this, a peer-closed session leaks in the connManager and
 	// Server.Close()/Shutdown() hang on <-connManager.Done().
-	if s.connManager != nil {
-		connManager := s.connManager
-		s.connManager = nil
-		defer connManager.removeConn(s.conn)
+	if sess.connManager != nil {
+		connManager := sess.connManager
+		sess.connManager = nil
+		defer connManager.removeConn(sess.conn)
 	}
 
-	err := s.conn.CloseWithError(transport.ConnErrorCode(code), msg)
+	err := sess.conn.CloseWithError(transport.ConnErrorCode(code), msg)
 	if err != nil {
 		if appErr, ok := errors.AsType[*transport.ApplicationError](err); ok {
 			reason := &SessionError{
@@ -392,12 +392,12 @@ func (s *Session) CloseWithError(code SessionErrorCode, msg string) error {
 	}
 
 	// Wait for finishing handling streams
-	s.wg.Wait()
+	sess.wg.Wait()
 
-	s.probeChannelsMu.Lock()
-	close(s.probeResponseCh)
-	close(s.probeTargetsCh)
-	s.probeChannelsMu.Unlock()
+	sess.probeChannelsMu.Lock()
+	close(sess.probeResponseCh)
+	close(sess.probeTargetsCh)
+	sess.probeChannelsMu.Unlock()
 
 	return nil
 }
@@ -405,12 +405,12 @@ func (s *Session) CloseWithError(code SessionErrorCode, msg string) error {
 // Subscribe sends SUBSCRIBE and waits for SUBSCRIBE_OK.
 // ctx is used while opening the stream, sending SUBSCRIBE, and waiting for the response.
 // If config is nil, a zero-value SubscribeConfig is used.
-func (s *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackName, config *SubscribeConfig) (*TrackReader, error) {
+func (sess *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackName, config *SubscribeConfig) (*TrackReader, error) {
 	if ctx == nil {
 		return nil, errors.New("nil context")
 	}
 
-	if s.terminating() {
+	if sess.terminating() {
 		return nil, ErrClosedSession
 	}
 
@@ -422,9 +422,9 @@ func (s *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackN
 		config = &SubscribeConfig{}
 	}
 
-	id := s.nextSubscribeID()
+	id := sess.nextSubscribeID()
 
-	stream, err := s.conn.OpenStreamSync(ctx)
+	stream, err := sess.conn.OpenStreamSync(ctx)
 	if err != nil {
 		if appErr, ok := errors.AsType[*transport.ApplicationError](err); ok {
 			return nil, &SessionError{
@@ -471,9 +471,9 @@ func (s *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackN
 
 	substr := newSendSubscribeStream(id, stream, config)
 
-	track := newTrackReader(path, name, substr, func() { s.removeTrackReader(id) })
-	s.addTrackReader(id, track)
-	ctx, cancel := context.WithTimeout(ctx, s.timeout())
+	track := newTrackReader(path, name, substr, func() { sess.removeTrackReader(id) })
+	sess.addTrackReader(id, track)
+	ctx, cancel := context.WithTimeout(ctx, sess.timeout())
 	defer cancel()
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = stream.SetReadDeadline(deadline)
@@ -511,21 +511,21 @@ func (s *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackN
 }
 
 // nextSubscribeID atomically increments and returns the next SubscribeID for new subscriptions.
-func (s *Session) nextSubscribeID() SubscribeID {
+func (sess *Session) nextSubscribeID() SubscribeID {
 	// Increment and return the previous value atomically
-	return SubscribeID(s.subscribeIDCounter.Add(1))
+	return SubscribeID(sess.subscribeIDCounter.Add(1))
 }
 
-func (s *Session) timeout() time.Duration {
+func (sess *Session) timeout() time.Duration {
 	return 30 * time.Second
 }
 
-func (s *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
-	if s.terminating() {
+func (sess *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
+	if sess.terminating() {
 		return nil, ErrClosedSession
 	}
 
-	stream, err := s.conn.OpenStreamSync(s.ctx)
+	stream, err := sess.conn.OpenStreamSync(sess.ctx)
 	if err != nil {
 		if appErr, ok := errors.AsType[*transport.ApplicationError](err); ok {
 			return nil, &SessionError{
@@ -1111,32 +1111,32 @@ func (sess *Session) processUniStream(stream transport.ReceiveStream) {
 	}
 }
 
-func (s *Session) addTrackWriter(id SubscribeID, writer *TrackWriter) {
-	s.trackWriterMapLocker.Lock()
-	defer s.trackWriterMapLocker.Unlock()
+func (sess *Session) addTrackWriter(id SubscribeID, writer *TrackWriter) {
+	sess.trackWriterMapLocker.Lock()
+	defer sess.trackWriterMapLocker.Unlock()
 
-	s.trackWriters[id] = writer
+	sess.trackWriters[id] = writer
 }
 
-func (s *Session) removeTrackWriter(id SubscribeID) {
-	s.trackWriterMapLocker.Lock()
-	defer s.trackWriterMapLocker.Unlock()
+func (sess *Session) removeTrackWriter(id SubscribeID) {
+	sess.trackWriterMapLocker.Lock()
+	defer sess.trackWriterMapLocker.Unlock()
 
-	delete(s.trackWriters, id)
+	delete(sess.trackWriters, id)
 }
 
-func (s *Session) addTrackReader(id SubscribeID, reader *TrackReader) {
-	s.trackReaderMapLocker.Lock()
-	defer s.trackReaderMapLocker.Unlock()
+func (sess *Session) addTrackReader(id SubscribeID, reader *TrackReader) {
+	sess.trackReaderMapLocker.Lock()
+	defer sess.trackReaderMapLocker.Unlock()
 
-	s.trackReaders[id] = reader
+	sess.trackReaders[id] = reader
 }
 
-func (s *Session) removeTrackReader(id SubscribeID) {
-	s.trackReaderMapLocker.Lock()
-	defer s.trackReaderMapLocker.Unlock()
+func (sess *Session) removeTrackReader(id SubscribeID) {
+	sess.trackReaderMapLocker.Lock()
+	defer sess.trackReaderMapLocker.Unlock()
 
-	delete(s.trackReaders, id)
+	delete(sess.trackReaders, id)
 }
 
 func cancelStreamWithError(stream transport.Stream, code transport.StreamErrorCode) {
