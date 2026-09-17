@@ -31,24 +31,37 @@ Outgoing requests such as subscribing to tracks, fetching specific groups, probi
 
 ## Request path
 
-How a handler learns the request path depends on the transport binding — the path
-is resolved *above* the session, never stored on `Session` itself:
-
-- **WebTransport:** the path is the HTTP request's `r.URL.Path`, available in your
-  `http.Handler` before the session is upgraded.
-- **Native QUIC:** native QUIC has no handshake-time request URI, so the path is
-  conveyed inside the client's SETUP message. A server-side router reads it before
-  constructing the session and stashes it on the connection context. Recover it with:
+`Session.Path` returns the session's request path, on either transport binding
+and on either side of the session:
 
 ```go
 func (h *HandlerImpl) ServeMOQ(sess *moqt.Session) {
-    path, ok := moqt.PathFromContext(sess.Context())
-    // path == "/live/alice" for a client that dialed moqt://host/live/alice
+    path := sess.Path()
+    // path == "/live/alice" for a client that dialed
+    // moqt://host/live/alice or https://host/live/alice
 }
 ```
 
-`PathFromContext` returns `("", false)` on the client side and for WebTransport
-sessions.
+The path is resolved by the binding before the session is constructed, so it is
+available immediately — you never wait on the peer's SETUP to read it:
+
+- **WebTransport:** the path is the HTTP request's `r.URL.Path`, resolved by the
+  HTTP handshake. It is also still available directly on the `*http.Request` in
+  your `http.Handler`, which is where you route with `http.ServeMux`.
+- **Native QUIC:** native QUIC has no handshake-time request URI, so the client
+  conveys the path in its SETUP message, as the mandatory Path parameter. A
+  server-side router reads it before constructing the session; a SETUP that omits
+  it, or whose path is not rooted at `/`, is rejected.
+
+A path is always rooted at `/` — dialing `moqt://host` or `https://host` with no
+path yields `"/"`. `Path` returns `""` only for a session constructed without a
+binding-supplied path, which the `Dialer` and `Server` entry points never produce.
+
+<Note>
+`Session.Path` is the session's request path, which selects a server-side
+endpoint. It is unrelated to `BroadcastPath`, which identifies a broadcast
+*within* an established session.
+</Note>
 
 ## Connection State
 

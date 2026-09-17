@@ -104,11 +104,17 @@ func (d *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *T
 		}
 	}
 	target := host
+	// fallback is the path to report if target turns out to be unparsable. It
+	// is only sound in the branch below, where target is built from path; when
+	// host already carries a scheme, the path argument is not part of target,
+	// so reporting it would be the very disagreement this tracking prevents.
+	fallback := "/"
 	if !strings.Contains(target, "://") {
 		if path == "" {
 			path = "/"
 		}
 		target = "https://" + host + path
+		fallback = path
 	}
 
 	_, conn, err := dialer(dialCtx, target, nil, d.TLSConfig)
@@ -123,9 +129,26 @@ func (d *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *T
 	)
 	connLogger.Info("connection established")
 
-	// WebTransport: the request path is bound by the HTTP handshake
-	// (path argument above), so Session carries no path state.
-	return newSession(conn, mux, nil, d.Config, d.FetchHandler, d.OnGoaway, d.Logger, sessionSetup{}, nil), nil
+	// WebTransport binds the request path in the HTTP handshake, so the peer
+	// learns it from the request URI and this endpoint must not send a SETUP
+	// Path parameter. Record the path that was actually dialed — when host
+	// already carries a scheme the path argument is not part of target — so
+	// Session.Path agrees with the connection.
+	return newSession(conn, mux, nil, d.Config, d.FetchHandler, d.OnGoaway, d.Logger,
+		sessionSetup{path: dialedPath(target, fallback)}, nil), nil
+}
+
+// dialedPath returns the request path of the URL actually dialed. fallback is
+// used only when target cannot be parsed, so callers must pass a path that is
+// genuinely part of target, or "/" when none is. The result is rooted at "/".
+func dialedPath(target, fallback string) string {
+	if u, err := url.Parse(target); err == nil && u.Path != "" {
+		return u.Path
+	}
+	if fallback == "" {
+		return "/"
+	}
+	return fallback
 }
 
 // DialQUIC establishes a new session over native QUIC by dialing the provided
@@ -133,7 +156,7 @@ func (d *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *T
 // function configured on the Dialer (DialQUICFunc) if present.
 // `path` is the request path conveyed to the server via the SETUP Path
 // parameter, since the native QUIC binding has no request URI of its own.
-// An empty path defaults to "/".
+// It is rooted at "/" if it is not already, and an empty path defaults to "/".
 //
 // Deprecated: Use Dial with a "moqt" URL, which carries the same information in
 // one argument: Dial(ctx, "moqt://"+addr+path, mux). The two are equivalent —
@@ -167,11 +190,18 @@ func (d *Dialer) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux)
 		return nil, err
 	}
 
-	if path == "" {
+	// Root the path, as url.Parse would for the equivalent "moqt://" URL. Left
+	// unrooted it would break Session.Path's documented contract and be sent
+	// verbatim as the SETUP Path parameter, which the peer rejects — surfacing
+	// as an opaque remote teardown rather than a local error.
+	switch {
+	case path == "":
 		path = "/"
+	case path[0] != '/':
+		path = "/" + path
 	}
-	// Native QUIC has no handshake-time request URI, so the client conveys the
-	// request path via the SETUP Path parameter. setupPath drives that.
+	// Native QUIC has no handshake-time request URI, so the client is the one
+	// role that conveys the request path in its own SETUP. sendPath drives that.
 	return newSession(conn, mux, nil, d.Config, d.FetchHandler, d.OnGoaway, d.Logger,
-		sessionSetup{setupPath: path}, nil), nil
+		sessionSetup{path: path, sendPath: true}, nil), nil
 }

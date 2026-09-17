@@ -81,20 +81,20 @@ func TestReadClientSetup_ExtractsPathAndProbe(t *testing.T) {
 	})
 }
 
-// TestPathContext_RoundTrips verifies the router stashes the learned path on
-// the connection context and handlers recover it via PathFromContext — the
-// native-QUIC analog of WebTransport's r.URL.Path.
-func TestPathContext_RoundTrips(t *testing.T) {
-	conn := &FakeStreamConn{}
-	wrapped := withPathContext(conn, "/live/alice")
+// TestSession_Path verifies Session.Path reports the path the binding resolved,
+// and that a session whose binding supplied none reports "".
+func TestSession_Path(t *testing.T) {
+	sess := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil,
+		sessionSetup{path: "/live/alice"}, nil)
+	defer sess.CloseWithError(NoError, "")
 
-	path, ok := PathFromContext(wrapped.Context())
-	require.True(t, ok)
-	assert.Equal(t, "/live/alice", path)
+	assert.Equal(t, "/live/alice", sess.Path())
 
-	// The base conn (no router) has no path, like a client-side session.
-	_, ok = PathFromContext(conn.Context())
-	assert.False(t, ok)
+	bare := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil,
+		sessionSetup{}, nil)
+	defer bare.CloseWithError(NoError, "")
+
+	assert.Empty(t, bare.Path())
 }
 
 // TestNewSession_InjectedPeerSetup verifies that when the native-QUIC router

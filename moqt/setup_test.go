@@ -52,7 +52,7 @@ func decodeSetupBytes(tb testing.TB, data []byte) message.SetupMessage {
 func TestSession_OpenSetupStream_QUICClientSendsPath(t *testing.T) {
 	conn, wait := collectSetupStream(t)
 
-	role := sessionSetup{setupPath: "/live"}
+	role := sessionSetup{path: "/live", sendPath: true}
 	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, role, nil)
 	defer sess.CloseWithError(NoError, "")
 
@@ -65,13 +65,15 @@ func TestSession_OpenSetupStream_QUICClientSendsPath(t *testing.T) {
 func TestSession_OpenSetupStream_WebTransportClientOmitsPath(t *testing.T) {
 	conn, wait := collectSetupStream(t)
 
-	// WebTransport: no setupPath → Path is omitted.
-	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{}, nil)
+	// WebTransport: the path is known but sendPath is false → Path is omitted.
+	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil,
+		sessionSetup{path: "/live"}, nil)
 	defer sess.CloseWithError(NoError, "")
 
 	sm := decodeSetupBytes(t, wait())
 	_, ok := sm.Path()
 	assert.False(t, ok, "the Path parameter is prohibited on a binding with a request URI")
+	assert.Equal(t, "/live", sess.Path(), "the path is still observable via Session.Path")
 }
 
 func TestSession_OpenSetupStream_ServerOmitsPath(t *testing.T) {
