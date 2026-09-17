@@ -230,4 +230,25 @@ func (h *trackHandler) TrackInfo(name moqt.TrackName) (moqt.PublishInfo, bool) {
 }
 ```
 
-`msf.Broadcast` does not implement `TrackInfoProvider` itself, so tracks registered through it report the default zero-valued properties unless the handler you pass to `RegisterTrack` implements `TrackInfoProvider` directly.
+TRACK_INFO is intentionally out-of-band from the catalog: catalog fields (`msf.Track`) describe *content*, while `PublishInfo` carries *transport scheduling* hints, and the two live in different layers by design — `msf.Track` has no `Priority`/`Ordered` fields to source them from.
+
+The `TrackInfoProvider` type assertion runs against the handler registered with `mux.Publish` for the broadcast path — not against the per-track handler passed to `RegisterTrack`. `msf.Broadcast` does not implement `TrackInfoProvider` itself, so publishing one directly means every track reports the default zero-valued properties. To supply real ones, embed `*msf.Broadcast` in your own type and implement `TrackInfo` on it, then publish that type instead of the `*msf.Broadcast` value:
+
+```go
+type broadcast struct {
+	*msf.Broadcast
+	info map[moqt.TrackName]moqt.PublishInfo
+}
+
+// TrackInfo implements moqt.TrackInfoProvider. *msf.Broadcast already
+// satisfies moqt.TrackHandler (ServeTrack is promoted), so this is the
+// only method the wrapper needs to add.
+func (b *broadcast) TrackInfo(name moqt.TrackName) (moqt.PublishInfo, bool) {
+	info, ok := b.info[name]
+	return info, ok
+}
+
+// mux.Publish(ctx, "/broadcast_path", &broadcast{Broadcast: msfBroadcast, info: infoByTrack})
+```
+
+`msf.Track` has spec-defined `TargetLatency`/`Timescale` fields that already carry the same meaning as `PublishInfo.MaxLatency`/`Timescale`, so a wrapper can forward those straight from the catalog. `Priority`/`Ordered` have no catalog equivalent to source from — they are tracked in [issue #420](https://github.com/qumo-dev/gomoqt/issues/420) as a possible future vendor extension to the catalog.
