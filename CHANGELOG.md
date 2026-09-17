@@ -9,6 +9,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **moqt: Breaking:** `Dialer.DialWebTransport` and `Dialer.DialQUIC` are
+  unexported; **`Dialer.Dial(ctx, rawURL, mux)` is now the only way to establish
+  a client session**. Both removed methods took a `host` and a `path` that
+  `Dial` had just finished splitting out of a URL and that the callee
+  immediately rejoined, so the pair carried no information the URL did not —
+  while the TypeScript client shipped in the same release already exposed
+  exactly one URL-shaped entry point (`connect(url)`, with the older `dial`
+  deprecated in its favor). Callers that need to bypass URL handling still have
+  `Dialer.DialQUICFunc` / `Dialer.DialWebTransportFunc`, which is the better
+  placed escape hatch: it replaces the handshake rather than the URL parsing.
+
+  Collapsing the surface fixes three defects that the split had been hiding:
+
+  - `DialWebTransport` documented `host` as `host:port` but tested it with
+    `strings.Contains(target, "://")` and accepted a full URL — in which case it
+    **silently ignored its own `path` argument**. With one entry point the
+    ambiguity cannot arise, and the branch is deleted.
+  - `Dial` built the request URI as `"https://" + host + url.Path`, **discarding
+    any query**: `https://host/session?token=x` reached the server as
+    `/session`. The parsed URL is now dialed verbatim, so path and query alike
+    reach the server's `http.Handler`. A fragment is stripped, being client-side
+    only.
+  - The default-`/` normalization existed twice, in different shapes and at
+    different points (inside `DialWebTransport`'s non-`://` branch, and after the
+    dial in `DialQUIC`). It is load-bearing — `handleNativeQUIC` rejects a SETUP
+    Path that is not rooted at `/`, and `url.Parse("moqt://host")` yields an
+    empty path — and now happens once, in `Dial`.
+
+  One behavior change beyond the signatures: a **`moqt` URL carrying a query is
+  now rejected** with the new `ErrQueryNotSupported`, instead of being dialed
+  with the query silently dropped. Native QUIC conveys only a path, in the SETUP
+  Path parameter, so such a URL cannot be honored; connecting anyway would reach
+  an endpoint the caller did not name. The `https` binding is unaffected and is
+  the one to use when the server needs a query. This does not change what goes
+  on the wire for either binding — in particular the Path parameter still
+  carries a path alone, since moq-lite draft-05 defines no query semantics for
+  it.
+
+  Migration is mechanical:
+
+  ```go
+  -sess, err := d.DialWebTransport(ctx, "host:4443", "/live", mux)
+  +sess, err := d.Dial(ctx, "https://host:4443/live", mux)
+
+  -sess, err := d.DialQUIC(ctx, "host:4433", "/live", mux)
+  +sess, err := d.Dial(ctx, "moqt://host:4433/live", mux)
+  ```
+
+  The three dialer tests that exercised the removed methods now go through
+  `Dial`, and new tests cover query preservation, fragment stripping, and the
+  rejected `moqt` query.
+
 - **moqt: Breaking:** `PathFromContext` is removed and replaced by
   **`Session.Path() string`**. A handler now reads the session's request path
   the same way on both bindings — `sess.Path()` — instead of `PathFromContext`

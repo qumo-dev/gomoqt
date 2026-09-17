@@ -101,7 +101,7 @@ type Dialer struct {
 
 ## Dial and Establish Session
 
-A `Dialer` can connect to servers using the `Dial` method, which automatically selects the transport based on the URL scheme:
+`Dial` is the only way to establish a session. It selects the transport from the URL scheme:
 - `https://` — WebTransport (HTTP/3)
 - `moqt://` — Native QUIC
 
@@ -116,15 +116,25 @@ A `Dialer` can connect to servers using the `Dial` method, which automatically s
 	// Handle session
 ```
 
-You can also use transport-specific methods directly:
+The URL's path selects the server-side endpoint and is reported by
+[`Session.Path`](/moq/session#request-path). A URL with no path is dialed as `/`.
+On native QUIC the path travels as the SETUP Path parameter, since that binding
+has no request URI of its own.
 
-```go
-	// WebTransport
-	sess, err := dialer.DialWebTransport(ctx, "host:port", "/path", mux)
+<Note>
+**Note: Queries and native QUIC**
 
-	// Native QUIC (path is conveyed via the SETUP Path parameter)
-	sess, err := dialer.DialQUIC(ctx, "host:port", "/path", mux)
-```
+A query is carried only by `https://`, where it belongs to the HTTP request URI
+the server receives. Native QUIC conveys only a path, so a `moqt://` URL carrying
+a query returns `moqt.ErrQueryNotSupported` rather than connecting to an endpoint
+you did not ask for. A fragment is client-side only and is never sent on either
+binding.
+</Note>
+
+To bypass URL handling entirely — dialing an address you have already resolved,
+or supplying your own handshake — set `DialQUICFunc` or `DialWebTransportFunc`
+on the `Dialer` — see the **Using Custom QUIC** tab under
+[Initialize a Dialer](#initialize-a-dialer).
 
 <Note>
 **Note: Nil TrackMux**

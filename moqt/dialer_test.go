@@ -86,7 +86,7 @@ func TestDialer_Dial_InvalidScheme(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidScheme)
 }
 
-func TestDialer_DialWebTransport_DefaultPath(t *testing.T) {
+func TestDialer_Dial_WebTransportDefaultPath(t *testing.T) {
 	recordedTarget := ""
 	dialer := &Dialer{
 		Config: &Config{SetupTimeout: 25 * time.Millisecond},
@@ -101,7 +101,7 @@ func TestDialer_DialWebTransport_DefaultPath(t *testing.T) {
 		},
 	}
 
-	sess, err := dialer.DialWebTransport(context.Background(), "example.com:8443", "", nil)
+	sess, err := dialer.Dial(context.Background(), "https://example.com:8443", nil)
 	require.NoError(t, err)
 	require.NotNil(t, sess)
 	assert.Equal(t, "https://example.com:8443/", recordedTarget)
@@ -111,7 +111,7 @@ func TestDialer_DialWebTransport_DefaultPath(t *testing.T) {
 	})
 }
 
-func TestDialer_DialQUIC_DefaultTLSConfig(t *testing.T) {
+func TestDialer_Dial_QUICDefaultTLSConfig(t *testing.T) {
 	recordedTLS := (*tls.Config)(nil)
 	recordedDeadline := time.Time{}
 	dialer := &Dialer{
@@ -130,7 +130,7 @@ func TestDialer_DialQUIC_DefaultTLSConfig(t *testing.T) {
 		},
 	}
 
-	sess, err := dialer.DialQUIC(context.Background(), "example.com:9000", "/", nil)
+	sess, err := dialer.Dial(context.Background(), "moqt://example.com:9000/", nil)
 	require.NoError(t, err)
 	require.NotNil(t, sess)
 	require.NotNil(t, recordedTLS)
@@ -141,7 +141,7 @@ func TestDialer_DialQUIC_DefaultTLSConfig(t *testing.T) {
 	})
 }
 
-func TestDialer_DialWebTransport_CustomDialError(t *testing.T) {
+func TestDialer_Dial_WebTransportCustomDialError(t *testing.T) {
 	dialErr := errors.New("dial failed")
 	dialer := &Dialer{
 		Config: &Config{SetupTimeout: 25 * time.Millisecond},
@@ -150,16 +150,14 @@ func TestDialer_DialWebTransport_CustomDialError(t *testing.T) {
 		},
 	}
 
-	sess, err := dialer.DialWebTransport(context.Background(), "example.com:8443", "/session", nil)
+	sess, err := dialer.Dial(context.Background(), "https://example.com:8443/session", nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, dialErr)
 	assert.Nil(t, sess)
 }
 
 // TestDialer_Dial_PopulatesSessionPath verifies Session.Path reports the path
-// that was actually dialed, on both bindings. The DialWebTransport case also
-// pins the host-already-carries-a-scheme branch, where the path argument is not
-// part of the dialed target and Session.Path must follow the target, not it.
+// that was actually dialed, on both bindings.
 func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 	newWebTransportDialer := func(recordTarget *string) *Dialer {
 		return &Dialer{
@@ -194,19 +192,6 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 
 		assert.Equal(t, "https://example.com:443/", target)
 		assert.Equal(t, "/", sess.Path())
-	})
-
-	t.Run("WebTransportHostCarryingSchemeIgnoresPathArgument", func(t *testing.T) {
-		var target string
-		d := newWebTransportDialer(&target)
-		// The path argument is dropped when host already carries a scheme;
-		// Session.Path must report the target that was dialed.
-		sess, err := d.DialWebTransport(context.Background(), "https://example.com:443/from-host", "/from-arg", nil)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
-
-		assert.Equal(t, "https://example.com:443/from-host", target)
-		assert.Equal(t, "/from-host", sess.Path())
 	})
 
 	t.Run("NativeQUIC", func(t *testing.T) {
@@ -244,4 +229,78 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 
 		assert.Equal(t, "/", sess.Path())
 	})
+}
+
+// TestDialer_Dial_PreservesQuery verifies the query survives into the dialed
+// WebTransport request URI. Dial previously rebuilt the target as
+// "https://" + host + url.Path, which discarded it.
+func TestDialer_Dial_PreservesQuery(t *testing.T) {
+	var target string
+	d := &Dialer{
+		Config: &Config{SetupTimeout: 50 * time.Millisecond},
+		DialWebTransportFunc: func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config) (*http.Response, WebTransportSession, error) {
+			target = addr
+			conn := &FakeWebTransportSession{}
+			conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
+			conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+			conn.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+			conn.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
+			return &http.Response{StatusCode: http.StatusOK}, conn, nil
+		},
+	}
+
+	sess, err := d.Dial(context.Background(), "https://example.com:443/session?token=abc&hub=east", nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
+
+	assert.Equal(t, "https://example.com:443/session?token=abc&hub=east", target)
+	// Session.Path is the path alone; the query reaches the server's
+	// http.Handler as part of the request URI.
+	assert.Equal(t, "/session", sess.Path())
+}
+
+// TestDialer_Dial_StripsFragment verifies a fragment is not sent to the server.
+// A fragment is client-side only and has no place in a request URI.
+func TestDialer_Dial_StripsFragment(t *testing.T) {
+	var target string
+	d := &Dialer{
+		Config: &Config{SetupTimeout: 50 * time.Millisecond},
+		DialWebTransportFunc: func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config) (*http.Response, WebTransportSession, error) {
+			target = addr
+			conn := &FakeWebTransportSession{}
+			conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
+			conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+			conn.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+			conn.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
+			return &http.Response{StatusCode: http.StatusOK}, conn, nil
+		},
+	}
+
+	sess, err := d.Dial(context.Background(), "https://example.com:443/session#frag", nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
+
+	assert.Equal(t, "https://example.com:443/session", target)
+	assert.Equal(t, "/session", sess.Path())
+}
+
+// TestDialer_Dial_QUICRejectsQuery verifies a moqt URL carrying a query is
+// refused rather than dialed without it. The native QUIC binding conveys only a
+// path (the SETUP Path parameter), so honoring such a URL is impossible and
+// dropping the query would silently connect to a different endpoint.
+func TestDialer_Dial_QUICRejectsQuery(t *testing.T) {
+	dialed := false
+	d := &Dialer{
+		Config: &Config{SetupTimeout: 50 * time.Millisecond},
+		DialQUICFunc: func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (StreamConn, error) {
+			dialed = true
+			return &FakeStreamConn{}, nil
+		},
+	}
+
+	sess, err := d.Dial(context.Background(), "moqt://example.com:9000/live?token=abc", nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrQueryNotSupported)
+	assert.Nil(t, sess)
+	assert.False(t, dialed, "the connection must not be opened")
 }
