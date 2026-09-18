@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Two behavior changes follow from matching Go. A clone's parent is looked up in `parentNamespace`, else the catalog default — no longer in the clone's own namespace. And since a delta has no `initDataList`, `stringifyCatalogDelta` now throws for a track carrying `initData` without an `initRef`, rather than writing a payload the receiver cannot use.
 
-  Interop is tested against the Go implementation itself, not this package's reading of the draft: the new `msf01_interop_test.ts` parses JSON emitted verbatim by the Go `msf` package, and checks `applyCatalogDelta` against the result Go's own `Catalog.ApplyDelta` returns for the same inputs. In the other direction, TS-emitted catalogs and deltas were confirmed to unmarshal, validate, and apply in the Go package with every track's init data resolving.
+  Interop is tested against the Go implementation itself, not this package's reading of the draft: the new `msf_interop_test.ts` parses JSON emitted verbatim by the Go `msf` package, and checks `applyCatalogDelta` against the result Go's own `Catalog.ApplyDelta` returns for the same inputs. In the other direction, TS-emitted catalogs and deltas were confirmed to unmarshal, validate, and apply in the Go package with every track's init data resolving.
 
   **Wire-breaking against older `@qumo/moq`:** a peer on this version and one on ≤0.19.0 no longer exchange deltas or init data — that is the point, since the older form never matched Go.
 

@@ -242,6 +242,11 @@ function applyTrackOverrides(base: Track, override: Track): Track {
 			}
 		}
 	}
+	// initData is resolved from initRef, so an overridden initRef invalidates
+	// the payload inherited from the parent; resolveInitData refills it.
+	if (override.initRef !== undefined && override.initData === undefined) {
+		delete next.initData;
+	}
 	if (override.extraFields) {
 		next.extraFields = {
 			...(next.extraFields ?? {}),

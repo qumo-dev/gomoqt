@@ -97,9 +97,9 @@ export function materializeInitData(catalog: Catalog): MaterializedInitData {
 
 	const initRefs = catalog.tracks.map((track: Track): string | undefined => {
 		if (track.initData === undefined) {
-			return track.initRef;
+			return track.initRef || undefined;
 		}
-		if (track.initRef !== undefined) {
+		if (track.initRef) {
 			const referenced = byId.get(track.initRef);
 			if (referenced !== undefined && inlineData(referenced) === track.initData) {
 				return track.initRef;
@@ -110,10 +110,11 @@ export function materializeInitData(catalog: Catalog): MaterializedInitData {
 			return shared;
 		}
 		// Keep the caller's chosen id when it is still free; otherwise derive one.
-		const referenced = track.initRef !== undefined && byId.has(track.initRef);
-		const id = track.initRef !== undefined && !referenced
-			? track.initRef
-			: freshId(track.initRef ?? (track.name || "init"));
+		// An empty initRef is unset, as in the Go package.
+		const initRef = track.initRef || undefined;
+		const id = initRef !== undefined && !byId.has(initRef)
+			? initRef
+			: freshId(initRef ?? (track.name || "init"));
 		const ref: InitDataRef = { id, type: INIT_DATA_TYPE_INLINE, data: track.initData };
 		list.push(ref);
 		ids.add(id);

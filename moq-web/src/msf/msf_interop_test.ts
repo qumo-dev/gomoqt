@@ -336,3 +336,29 @@ Deno.test("applyCatalogDelta looks for a clone's parent in parentNamespace, not 
 
 	assertEquals(result.tracks.find((t) => t.name === "copy")?.codec, "c1");
 });
+
+Deno.test("applyCatalogDelta resolves a clone's overridden initRef instead of inheriting the parent's payload", () => {
+	const base = goBaseCatalog();
+	const delta: CatalogDelta = {
+		addTracks: [],
+		removeTracks: [],
+		cloneTracks: [{ track: { name: "video-alt", initRef: "audio" }, parentName: "video" }],
+	};
+
+	const result = applyCatalogDelta(base, delta);
+
+	const clone = result.tracks.find((t) => t.name === "video-alt");
+	assertEquals([clone?.initRef, clone?.initData], ["audio", AUDIO_INIT]);
+});
+
+Deno.test("stringifyCatalog treats an empty initRef as unset", () => {
+	const catalog: Catalog = {
+		version: 1,
+		tracks: [{ name: "video", packaging: "loc", initRef: "", initData: VIDEO_INIT }],
+	};
+
+	const wire = JSON.parse(stringifyCatalog(catalog));
+
+	assertEquals(wire.initDataList, [{ id: "video", type: "inline", data: VIDEO_INIT }]);
+	assertEquals(wire.tracks[0].initRef, "video");
+});
