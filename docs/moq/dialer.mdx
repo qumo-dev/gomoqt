@@ -117,7 +117,7 @@ type Dialer struct {
 ```
 
 The URL's path selects the server-side endpoint and is reported by
-[`Session.Path`](/moq/session#request-path). A URL with no path is dialed as `/`.
+[`Session.RequestPath`](/moq/session#request-path). A URL with no path is dialed as `/`.
 On native QUIC the path travels as the SETUP Path parameter, since that binding
 has no request URI of its own.
 

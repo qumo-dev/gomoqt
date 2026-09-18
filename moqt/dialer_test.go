@@ -156,7 +156,7 @@ func TestDialer_Dial_WebTransportCustomDialError(t *testing.T) {
 	assert.Nil(t, sess)
 }
 
-// TestDialer_Dial_PopulatesSessionPath verifies Session.Path reports the path
+// TestDialer_Dial_PopulatesSessionPath verifies Session.RequestPath reports the path
 // that was actually dialed, on both bindings.
 func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 	newWebTransportDialer := func(recordTarget *string) *Dialer {
@@ -181,7 +181,7 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 		assert.Equal(t, "https://example.com:443/live/alice", target)
-		assert.Equal(t, "/live/alice", sess.Path())
+		assert.Equal(t, "/live/alice", sess.RequestPath())
 	})
 
 	t.Run("WebTransportNoPathDefaultsToRoot", func(t *testing.T) {
@@ -191,7 +191,7 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 		assert.Equal(t, "https://example.com:443/", target)
-		assert.Equal(t, "/", sess.Path())
+		assert.Equal(t, "/", sess.RequestPath())
 	})
 
 	t.Run("NativeQUIC", func(t *testing.T) {
@@ -209,7 +209,7 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
-		assert.Equal(t, "/live/alice", sess.Path())
+		assert.Equal(t, "/live/alice", sess.RequestPath())
 	})
 
 	t.Run("NativeQUICNoPathDefaultsToRoot", func(t *testing.T) {
@@ -227,7 +227,7 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
-		assert.Equal(t, "/", sess.Path())
+		assert.Equal(t, "/", sess.RequestPath())
 	})
 }
 
@@ -254,9 +254,9 @@ func TestDialer_Dial_PreservesQuery(t *testing.T) {
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 	assert.Equal(t, "https://example.com:443/session?token=abc&hub=east", target)
-	// Session.Path is the path alone; the query reaches the server's
+	// Session.RequestPath is the path alone; the query reaches the server's
 	// http.Handler as part of the request URI.
-	assert.Equal(t, "/session", sess.Path())
+	assert.Equal(t, "/session", sess.RequestPath())
 }
 
 // TestDialer_Dial_StripsFragment verifies a fragment is not sent to the server.
@@ -281,7 +281,7 @@ func TestDialer_Dial_StripsFragment(t *testing.T) {
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 	assert.Equal(t, "https://example.com:443/session", target)
-	assert.Equal(t, "/session", sess.Path())
+	assert.Equal(t, "/session", sess.RequestPath())
 }
 
 // TestDialer_Dial_QUICRejectsQuery verifies a moqt URL carrying a query is
@@ -375,7 +375,7 @@ func TestDialer_Dial_BareQuestionMarkIsNotAQuery(t *testing.T) {
 		require.NoError(t, err, "a bare ? carries no query and must not be rejected")
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
-		assert.Equal(t, "/live", sess.Path())
+		assert.Equal(t, "/live", sess.RequestPath())
 	})
 }
 

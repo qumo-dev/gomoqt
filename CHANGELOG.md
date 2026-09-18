@@ -9,16 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **moqt: Breaking:** `Dialer.DialWebTransport` and `Dialer.DialQUIC` are
-  unexported; **`Dialer.Dial(ctx, rawURL, mux)` is now the only way to establish
-  a client session**. Both removed methods took a `host` and a `path` that
+- **moqt: Breaking:** `Dialer.DialWebTransport` and `Dialer.DialQUIC`, deprecated
+  in v0.19.0 (#426), are removed; **`Dialer.Dial(ctx, rawURL, mux)` is now the
+  only way to establish a client session**. Both removed methods took a `host` and a `path` that
   `Dial` had just finished splitting out of a URL and that the callee
   immediately rejoined, so the pair carried no information the URL did not —
-  while the TypeScript client shipped in the same release already exposed
-  exactly one URL-shaped entry point (`connect(url)`, with the older `dial`
-  deprecated in its favor). Callers that need to bypass URL handling still have
-  `Dialer.DialQUICFunc` / `Dialer.DialWebTransportFunc`, which is the better
-  placed escape hatch: it replaces the handshake rather than the URL parsing.
+  while the TypeScript client has exposed exactly one URL-shaped entry point
+  since v0.18.0 (`connect(url)`, with the older `dial` deprecated in its
+  favor). Callers that need to supply their own connection or handshake still
+  have `Dialer.DialQUICFunc` / `Dialer.DialWebTransportFunc`; these replace the
+  handshake `Dial` performs, not its URL handling.
 
   Collapsing the surface fixes three defects that the split had been hiding:
 
@@ -72,9 +72,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejected `moqt` query, dropped userinfo, the bare `?` on both bindings, and
   that the rejection does not echo the query.
 
+### Fixed
+
+- **moq-web: `@qumo/moq`'s `msf` catalogs now speak draft-ietf-moq-msf-01, restoring Go↔TS interop broken since v0.18.0.** The v0.18.0 msf-01 upgrade (#392) was Go-only: the Go `msf` package moved to the draft-01 wire form while the TypeScript package stayed on draft-00, so the two sides of the same dual release disagreed on two wire-breaking points:
+  - **Initialization data.** Go writes a catalog-level `initDataList` and a per-track `initRef`, with no inline `initData`; TS read only inline `initData`. TS did not reject a Go catalog — its schema is lenient — but filed `initRef`/`initDataList` under `extraFields` unresolved, so `track.initData` was `undefined`. Anything a Go publisher sent a browser subscriber arrived without its AVC decoder configuration or AAC `AudioSpecificConfig`.
+  - **Delta updates.** Go writes `deltaUpdate` as an array of `{op, tracks}` objects; TS required `deltaUpdate: true` with sibling `addTracks`/`removeTracks`/`cloneTracks`, so `parseCatalogDelta` **threw** on every Go-emitted delta.
+
+  Both now match the Go package. `parseCatalog` reads `initDataList` and resolves each track's `initRef` into `Track.initData`, so existing consumers that read `initData` keep working without code changes; `applyCatalogDelta` does the same for added and cloned tracks. `stringifyCatalog` never writes `initData` inline: a track's payload becomes an `initDataList` entry — tracks sharing a payload share one entry, and a payload edited after parsing gets its own entry rather than being hidden by a stale reference. The delta wire form is the draft-01 array; the in-memory `CatalogDelta` API is unchanged, as on the Go side. New: `InitDataRef`, `Catalog.initDataList`, `Track.initRef`, and `TrackClone.parentNamespace`; `validateCatalog` enforces the Go rules (unique ids, `"inline"` type, resolvable references).
+
+  Two behavior changes follow from matching Go. A clone's parent is looked up in `parentNamespace`, else the catalog default — no longer in the clone's own namespace. And since a delta has no `initDataList`, `stringifyCatalogDelta` now throws for a track carrying `initData` without an `initRef`, rather than writing a payload the receiver cannot use.
+
+  Interop is tested against the Go implementation itself, not this package's reading of the draft: the new `msf_interop_test.ts` parses JSON emitted verbatim by the Go `msf` package, and checks `applyCatalogDelta` against the result Go's own `Catalog.ApplyDelta` returns for the same inputs. In the other direction, TS-emitted catalogs and deltas were confirmed to unmarshal, validate, and apply in the Go package with every track's init data resolving.
+
+  **Wire-breaking against older `@qumo/moq`:** a peer on this version and one on ≤0.19.0 no longer exchange deltas or init data — that is the point, since the older form never matched Go.
+
+- **moq-web:** `stringifyCatalog` and `stringifyCatalogDelta` wrote each track's `extraFields` object as a literal `"extraFields"` key in the JSON, in addition to spreading its entries, because they spread the whole track after its extra fields. A test asserted the leaked key as expected output; it now asserts the entries only.
+
+## [v0.19.0] - 2026-09-18
+
+> **Dual release.** `v0.19.0` ships both packages at the same version: the Go module (`moqt`, consumed via `go get github.com/qumo-dev/gomoqt@v0.19.0`) and the TypeScript package (`@qumo/moq` on JSR). Minor-bumped from `v0.18.0` because both sides carry **breaking API changes**: in Go, `PathFromContext` is removed in favor of `Session.RequestPath`; in TypeScript, `@qumo/moq` stops re-exporting subscribe-stream and stream-type internals that have no exported Go counterpart. `Dialer.DialWebTransport` and `Dialer.DialQUIC` are deprecated in favor of `Dialer.Dial` and still work unchanged; their removal is planned for a later release. **No wire-protocol change** — this release interoperates with `v0.18.0` peers.
+
+### Changed
+
 - **moqt: Breaking:** `PathFromContext` is removed and replaced by
-  **`Session.Path() string`**. A handler now reads the session's request path
-  the same way on both bindings — `sess.Path()` — instead of `PathFromContext`
+  **`Session.RequestPath() string`**. A handler now reads the session's request path
+  the same way on both bindings — `sess.RequestPath()` — instead of `PathFromContext`
   for native QUIC and `r.URL.Path` for WebTransport. `PathFromContext` shipped
   in v0.18.0 with the draft-05 migration and had no caller in this repository
   or in qumo, so nothing depended on it in practice.
@@ -93,10 +115,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wire behavior is unchanged: WebTransport endpoints and the native-QUIC server
   still send no Path parameter, and receiving one is still a protocol violation.
 
-  `Session.Path` is populated in all four roles, so it is symmetric where
+  `Session.RequestPath` is populated in all four roles, so it is symmetric where
   `PathFromContext` was not (it returned `("", false)` for every WebTransport
-  session and every client). It is always rooted at `/`, and reports the path of
-  the URL actually dialed, so it cannot disagree with the connection.
+  session and every client). It is always rooted at `/`. On the WebTransport
+  client it reports the path of the URL actually dialed rather than the `path`
+  argument, which `DialWebTransport` ignores when `host` already carries a
+  scheme — so `Path` cannot disagree with the connection.
+
+  Two defects found reviewing this change are fixed here rather than left for
+  the follow-up. `dialedPath` fell back to the `path` argument when the target
+  was unparsable — but in the branch where `host` already carries a scheme that
+  argument is the one `DialWebTransport` discards, so `Session.RequestPath` could
+  report a path the connection never used (confirmed: target
+  `https://exa mple.com/from-host`, `Path()` `/from-arg`), reachable through the
+  `DialWebTransportFunc` extension point. The fallback is now supplied only by
+  the branch that owns it. And `DialQUIC` rooted only an *empty* path, so
+  `DialQUIC(ctx, addr, "live/alice", mux)` both broke `Session.RequestPath`'s
+  documented "rooted at `/`" contract and sent an unrooted SETUP Path that the
+  peer rejects as invalid — an opaque remote teardown instead of a local error.
+  It now roots the value, as `url.Parse` would for the equivalent URL.
+
+  The accessor is named `RequestPath`, not `Path`, because in this package
+  "path" already means `BroadcastPath` — thirteen exported signatures take a
+  `path BroadcastPath`, and `Announcement` has a `BroadcastPath()` method. A
+  bare `Session.Path()` sitting between `Session.Subscribe(ctx, path
+  BroadcastPath, …)` and `Session.TrackInfo(ctx, path BroadcastPath, …)` in
+  godoc would read as returning a broadcast path, which it does not.
+  "Request path" is also the term both specs use.
 
   Test coverage follows the behavior rather than the accessor. The removed
   `TestPathContext_RoundTrips` exercised `context.WithValue` in isolation; the
@@ -105,10 +150,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TestServer_handleNativeQUIC_CallsHandlerOnValidSetup` dialed `/live` while
   checking only that the handler ran. New tests cover the handler observing the
   path on both bindings (`..._HandlerSeesSetupPath`,
-  `..._HandlerSeesRequestPath`), `Session.Path` after `Dial` on both schemes
-  including the default-`/` case (`TestDialer_Dial_PopulatesSessionPath`), and
-  that a WebTransport session still omits the Path parameter while exposing the
-  path via `Session.Path`.
+  `..._HandlerSeesRequestPath`), `Session.RequestPath` after `Dial` on both schemes
+  including the default-`/` and already-has-a-scheme branches
+  (`TestDialer_Dial_PopulatesSessionPath`), and that a WebTransport session
+  still omits the Path parameter while exposing it via `Session.RequestPath`.
+
+### Deprecated
+
+- **moqt:** `Dialer.DialWebTransport` and `Dialer.DialQUIC` are deprecated in
+  favor of `Dialer.Dial`, and will be removed in a future release. Both take a
+  `host` and a `path` that `Dial` derives from the URL and the callee
+  immediately rejoins, so the pair carries no information the URL does not —
+  while the TypeScript client already exposes exactly one URL-shaped entry point
+  (`connect(url)`, with the older `dial` deprecated in its favor since v0.18.0).
+  This release only marks them; they still work unchanged, so code compiles with
+  a migration hint rather than an error.
+
+  ```go
+  -sess, err := d.DialWebTransport(ctx, "host:4443", "/live", mux)
+  +sess, err := d.Dial(ctx, "https://host:4443/live", mux)
+
+  -sess, err := d.DialQUIC(ctx, "host:4433", "/live", mux)
+  +sess, err := d.Dial(ctx, "moqt://host:4433/live", mux)
+  ```
+
+  `DialQUIC`'s substitution is exact: `addr` is a host:port and `path` is rooted
+  at `/`, so the URL form loses nothing, and it works for an already-resolved
+  address — including an IPv6 literal, which `url.Parse` handles
+  (`moqt://[::1]:4433/live`). This matters for peer-dialing code that resolves
+  addresses itself before connecting.
+
+  `DialWebTransport` additionally accepts a full URL as `host`, in which case it
+  **silently ignores its own `path` argument** — an ambiguity `Dial` does not
+  have, and a reason to migrate rather than wait for the removal.
+
+  Callers that need to replace the handshake rather than the URL handling should
+  use `Dialer.DialQUICFunc` / `Dialer.DialWebTransportFunc`, which `Dial` honors.
 
 ### Fixed
 

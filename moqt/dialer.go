@@ -54,7 +54,7 @@ type Dialer struct {
 // binding, and its path selects the server-side endpoint.
 //
 // Scheme "https" dials WebTransport and "moqt" dials native QUIC; any other
-// scheme returns ErrInvalidScheme. The path is reported by Session.Path and, on
+// scheme returns ErrInvalidScheme. The path is reported by Session.RequestPath and, on
 // native QUIC, conveyed to the server as the SETUP Path parameter. A URL with no
 // path is dialed as "/".
 //

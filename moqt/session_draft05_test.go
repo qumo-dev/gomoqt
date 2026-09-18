@@ -81,20 +81,20 @@ func TestReadClientSetup_ExtractsPathAndProbe(t *testing.T) {
 	})
 }
 
-// TestSession_Path verifies Session.Path reports the path the binding resolved,
+// TestSession_RequestPath verifies Session.RequestPath reports the path the binding resolved,
 // and that a session whose binding supplied none reports "".
-func TestSession_Path(t *testing.T) {
+func TestSession_RequestPath(t *testing.T) {
 	sess := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil,
 		sessionSetup{path: "/live/alice"}, nil)
 	defer sess.CloseWithError(NoError, "")
 
-	assert.Equal(t, "/live/alice", sess.Path())
+	assert.Equal(t, "/live/alice", sess.RequestPath())
 
 	bare := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil,
 		sessionSetup{}, nil)
 	defer bare.CloseWithError(NoError, "")
 
-	assert.Empty(t, bare.Path())
+	assert.Empty(t, bare.RequestPath())
 }
 
 // TestNewSession_InjectedPeerSetup verifies that when the native-QUIC router
