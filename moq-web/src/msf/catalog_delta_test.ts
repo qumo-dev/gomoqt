@@ -15,15 +15,15 @@ import { ValidationError } from "./mod.ts";
 
 Deno.test("parseCatalogDelta rejects malformed JSON schema", () => {
 	assertThrows(
-		() => parseCatalogDelta('{"deltaUpdate":true,"addTracks":123}'),
+		() => parseCatalogDelta('{"deltaUpdate":[{"op":"add","tracks":123}]}'),
 		Error,
-		"addTracks",
+		"deltaUpdate.0.tracks",
 	);
 });
 
 Deno.test("parseCatalogDelta parses addTracks", () => {
 	const delta = parseCatalogDelta(
-		'{"deltaUpdate":true,"addTracks":[{"name":"video","packaging":"cmaf"}]}',
+		'{"deltaUpdate":[{"op":"add","tracks":[{"name":"video","packaging":"cmaf"}]}]}',
 	);
 	assertEquals(delta.addTracks.length, 1);
 	assertEquals(delta.addTracks[0]?.name, "video");
@@ -33,7 +33,7 @@ Deno.test("parseCatalogDelta parses addTracks", () => {
 
 Deno.test("parseCatalogDelta parses removeTracks with extraFields", () => {
 	const delta = parseCatalogDelta(
-		'{"deltaUpdate":true,"removeTracks":[{"name":"video","extra":1}]}',
+		'{"deltaUpdate":[{"op":"remove","tracks":[{"name":"video","extra":1}]}]}',
 	);
 	assertEquals(delta.removeTracks.length, 1);
 	assertEquals(delta.removeTracks[0]?.name, "video");
@@ -42,7 +42,7 @@ Deno.test("parseCatalogDelta parses removeTracks with extraFields", () => {
 
 Deno.test("parseCatalogDelta parses cloneTracks with parentName", () => {
 	const delta = parseCatalogDelta(
-		'{"deltaUpdate":true,"cloneTracks":[{"parentName":"video","name":"audio","packaging":"cmaf"}]}',
+		'{"deltaUpdate":[{"op":"clone","tracks":[{"parentName":"video","name":"audio","packaging":"cmaf"}]}]}',
 	);
 	assertEquals(delta.cloneTracks.length, 1);
 	assertEquals(delta.cloneTracks[0]?.parentName, "video");
@@ -51,7 +51,7 @@ Deno.test("parseCatalogDelta parses cloneTracks with parentName", () => {
 
 Deno.test("parseCatalogDelta parses optional fields and extraFields", () => {
 	const delta = parseCatalogDelta(
-		'{"deltaUpdate":true,"defaultNamespace":"ns","generatedAt":42,"isComplete":true,"addTracks":[{"name":"v","packaging":"cmaf"}],"custom":"value"}',
+		'{"deltaUpdate":[{"op":"add","tracks":[{"name":"v","packaging":"cmaf"}]}],"defaultNamespace":"ns","generatedAt":42,"isComplete":true,"custom":"value"}',
 	);
 	assertEquals(delta.defaultNamespace, "ns");
 	assertEquals(delta.generatedAt, 42);
@@ -60,7 +60,7 @@ Deno.test("parseCatalogDelta parses optional fields and extraFields", () => {
 });
 
 Deno.test("parseCatalogDelta accepts Uint8Array input", () => {
-	const json = '{"deltaUpdate":true,"removeTracks":[{"name":"v"}]}';
+	const json = '{"deltaUpdate":[{"op":"remove","tracks":[{"name":"v"}]}]}';
 	const bytes = new TextEncoder().encode(json);
 	const delta = parseCatalogDelta(bytes);
 	assertEquals(delta.removeTracks[0]?.name, "v");
@@ -68,7 +68,7 @@ Deno.test("parseCatalogDelta accepts Uint8Array input", () => {
 
 Deno.test("parseCatalogDelta records deltaOpOrder from JSON key order", () => {
 	const delta = parseCatalogDelta(
-		'{"deltaUpdate":true,"removeTracks":[{"name":"a"}],"addTracks":[{"name":"b","packaging":"cmaf"}]}',
+		'{"deltaUpdate":[{"op":"remove","tracks":[{"name":"a"}]},{"op":"add","tracks":[{"name":"b","packaging":"cmaf"}]}]}',
 	);
 	assertEquals(delta.deltaOpOrder, ["removeTracks", "addTracks"]);
 });
@@ -330,8 +330,10 @@ Deno.test("stringifyCatalogDelta roundtrip basic delta", () => {
 	};
 	const json = stringifyCatalogDelta(delta);
 	const parsed = JSON.parse(json);
-	assertEquals(parsed.deltaUpdate, true);
-	assertEquals(parsed.addTracks?.[0]?.name, "video");
+	assertEquals(parsed.deltaUpdate, [{
+		op: "add",
+		tracks: [{ name: "video", packaging: "cmaf" }],
+	}]);
 });
 
 Deno.test("stringifyCatalogDelta includes optional fields", () => {
@@ -349,9 +351,10 @@ Deno.test("stringifyCatalogDelta includes optional fields", () => {
 	assertEquals(parsed.defaultNamespace, "ns");
 	assertEquals(parsed.generatedAt, 5);
 	assertEquals(parsed.isComplete, true);
-	assertEquals(parsed.removeTracks?.[0]?.name, "v");
-	assertEquals(parsed.removeTracks?.[0]?.namespace, "ns");
-	assertEquals(parsed.cloneTracks?.[0]?.parentName, "orig");
+	assertEquals(parsed.deltaUpdate, [
+		{ op: "remove", tracks: [{ name: "v", namespace: "ns" }] },
+		{ op: "clone", tracks: [{ name: "clone", packaging: "cmaf", parentName: "orig" }] },
+	]);
 	assertEquals(parsed.custom, "x");
 });
 
@@ -363,9 +366,8 @@ Deno.test("stringifyCatalogDelta omits empty arrays", () => {
 	};
 	const json = stringifyCatalogDelta(delta);
 	const parsed = JSON.parse(json);
-	assertEquals(Object.hasOwn(parsed, "addTracks"), false);
-	assertEquals(Object.hasOwn(parsed, "cloneTracks"), false);
-	assertEquals(parsed.removeTracks?.length, 1);
+	// Only non-empty operations are written, one {op, tracks} entry each.
+	assertEquals(parsed.deltaUpdate, [{ op: "remove", tracks: [{ name: "v" }] }]);
 });
 
 // ─── TrackRef / TrackClone type checking ────────────────────────────────────

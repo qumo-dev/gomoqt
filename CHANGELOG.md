@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **moq-web: `@qumo/moq`'s `msf` catalogs now speak draft-ietf-moq-msf-01, restoring Go↔TS interop broken since v0.18.0.** The v0.18.0 msf-01 upgrade (#392) was Go-only: the Go `msf` package moved to the draft-01 wire form while the TypeScript package stayed on draft-00, so the two sides of the same dual release disagreed on two wire-breaking points:
+  - **Initialization data.** Go writes a catalog-level `initDataList` and a per-track `initRef`, with no inline `initData`; TS read only inline `initData`. TS did not reject a Go catalog — its schema is lenient — but filed `initRef`/`initDataList` under `extraFields` unresolved, so `track.initData` was `undefined`. Anything a Go publisher sent a browser subscriber arrived without its AVC decoder configuration or AAC `AudioSpecificConfig`.
+  - **Delta updates.** Go writes `deltaUpdate` as an array of `{op, tracks}` objects; TS required `deltaUpdate: true` with sibling `addTracks`/`removeTracks`/`cloneTracks`, so `parseCatalogDelta` **threw** on every Go-emitted delta.
+
+  Both now match the Go package. `parseCatalog` reads `initDataList` and resolves each track's `initRef` into `Track.initData`, so existing consumers that read `initData` keep working without code changes; `applyCatalogDelta` does the same for added and cloned tracks. `stringifyCatalog` never writes `initData` inline: a track's payload becomes an `initDataList` entry — tracks sharing a payload share one entry, and a payload edited after parsing gets its own entry rather than being hidden by a stale reference. The delta wire form is the draft-01 array; the in-memory `CatalogDelta` API is unchanged, as on the Go side. New: `InitDataRef`, `Catalog.initDataList`, `Track.initRef`, and `TrackClone.parentNamespace`; `validateCatalog` enforces the Go rules (unique ids, `"inline"` type, resolvable references).
+
+  Two behavior changes follow from matching Go. A clone's parent is looked up in `parentNamespace`, else the catalog default — no longer in the clone's own namespace. And since a delta has no `initDataList`, `stringifyCatalogDelta` now throws for a track carrying `initData` without an `initRef`, rather than writing a payload the receiver cannot use.
+
+  Interop is tested against the Go implementation itself, not this package's reading of the draft: the new `msf_interop_test.ts` parses JSON emitted verbatim by the Go `msf` package, and checks `applyCatalogDelta` against the result Go's own `Catalog.ApplyDelta` returns for the same inputs. In the other direction, TS-emitted catalogs and deltas were confirmed to unmarshal, validate, and apply in the Go package with every track's init data resolving.
+
+  **Wire-breaking against older `@qumo/moq`:** a peer on this version and one on ≤0.19.0 no longer exchange deltas or init data — that is the point, since the older form never matched Go.
+
+- **moq-web:** `stringifyCatalog` and `stringifyCatalogDelta` wrote each track's `extraFields` object as a literal `"extraFields"` key in the JSON, in addition to spreading its entries, because they spread the whole track after its extra fields. A test asserted the leaked key as expected output; it now asserts the entries only.
+
 ## [v0.19.0] - 2026-09-18
 
 > **Dual release.** `v0.19.0` ships both packages at the same version: the Go module (`moqt`, consumed via `go get github.com/qumo-dev/gomoqt@v0.19.0`) and the TypeScript package (`@qumo/moq` on JSR). Minor-bumped from `v0.18.0` because both sides carry **breaking API changes**: in Go, `PathFromContext` is removed in favor of `Session.RequestPath`; in TypeScript, `@qumo/moq` stops re-exporting subscribe-stream and stream-type internals that have no exported Go counterpart. `Dialer.DialWebTransport` and `Dialer.DialQUIC` are deprecated in favor of `Dialer.Dial` and still work unchanged; their removal is planned for a later release. **No wire-protocol change** — this release interoperates with `v0.18.0` peers.
