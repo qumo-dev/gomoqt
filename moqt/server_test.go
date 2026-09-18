@@ -605,13 +605,13 @@ func TestServer_handleNativeQUIC_CallsHandlerOnValidSetup(t *testing.T) {
 
 // TestServer_handleNativeQUIC_HandlerSeesSetupPath verifies the end-to-end
 // contract the Path parameter exists for: the path a client puts in its SETUP
-// reaches the handler as Session.Path. Nothing else asserts that the router's
+// reaches the handler as Session.RequestPath. Nothing else asserts that the router's
 // learned path survives into the Session.
 func TestServer_handleNativeQUIC_HandlerSeesSetupPath(t *testing.T) {
 	var got string
 	s := &Server{
 		Handler: HandleFunc(func(sess *Session) {
-			got = sess.Path()
+			got = sess.RequestPath()
 		}),
 	}
 
@@ -681,7 +681,7 @@ func TestWebTransportHandler_ServeHTTP_UpgradeSuccess(t *testing.T) {
 }
 
 // TestWebTransportHandler_ServeHTTP_HandlerSeesRequestPath verifies the
-// WebTransport half of Session.Path: the handler observes the HTTP request's
+// WebTransport half of Session.RequestPath: the handler observes the HTTP request's
 // path, the same value a native-QUIC handler gets from the SETUP Path
 // parameter, so a handler serving both bindings has one way to ask.
 func TestWebTransportHandler_ServeHTTP_HandlerSeesRequestPath(t *testing.T) {
@@ -704,7 +704,7 @@ func TestWebTransportHandler_ServeHTTP_HandlerSeesRequestPath(t *testing.T) {
 					return sess, nil
 				},
 				Handler: HandleFunc(func(sess *Session) {
-					got = sess.Path()
+					got = sess.RequestPath()
 				}),
 			}
 

@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **moqt: Breaking:** `PathFromContext` is removed and replaced by
-  **`Session.Path() string`**. A handler now reads the session's request path
-  the same way on both bindings — `sess.Path()` — instead of `PathFromContext`
+  **`Session.RequestPath() string`**. A handler now reads the session's request path
+  the same way on both bindings — `sess.RequestPath()` — instead of `PathFromContext`
   for native QUIC and `r.URL.Path` for WebTransport. `PathFromContext` shipped
   in v0.18.0 with the draft-05 migration and had no caller in this repository
   or in qumo, so nothing depended on it in practice.
@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wire behavior is unchanged: WebTransport endpoints and the native-QUIC server
   still send no Path parameter, and receiving one is still a protocol violation.
 
-  `Session.Path` is populated in all four roles, so it is symmetric where
+  `Session.RequestPath` is populated in all four roles, so it is symmetric where
   `PathFromContext` was not (it returned `("", false)` for every WebTransport
   session and every client). It is always rooted at `/`. On the WebTransport
   client it reports the path of the URL actually dialed rather than the `path`
@@ -40,15 +40,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Two defects found reviewing this change are fixed here rather than left for
   the follow-up. `dialedPath` fell back to the `path` argument when the target
   was unparsable — but in the branch where `host` already carries a scheme that
-  argument is the one `DialWebTransport` discards, so `Session.Path` could
+  argument is the one `DialWebTransport` discards, so `Session.RequestPath` could
   report a path the connection never used (confirmed: target
   `https://exa mple.com/from-host`, `Path()` `/from-arg`), reachable through the
   `DialWebTransportFunc` extension point. The fallback is now supplied only by
   the branch that owns it. And `DialQUIC` rooted only an *empty* path, so
-  `DialQUIC(ctx, addr, "live/alice", mux)` both broke `Session.Path`'s
+  `DialQUIC(ctx, addr, "live/alice", mux)` both broke `Session.RequestPath`'s
   documented "rooted at `/`" contract and sent an unrooted SETUP Path that the
   peer rejects as invalid — an opaque remote teardown instead of a local error.
   It now roots the value, as `url.Parse` would for the equivalent URL.
+
+  The accessor is named `RequestPath`, not `Path`, because in this package
+  "path" already means `BroadcastPath` — thirteen exported signatures take a
+  `path BroadcastPath`, and `Announcement` has a `BroadcastPath()` method. A
+  bare `Session.Path()` sitting between `Session.Subscribe(ctx, path
+  BroadcastPath, …)` and `Session.TrackInfo(ctx, path BroadcastPath, …)` in
+  godoc would read as returning a broadcast path, which it does not.
+  "Request path" is also the term both specs use.
 
   Test coverage follows the behavior rather than the accessor. The removed
   `TestPathContext_RoundTrips` exercised `context.WithValue` in isolation; the
@@ -57,10 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TestServer_handleNativeQUIC_CallsHandlerOnValidSetup` dialed `/live` while
   checking only that the handler ran. New tests cover the handler observing the
   path on both bindings (`..._HandlerSeesSetupPath`,
-  `..._HandlerSeesRequestPath`), `Session.Path` after `Dial` on both schemes
+  `..._HandlerSeesRequestPath`), `Session.RequestPath` after `Dial` on both schemes
   including the default-`/` and already-has-a-scheme branches
   (`TestDialer_Dial_PopulatesSessionPath`), and that a WebTransport session
-  still omits the Path parameter while exposing the path via `Session.Path`.
+  still omits the Path parameter while exposing it via `Session.RequestPath`.
 
 ### Deprecated
 

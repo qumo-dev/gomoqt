@@ -133,7 +133,7 @@ func (d *Dialer) DialWebTransport(ctx context.Context, host, path string, mux *T
 	// learns it from the request URI and this endpoint must not send a SETUP
 	// Path parameter. Record the path that was actually dialed — when host
 	// already carries a scheme the path argument is not part of target — so
-	// Session.Path agrees with the connection.
+	// Session.RequestPath agrees with the connection.
 	return newSession(conn, mux, nil, d.Config, d.FetchHandler, d.OnGoaway, d.Logger,
 		sessionSetup{path: dialedPath(target, fallback)}, nil), nil
 }
@@ -191,7 +191,7 @@ func (d *Dialer) DialQUIC(ctx context.Context, addr, path string, mux *TrackMux)
 	}
 
 	// Root the path, as url.Parse would for the equivalent "moqt://" URL. Left
-	// unrooted it would break Session.Path's documented contract and be sent
+	// unrooted it would break Session.RequestPath's documented contract and be sent
 	// verbatim as the SETUP Path parameter, which the peer rejects — surfacing
 	// as an opaque remote teardown rather than a local error.
 	switch {
