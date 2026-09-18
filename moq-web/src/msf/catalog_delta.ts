@@ -13,6 +13,7 @@ import {
 	zodSchemaError,
 } from "./catalog.ts";
 import { z } from "zod";
+import { resolveInitData } from "./init_data.ts";
 
 /** Discriminator for the three delta operations. */
 export type DeltaOperationKind = "addTracks" | "removeTracks" | "cloneTracks";
@@ -28,6 +29,8 @@ export interface TrackRef {
 export interface TrackClone {
 	track: Track;
 	parentName?: string;
+	/** Namespace of the parent track, when it differs from the clone's. */
+	parentNamespace?: string;
 }
 
 /**
@@ -52,17 +55,33 @@ const trackRefSchema = z.object({
 
 const trackCloneSchema = z.object({
 	parentName: z.string().optional(),
+	parentNamespace: z.string().optional(),
+}).catchall(z.unknown());
+
+// draft-ietf-moq-msf-01: "deltaUpdate" is an array of {op, tracks} objects.
+const deltaOperationSchema = z.object({
+	op: z.string(),
+	tracks: z.array(z.unknown()),
 }).catchall(z.unknown());
 
 const catalogDeltaSchema = z.object({
-	deltaUpdate: z.literal(true),
+	deltaUpdate: z.array(deltaOperationSchema),
 	defaultNamespace: z.string().optional(),
 	generatedAt: z.number().optional(),
 	isComplete: z.boolean().optional(),
-	addTracks: z.array(z.unknown()).optional(),
-	removeTracks: z.array(z.unknown()).optional(),
-	cloneTracks: z.array(z.unknown()).optional(),
 }).catchall(z.unknown());
+
+// Wire op name <-> in-memory operation kind.
+const OP_TO_KIND: Record<string, DeltaOperationKind> = {
+	add: "addTracks",
+	remove: "removeTracks",
+	clone: "cloneTracks",
+};
+const KIND_TO_OP: Record<DeltaOperationKind, string> = {
+	addTracks: "add",
+	removeTracks: "remove",
+	cloneTracks: "clone",
+};
 
 function parseTrackRef(value: unknown): TrackRef {
 	const rawRecord = asRecord(value, "msf: remove track reference must be a JSON object");
@@ -91,12 +110,11 @@ function parseTrackClone(value: unknown): TrackClone {
 		throw zodSchemaError("msf: clone track entry must be a JSON object", parsed.error);
 	}
 	const raw = parsed.data;
-	const parentName = raw.parentName;
-	const trackRecord = { ...raw };
-	delete trackRecord.parentName;
+	const { parentName, parentNamespace, ...trackRecord } = raw;
 	return {
 		track: parseTrack(trackRecord),
 		parentName,
+		parentNamespace,
 	};
 }
 
@@ -117,20 +135,32 @@ export function parseCatalogDelta(data: string | Uint8Array): CatalogDelta {
 		throw new Error("msf: independent catalog fields are not allowed in a delta catalog");
 	}
 
+	// Repeated operations of one kind are legal in draft-01: their tracks are
+	// appended, and only the first-seen order of each kind is recorded.
 	const deltaOpOrder: DeltaOperationKind[] = [];
-	for (const key of Object.keys(rawRoot)) {
-		if (key === "addTracks" || key === "removeTracks" || key === "cloneTracks") {
-			deltaOpOrder.push(key);
+	const addTracks: Track[] = [];
+	const removeTracks: TrackRef[] = [];
+	const cloneTracks: TrackClone[] = [];
+	for (const operation of root.deltaUpdate) {
+		const kind = OP_TO_KIND[operation.op];
+		if (kind === undefined) {
+			throw new Error(`msf: unknown delta update op ${JSON.stringify(operation.op)}`);
+		}
+		if (!deltaOpOrder.includes(kind)) {
+			deltaOpOrder.push(kind);
+		}
+		switch (kind) {
+			case "addTracks":
+				addTracks.push(...operation.tracks.map(parseTrack));
+				break;
+			case "removeTracks":
+				removeTracks.push(...operation.tracks.map(parseTrackRef));
+				break;
+			case "cloneTracks":
+				cloneTracks.push(...operation.tracks.map(parseTrackClone));
+				break;
 		}
 	}
-
-	const addTracks = Array.isArray(root.addTracks) ? root.addTracks.map(parseTrack) : [];
-	const removeTracks = Array.isArray(root.removeTracks)
-		? root.removeTracks.map(parseTrackRef)
-		: [];
-	const cloneTracks = Array.isArray(root.cloneTracks)
-		? root.cloneTracks.map(parseTrackClone)
-		: [];
 
 	const extraFields: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(root)) {
@@ -138,10 +168,7 @@ export function parseCatalogDelta(data: string | Uint8Array): CatalogDelta {
 			key !== "deltaUpdate" &&
 			key !== "defaultNamespace" &&
 			key !== "generatedAt" &&
-			key !== "isComplete" &&
-			key !== "addTracks" &&
-			key !== "removeTracks" &&
-			key !== "cloneTracks"
+			key !== "isComplete"
 		) {
 			extraFields[key] = value;
 		}
@@ -300,8 +327,10 @@ export function applyCatalogDelta(baseCatalog: Catalog, deltaCatalog: CatalogDel
 				break;
 			case "cloneTracks":
 				for (const clone of deltaCatalog.cloneTracks) {
+					// As in the Go package: the parent lives in parentNamespace when
+					// given, else the catalog default -- not the clone's own namespace.
 					const parentId = trackId(
-						{ namespace: clone.track.namespace, name: clone.parentName },
+						{ namespace: clone.parentNamespace, name: clone.parentName },
 						result.defaultNamespace,
 					);
 					const parent = result.tracks.find(
@@ -335,14 +364,25 @@ export function applyCatalogDelta(baseCatalog: Catalog, deltaCatalog: CatalogDel
 		}
 	}
 
+	resolveInitData(result);
 	validateCatalog(result);
 	return result;
 }
 
+/**
+ * Serialize a {@link CatalogDelta} to its draft-ietf-moq-msf-01 JSON form: a
+ * `deltaUpdate` array of `{op, tracks}` objects, in {@link CatalogDelta.deltaOpOrder}
+ * when it is set.
+ *
+ * A delta has no Initialization Data List, so a track can only reference an
+ * entry of the base catalog through `initRef`; its resolved `initData` is not
+ * written.
+ * @throws Error if a track carries `initData` without an `initRef`, since
+ * that payload cannot be represented in a delta.
+ */
 export function stringifyCatalogDelta(delta: CatalogDelta): string {
 	const obj: Record<string, unknown> = {
 		...(delta.extraFields ?? {}),
-		deltaUpdate: true,
 	};
 	if (delta.defaultNamespace !== undefined) {
 		obj.defaultNamespace = delta.defaultNamespace;
@@ -353,25 +393,46 @@ export function stringifyCatalogDelta(delta: CatalogDelta): string {
 	if (delta.isComplete) {
 		obj.isComplete = true;
 	}
-	if (delta.addTracks.length > 0) {
-		obj.addTracks = delta.addTracks.map((track) => ({
-			...(track.extraFields ?? {}),
-			...track,
-		}));
-	}
-	if (delta.removeTracks.length > 0) {
-		obj.removeTracks = delta.removeTracks.map((track) => ({
-			...(track.extraFields ?? {}),
-			name: track.name,
-			...(track.namespace ? { namespace: track.namespace } : {}),
-		}));
-	}
-	if (delta.cloneTracks.length > 0) {
-		obj.cloneTracks = delta.cloneTracks.map((clone) => ({
-			...(clone.track.extraFields ?? {}),
-			...clone.track,
-			parentName: clone.parentName,
-		}));
-	}
+
+	const trackWire = (track: Track, where: string): Record<string, unknown> => {
+		const { extraFields, initData, ...rest } = track;
+		if (initData !== undefined && !rest.initRef) {
+			throw new Error(
+				`msf: ${where} carries initData, which a delta cannot represent; ` +
+					"reference an initDataList entry of the base catalog with initRef, " +
+					"or publish an independent catalog",
+			);
+		}
+		return { ...(extraFields ?? {}), ...rest };
+	};
+
+	const order: DeltaOperationKind[] = delta.deltaOpOrder && delta.deltaOpOrder.length > 0
+		? delta.deltaOpOrder
+		: (["addTracks", "removeTracks", "cloneTracks"] as const).filter((kind) =>
+			delta[kind].length > 0
+		);
+	obj.deltaUpdate = order.map((kind) => {
+		let tracks: Record<string, unknown>[];
+		switch (kind) {
+			case "addTracks":
+				tracks = delta.addTracks.map((track, i) => trackWire(track, `addTracks[${i}]`));
+				break;
+			case "removeTracks":
+				tracks = delta.removeTracks.map((ref) => ({
+					...(ref.extraFields ?? {}),
+					name: ref.name,
+					...(ref.namespace ? { namespace: ref.namespace } : {}),
+				}));
+				break;
+			case "cloneTracks":
+				tracks = delta.cloneTracks.map((clone, i) => ({
+					...trackWire(clone.track, `cloneTracks[${i}]`),
+					parentName: clone.parentName,
+					...(clone.parentNamespace ? { parentNamespace: clone.parentNamespace } : {}),
+				}));
+				break;
+		}
+		return { op: KIND_TO_OP[kind], tracks };
+	});
 	return JSON.stringify(obj);
 }

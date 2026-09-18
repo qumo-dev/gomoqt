@@ -16,7 +16,7 @@ import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 
 Deno.test("parseCatalog rejects delta-only fields", () => {
 	assertThrows(
-		() => parseCatalog('{"version":1,"deltaUpdate":true}'),
+		() => parseCatalog('{"deltaUpdate":[],"version":1}'),
 		Error,
 		"delta catalog fields are not allowed",
 	);
@@ -35,7 +35,7 @@ Deno.test("parseCatalog rejects invalid track field types", () => {
 
 Deno.test("parseCatalogDelta rejects independent catalog fields", () => {
 	assertThrows(
-		() => parseCatalogDelta('{"deltaUpdate":true,"version":1}'),
+		() => parseCatalogDelta('{"deltaUpdate":[],"version":1}'),
 		Error,
 		"independent catalog fields are not allowed",
 	);
@@ -43,7 +43,7 @@ Deno.test("parseCatalogDelta rejects independent catalog fields", () => {
 
 Deno.test("parseCatalogDelta rejects invalid removeTrack field types", () => {
 	assertThrows(
-		() => parseCatalogDelta('{"deltaUpdate":true,"removeTracks":[{"name":1}]}'),
+		() => parseCatalogDelta('{"deltaUpdate":[{"op":"remove","tracks":[{"name":1}]}]}'),
 		Error,
 		"name",
 	);
@@ -73,7 +73,7 @@ Deno.test("applyCatalogDelta respects operation order from source JSON", () => {
 		}),
 	);
 	const delta = parseCatalogDelta(
-		'{"deltaUpdate":true,"removeTracks":[{"name":"alpha"}],"addTracks":[{"name":"alpha","packaging":"cmaf"}]}',
+		'{"deltaUpdate":[{"op":"remove","tracks":[{"name":"alpha"}]},{"op":"add","tracks":[{"name":"alpha","packaging":"cmaf"}]}]}',
 	);
 
 	const updated = applyCatalogDelta(base, delta);
@@ -90,10 +90,9 @@ Deno.test("applyCatalogDelta blocks default namespace change with inherited trac
 	);
 	const delta = parseCatalogDelta(
 		JSON.stringify({
-			deltaUpdate: true,
+			deltaUpdate: [{ op: "add", tracks: [{ name: "beta", packaging: "cmaf" }] }],
 			generatedAt: 5,
 			defaultNamespace: "newns",
-			addTracks: [{ name: "beta", packaging: "cmaf" }],
 		}),
 	);
 
@@ -138,7 +137,7 @@ Deno.test("catalog helpers cover namespace and serialization branches", () => {
 			version: 2,
 			generatedAt: 10,
 			isComplete: true,
-			tracks: [{ extra: 1, name: "clip", packaging: "cmaf", extraFields: { extra: 1 } }],
+			tracks: [{ extra: 1, name: "clip", packaging: "cmaf" }],
 		}),
 	);
 });
