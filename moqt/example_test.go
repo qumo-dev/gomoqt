@@ -83,8 +83,8 @@ func Example() {
 // ExampleClient dials a MOQ session from a URL.
 //
 // Dialer.Dial selects the transport from the URL scheme: "moqt://" uses native
-// QUIC and "https://" uses WebTransport. (DialWebTransport and DialQUIC select
-// a transport explicitly when you already know which one you want.)
+// QUIC and "https://" uses WebTransport. The URL's path selects the server-side
+// endpoint and is reported by Session.RequestPath.
 //
 // The mux argument routes INBOUND tracks — subscriptions and announcements
 // directed at this client when it also acts as a publisher. A pure subscriber

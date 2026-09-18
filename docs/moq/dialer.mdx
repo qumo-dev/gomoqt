@@ -101,7 +101,7 @@ type Dialer struct {
 
 ## Dial and Establish Session
 
-A `Dialer` can connect to servers using the `Dial` method, which automatically selects the transport based on the URL scheme:
+`Dial` is the only way to establish a session. It selects the transport from the URL scheme:
 - `https://` — WebTransport (HTTP/3)
 - `moqt://` — Native QUIC
 
@@ -116,26 +116,26 @@ A `Dialer` can connect to servers using the `Dial` method, which automatically s
 	// Handle session
 ```
 
-<Warning>
-**Deprecated: `DialWebTransport` and `DialQUIC`**
+The URL's path selects the server-side endpoint and is reported by
+[`Session.RequestPath`](/moq/session#request-path). A URL with no path is dialed as `/`.
+On native QUIC the path travels as the SETUP Path parameter, since that binding
+has no request URI of its own.
 
-The transport-specific methods are deprecated and will be removed in a future
-release. They take a host and a path that `Dial` derives from the URL, so they
-carry no information the URL does not. Migrate to `Dial`:
+<Note>
+**Note: Queries and native QUIC**
 
-```go
-	// WebTransport
-	-sess, err := dialer.DialWebTransport(ctx, "host:port", "/path", mux)
-	+sess, err := dialer.Dial(ctx, "https://host:port/path", mux)
+A query is carried only by `https://`, where it belongs to the HTTP request URI
+the server receives. Native QUIC conveys only a path, so a `moqt://` URL carrying
+a query returns `moqt.ErrQueryNotSupported` rather than connecting to an endpoint
+you did not ask for. A fragment is client-side only and is never sent on either
+binding.
+</Note>
 
-	// Native QUIC
-	-sess, err := dialer.DialQUIC(ctx, "host:port", "/path", mux)
-	+sess, err := dialer.Dial(ctx, "moqt://host:port/path", mux)
-```
-
-The URL form works for an already-resolved address too, including an IPv6
-literal (`moqt://[::1]:4433/live`).
-</Warning>
+To supply your own connection or handshake, set `DialQUICFunc` or
+`DialWebTransportFunc` on the `Dialer` — see the **Using Custom QUIC** tab under
+[Initialize a Dialer](#initialize-a-dialer). These replace the handshake `Dial`
+performs; `Dial` still parses the URL and selects the transport from it, so they
+are not a way to bypass URL handling.
 
 <Note>
 **Note: Nil TrackMux**

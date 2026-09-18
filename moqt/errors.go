@@ -12,6 +12,13 @@ var (
 	// Only "https" (for WebTransport) and "moqt" (for QUIC) schemes are valid.
 	ErrInvalidScheme = errors.New("moqt: invalid scheme")
 
+	// ErrQueryNotSupported is returned by Dialer.Dial for a "moqt" URL that
+	// carries a query. The native QUIC binding conveys only a path, in the
+	// SETUP Path parameter, so a query cannot reach the server; dialing without
+	// it would silently connect to a different endpoint than the caller named.
+	// Use the "https" (WebTransport) binding when the server needs a query.
+	ErrQueryNotSupported = errors.New("moqt: query not supported on this transport")
+
 	// ErrClosedSession is returned when attempting to use a closed session.
 	ErrClosedSession = errors.New("moqt: closed session")
 
