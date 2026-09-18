@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.20.0] - 2026-09-18
+
+> **Dual release.** `v0.20.0` ships both packages at the same version: the Go module (`moqt`, consumed via `go get github.com/qumo-dev/gomoqt@v0.20.0`) and the TypeScript package (`@qumo/moq` on JSR). Minor-bumped from `v0.19.0` because both sides carry **breaking changes**. In Go, `Dialer.DialWebTransport` and `Dialer.DialQUIC`, deprecated in `v0.19.0`, are removed: `Dialer.Dial` is the only client entry point, and a `moqt` URL carrying a query now returns `ErrQueryNotSupported`. In TypeScript, `@qumo/moq`'s `msf` catalogs move to draft-ietf-moq-msf-01 (`initDataList`/`initRef`, and the `{op, tracks}` delta form), restoring interop with the Go `msf` package, which had been broken since `v0.18.0`. The MoQ wire protocol is unchanged, so this release interoperates with `v0.19.0` peers; `msf` catalog JSON from `@qumo/moq` ≤0.19.0 is not compatible.
+
 ### Changed
 
 - **moqt: Breaking:** `Dialer.DialWebTransport` and `Dialer.DialQUIC`, deprecated
