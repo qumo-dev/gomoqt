@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.19.0] - 2026-09-18
+
+> **Dual release.** `v0.19.0` ships both packages at the same version: the Go module (`moqt`, consumed via `go get github.com/qumo-dev/gomoqt@v0.19.0`) and the TypeScript package (`@qumo/moq` on JSR). Minor-bumped from `v0.18.0` because both sides carry **breaking API changes**: in Go, `PathFromContext` is removed in favor of `Session.RequestPath`; in TypeScript, `@qumo/moq` stops re-exporting subscribe-stream and stream-type internals that have no exported Go counterpart. `Dialer.DialWebTransport` and `Dialer.DialQUIC` are deprecated in favor of `Dialer.Dial` and still work unchanged; their removal is planned for a later release. **No wire-protocol change** — this release interoperates with `v0.18.0` peers.
+
 ### Changed
 
 - **moqt: Breaking:** `PathFromContext` is removed and replaced by
