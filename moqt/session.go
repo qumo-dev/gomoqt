@@ -40,6 +40,10 @@ type sessionSetup struct {
 	// here so Session can seed its peer-probe state without re-reading the
 	// stream. Nil means Session reads the peer SETUP itself (all other bindings).
 	peerSetup *message.SetupMessage
+	// ctx is the connection's context as the server's ConnContext left it; the
+	// session's context carries its values. Nil means conn.Context() alone
+	// (clients, and a WebTransportHandler used without a Server).
+	ctx context.Context
 }
 
 // Session represents an active MOQ session over a QUIC connection.
@@ -123,6 +127,9 @@ func newSession(
 	}
 
 	connCtx := conn.Context()
+	if setup.ctx != nil {
+		connCtx = withValuesOf(connCtx, setup.ctx)
+	}
 	sess := &Session{
 		ctx:             connCtx,
 		config:          config.Clone(),
@@ -894,7 +901,9 @@ func (sess *Session) handleSubscribeStream(stream transport.Stream) {
 		sess.conn.OpenUniStreamSync,
 		func() { sess.removeTrackWriter(SubscribeID(sm.SubscribeID)) },
 	)
-	track.ctx = withSession(track.ctx, sess)
+	// Like an http.Request's context: the session's values (and so the
+	// server's ConnContext), ending with the SUBSCRIBE stream.
+	track.ctx = context.WithValue(withValuesOf(stream.Context(), sess.ctx), biStreamTypeCtxKey, message.StreamTypeSubscribe)
 	sess.addTrackWriter(SubscribeID(sm.SubscribeID), track)
 
 	if sess.counters != nil {
@@ -1037,7 +1046,7 @@ func (sess *Session) handleFetchStream(stream transport.Stream) {
 		TrackName:     TrackName(fm.TrackName),
 		Priority:      TrackPriority(fm.Priority),
 		GroupSequence: GroupSequence(fm.GroupSequence),
-		ctx:           withSession(stream.Context(), sess),
+		ctx:           withValuesOf(stream.Context(), sess.ctx),
 	}
 
 	// Priority is per-endpoint and not negotiated, so the requester's call on

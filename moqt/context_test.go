@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
 	"github.com/qumo-dev/gomoqt/transport"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCause(t *testing.T) {
@@ -123,4 +125,21 @@ func TestCause(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWithValuesOf(t *testing.T) {
+	type key struct{}
+	values, cancelValues := context.WithCancel(context.WithValue(context.Background(), key{}, "v"))
+	lifetime, endLifetime := context.WithCancelCause(context.Background())
+	streamErr := errors.New("stream reset")
+
+	ctx := withValuesOf(lifetime, values)
+
+	assert.Equal(t, "v", ctx.Value(key{}), "carries the values context's values")
+	cancelValues()
+	assert.NoError(t, ctx.Err(), "does not end with the values context")
+	endLifetime(streamErr)
+	require.Eventually(t, func() bool { return ctx.Err() != nil }, time.Second, time.Millisecond,
+		"ends with the lifetime context")
+	assert.ErrorIs(t, context.Cause(ctx), streamErr, "keeps the lifetime's cause, which Cause translates")
 }

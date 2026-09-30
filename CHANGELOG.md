@@ -7,18 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- **moqt: `SessionFromContext(ctx) (*Session, bool)`** returns the session a
-  peer-initiated request arrived on. The context of a `TrackWriter` handed to
-  a `TrackHandler`, and of a `FetchRequest` handed to a `FetchHandler`, now
-  carries it, so a server that serves many sessions from one `TrackMux` can
-  authorize a SUBSCRIBE or FETCH per session (#431). Previously nothing
-  reachable from the writer identified the session, and a `Server.ConnContext`
-  value reached neither the writer's nor the session's context.
-
 ### Fixed
 
+- **moqt: `Server.ConnContext` values now reach handlers, as in net/http**
+  (#431). The hook mirrors `http.Server.ConnContext`, but its context was
+  lost: native QUIC never called it, WebTransport sessions were built from the
+  unwrapped connection, and a `TrackWriter` or `FetchRequest` context came
+  from its stream alone. Now `Session.Context()` carries the connection
+  context's values on both transports, and the contexts handed to a
+  `TrackHandler` and `FetchHandler` carry the session's values while still
+  ending with their stream (with the stream's error as the cause, so `Cause`
+  is unchanged). A server serving many sessions from one `TrackMux` can store
+  per-connection state in `ConnContext` and read it in its handlers, for
+  example to authorize a SUBSCRIBE per session.
 - **moqt: data race between `TrackReader.Close` and a concurrent
   `AcceptGroup`** (#432). `AcceptGroup` read `queuedCh` outside the lock while
   `Close` set it to nil, so closing a subscription from any goroutine other

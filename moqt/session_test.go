@@ -946,11 +946,15 @@ func TestSession_ProcessBiStream_Announce(t *testing.T) {
 	_ = session.CloseWithError(NoError, "")
 }
 
+// connValueKey stands for a value an application's Server.ConnContext stores.
+type connValueKey struct{}
+
 func TestSession_ProcessBiStream_Subscribe(t *testing.T) {
 	conn := &FakeStreamConn{}
 	conn.OpenUniStreams = []sendStreamResult{{Stream: &FakeQUICSendStream{}}}
 
-	session := newTestSession(conn)
+	session := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil,
+		sessionSetup{ctx: context.WithValue(context.Background(), connValueKey{}, "conn-value")}, nil)
 	blockHandler := make(chan struct{})
 	trackReady := make(chan *TrackWriter, 1)
 	session.mux.PublishFunc(context.Background(), BroadcastPath("/test/path"), func(tw *TrackWriter) {
@@ -1011,9 +1015,8 @@ func TestSession_ProcessBiStream_Subscribe(t *testing.T) {
 		t.Fatal("processBiStream did not deliver track writer to handler")
 	}
 
-	gotSess, ok := SessionFromContext(track.Context())
-	assert.True(t, ok, "the TrackWriter's context carries the subscribing session")
-	assert.Same(t, session, gotSess)
+	assert.Equal(t, "conn-value", track.Context().Value(connValueKey{}),
+		"the TrackWriter's context carries the connection context's values, like an http.Request's")
 
 	gotConfig := track.TrackConfig()
 	assert.Equal(t, TrackPriority(7), gotConfig.Priority)
@@ -1139,7 +1142,8 @@ func TestSession_ProcessBiStream_DecodeSubscribeMessageError(t *testing.T) {
 func TestSession_ProcessBiStream_Fetch(t *testing.T) {
 	conn := &FakeStreamConn{}
 
-	session := newTestSession(conn)
+	session := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil,
+		sessionSetup{ctx: context.WithValue(context.Background(), connValueKey{}, "conn-value")}, nil)
 
 	called := false
 	var gotReq *FetchRequest
@@ -1173,9 +1177,8 @@ func TestSession_ProcessBiStream_Fetch(t *testing.T) {
 	assert.Equal(t, TrackName(req.TrackName), gotReq.TrackName)
 	assert.Equal(t, TrackPriority(req.Priority), gotReq.Priority)
 	assert.Equal(t, GroupSequence(req.GroupSequence), gotReq.GroupSequence)
-	gotSess, ok := SessionFromContext(gotReq.Context())
-	assert.True(t, ok, "the FetchRequest's context carries the requesting session")
-	assert.Same(t, session, gotSess)
+	assert.Equal(t, "conn-value", gotReq.Context().Value(connValueKey{}),
+		"the FetchRequest's context carries the connection context's values")
 	require.NotNil(t, gotWriter)
 	assert.Equal(t, GroupSequence(req.GroupSequence), gotWriter.GroupSequence())
 

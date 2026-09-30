@@ -379,8 +379,10 @@ func (u *WebTransportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	// to the Session (which exposes it as Session.RequestPath, the same way the
 	// native-QUIC router does with the path from SETUP). A WebTransport
 	// endpoint must not send a SETUP Path parameter, so sendPath stays false.
+	// r.Context() carries what the Server's ConnContext stored for this
+	// connection; the session's context inherits it, as net/http's does.
 	sess := newSession(conn, u.TrackMux, manager, u.Config, u.FetchHandler, nil, u.Logger,
-		sessionSetup{path: requestPath(r)}, nil)
+		sessionSetup{path: requestPath(r), ctx: r.Context()}, nil)
 	// Ensure the session is cleaned up (conn removed from the manager) when
 	// the Handler returns, even if it did not call CloseWithError itself (e.g.
 	// the peer closed the connection). Idempotent.
@@ -429,7 +431,7 @@ func (s *Server) handleNativeQUIC(conn StreamConn) error {
 	// WebTransport's r.URL.Path) along with the decoded SETUP, so it seeds
 	// peer-probe state without re-reading the consumed stream.
 	sess := newSession(conn, s.TrackMux, s.connManager, s.Config, s.FetchHandler, nil, s.Logger,
-		sessionSetup{path: path, peerSetup: &sm}, s.Counters)
+		sessionSetup{path: path, peerSetup: &sm, ctx: s.connContext(conn.Context(), conn)}, s.Counters)
 	if s.Counters != nil {
 		s.Counters.NativeSessions.Add(1)
 	}
