@@ -894,6 +894,7 @@ func (sess *Session) handleSubscribeStream(stream transport.Stream) {
 		sess.conn.OpenUniStreamSync,
 		func() { sess.removeTrackWriter(SubscribeID(sm.SubscribeID)) },
 	)
+	track.ctx = withSession(track.ctx, sess)
 	sess.addTrackWriter(SubscribeID(sm.SubscribeID), track)
 
 	if sess.counters != nil {
@@ -1036,7 +1037,7 @@ func (sess *Session) handleFetchStream(stream transport.Stream) {
 		TrackName:     TrackName(fm.TrackName),
 		Priority:      TrackPriority(fm.Priority),
 		GroupSequence: GroupSequence(fm.GroupSequence),
-		ctx:           stream.Context(),
+		ctx:           withSession(stream.Context(), sess),
 	}
 
 	// Priority is per-endpoint and not negotiated, so the requester's call on

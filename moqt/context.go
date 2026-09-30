@@ -14,6 +14,25 @@ type uniStreamTypeCtxKeyType struct{}
 var biStreamTypeCtxKey biStreamTypeCtxKeyType = biStreamTypeCtxKeyType{}
 var uniStreamTypeCtxKey uniStreamTypeCtxKeyType = uniStreamTypeCtxKeyType{}
 
+type sessionCtxKeyType struct{}
+
+var sessionCtxKey sessionCtxKeyType = sessionCtxKeyType{}
+
+// SessionFromContext returns the session a peer-initiated request arrived on.
+// The context of a [TrackWriter] handed to a [TrackHandler], and of a
+// [FetchRequest] handed to a [FetchHandler], carries it, so a handler serving
+// many sessions from one [TrackMux] can tell who is asking — for example to
+// authorize a SUBSCRIBE per session.
+func SessionFromContext(ctx context.Context) (*Session, bool) {
+	sess, ok := ctx.Value(sessionCtxKey).(*Session)
+	return sess, ok
+}
+
+// withSession returns ctx carrying sess for [SessionFromContext].
+func withSession(ctx context.Context, sess *Session) context.Context {
+	return context.WithValue(ctx, sessionCtxKey, sess)
+}
+
 // Cause translates a Go context cancellation reason into a package-specific error type.
 // When the provided context was canceled because of a QUIC stream error or application error,
 // Cause converts that into the corresponding moqt error (e.g., SessionError, AnnounceError,

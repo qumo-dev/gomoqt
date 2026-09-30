@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **moqt: `SessionFromContext(ctx) (*Session, bool)`** returns the session a
+  peer-initiated request arrived on. The context of a `TrackWriter` handed to
+  a `TrackHandler`, and of a `FetchRequest` handed to a `FetchHandler`, now
+  carries it, so a server that serves many sessions from one `TrackMux` can
+  authorize a SUBSCRIBE or FETCH per session (#431). Previously nothing
+  reachable from the writer identified the session, and a `Server.ConnContext`
+  value reached neither the writer's nor the session's context.
+
+### Fixed
+
+- **moqt: data race between `TrackReader.Close` and a concurrent
+  `AcceptGroup`** (#432). `AcceptGroup` read `queuedCh` outside the lock while
+  `Close` set it to nil, so closing a subscription from any goroutine other
+  than the reader's raced. `AcceptGroup` now snapshots the channel under the
+  lock.
+
 ## [v0.20.0] - 2026-09-18
 
 > **Dual release.** `v0.20.0` ships both packages at the same version: the Go module (`moqt`, consumed via `go get github.com/qumo-dev/gomoqt@v0.20.0`) and the TypeScript package (`@qumo/moq` on JSR). Minor-bumped from `v0.19.0` because both sides carry **breaking changes**. In Go, `Dialer.DialWebTransport` and `Dialer.DialQUIC`, deprecated in `v0.19.0`, are removed: `Dialer.Dial` is the only client entry point, and a `moqt` URL carrying a query now returns `ErrQueryNotSupported`. In TypeScript, `@qumo/moq`'s `msf` catalogs move to draft-ietf-moq-msf-01 (`initDataList`/`initRef`, and the `{op, tracks}` delta form), restoring interop with the Go `msf` package, which had been broken since `v0.18.0`. The MoQ wire protocol is unchanged, so this release interoperates with `v0.19.0` peers; `msf` catalog JSON from `@qumo/moq` ≤0.19.0 is not compatible.

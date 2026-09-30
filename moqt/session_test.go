@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
 func newTestSession(conn StreamConn) *Session {
 	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{}, nil)
 	markPeerSetupReceived(sess, message.ProbeLevelReport)
@@ -1010,6 +1011,10 @@ func TestSession_ProcessBiStream_Subscribe(t *testing.T) {
 		t.Fatal("processBiStream did not deliver track writer to handler")
 	}
 
+	gotSess, ok := SessionFromContext(track.Context())
+	assert.True(t, ok, "the TrackWriter's context carries the subscribing session")
+	assert.Same(t, session, gotSess)
+
 	gotConfig := track.TrackConfig()
 	assert.Equal(t, TrackPriority(7), gotConfig.Priority)
 	assert.True(t, gotConfig.Ordered)
@@ -1168,6 +1173,9 @@ func TestSession_ProcessBiStream_Fetch(t *testing.T) {
 	assert.Equal(t, TrackName(req.TrackName), gotReq.TrackName)
 	assert.Equal(t, TrackPriority(req.Priority), gotReq.Priority)
 	assert.Equal(t, GroupSequence(req.GroupSequence), gotReq.GroupSequence)
+	gotSess, ok := SessionFromContext(gotReq.Context())
+	assert.True(t, ok, "the FetchRequest's context carries the requesting session")
+	assert.Same(t, session, gotSess)
 	require.NotNil(t, gotWriter)
 	assert.Equal(t, GroupSequence(req.GroupSequence), gotWriter.GroupSequence())
 
