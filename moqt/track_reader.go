@@ -173,6 +173,11 @@ func (r *TrackReader) Drops(ctx context.Context) iter.Seq[SubscribeDrop] {
 // loss recovery on a slow path is not cut short.
 const subscribeEndGrace = 100 * time.Millisecond
 
+// subscribeEndGraceRTTs is how many round trips a Session adds to
+// subscribeEndGrace: a lost packet on the group's stream is recovered within
+// about one round trip plus the probe timeout.
+const subscribeEndGraceRTTs = 3
+
 // AcceptGroup blocks until the next group is available or context is
 // canceled. It returns a GroupReader tied to the accepted group stream.
 //
@@ -392,6 +397,7 @@ type settledGroups struct {
 	ranges []groupRange
 }
 
+// groupRange is an inclusive range of group sequences.
 type groupRange struct{ lo, hi GroupSequence }
 
 // add records lo through hi as settled.
