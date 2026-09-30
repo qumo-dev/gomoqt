@@ -181,9 +181,17 @@ func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 		// The publisher ended the track, and either its last group has been
 		// handed out (or it had none) or it has closed the subscribe stream:
 		// nothing more will arrive.
-		if end, ended := r.sendSubscribeStream.end(); ended && (r.lastQueued >= end || r.sendSubscribeStream.isClosed()) {
+		end, ended := r.sendSubscribeStream.end()
+		if ended && (r.lastQueued >= end || r.sendSubscribeStream.isClosed()) {
 			r.trackMu.Unlock()
 			return nil, io.EOF
+		}
+		// Once SUBSCRIBE_END has arrived, endCh stays closed; waiting on it
+		// again would spin. What can still change is a new group or the
+		// stream closing.
+		endCh := r.sendSubscribeStream.endCh
+		if ended {
+			endCh = nil
 		}
 		r.trackMu.Unlock()
 
@@ -197,7 +205,7 @@ func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 		case <-trackCtx.Done():
 			return nil, Cause(trackCtx)
 		case <-queued:
-		case <-r.sendSubscribeStream.endCh:
+		case <-endCh:
 		case <-r.sendSubscribeStream.closedCh:
 		}
 	}
