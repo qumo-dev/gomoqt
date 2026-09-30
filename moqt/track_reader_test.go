@@ -292,21 +292,29 @@ func TestTrackReader_SubscribeID(t *testing.T) {
 }
 
 // After SUBSCRIBE_END, AcceptGroup hands out the groups up to the last one
-// the publisher named, then returns io.EOF instead of blocking forever.
+// the publisher named, then returns io.EOF instead of blocking forever. If
+// the publisher also closes the subscribe stream, it stops waiting for a
+// named group that never arrives.
 func TestTrackReader_AcceptGroup_EndsAfterSubscribeEnd(t *testing.T) {
 	tests := map[string]struct {
 		queued []GroupSequence // queued before SUBSCRIBE_END
 		late   []GroupSequence // queued after it
 		end    GroupSequence
-		want   int // groups returned before io.EOF
+		closed bool // the publisher closes the subscribe stream after END
+		want   int  // groups returned before io.EOF
 	}{
-		"no groups":                    {end: 0, want: 0},
-		"last group already taken":     {queued: []GroupSequence{1, 2}, end: 2, want: 2},
-		"last group arrives after END": {queued: []GroupSequence{1}, late: []GroupSequence{2}, end: 2, want: 2},
+		"no groups":                                {end: 0, want: 0},
+		"last group already taken":                 {queued: []GroupSequence{1, 2}, end: 2, want: 2},
+		"last group arrives after END":             {queued: []GroupSequence{1}, late: []GroupSequence{2}, end: 2, want: 2},
+		"named group never arrives, stream closed": {queued: []GroupSequence{1}, end: 2, closed: true, want: 1},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			receiver, _ := newTestTrackReader(t)
+			// The subscribe stream stays open until gate is closed.
+			gate := make(chan struct{})
+			stream := &FakeQUICStream{Reads: []streamResult{{Block: true}}, ReadGate: gate}
+			substr := newTestSendSubscribeStreamFromStream(stream, &SubscribeConfig{})
+			receiver := newTrackReader("/test", "video", substr, func() {})
 			for _, seq := range tt.queued {
 				receiver.enqueueGroup(seq, &FakeQUICReceiveStream{})
 			}
@@ -333,6 +341,11 @@ func TestTrackReader_AcceptGroup_EndsAfterSubscribeEnd(t *testing.T) {
 			receiver.sendSubscribeStream.setEnd(tt.end)
 			for _, seq := range tt.late {
 				receiver.enqueueGroup(seq, &FakeQUICReceiveStream{})
+			}
+			if tt.closed {
+				close(gate)
+			} else {
+				t.Cleanup(func() { close(gate) })
 			}
 
 			r := <-done

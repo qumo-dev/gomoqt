@@ -16,6 +16,7 @@ func newSendSubscribeStream(id SubscribeID, stream transport.Stream, initConfig 
 		stream:    stream,
 		droppedCh: make(chan struct{}, 1),
 		endCh:     make(chan struct{}),
+		closedCh:  make(chan struct{}),
 	}
 
 	return substr
@@ -33,9 +34,10 @@ type sendSubscribeStream struct {
 	// endGroup is the last group that may be delivered, from SUBSCRIBE_END.
 	endGroup GroupSequence
 	ended    bool
-	// endCh is closed when SUBSCRIBE_END arrives, to wake a blocked
-	// AcceptGroup.
-	endCh chan struct{}
+	// endCh is closed when SUBSCRIBE_END arrives, and closedCh when the
+	// publisher closes the subscribe stream; both wake a blocked AcceptGroup.
+	endCh    chan struct{}
+	closedCh chan struct{}
 
 	mu sync.Mutex
 
@@ -48,6 +50,7 @@ type sendSubscribeStream struct {
 // readSubscribeResponses consumes SUBSCRIBE_END and SUBSCRIBE_DROP messages
 // from the publisher until the stream ends.
 func (substr *sendSubscribeStream) readSubscribeResponses() {
+	defer close(substr.closedCh)
 	for {
 		resp, err := readSubscribeResponse(substr.stream)
 		if err != nil {
@@ -235,4 +238,14 @@ func (substr *sendSubscribeStream) closeWithError(code SubscribeErrorCode) {
 	defer substr.mu.Unlock()
 
 	cancelStreamWithError(substr.stream, transport.StreamErrorCode(code))
+}
+
+// isClosed reports whether the publisher has closed the subscribe stream.
+func (substr *sendSubscribeStream) isClosed() bool {
+	select {
+	case <-substr.closedCh:
+		return true
+	default:
+		return false
+	}
 }

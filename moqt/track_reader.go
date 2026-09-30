@@ -157,8 +157,10 @@ func (r *TrackReader) Drops(ctx context.Context) iter.Seq[SubscribeDrop] {
 // canceled. It returns a GroupReader tied to the accepted group stream.
 //
 // When the publisher ends the track (SUBSCRIBE_END), AcceptGroup keeps
-// returning the groups still queued or in flight up to the last one it named,
-// then returns io.EOF.
+// returning the groups still queued, and those still in flight up to the last
+// one it named, then returns io.EOF. SUBSCRIBE_END promises only that no later
+// group will come, not that the named one will: once the publisher has also
+// closed the subscribe stream, AcceptGroup stops waiting for it.
 func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 	trackCtx := r.Context()
 
@@ -176,9 +178,10 @@ func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 		}
 		// Read queuedCh under the lock: Close sets it to nil concurrently.
 		queued := r.queuedCh
-		// The publisher ended the track and its last group has been handed
-		// out (or it had none): nothing more will arrive.
-		if end, ended := r.sendSubscribeStream.end(); ended && r.lastQueued >= end {
+		// The publisher ended the track, and either its last group has been
+		// handed out (or it had none) or it has closed the subscribe stream:
+		// nothing more will arrive.
+		if end, ended := r.sendSubscribeStream.end(); ended && (r.lastQueued >= end || r.sendSubscribeStream.isClosed()) {
 			r.trackMu.Unlock()
 			return nil, io.EOF
 		}
@@ -195,6 +198,7 @@ func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 			return nil, Cause(trackCtx)
 		case <-queued:
 		case <-r.sendSubscribeStream.endCh:
+		case <-r.sendSubscribeStream.closedCh:
 		}
 	}
 }
