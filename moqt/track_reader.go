@@ -166,6 +166,8 @@ func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 			r.trackMu.Unlock()
 			return group, nil
 		}
+		// Read queuedCh under the lock: Close sets it to nil concurrently.
+		queued := r.queuedCh
 		r.trackMu.Unlock()
 
 		if trackCtx.Err() != nil {
@@ -177,7 +179,7 @@ func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 			return nil, ctx.Err()
 		case <-trackCtx.Done():
 			return nil, Cause(trackCtx)
-		case <-r.queuedCh:
+		case <-queued:
 		}
 	}
 }

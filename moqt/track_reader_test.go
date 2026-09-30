@@ -137,6 +137,29 @@ func TestTrackReader_Close(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// Close from another goroutine while AcceptGroup is blocked must be safe; run
+// with -race. AcceptGroup then returns once its context ends.
+func TestTrackReader_CloseWhileAccepting(t *testing.T) {
+	receiver, _ := newTestTrackReader(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	accepted := make(chan error, 1)
+	go func() {
+		_, err := receiver.AcceptGroup(ctx)
+		accepted <- err
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	require.NoError(t, receiver.Close())
+
+	select {
+	case err := <-accepted:
+		assert.Error(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("AcceptGroup did not return")
+	}
+}
+
 func TestTrackReader_Update(t *testing.T) {
 	receiver, _ := newTestTrackReader(t)
 
