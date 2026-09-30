@@ -949,6 +949,20 @@ func TestSession_ProcessBiStream_Announce(t *testing.T) {
 // connValueKey stands for a value an application's Server.ConnContext stores.
 type connValueKey struct{}
 
+// The context the server's ConnContext returns is the session's parent, as
+// the connection context is an http.Request's: its cancellation ends the
+// session's context, not only its values.
+func TestNewSession_ContextFromConnContext(t *testing.T) {
+	connCtx, kick := context.WithCancel(context.WithValue(context.Background(), connValueKey{}, "conn-value"))
+	defer kick()
+
+	session := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{ctx: connCtx}, nil)
+	assert.Equal(t, "conn-value", session.Context().Value(connValueKey{}))
+	kick()
+
+	assert.Error(t, session.Context().Err(), "an application's cancellation in ConnContext ends the session's context")
+}
+
 func TestSession_ProcessBiStream_Subscribe(t *testing.T) {
 	conn := &FakeStreamConn{}
 	conn.OpenUniStreams = []sendStreamResult{{Stream: &FakeQUICSendStream{}}}

@@ -14,15 +14,32 @@ type uniStreamTypeCtxKeyType struct{}
 var biStreamTypeCtxKey biStreamTypeCtxKeyType = biStreamTypeCtxKeyType{}
 var uniStreamTypeCtxKey uniStreamTypeCtxKeyType = uniStreamTypeCtxKeyType{}
 
-// withValuesOf returns a context that carries the values of values and ends
-// when lifetime ends, with lifetime's cause. It is how a handler's context sees
-// what [Server.ConnContext] stored for its connection, the way net/http
-// derives each request's context from its connection's, while still ending
-// with its own stream or session.
+// withValuesOf returns lifetime with the values of values as a fallback: its
+// deadline, cancellation and cause are lifetime's alone, and Value consults
+// lifetime first, then values. It is how a handler's context sees what
+// [Server.ConnContext] stored for its connection, the way net/http derives
+// each request's context from its connection's, while still ending with its
+// own stream.
+//
+// The context package has no way to merge two contexts; this is the same
+// technique context.WithoutCancel uses internally, in reverse: a wrapper
+// that overrides only Value. Nothing runs in the background, so the result
+// is done exactly when lifetime is, and context.Cause finds lifetime's cause
+// (it looks the cancel context up through Value, which lifetime answers first).
 func withValuesOf(lifetime, values context.Context) context.Context {
-	ctx, cancel := context.WithCancelCause(context.WithoutCancel(values))
-	context.AfterFunc(lifetime, func() { cancel(context.Cause(lifetime)) })
-	return ctx
+	return valuesCtx{Context: lifetime, values: values}
+}
+
+type valuesCtx struct {
+	context.Context
+	values context.Context
+}
+
+func (c valuesCtx) Value(key any) any {
+	if v := c.Context.Value(key); v != nil {
+		return v
+	}
+	return c.values.Value(key)
 }
 
 // Cause translates a Go context cancellation reason into a package-specific error type.

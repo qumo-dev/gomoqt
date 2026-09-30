@@ -40,9 +40,9 @@ type sessionSetup struct {
 	// here so Session can seed its peer-probe state without re-reading the
 	// stream. Nil means Session reads the peer SETUP itself (all other bindings).
 	peerSetup *message.SetupMessage
-	// ctx is the connection's context as the server's ConnContext left it; the
-	// session's context carries its values. Nil means conn.Context() alone
-	// (clients, and a WebTransportHandler used without a Server).
+	// ctx, when set, is the session's context: on the server, the connection
+	// context as ConnContext left it. It must end when conn does. Nil means
+	// conn.Context() (clients).
 	ctx context.Context
 }
 
@@ -128,7 +128,7 @@ func newSession(
 
 	connCtx := conn.Context()
 	if setup.ctx != nil {
-		connCtx = withValuesOf(connCtx, setup.ctx)
+		connCtx = setup.ctx
 	}
 	sess := &Session{
 		ctx:             connCtx,

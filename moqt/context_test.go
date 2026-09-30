@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
 	"github.com/qumo-dev/gomoqt/transport"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestCause(t *testing.T) {
@@ -129,17 +127,24 @@ func TestCause(t *testing.T) {
 
 func TestWithValuesOf(t *testing.T) {
 	type key struct{}
-	values, cancelValues := context.WithCancel(context.WithValue(context.Background(), key{}, "v"))
-	lifetime, endLifetime := context.WithCancelCause(context.Background())
+	type shared struct{}
+	values, cancelValues := context.WithCancel(context.WithValue(
+		context.WithValue(context.Background(), key{}, "from values"), shared{}, "from values"))
+	lifetime, endLifetime := context.WithCancelCause(context.WithValue(context.Background(), shared{}, "from lifetime"))
 	streamErr := errors.New("stream reset")
 
 	ctx := withValuesOf(lifetime, values)
+	child, cancelChild := context.WithCancel(ctx)
+	defer cancelChild()
 
-	assert.Equal(t, "v", ctx.Value(key{}), "carries the values context's values")
+	assert.Equal(t, "from values", ctx.Value(key{}), "falls back to the values context")
+	assert.Equal(t, "from lifetime", ctx.Value(shared{}), "the lifetime context's own values win")
 	cancelValues()
 	assert.NoError(t, ctx.Err(), "does not end with the values context")
+
 	endLifetime(streamErr)
-	require.Eventually(t, func() bool { return ctx.Err() != nil }, time.Second, time.Millisecond,
-		"ends with the lifetime context")
+
+	assert.Error(t, ctx.Err(), "ends at once with the lifetime context")
 	assert.ErrorIs(t, context.Cause(ctx), streamErr, "keeps the lifetime's cause, which Cause translates")
+	assert.Error(t, child.Err(), "a context derived from it is cancelled at once too")
 }

@@ -13,11 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#431). The hook mirrors `http.Server.ConnContext`, but its context was
   lost: native QUIC never called it, WebTransport sessions were built from the
   unwrapped connection, and a `TrackWriter` or `FetchRequest` context came
-  from its stream alone. Now `Session.Context()` carries the connection
-  context's values on both transports, and the contexts handed to a
-  `TrackHandler` and `FetchHandler` carry the session's values while still
-  ending with their stream (with the stream's error as the cause, so `Cause`
-  is unchanged). A server serving many sessions from one `TrackMux` can store
+  from its stream alone. Now, on native QUIC, the context `ConnContext`
+  returns is the session's context, so its values, deadline and cancellation
+  all apply, as in net/http. On WebTransport the session takes its values
+  (its lifetime stays the WebTransport session's). The contexts handed to a
+  `TrackHandler` and `FetchHandler` carry the session's values and still end
+  exactly when their stream does, with the stream's error as the cause, so
+  `Cause` is unchanged. A server serving many sessions from one `TrackMux` can store
   per-connection state in `ConnContext` and read it in its handlers, for
   example to authorize a SUBSCRIBE per session.
 - **moqt: data race between `TrackReader.Close` and a concurrent
