@@ -302,9 +302,15 @@ func TestTrackReader_AcceptGroup_EndsAfterSubscribeEnd(t *testing.T) {
 		end      GroupSequence
 		closed   bool            // the publisher closes the subscribe stream after END
 		afterFIN []GroupSequence // queued after the close, within the grace
+		dropped  *SubscribeDrop  // SUBSCRIBE_DROP received after END
+		noOK     bool            // END came without SUBSCRIBE_OK
 		want     int             // groups returned before io.EOF
 	}{
 		"no groups":                                {end: 0, want: 0},
+		"END without SUBSCRIBE_OK":                 {noOK: true, end: 2, want: 0},
+		"earlier group still in flight":            {queued: []GroupSequence{2}, late: []GroupSequence{1}, end: 2, want: 2},
+		"out of order, all before END":             {queued: []GroupSequence{3, 1, 2}, end: 3, want: 3},
+		"gap closed by SUBSCRIBE_DROP":             {queued: []GroupSequence{1, 4}, end: 4, dropped: &SubscribeDrop{StartGroup: 2, EndGroup: 3}, want: 2},
 		"last group already taken":                 {queued: []GroupSequence{1, 2}, end: 2, want: 2},
 		"last group arrives after END":             {queued: []GroupSequence{1}, late: []GroupSequence{2}, end: 2, want: 2},
 		"named group never arrives, stream closed": {queued: []GroupSequence{1}, end: 2, closed: true, want: 1},
@@ -317,6 +323,9 @@ func TestTrackReader_AcceptGroup_EndsAfterSubscribeEnd(t *testing.T) {
 			stream := &FakeQUICStream{Reads: []streamResult{{Block: true}}, ReadGate: gate}
 			substr := newTestSendSubscribeStreamFromStream(stream, &SubscribeConfig{})
 			receiver := newTrackReader("/test", "video", substr, func() {})
+			if !tt.noOK {
+				substr.setResolvedStart(1) // SUBSCRIBE_OK: the subscription starts at group 1
+			}
 			for _, seq := range tt.queued {
 				receiver.enqueueGroup(seq, &FakeQUICReceiveStream{})
 			}
@@ -343,6 +352,9 @@ func TestTrackReader_AcceptGroup_EndsAfterSubscribeEnd(t *testing.T) {
 			receiver.sendSubscribeStream.setEnd(tt.end)
 			for _, seq := range tt.late {
 				receiver.enqueueGroup(seq, &FakeQUICReceiveStream{})
+			}
+			if tt.dropped != nil {
+				substr.appendDrop(*tt.dropped)
 			}
 			if tt.closed {
 				close(gate)
@@ -389,4 +401,68 @@ func TestTrackReader_AcceptGroup_GraceAfterClose(t *testing.T) {
 
 	assert.ErrorIs(t, err, io.EOF)
 	assert.Less(t, time.Since(start), subscribeEndGrace+500*time.Millisecond, "bounded by the grace")
+}
+
+// io.EOF is sticky, and a group that arrives after it is cancelled, not
+// queued where no reader will take it.
+func TestTrackReader_AcceptGroup_EOFIsSticky(t *testing.T) {
+	gate := make(chan struct{})
+	defer close(gate)
+	stream := &FakeQUICStream{Reads: []streamResult{{Block: true}}, ReadGate: gate}
+	substr := newTestSendSubscribeStreamFromStream(stream, &SubscribeConfig{})
+	receiver := newTrackReader("/test", "video", substr, func() {})
+	substr.setResolvedStart(1)
+	receiver.enqueueGroup(1, &FakeQUICReceiveStream{})
+	substr.setEnd(1)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := receiver.AcceptGroup(ctx)
+	require.NoError(t, err)
+	_, err = receiver.AcceptGroup(ctx)
+	require.ErrorIs(t, err, io.EOF)
+	late := &FakeQUICReceiveStream{}
+
+	receiver.enqueueGroup(2, late)
+
+	_, err = receiver.AcceptGroup(ctx)
+	assert.ErrorIs(t, err, io.EOF, "EOF again, not the late group")
+	assert.NotEmpty(t, late.CancelReadCodes(), "the late group's stream is released")
+}
+
+func TestSettledGroups(t *testing.T) {
+	tests := map[string]struct {
+		add    [][2]GroupSequence
+		lo, hi GroupSequence
+		want   bool
+		ranges int
+	}{
+		"in order is one range":        {add: [][2]GroupSequence{{1, 1}, {2, 2}, {3, 3}}, lo: 1, hi: 3, want: true, ranges: 1},
+		"out of order merges":          {add: [][2]GroupSequence{{3, 3}, {1, 1}, {2, 2}}, lo: 1, hi: 3, want: true, ranges: 1},
+		"a gap is not covered":         {add: [][2]GroupSequence{{1, 1}, {3, 3}}, lo: 1, hi: 3, want: false, ranges: 2},
+		"a dropped range fills it":     {add: [][2]GroupSequence{{1, 1}, {4, 4}, {2, 3}}, lo: 1, hi: 4, want: true, ranges: 1},
+		"overlapping ranges merge":     {add: [][2]GroupSequence{{1, 5}, {3, 8}}, lo: 1, hi: 8, want: true, ranges: 1},
+		"a range inside another":       {add: [][2]GroupSequence{{1, 9}, {3, 4}}, lo: 2, hi: 9, want: true, ranges: 1},
+		"empty is not covered":         {lo: 1, hi: 1, want: false},
+		"an inverted range is ignored": {add: [][2]GroupSequence{{5, 4}}, lo: 4, hi: 5, want: false},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			var s settledGroups
+			for _, r := range tt.add {
+				s.add(r[0], r[1])
+			}
+
+			assert.Equal(t, tt.want, s.covers(tt.lo, tt.hi))
+			assert.Len(t, s.ranges, tt.ranges)
+		})
+	}
+
+	t.Run("bounded: the oldest gap is given up past the cap", func(t *testing.T) {
+		var s settledGroups
+		for i := range GroupSequence(maxSettledRanges + 10) {
+			s.add(2*i+1, 2*i+1) // every other group: one gap each
+		}
+
+		assert.Len(t, s.ranges, maxSettledRanges)
+	})
 }

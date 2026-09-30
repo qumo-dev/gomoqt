@@ -26,10 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   forever** (#435). `TrackReader` recorded SUBSCRIBE_END but never woke
   `AcceptGroup`, so a subscriber whose publisher closed the track (as a relay
   does when it switches a broadcast to a new route) waited with no data and no
-  error. `AcceptGroup` now returns the groups still queued or in flight up to
-  the last one the END names, then `io.EOF`. If the publisher has also closed
-  the subscribe stream, it waits at most 100 ms for that named group, since a
-  publisher that closes while opening a group names one it never sends.
+  error. `AcceptGroup` now returns the groups still queued or in flight, then
+  `io.EOF` once every group from the subscription's start to the last one the
+  END names has arrived or been dropped (SUBSCRIBE_DROP). Group streams arrive
+  in any order, so it waits for gaps, not only for the named group. A gap that
+  never fills (a group skipped without SUBSCRIBE_DROP) is waited for until the
+  publisher has closed the subscribe stream plus 100 ms and three round trips.
+  `io.EOF` is sticky, and a group that arrives after it is cancelled rather
+  than left holding stream credit.
 - **moqt: data race between `TrackReader.Close` and a concurrent
   `AcceptGroup`** (#432). `AcceptGroup` read `queuedCh` outside the lock while
   `Close` set it to nil, so closing a subscription from any goroutine other

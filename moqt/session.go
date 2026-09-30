@@ -486,6 +486,9 @@ func (sess *Session) Subscribe(ctx context.Context, path BroadcastPath, name Tra
 	substr := newSendSubscribeStream(id, stream, config)
 
 	track := newTrackReader(path, name, substr, func() { sess.removeTrackReader(id) })
+	// A missing group is waited for three round trips beyond the minimum
+	// after the publisher closes the stream: enough for a loss recovery.
+	track.endGrace = func() time.Duration { return subscribeEndGrace + 3*sess.Stats().RTT }
 	sess.addTrackReader(id, track)
 	ctx, cancel := context.WithTimeout(ctx, sess.timeout())
 	defer cancel()

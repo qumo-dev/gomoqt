@@ -42,6 +42,9 @@ type sendSubscribeStream struct {
 	// closedAt is when readSubscribeResponses saw the stream close; set
 	// before closedCh is closed.
 	closedAt time.Time
+	// onDrop, when set, is told of each SUBSCRIBE_DROP, outside mu. It is set
+	// before readSubscribeResponses starts.
+	onDrop func(SubscribeDrop)
 
 	mu sync.Mutex
 
@@ -220,6 +223,11 @@ func (substr *sendSubscribeStream) appendDrop(drop SubscribeDrop) {
 	default:
 	}
 	substr.mu.Unlock()
+	// Outside mu: AcceptGroup holds the reader's lock while reading this
+	// stream's state, so the reader's lock must never be taken under mu.
+	if substr.onDrop != nil {
+		substr.onDrop(drop)
+	}
 }
 
 func (substr *sendSubscribeStream) pendingDrops() []SubscribeDrop {

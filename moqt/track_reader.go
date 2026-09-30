@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"iter"
+	"slices"
 	"sync"
 	"time"
 
@@ -54,6 +55,8 @@ func newTrackReader(path BroadcastPath, name TrackName, subscribeStream *sendSub
 		onCloseFunc:  onCloseFunc,
 		ctx:          context.WithValue(subscribeStream.stream.Context(), biStreamTypeCtxKey, message.StreamTypeSubscribe),
 	}
+	// Set before readSubscribeResponses starts, which is the only caller.
+	subscribeStream.onDrop = track.settleDropped
 
 	return track
 }
@@ -78,9 +81,16 @@ type TrackReader struct {
 	}
 	queuedCh chan struct{}
 	trackMu  sync.Mutex
-	// lastQueued is the highest group sequence queued so far (0: none).
-	// Group sequences start at 1.
-	lastQueued GroupSequence
+	// settled records the groups received or dropped (SUBSCRIBE_DROP), so
+	// that SUBSCRIBE_END ends the subscription only once no earlier group is
+	// still owed. Guarded by trackMu.
+	settled settledGroups
+	// eof is set once AcceptGroup has returned io.EOF; it keeps returning it,
+	// and groups that arrive later are cancelled rather than queued.
+	eof bool
+	// endGrace returns how long to wait for a missing group after the
+	// publisher closed the subscribe stream; nil means subscribeEndGrace.
+	endGrace func() time.Duration
 
 	dequeued map[*GroupReader]struct{}
 
@@ -154,22 +164,26 @@ func (r *TrackReader) Drops(ctx context.Context) iter.Seq[SubscribeDrop] {
 	}
 }
 
-// subscribeEndGrace is how long AcceptGroup still waits for the last group a
-// SUBSCRIBE_END named after the publisher closed the subscribe stream: QUIC
-// does not order the group's stream against that close, so a group written
-// just before it can arrive just after. A publisher that closed while opening
-// a group names one that never comes; the grace bounds that wait.
+// subscribeEndGrace is the least time AcceptGroup still waits for a group
+// SUBSCRIBE_END covers after the publisher closed the subscribe stream: QUIC
+// does not order a group's stream against that close, so a group written just
+// before it can arrive just after. A group that never comes (skipped without
+// SUBSCRIBE_DROP, or abandoned mid-open) would otherwise be waited for
+// forever; the grace bounds that wait. A Session adds three round trips, so a
+// loss recovery on a slow path is not cut short.
 const subscribeEndGrace = 100 * time.Millisecond
 
 // AcceptGroup blocks until the next group is available or context is
 // canceled. It returns a GroupReader tied to the accepted group stream.
 //
-// When the publisher ends the track (SUBSCRIBE_END), AcceptGroup keeps
-// returning the groups still queued, and those still in flight up to the last
-// one it named, then returns io.EOF. SUBSCRIBE_END promises only that no later
-// group will come, not that the named one will: once the publisher has also
-// closed the subscribe stream, AcceptGroup waits at most subscribeEndGrace for
-// it, since its group stream may still be in flight behind the close.
+// When the publisher ends the track (SUBSCRIBE_END), AcceptGroup returns the
+// groups still queued and still in flight, then io.EOF once every group from
+// the subscription's start to the last one SUBSCRIBE_END named has arrived or
+// been dropped (SUBSCRIBE_DROP). Group streams arrive in any order, so EOF
+// waits for the gaps, not only for the named group. A gap that never fills
+// is waited for until the publisher has closed the subscribe stream and a
+// grace period has passed. io.EOF is sticky: later calls return it again,
+// and a group that arrives after it is cancelled.
 func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 	trackCtx := r.Context()
 
@@ -187,20 +201,29 @@ func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 		}
 		// Read queuedCh under the lock: Close sets it to nil concurrently.
 		queued := r.queuedCh
-		// The publisher ended the track, and either its last group has been
-		// handed out (or it had none) or it has closed the subscribe stream:
-		// nothing more will arrive.
+		if r.eof {
+			r.trackMu.Unlock()
+			return nil, io.EOF
+		}
+		// The publisher ended the track: nothing more will arrive once every
+		// group it covered has arrived or been dropped, or, for a gap that
+		// never fills, once the stream has closed and the grace has passed.
 		end, ended := r.sendSubscribeStream.end()
 		closedAt, closed := r.sendSubscribeStream.closedSince()
 		var graceLeft <-chan time.Time
 		if ended {
-			if r.lastQueued >= end {
+			start := r.sendSubscribeStream.resolvedStartGroup()
+			// start is 0 when SUBSCRIBE_END came without SUBSCRIBE_OK: the
+			// track ended with no groups for this subscription.
+			if start == 0 || end < start || r.settled.covers(start, end) {
+				r.eof = true
 				r.trackMu.Unlock()
 				return nil, io.EOF
 			}
 			if closed {
-				left := subscribeEndGrace - time.Since(closedAt)
+				left := r.graceAfterClose() - time.Since(closedAt)
 				if left <= 0 {
+					r.eof = true
 					r.trackMu.Unlock()
 					return nil, io.EOF
 				}
@@ -316,10 +339,11 @@ func (r *TrackReader) enqueueGroup(sequence GroupSequence, stream transport.Rece
 	r.trackMu.Lock()
 	defer r.trackMu.Unlock()
 
-	if r.Context().Err() != nil || r.queueing == nil {
+	if r.Context().Err() != nil || r.queueing == nil || r.eof {
 		stream.CancelRead(transport.StreamErrorCode(SubscribeCanceledErrorCode))
 		return
 	}
+	r.settled.add(sequence, sequence)
 
 	entry := struct {
 		sequence GroupSequence
@@ -329,12 +353,79 @@ func (r *TrackReader) enqueueGroup(sequence GroupSequence, stream transport.Rece
 		stream:   stream,
 	}
 	r.queueing = append(r.queueing, entry)
-	if sequence > r.lastQueued {
-		r.lastQueued = sequence
-	}
 
 	select {
 	case r.queuedCh <- struct{}{}:
 	default:
 	}
+}
+
+// settleDropped records a SUBSCRIBE_DROP range as settled and wakes a waiting
+// AcceptGroup, which may now reach io.EOF.
+func (r *TrackReader) settleDropped(drop SubscribeDrop) {
+	r.trackMu.Lock()
+	defer r.trackMu.Unlock()
+	r.settled.add(drop.StartGroup, drop.EndGroup)
+	select {
+	case r.queuedCh <- struct{}{}:
+	default:
+	}
+}
+
+// graceAfterClose is how long a gap is still waited for after the publisher
+// closed the subscribe stream.
+func (r *TrackReader) graceAfterClose() time.Duration {
+	if r.endGrace != nil {
+		return r.endGrace()
+	}
+	return subscribeEndGrace
+}
+
+// maxSettledRanges bounds settledGroups. A publisher that skips groups without
+// SUBSCRIBE_DROP leaves permanent gaps; past this many, the oldest gap, long
+// behind any reordering, is treated as settled.
+const maxSettledRanges = 1024
+
+// settledGroups is a set of group sequences kept as sorted, disjoint,
+// inclusive ranges, merged as they touch. In-order delivery keeps one range.
+type settledGroups struct {
+	ranges []groupRange
+}
+
+type groupRange struct{ lo, hi GroupSequence }
+
+// add records lo through hi as settled.
+func (s *settledGroups) add(lo, hi GroupSequence) {
+	if hi < lo {
+		return
+	}
+	// Most groups arrive in order, so search from the end.
+	i := len(s.ranges)
+	for i > 0 && s.ranges[i-1].lo > lo {
+		i--
+	}
+	s.ranges = slices.Insert(s.ranges, i, groupRange{lo: lo, hi: hi})
+	if i > 0 && s.ranges[i-1].hi+1 >= lo {
+		i--
+	}
+	j := i + 1
+	for j < len(s.ranges) && s.ranges[j].lo <= s.ranges[i].hi+1 {
+		s.ranges[i].hi = max(s.ranges[i].hi, s.ranges[j].hi)
+		j++
+	}
+	s.ranges = slices.Delete(s.ranges, i+1, j)
+	if len(s.ranges) > maxSettledRanges {
+		s.ranges[1].lo = s.ranges[0].lo
+		s.ranges = slices.Delete(s.ranges, 0, 1)
+	}
+}
+
+// covers reports whether every sequence from lo through hi is settled.
+func (s *settledGroups) covers(lo, hi GroupSequence) bool {
+	for _, r := range s.ranges {
+		if r.lo <= lo && hi <= r.hi {
+			return true
+		}
+	}
+	return false
 }
