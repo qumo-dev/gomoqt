@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
 	"github.com/qumo-dev/gomoqt/transport"
@@ -38,6 +39,9 @@ type sendSubscribeStream struct {
 	// publisher closes the subscribe stream; both wake a blocked AcceptGroup.
 	endCh    chan struct{}
 	closedCh chan struct{}
+	// closedAt is when readSubscribeResponses saw the stream close; set
+	// before closedCh is closed.
+	closedAt time.Time
 
 	mu sync.Mutex
 
@@ -50,7 +54,12 @@ type sendSubscribeStream struct {
 // readSubscribeResponses consumes SUBSCRIBE_END and SUBSCRIBE_DROP messages
 // from the publisher until the stream ends.
 func (substr *sendSubscribeStream) readSubscribeResponses() {
-	defer close(substr.closedCh)
+	defer func() {
+		substr.mu.Lock()
+		substr.closedAt = time.Now()
+		substr.mu.Unlock()
+		close(substr.closedCh)
+	}()
 	for {
 		resp, err := readSubscribeResponse(substr.stream)
 		if err != nil {
@@ -240,12 +249,15 @@ func (substr *sendSubscribeStream) closeWithError(code SubscribeErrorCode) {
 	cancelStreamWithError(substr.stream, transport.StreamErrorCode(code))
 }
 
-// isClosed reports whether the publisher has closed the subscribe stream.
-func (substr *sendSubscribeStream) isClosed() bool {
+// closedSince reports whether the publisher has closed the subscribe stream,
+// and when.
+func (substr *sendSubscribeStream) closedSince() (time.Time, bool) {
 	select {
 	case <-substr.closedCh:
-		return true
+		substr.mu.Lock()
+		defer substr.mu.Unlock()
+		return substr.closedAt, true
 	default:
-		return false
+		return time.Time{}, false
 	}
 }

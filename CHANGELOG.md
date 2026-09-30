@@ -22,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Cause` is unchanged. A server serving many sessions from one `TrackMux` can store
   per-connection state in `ConnContext` and read it in its handlers, for
   example to authorize a SUBSCRIBE per session.
+- **moqt: a subscription now ends after SUBSCRIBE_END instead of blocking
+  forever** (#435). `TrackReader` recorded SUBSCRIBE_END but never woke
+  `AcceptGroup`, so a subscriber whose publisher closed the track (as a relay
+  does when it switches a broadcast to a new route) waited with no data and no
+  error. `AcceptGroup` now returns the groups still queued or in flight up to
+  the last one the END names, then `io.EOF`. If the publisher has also closed
+  the subscribe stream, it waits at most 100 ms for that named group, since a
+  publisher that closes while opening a group names one it never sends.
 - **moqt: data race between `TrackReader.Close` and a concurrent
   `AcceptGroup`** (#432). `AcceptGroup` read `queuedCh` outside the lock while
   `Close` set it to nil, so closing a subscription from any goroutine other

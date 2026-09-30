@@ -297,16 +297,18 @@ func TestTrackReader_SubscribeID(t *testing.T) {
 // named group that never arrives.
 func TestTrackReader_AcceptGroup_EndsAfterSubscribeEnd(t *testing.T) {
 	tests := map[string]struct {
-		queued []GroupSequence // queued before SUBSCRIBE_END
-		late   []GroupSequence // queued after it
-		end    GroupSequence
-		closed bool // the publisher closes the subscribe stream after END
-		want   int  // groups returned before io.EOF
+		queued   []GroupSequence // queued before SUBSCRIBE_END
+		late     []GroupSequence // queued after it
+		end      GroupSequence
+		closed   bool            // the publisher closes the subscribe stream after END
+		afterFIN []GroupSequence // queued after the close, within the grace
+		want     int             // groups returned before io.EOF
 	}{
 		"no groups":                                {end: 0, want: 0},
 		"last group already taken":                 {queued: []GroupSequence{1, 2}, end: 2, want: 2},
 		"last group arrives after END":             {queued: []GroupSequence{1}, late: []GroupSequence{2}, end: 2, want: 2},
 		"named group never arrives, stream closed": {queued: []GroupSequence{1}, end: 2, closed: true, want: 1},
+		"named group arrives just after the close": {queued: []GroupSequence{1}, end: 2, closed: true, afterFIN: []GroupSequence{2}, want: 2},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -344,6 +346,10 @@ func TestTrackReader_AcceptGroup_EndsAfterSubscribeEnd(t *testing.T) {
 			}
 			if tt.closed {
 				close(gate)
+				time.Sleep(20 * time.Millisecond) // the close is seen before the late group
+				for _, seq := range tt.afterFIN {
+					receiver.enqueueGroup(seq, &FakeQUICReceiveStream{})
+				}
 			} else {
 				t.Cleanup(func() { close(gate) })
 			}
@@ -353,4 +359,34 @@ func TestTrackReader_AcceptGroup_EndsAfterSubscribeEnd(t *testing.T) {
 			assert.Equal(t, tt.want, r.groups)
 		})
 	}
+}
+
+// A second SUBSCRIBE_END is ignored: the first one names the last group.
+func TestSendSubscribeStream_SetEnd_FirstWins(t *testing.T) {
+	substr := newSendSubscribeStream(SubscribeID(1), &FakeQUICStream{}, &SubscribeConfig{})
+
+	substr.setEnd(5)
+	substr.setEnd(9)
+
+	end, ended := substr.end()
+	assert.True(t, ended)
+	assert.Equal(t, GroupSequence(5), end)
+}
+
+// With the publisher gone silent after naming a group that never comes,
+// AcceptGroup returns io.EOF once subscribeEndGrace has passed, not before.
+func TestTrackReader_AcceptGroup_GraceAfterClose(t *testing.T) {
+	stream := &FakeQUICStream{} // reads EOF at once: the publisher closed the stream
+	substr := newTestSendSubscribeStreamFromStream(stream, &SubscribeConfig{})
+	receiver := newTrackReader("/test", "video", substr, func() {})
+	require.Eventually(t, func() bool { _, closed := substr.closedSince(); return closed }, time.Second, time.Millisecond)
+	substr.setEnd(3)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	start := time.Now()
+	_, err := receiver.AcceptGroup(ctx)
+
+	assert.ErrorIs(t, err, io.EOF)
+	assert.Less(t, time.Since(start), subscribeEndGrace+500*time.Millisecond, "bounded by the grace")
 }

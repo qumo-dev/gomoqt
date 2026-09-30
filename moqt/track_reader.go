@@ -2,10 +2,11 @@ package moqt
 
 import (
 	"context"
-	"io"
 	"errors"
+	"io"
 	"iter"
 	"sync"
+	"time"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
 	"github.com/qumo-dev/gomoqt/transport"
@@ -153,6 +154,13 @@ func (r *TrackReader) Drops(ctx context.Context) iter.Seq[SubscribeDrop] {
 	}
 }
 
+// subscribeEndGrace is how long AcceptGroup still waits for the last group a
+// SUBSCRIBE_END named after the publisher closed the subscribe stream: QUIC
+// does not order the group's stream against that close, so a group written
+// just before it can arrive just after. A publisher that closed while opening
+// a group names one that never comes; the grace bounds that wait.
+const subscribeEndGrace = 100 * time.Millisecond
+
 // AcceptGroup blocks until the next group is available or context is
 // canceled. It returns a GroupReader tied to the accepted group stream.
 //
@@ -160,7 +168,8 @@ func (r *TrackReader) Drops(ctx context.Context) iter.Seq[SubscribeDrop] {
 // returning the groups still queued, and those still in flight up to the last
 // one it named, then returns io.EOF. SUBSCRIBE_END promises only that no later
 // group will come, not that the named one will: once the publisher has also
-// closed the subscribe stream, AcceptGroup stops waiting for it.
+// closed the subscribe stream, AcceptGroup waits at most subscribeEndGrace for
+// it, since its group stream may still be in flight behind the close.
 func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 	trackCtx := r.Context()
 
@@ -182,9 +191,21 @@ func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 		// handed out (or it had none) or it has closed the subscribe stream:
 		// nothing more will arrive.
 		end, ended := r.sendSubscribeStream.end()
-		if ended && (r.lastQueued >= end || r.sendSubscribeStream.isClosed()) {
-			r.trackMu.Unlock()
-			return nil, io.EOF
+		closedAt, closed := r.sendSubscribeStream.closedSince()
+		var graceLeft <-chan time.Time
+		if ended {
+			if r.lastQueued >= end {
+				r.trackMu.Unlock()
+				return nil, io.EOF
+			}
+			if closed {
+				left := subscribeEndGrace - time.Since(closedAt)
+				if left <= 0 {
+					r.trackMu.Unlock()
+					return nil, io.EOF
+				}
+				graceLeft = time.After(left)
+			}
 		}
 		// Once SUBSCRIBE_END has arrived, endCh stays closed; waiting on it
 		// again would spin. What can still change is a new group or the
@@ -192,6 +213,11 @@ func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 		endCh := r.sendSubscribeStream.endCh
 		if ended {
 			endCh = nil
+		}
+		// Likewise closedCh once the close has been seen.
+		closedCh := r.sendSubscribeStream.closedCh
+		if closed {
+			closedCh = nil
 		}
 		r.trackMu.Unlock()
 
@@ -206,7 +232,8 @@ func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 			return nil, Cause(trackCtx)
 		case <-queued:
 		case <-endCh:
-		case <-r.sendSubscribeStream.closedCh:
+		case <-closedCh:
+		case <-graceLeft:
 		}
 	}
 }
