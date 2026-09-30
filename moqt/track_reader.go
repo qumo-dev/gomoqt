@@ -2,6 +2,7 @@ package moqt
 
 import (
 	"context"
+	"io"
 	"errors"
 	"iter"
 	"sync"
@@ -76,6 +77,9 @@ type TrackReader struct {
 	}
 	queuedCh chan struct{}
 	trackMu  sync.Mutex
+	// lastQueued is the highest group sequence queued so far (0: none).
+	// Group sequences start at 1.
+	lastQueued GroupSequence
 
 	dequeued map[*GroupReader]struct{}
 
@@ -151,6 +155,10 @@ func (r *TrackReader) Drops(ctx context.Context) iter.Seq[SubscribeDrop] {
 
 // AcceptGroup blocks until the next group is available or context is
 // canceled. It returns a GroupReader tied to the accepted group stream.
+//
+// When the publisher ends the track (SUBSCRIBE_END), AcceptGroup keeps
+// returning the groups still queued or in flight up to the last one it named,
+// then returns io.EOF.
 func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 	trackCtx := r.Context()
 
@@ -168,6 +176,12 @@ func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 		}
 		// Read queuedCh under the lock: Close sets it to nil concurrently.
 		queued := r.queuedCh
+		// The publisher ended the track and its last group has been handed
+		// out (or it had none): nothing more will arrive.
+		if end, ended := r.sendSubscribeStream.end(); ended && r.lastQueued >= end {
+			r.trackMu.Unlock()
+			return nil, io.EOF
+		}
 		r.trackMu.Unlock()
 
 		if trackCtx.Err() != nil {
@@ -180,6 +194,7 @@ func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 		case <-trackCtx.Done():
 			return nil, Cause(trackCtx)
 		case <-queued:
+		case <-r.sendSubscribeStream.endCh:
 		}
 	}
 }
@@ -275,6 +290,9 @@ func (r *TrackReader) enqueueGroup(sequence GroupSequence, stream transport.Rece
 		stream:   stream,
 	}
 	r.queueing = append(r.queueing, entry)
+	if sequence > r.lastQueued {
+		r.lastQueued = sequence
+	}
 
 	select {
 	case r.queuedCh <- struct{}{}:

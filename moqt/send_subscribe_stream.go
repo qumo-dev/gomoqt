@@ -15,6 +15,7 @@ func newSendSubscribeStream(id SubscribeID, stream transport.Stream, initConfig 
 		config:    initConfig,
 		stream:    stream,
 		droppedCh: make(chan struct{}, 1),
+		endCh:     make(chan struct{}),
 	}
 
 	return substr
@@ -32,6 +33,9 @@ type sendSubscribeStream struct {
 	// endGroup is the last group that may be delivered, from SUBSCRIBE_END.
 	endGroup GroupSequence
 	ended    bool
+	// endCh is closed when SUBSCRIBE_END arrives, to wake a blocked
+	// AcceptGroup.
+	endCh chan struct{}
 
 	mu sync.Mutex
 
@@ -147,8 +151,20 @@ func (substr *sendSubscribeStream) setEnd(seq GroupSequence) {
 	substr.mu.Lock()
 	defer substr.mu.Unlock()
 
+	if substr.ended {
+		return
+	}
 	substr.endGroup = seq
 	substr.ended = true
+	close(substr.endCh)
+}
+
+// end returns the last group the publisher will deliver, once SUBSCRIBE_END
+// has arrived.
+func (substr *sendSubscribeStream) end() (GroupSequence, bool) {
+	substr.mu.Lock()
+	defer substr.mu.Unlock()
+	return substr.endGroup, substr.ended
 }
 
 func (substr *sendSubscribeStream) updateSubscribe(newConfig *SubscribeConfig) error {

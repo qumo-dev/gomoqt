@@ -3,6 +3,7 @@ package moqt
 import (
 	"bytes"
 	"context"
+	"io"
 	"testing"
 	"time"
 
@@ -288,4 +289,55 @@ func TestTrackReader_SubscribeID(t *testing.T) {
 	receiver := newTrackReader("/test", "video", substr, func() {})
 
 	assert.Equal(t, SubscribeID(42), receiver.SubscribeID())
+}
+
+// After SUBSCRIBE_END, AcceptGroup hands out the groups up to the last one
+// the publisher named, then returns io.EOF instead of blocking forever.
+func TestTrackReader_AcceptGroup_EndsAfterSubscribeEnd(t *testing.T) {
+	tests := map[string]struct {
+		queued []GroupSequence // queued before SUBSCRIBE_END
+		late   []GroupSequence // queued after it
+		end    GroupSequence
+		want   int // groups returned before io.EOF
+	}{
+		"no groups":                    {end: 0, want: 0},
+		"last group already taken":     {queued: []GroupSequence{1, 2}, end: 2, want: 2},
+		"last group arrives after END": {queued: []GroupSequence{1}, late: []GroupSequence{2}, end: 2, want: 2},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			receiver, _ := newTestTrackReader(t)
+			for _, seq := range tt.queued {
+				receiver.enqueueGroup(seq, &FakeQUICReceiveStream{})
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+
+			type result struct {
+				groups int
+				err    error
+			}
+			done := make(chan result, 1)
+			go func() {
+				var r result
+				for {
+					if _, err := receiver.AcceptGroup(ctx); err != nil {
+						r.err = err
+						done <- r
+						return
+					}
+					r.groups++
+				}
+			}()
+			time.Sleep(20 * time.Millisecond) // let AcceptGroup block
+			receiver.sendSubscribeStream.setEnd(tt.end)
+			for _, seq := range tt.late {
+				receiver.enqueueGroup(seq, &FakeQUICReceiveStream{})
+			}
+
+			r := <-done
+			assert.ErrorIs(t, r.err, io.EOF, "the track ends instead of blocking until the deadline")
+			assert.Equal(t, tt.want, r.groups)
+		})
+	}
 }
