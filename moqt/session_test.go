@@ -963,6 +963,65 @@ func TestNewSession_ContextFromConnContext(t *testing.T) {
 	assert.Error(t, session.Context().Err(), "an application's cancellation in ConnContext ends the session's context")
 }
 
+// A handler's context is derived like an http.Request's: a child of the
+// session's context that also ends when its stream does, with the stream's
+// cause, or when the server cancels it after the handler returns.
+func TestSession_StreamContext(t *testing.T) {
+	newStream := func() (*FakeQUICStream, context.CancelCauseFunc) {
+		parent, end := context.WithCancelCause(context.Background())
+		return &FakeQUICStream{ParentCtx: parent}, end
+	}
+	connCtx := context.WithValue(context.Background(), connValueKey{}, "conn-value")
+
+	t.Run("carries the connection context's values", func(t *testing.T) {
+		session := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{ctx: connCtx}, nil)
+		stream, end := newStream()
+		defer end(nil)
+
+		ctx, cancel := session.streamContext(stream)
+		defer cancel()
+
+		assert.Equal(t, "conn-value", ctx.Value(connValueKey{}))
+		assert.NoError(t, ctx.Err())
+	})
+	t.Run("ends with the stream, keeping its cause", func(t *testing.T) {
+		session := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{ctx: connCtx}, nil)
+		stream, end := newStream()
+		ctx, cancel := session.streamContext(stream)
+		defer cancel()
+		reset := &transport.StreamError{ErrorCode: transport.StreamErrorCode(SubscribeErrorCodeTimeout), Remote: true}
+
+		end(reset)
+
+		<-ctx.Done()
+		var subErr *SubscribeError
+		require.ErrorAs(t, Cause(context.WithValue(ctx, biStreamTypeCtxKey, message.StreamTypeSubscribe)), &subErr,
+			"Cause reports the stream's error, as before")
+	})
+	t.Run("ends with the session", func(t *testing.T) {
+		sessParent, endSession := context.WithCancel(connCtx)
+		session := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{ctx: sessParent}, nil)
+		stream, end := newStream()
+		defer end(nil)
+		ctx, cancel := session.streamContext(stream)
+		defer cancel()
+
+		endSession()
+
+		assert.Error(t, ctx.Err(), "a child of the session's context ends with it at once")
+	})
+	t.Run("the server's cancel ends it after the handler", func(t *testing.T) {
+		session := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{ctx: connCtx}, nil)
+		stream, end := newStream()
+		defer end(nil)
+		ctx, cancel := session.streamContext(stream)
+
+		cancel()
+
+		assert.ErrorIs(t, ctx.Err(), context.Canceled)
+	})
+}
+
 func TestSession_ProcessBiStream_Subscribe(t *testing.T) {
 	conn := &FakeStreamConn{}
 	conn.OpenUniStreams = []sendStreamResult{{Stream: &FakeQUICSendStream{}}}
