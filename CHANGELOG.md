@@ -7,16 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.20.1] - 2026-10-01
+
+> Go-only patch release; `@qumo/moq` stays at `0.20.0` (no `moq-web` change). No exported API change and no wire change, so this interoperates with `v0.20.0` peers. Behavior changes for servers: handlers now see `Server.ConnContext` values, and a subscriber's `AcceptGroup` returns `io.EOF` after SUBSCRIBE_END where it used to block.
+
 ### Fixed
 
 - **moqt: `Server.ConnContext` values now reach handlers, as in net/http**
   (#431). The hook mirrors `http.Server.ConnContext`, but its context was
   lost: native QUIC never called it, WebTransport sessions were built from the
   unwrapped connection, and a `TrackWriter` or `FetchRequest` context came
-  from its stream alone. Now, on native QUIC, the context `ConnContext`
-  returns is the session's context, so its values, deadline and cancellation
-  all apply, as in net/http. On WebTransport the session takes its values
-  (its lifetime stays the WebTransport session's). The contexts handed to a
+  from its stream alone. Now the session's context is a child of the context
+  `ConnContext` returned (on WebTransport, through the upgrade request's
+  context), ended with the connection's cause when the connection closes, so
+  its values, deadline and cancellation all apply, as in net/http. Cancelling
+  it ends the session's context but, as in net/http, does not itself close the
+  connection. The contexts handed to a
   `TrackHandler` and `FetchHandler` carry the session's values and still end
   exactly when their stream does, with the stream's error as the cause, so
   `Cause` is unchanged. A server serving many sessions from one `TrackMux` can store
