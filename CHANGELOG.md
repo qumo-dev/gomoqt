@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **moqt: `Server.ConnContext` values now reach handlers, as in net/http**
+  (#431). The hook mirrors `http.Server.ConnContext`, but its context was
+  lost: native QUIC never called it, WebTransport sessions were built from the
+  unwrapped connection, and a `TrackWriter` or `FetchRequest` context came
+  from its stream alone. Now, on native QUIC, the context `ConnContext`
+  returns is the session's context, so its values, deadline and cancellation
+  all apply, as in net/http. On WebTransport the session takes its values
+  (its lifetime stays the WebTransport session's). The contexts handed to a
+  `TrackHandler` and `FetchHandler` carry the session's values and still end
+  exactly when their stream does, with the stream's error as the cause, so
+  `Cause` is unchanged. A server serving many sessions from one `TrackMux` can store
+  per-connection state in `ConnContext` and read it in its handlers, for
+  example to authorize a SUBSCRIBE per session.
+- **moqt: a subscription now ends after SUBSCRIBE_END instead of blocking
+  forever** (#435). `TrackReader` recorded SUBSCRIBE_END but never woke
+  `AcceptGroup`, so a subscriber whose publisher closed the track (as a relay
+  does when it switches a broadcast to a new route) waited with no data and no
+  error. `AcceptGroup` now returns the groups still queued or in flight, then
+  `io.EOF` once every group from the subscription's start to the last one the
+  END names has arrived or been dropped (SUBSCRIBE_DROP). Group streams arrive
+  in any order, so it waits for gaps, not only for the named group. A gap that
+  never fills (a group skipped without SUBSCRIBE_DROP) is waited for until the
+  publisher has closed the subscribe stream plus 100 ms and three round trips.
+  `io.EOF` is sticky, and a group that arrives after it is cancelled rather
+  than left holding stream credit.
+- **moqt: data race between `TrackReader.Close` and a concurrent
+  `AcceptGroup`** (#432). `AcceptGroup` read `queuedCh` outside the lock while
+  `Close` set it to nil, so closing a subscription from any goroutine other
+  than the reader's raced. `AcceptGroup` now snapshots the channel under the
+  lock.
+
 ## [v0.20.0] - 2026-09-18
 
 > **Dual release.** `v0.20.0` ships both packages at the same version: the Go module (`moqt`, consumed via `go get github.com/qumo-dev/gomoqt@v0.20.0`) and the TypeScript package (`@qumo/moq` on JSR). Minor-bumped from `v0.19.0` because both sides carry **breaking changes**. In Go, `Dialer.DialWebTransport` and `Dialer.DialQUIC`, deprecated in `v0.19.0`, are removed: `Dialer.Dial` is the only client entry point, and a `moqt` URL carrying a query now returns `ErrQueryNotSupported`. In TypeScript, `@qumo/moq`'s `msf` catalogs move to draft-ietf-moq-msf-01 (`initDataList`/`initRef`, and the `{op, tracks}` delta form), restoring interop with the Go `msf` package, which had been broken since `v0.18.0`. The MoQ wire protocol is unchanged, so this release interoperates with `v0.19.0` peers; `msf` catalog JSON from `@qumo/moq` ≤0.19.0 is not compatible.

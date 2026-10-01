@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
 func newTestSession(conn StreamConn) *Session {
 	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{}, nil)
 	markPeerSetupReceived(sess, message.ProbeLevelReport)
@@ -945,11 +946,88 @@ func TestSession_ProcessBiStream_Announce(t *testing.T) {
 	_ = session.CloseWithError(NoError, "")
 }
 
+// connValueKey stands for a value an application's Server.ConnContext stores.
+type connValueKey struct{}
+
+// The context the server's ConnContext returns is the session's parent, as
+// the connection context is an http.Request's: its cancellation ends the
+// session's context, not only its values.
+func TestNewSession_ContextFromConnContext(t *testing.T) {
+	connCtx, kick := context.WithCancel(context.WithValue(context.Background(), connValueKey{}, "conn-value"))
+	defer kick()
+
+	session := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{ctx: connCtx}, nil)
+	assert.Equal(t, "conn-value", session.Context().Value(connValueKey{}))
+	kick()
+
+	assert.Error(t, session.Context().Err(), "an application's cancellation in ConnContext ends the session's context")
+}
+
+// A handler's context is derived like an http.Request's: a child of the
+// session's context that also ends when its stream does, with the stream's
+// cause, or when the server cancels it after the handler returns.
+func TestSession_StreamContext(t *testing.T) {
+	newStream := func() (*FakeQUICStream, context.CancelCauseFunc) {
+		parent, end := context.WithCancelCause(context.Background())
+		return &FakeQUICStream{ParentCtx: parent}, end
+	}
+	connCtx := context.WithValue(context.Background(), connValueKey{}, "conn-value")
+
+	t.Run("carries the connection context's values", func(t *testing.T) {
+		session := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{ctx: connCtx}, nil)
+		stream, end := newStream()
+		defer end(nil)
+
+		ctx, cancel := session.streamContext(stream)
+		defer cancel()
+
+		assert.Equal(t, "conn-value", ctx.Value(connValueKey{}))
+		assert.NoError(t, ctx.Err())
+	})
+	t.Run("ends with the stream, keeping its cause", func(t *testing.T) {
+		session := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{ctx: connCtx}, nil)
+		stream, end := newStream()
+		ctx, cancel := session.streamContext(stream)
+		defer cancel()
+		reset := &transport.StreamError{ErrorCode: transport.StreamErrorCode(SubscribeErrorCodeTimeout), Remote: true}
+
+		end(reset)
+
+		<-ctx.Done()
+		var subErr *SubscribeError
+		require.ErrorAs(t, Cause(context.WithValue(ctx, biStreamTypeCtxKey, message.StreamTypeSubscribe)), &subErr,
+			"Cause reports the stream's error, as before")
+	})
+	t.Run("ends with the session", func(t *testing.T) {
+		sessParent, endSession := context.WithCancel(connCtx)
+		session := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{ctx: sessParent}, nil)
+		stream, end := newStream()
+		defer end(nil)
+		ctx, cancel := session.streamContext(stream)
+		defer cancel()
+
+		endSession()
+
+		assert.Error(t, ctx.Err(), "a child of the session's context ends with it at once")
+	})
+	t.Run("the server's cancel ends it after the handler", func(t *testing.T) {
+		session := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, sessionSetup{ctx: connCtx}, nil)
+		stream, end := newStream()
+		defer end(nil)
+		ctx, cancel := session.streamContext(stream)
+
+		cancel()
+
+		assert.ErrorIs(t, ctx.Err(), context.Canceled)
+	})
+}
+
 func TestSession_ProcessBiStream_Subscribe(t *testing.T) {
 	conn := &FakeStreamConn{}
 	conn.OpenUniStreams = []sendStreamResult{{Stream: &FakeQUICSendStream{}}}
 
-	session := newTestSession(conn)
+	session := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil,
+		sessionSetup{ctx: context.WithValue(context.Background(), connValueKey{}, "conn-value")}, nil)
 	blockHandler := make(chan struct{})
 	trackReady := make(chan *TrackWriter, 1)
 	session.mux.PublishFunc(context.Background(), BroadcastPath("/test/path"), func(tw *TrackWriter) {
@@ -1009,6 +1087,9 @@ func TestSession_ProcessBiStream_Subscribe(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("processBiStream did not deliver track writer to handler")
 	}
+
+	assert.Equal(t, "conn-value", track.Context().Value(connValueKey{}),
+		"the TrackWriter's context carries the connection context's values, like an http.Request's")
 
 	gotConfig := track.TrackConfig()
 	assert.Equal(t, TrackPriority(7), gotConfig.Priority)
@@ -1134,7 +1215,8 @@ func TestSession_ProcessBiStream_DecodeSubscribeMessageError(t *testing.T) {
 func TestSession_ProcessBiStream_Fetch(t *testing.T) {
 	conn := &FakeStreamConn{}
 
-	session := newTestSession(conn)
+	session := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil,
+		sessionSetup{ctx: context.WithValue(context.Background(), connValueKey{}, "conn-value")}, nil)
 
 	called := false
 	var gotReq *FetchRequest
@@ -1168,6 +1250,8 @@ func TestSession_ProcessBiStream_Fetch(t *testing.T) {
 	assert.Equal(t, TrackName(req.TrackName), gotReq.TrackName)
 	assert.Equal(t, TrackPriority(req.Priority), gotReq.Priority)
 	assert.Equal(t, GroupSequence(req.GroupSequence), gotReq.GroupSequence)
+	assert.Equal(t, "conn-value", gotReq.Context().Value(connValueKey{}),
+		"the FetchRequest's context carries the connection context's values")
 	require.NotNil(t, gotWriter)
 	assert.Equal(t, GroupSequence(req.GroupSequence), gotWriter.GroupSequence())
 

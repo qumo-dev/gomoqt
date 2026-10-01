@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
 	"github.com/qumo-dev/gomoqt/transport"
@@ -15,6 +16,8 @@ func newSendSubscribeStream(id SubscribeID, stream transport.Stream, initConfig 
 		config:    initConfig,
 		stream:    stream,
 		droppedCh: make(chan struct{}, 1),
+		endCh:     make(chan struct{}),
+		closedCh:  make(chan struct{}),
 	}
 
 	return substr
@@ -32,6 +35,16 @@ type sendSubscribeStream struct {
 	// endGroup is the last group that may be delivered, from SUBSCRIBE_END.
 	endGroup GroupSequence
 	ended    bool
+	// endCh is closed when SUBSCRIBE_END arrives, and closedCh when the
+	// publisher closes the subscribe stream; both wake a blocked AcceptGroup.
+	endCh    chan struct{}
+	closedCh chan struct{}
+	// closedAt is when readSubscribeResponses saw the stream close; set
+	// before closedCh is closed.
+	closedAt time.Time
+	// onDrop, when set, is told of each SUBSCRIBE_DROP, outside mu. It is set
+	// before readSubscribeResponses starts.
+	onDrop func(SubscribeDrop)
 
 	mu sync.Mutex
 
@@ -44,6 +57,12 @@ type sendSubscribeStream struct {
 // readSubscribeResponses consumes SUBSCRIBE_END and SUBSCRIBE_DROP messages
 // from the publisher until the stream ends.
 func (substr *sendSubscribeStream) readSubscribeResponses() {
+	defer func() {
+		substr.mu.Lock()
+		substr.closedAt = time.Now()
+		substr.mu.Unlock()
+		close(substr.closedCh)
+	}()
 	for {
 		resp, err := readSubscribeResponse(substr.stream)
 		if err != nil {
@@ -147,8 +166,20 @@ func (substr *sendSubscribeStream) setEnd(seq GroupSequence) {
 	substr.mu.Lock()
 	defer substr.mu.Unlock()
 
+	if substr.ended {
+		return
+	}
 	substr.endGroup = seq
 	substr.ended = true
+	close(substr.endCh)
+}
+
+// end returns the last group the publisher will deliver, once SUBSCRIBE_END
+// has arrived.
+func (substr *sendSubscribeStream) end() (GroupSequence, bool) {
+	substr.mu.Lock()
+	defer substr.mu.Unlock()
+	return substr.endGroup, substr.ended
 }
 
 func (substr *sendSubscribeStream) updateSubscribe(newConfig *SubscribeConfig) error {
@@ -192,6 +223,11 @@ func (substr *sendSubscribeStream) appendDrop(drop SubscribeDrop) {
 	default:
 	}
 	substr.mu.Unlock()
+	// Outside mu: AcceptGroup holds the reader's lock while reading this
+	// stream's state, so the reader's lock must never be taken under mu.
+	if substr.onDrop != nil {
+		substr.onDrop(drop)
+	}
 }
 
 func (substr *sendSubscribeStream) pendingDrops() []SubscribeDrop {
@@ -219,4 +255,17 @@ func (substr *sendSubscribeStream) closeWithError(code SubscribeErrorCode) {
 	defer substr.mu.Unlock()
 
 	cancelStreamWithError(substr.stream, transport.StreamErrorCode(code))
+}
+
+// closedSince reports whether the publisher has closed the subscribe stream,
+// and when.
+func (substr *sendSubscribeStream) closedSince() (time.Time, bool) {
+	select {
+	case <-substr.closedCh:
+		substr.mu.Lock()
+		defer substr.mu.Unlock()
+		return substr.closedAt, true
+	default:
+		return time.Time{}, false
+	}
 }

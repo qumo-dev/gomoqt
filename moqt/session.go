@@ -40,6 +40,11 @@ type sessionSetup struct {
 	// here so Session can seed its peer-probe state without re-reading the
 	// stream. Nil means Session reads the peer SETUP itself (all other bindings).
 	peerSetup *message.SetupMessage
+	// ctx, when set, is the parent of the session's context: on the server,
+	// the context Server.ConnContext returned (native QUIC) or the upgrade
+	// request's context, which carries it (WebTransport). Nil means
+	// conn.Context() alone (clients).
+	ctx context.Context
 }
 
 // Session represents an active MOQ session over a QUIC connection.
@@ -123,6 +128,15 @@ func newSession(
 	}
 
 	connCtx := conn.Context()
+	if setup.ctx != nil {
+		// As net/http derives a connection's context from ConnContext's and
+		// cancels it when the connection ends: a child of the parent, ended
+		// with the connection's cause when the connection closes.
+		ctx, cancel := context.WithCancelCause(setup.ctx)
+		transportCtx := connCtx
+		context.AfterFunc(transportCtx, func() { cancel(context.Cause(transportCtx)) })
+		connCtx = ctx
+	}
 	sess := &Session{
 		ctx:             connCtx,
 		config:          config.Clone(),
@@ -472,6 +486,9 @@ func (sess *Session) Subscribe(ctx context.Context, path BroadcastPath, name Tra
 	substr := newSendSubscribeStream(id, stream, config)
 
 	track := newTrackReader(path, name, substr, func() { sess.removeTrackReader(id) })
+	// A missing group is waited for a few round trips beyond the minimum
+	// after the publisher closes the stream: enough for a loss recovery.
+	track.endGrace = func() time.Duration { return subscribeEndGrace + subscribeEndGraceRTTs*sess.Stats().RTT }
 	sess.addTrackReader(id, track)
 	ctx, cancel := context.WithTimeout(ctx, sess.timeout())
 	defer cancel()
@@ -851,6 +868,22 @@ func (sess *Session) handleAnnounceStream(stream transport.Stream) {
 	annstr.Close()
 }
 
+// streamContext returns the context for the handler of a peer-initiated
+// stream, derived the way net/http derives a request's context from its
+// connection's: a child of the session's context, so it carries what
+// Server.ConnContext stored and ends with the session. It also ends when the
+// stream does, with the stream's cause, so Cause reports the stream's error.
+// The returned cancel ends it after the handler returns.
+func (sess *Session) streamContext(stream transport.Stream) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancelCause(sess.ctx)
+	streamCtx := stream.Context()
+	stop := context.AfterFunc(streamCtx, func() { cancel(context.Cause(streamCtx)) })
+	return ctx, func() {
+		stop()
+		cancel(context.Canceled)
+	}
+}
+
 // handleSubscribeStream decodes a SUBSCRIBE and registers a track writer for the
 // incoming track. Group streams are opened via OpenUniStreamSync so the publisher
 // backpressures on the peer's uni-stream limit instead of aborting (see #211).
@@ -894,6 +927,8 @@ func (sess *Session) handleSubscribeStream(stream transport.Stream) {
 		sess.conn.OpenUniStreamSync,
 		func() { sess.removeTrackWriter(SubscribeID(sm.SubscribeID)) },
 	)
+	trackCtx, cancelTrack := sess.streamContext(stream)
+	track.ctx = context.WithValue(trackCtx, biStreamTypeCtxKey, message.StreamTypeSubscribe)
 	sess.addTrackWriter(SubscribeID(sm.SubscribeID), track)
 
 	if sess.counters != nil {
@@ -904,6 +939,7 @@ func (sess *Session) handleSubscribeStream(stream transport.Stream) {
 
 	// Ensure the track writer is closed when done
 	track.Close()
+	cancelTrack()
 }
 
 // handleTrackStream decodes a TRACK message and responds with the track's
@@ -1031,12 +1067,16 @@ func (sess *Session) handleFetchStream(stream transport.Stream) {
 
 	handler := sess.fetchHandler
 
+	reqCtx, cancelReq := sess.streamContext(stream)
+	// Registered before stop below, so it runs after it: ending the context
+	// once the handler has returned must not abort the group it wrote.
+	defer cancelReq()
 	req := &FetchRequest{
 		BroadcastPath: BroadcastPath(fm.BroadcastPath),
 		TrackName:     TrackName(fm.TrackName),
 		Priority:      TrackPriority(fm.Priority),
 		GroupSequence: GroupSequence(fm.GroupSequence),
-		ctx:           stream.Context(),
+		ctx:           reqCtx,
 	}
 
 	// Priority is per-endpoint and not negotiated, so the requester's call on
