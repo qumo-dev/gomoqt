@@ -3,7 +3,9 @@ package moqt
 import (
 	"bytes"
 	"context"
+	"io"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
@@ -138,26 +140,23 @@ func TestTrackReader_Close(t *testing.T) {
 }
 
 // Close from another goroutine while AcceptGroup is blocked must be safe; run
-// with -race. AcceptGroup then returns once its context ends.
+// with -race. AcceptGroup then returns an error instead of blocking.
 func TestTrackReader_CloseWhileAccepting(t *testing.T) {
-	receiver, _ := newTestTrackReader(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-	accepted := make(chan error, 1)
-	go func() {
-		_, err := receiver.AcceptGroup(ctx)
-		accepted <- err
-	}()
+	synctest.Test(t, func(t *testing.T) {
+		receiver, _ := newTestTrackReader(t)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		accepted := make(chan error, 1)
+		go func() {
+			_, err := receiver.AcceptGroup(ctx)
+			accepted <- err
+		}()
+		synctest.Wait() // AcceptGroup is blocked
 
-	time.Sleep(20 * time.Millisecond)
-	require.NoError(t, receiver.Close())
+		require.NoError(t, receiver.Close())
 
-	select {
-	case err := <-accepted:
-		assert.Error(t, err)
-	case <-time.After(time.Second):
-		t.Fatal("AcceptGroup did not return")
-	}
+		assert.Error(t, <-accepted)
+	})
 }
 
 func TestTrackReader_Update(t *testing.T) {
@@ -288,4 +287,211 @@ func TestTrackReader_SubscribeID(t *testing.T) {
 	receiver := newTrackReader("/test", "video", substr, func() {})
 
 	assert.Equal(t, SubscribeID(42), receiver.SubscribeID())
+}
+
+// After SUBSCRIBE_END, AcceptGroup hands out every group the subscription is
+// owed, from its start to the last one the END names, in whatever order they
+// arrive, then returns io.EOF instead of blocking forever. A gap that never
+// fills ends once the publisher has closed the subscribe stream and the grace
+// has passed.
+func TestTrackReader_AcceptGroup_EndsAfterSubscribeEnd(t *testing.T) {
+	tests := map[string]struct {
+		queued   []GroupSequence // queued before SUBSCRIBE_END
+		late     []GroupSequence // queued after it
+		end      GroupSequence
+		closed   bool            // the publisher closes the subscribe stream after END
+		afterFIN []GroupSequence // queued after the close, within the grace
+		dropped  *SubscribeDrop  // SUBSCRIBE_DROP received after END
+		noOK     bool            // END came without SUBSCRIBE_OK
+		want     int             // groups returned before io.EOF
+	}{
+		"no groups":                                {end: 0, want: 0},
+		"END without SUBSCRIBE_OK":                 {noOK: true, end: 2, want: 0},
+		"last group already taken":                 {queued: []GroupSequence{1, 2}, end: 2, want: 2},
+		"last group arrives after END":             {queued: []GroupSequence{1}, late: []GroupSequence{2}, end: 2, want: 2},
+		"earlier group still in flight":            {queued: []GroupSequence{2}, late: []GroupSequence{1}, end: 2, want: 2},
+		"out of order, all before END":             {queued: []GroupSequence{3, 1, 2}, end: 3, want: 3},
+		"gap closed by SUBSCRIBE_DROP":             {queued: []GroupSequence{1, 4}, end: 4, dropped: &SubscribeDrop{StartGroup: 2, EndGroup: 3}, want: 2},
+		"named group never arrives, stream closed": {queued: []GroupSequence{1}, end: 2, closed: true, want: 1},
+		"named group arrives just after the close": {queued: []GroupSequence{1}, end: 2, closed: true, afterFIN: []GroupSequence{2}, want: 2},
+	}
+	for name, tt := range tests {
+		// t.Run outside the bubble: synctest does not support t.Run inside it.
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				// The subscribe stream stays open until gate is closed.
+				gate := make(chan struct{})
+				stream := &FakeQUICStream{Reads: []streamResult{{Block: true}}, ReadGate: gate}
+				substr := newTestSendSubscribeStreamFromStream(stream, &SubscribeConfig{})
+				receiver := newTrackReader("/test", "video", substr, func() {})
+				if !tt.noOK {
+					substr.setResolvedStart(1) // SUBSCRIBE_OK: the subscription starts at group 1
+				}
+				for _, seq := range tt.queued {
+					receiver.enqueueGroup(seq, &FakeQUICReceiveStream{})
+				}
+				ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+				defer cancel()
+				type result struct {
+					groups int
+					err    error
+				}
+				done := make(chan result, 1)
+				go func() {
+					var r result
+					for {
+						if _, err := receiver.AcceptGroup(ctx); err != nil {
+							r.err = err
+							done <- r
+							return
+						}
+						r.groups++
+					}
+				}()
+				synctest.Wait() // AcceptGroup has taken what was queued and blocks
+
+				substr.setEnd(tt.end)
+				for _, seq := range tt.late {
+					receiver.enqueueGroup(seq, &FakeQUICReceiveStream{})
+				}
+				if tt.dropped != nil {
+					substr.appendDrop(*tt.dropped)
+				}
+				if tt.closed {
+					close(gate)
+					synctest.Wait() // the close is seen before any group after it
+					for _, seq := range tt.afterFIN {
+						receiver.enqueueGroup(seq, &FakeQUICReceiveStream{})
+					}
+				} else {
+					defer close(gate)
+				}
+
+				r := <-done
+				assert.ErrorIs(t, r.err, io.EOF, "the track ends instead of blocking until the deadline")
+				assert.Equal(t, tt.want, r.groups)
+			})
+		})
+	}
+}
+
+// A second SUBSCRIBE_END is ignored: the first one names the last group.
+func TestSendSubscribeStream_SetEnd_FirstWins(t *testing.T) {
+	substr := newSendSubscribeStream(SubscribeID(1), &FakeQUICStream{}, &SubscribeConfig{})
+
+	substr.setEnd(5)
+	substr.setEnd(9)
+
+	end, ended := substr.end()
+	assert.True(t, ended)
+	assert.Equal(t, GroupSequence(5), end)
+}
+
+// With a group still owed and the publisher's subscribe stream closed,
+// AcceptGroup returns io.EOF exactly when the grace has passed, not before.
+func TestTrackReader_AcceptGroup_GraceAfterClose(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		stream := &FakeQUICStream{} // reads EOF at once: the publisher closed the stream
+		substr := newTestSendSubscribeStreamFromStream(stream, &SubscribeConfig{})
+		receiver := newTrackReader("/test", "video", substr, func() {})
+		substr.setResolvedStart(1)
+		synctest.Wait() // readSubscribeResponses has seen the close
+		substr.setEnd(3) // groups 1 to 3 are owed; none will come
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+		defer cancel()
+		start := time.Now()
+
+		_, err := receiver.AcceptGroup(ctx)
+
+		assert.ErrorIs(t, err, io.EOF)
+		assert.Equal(t, subscribeEndGrace, time.Since(start), "waits the whole grace, no longer")
+	})
+}
+
+// io.EOF is sticky, and a group that arrives after it is cancelled, not
+// queued where no reader will take it.
+func TestTrackReader_AcceptGroup_EOFIsSticky(t *testing.T) {
+	gate := make(chan struct{})
+	defer close(gate)
+	stream := &FakeQUICStream{Reads: []streamResult{{Block: true}}, ReadGate: gate}
+	substr := newTestSendSubscribeStreamFromStream(stream, &SubscribeConfig{})
+	receiver := newTrackReader("/test", "video", substr, func() {})
+	substr.setResolvedStart(1)
+	receiver.enqueueGroup(1, &FakeQUICReceiveStream{})
+	substr.setEnd(1)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := receiver.AcceptGroup(ctx)
+	require.NoError(t, err)
+	_, err = receiver.AcceptGroup(ctx)
+	require.ErrorIs(t, err, io.EOF)
+	late := &FakeQUICReceiveStream{}
+
+	receiver.enqueueGroup(2, late)
+
+	_, err = receiver.AcceptGroup(ctx)
+	assert.ErrorIs(t, err, io.EOF, "EOF again, not the late group")
+	assert.NotEmpty(t, late.CancelReadCodes(), "the late group's stream is released")
+}
+
+func TestSettledGroups_Add(t *testing.T) {
+	tests := map[string]struct {
+		add  [][2]GroupSequence
+		want []groupRange
+	}{
+		"in order is one range":        {add: [][2]GroupSequence{{1, 1}, {2, 2}, {3, 3}}, want: []groupRange{{1, 3}}},
+		"out of order merges":          {add: [][2]GroupSequence{{3, 3}, {1, 1}, {2, 2}}, want: []groupRange{{1, 3}}},
+		"a gap stays a gap":            {add: [][2]GroupSequence{{1, 1}, {3, 3}}, want: []groupRange{{1, 1}, {3, 3}}},
+		"a dropped range fills it":     {add: [][2]GroupSequence{{1, 1}, {4, 4}, {2, 3}}, want: []groupRange{{1, 4}}},
+		"overlapping ranges merge":     {add: [][2]GroupSequence{{1, 5}, {3, 8}}, want: []groupRange{{1, 8}}},
+		"a range inside another":       {add: [][2]GroupSequence{{1, 9}, {3, 4}}, want: []groupRange{{1, 9}}},
+		"an inverted range is ignored": {add: [][2]GroupSequence{{5, 4}}, want: nil},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			var s settledGroups
+
+			for _, r := range tt.add {
+				s.add(r[0], r[1])
+			}
+
+			assert.Equal(t, tt.want, s.ranges)
+		})
+	}
+}
+
+// A publisher that skips every other group without SUBSCRIBE_DROP leaves a gap
+// per group; past the cap, the oldest gap is given up.
+func TestSettledGroups_Add_Bounded(t *testing.T) {
+	var s settledGroups
+
+	for i := range GroupSequence(maxSettledRanges + 10) {
+		s.add(2*i+1, 2*i+1)
+	}
+
+	assert.Len(t, s.ranges, maxSettledRanges)
+}
+
+func TestSettledGroups_Covers(t *testing.T) {
+	settled := settledGroups{ranges: []groupRange{{1, 3}, {6, 9}}}
+	tests := map[string]struct {
+		lo, hi GroupSequence
+		want   bool
+	}{
+		"inside one range":     {lo: 1, hi: 3, want: true},
+		"a single group":       {lo: 7, hi: 7, want: true},
+		"across a gap":         {lo: 1, hi: 6, want: false},
+		"inside the gap":       {lo: 4, hi: 5, want: false},
+		"past the last range":  {lo: 9, hi: 10, want: false},
+		"before the first one": {lo: 0, hi: 1, want: false},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tt.want, settled.covers(tt.lo, tt.hi))
+		})
+	}
+	t.Run("empty", func(t *testing.T) {
+		var empty settledGroups
+		assert.False(t, empty.covers(1, 1))
+	})
 }
