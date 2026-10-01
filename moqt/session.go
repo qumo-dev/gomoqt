@@ -868,9 +868,6 @@ func (sess *Session) handleAnnounceStream(stream transport.Stream) {
 	annstr.Close()
 }
 
-// handleSubscribeStream decodes a SUBSCRIBE and registers a track writer for the
-// incoming track. Group streams are opened via OpenUniStreamSync so the publisher
-// backpressures on the peer's uni-stream limit instead of aborting (see #211).
 // streamContext returns the context for the handler of a peer-initiated
 // stream, derived the way net/http derives a request's context from its
 // connection's: a child of the session's context, so it carries what
@@ -887,6 +884,9 @@ func (sess *Session) streamContext(stream transport.Stream) (context.Context, co
 	}
 }
 
+// handleSubscribeStream decodes a SUBSCRIBE and registers a track writer for the
+// incoming track. Group streams are opened via OpenUniStreamSync so the publisher
+// backpressures on the peer's uni-stream limit instead of aborting (see #211).
 func (sess *Session) handleSubscribeStream(stream transport.Stream) {
 	var sm message.SubscribeMessage
 	err := sm.Decode(stream)
