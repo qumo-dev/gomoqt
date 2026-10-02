@@ -416,7 +416,7 @@ func (s *Server) handleNativeQUIC(conn StreamConn) error {
 
 	// Router: native QUIC has no handshake-time request URI, so the request
 	// path arrives inside the client's SETUP message. Read it here, above
-	// Session — the same place WebTransport resolves r.URL.Path — so Session
+	// Session — the same place WebTransport resolves r.URL.RequestURI() — so Session
 	// itself stays path/role-agnostic.
 	sm, err := readClientSetup(conn, s.Config.setupTimeout())
 	if err != nil {
@@ -430,7 +430,7 @@ func (s *Server) handleNativeQUIC(conn StreamConn) error {
 	}
 
 	// Hand the Session the learned path (exposed as Session.RequestURI, mirroring
-	// WebTransport's r.URL.Path) along with the decoded SETUP, so it seeds
+	// WebTransport's r.URL.RequestURI()) along with the decoded SETUP, so it seeds
 	// peer-probe state without re-reading the consumed stream.
 	sess := newSession(conn, s.TrackMux, s.connManager, s.Config, s.FetchHandler, nil, s.Logger,
 		sessionSetup{path: path, peerSetup: &sm, ctx: s.connContext(conn.Context(), conn)}, s.Counters)

@@ -727,6 +727,7 @@ func TestWebTransportHandler_ServeHTTP_HandlerSeesRequestURI(t *testing.T) {
 		{name: "EmptyPathDefaultsToRoot", url: "https://example.com", want: "/"},
 		{name: "Query", url: "https://example.com/live/alice?jwt=a.b.c", want: "/live/alice?jwt=a.b.c"},
 		{name: "QueryOnRoot", url: "https://example.com?jwt=a.b.c", want: "/?jwt=a.b.c"},
+		{name: "EscapedPathKeptEscaped", url: "https://example.com/live/alice%20smith?jwt=a.b.c", want: "/live/alice%20smith?jwt=a.b.c"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var got string

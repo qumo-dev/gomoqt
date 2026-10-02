@@ -28,7 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **moqt: `ErrQueryNotSupported`.** `Dialer.Dial` no longer refuses a `moqt://`
   URL that carries a query; it sends it (see Changed). Interop note: a peer
   running an older gomoqt keeps the whole SETUP Path, query included, as its
-  `RequestPath`, so it sees the same string.
+  `RequestPath`, so it sees the same string. One wire difference: the
+  native-QUIC client now sends the path in its escaped URI form (`%20` for a
+  space), where it used to send the decoded path, so a path with characters
+  that need escaping reaches an older server escaped.
 
 ## [v0.20.1] - 2026-10-01
 

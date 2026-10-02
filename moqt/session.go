@@ -219,7 +219,6 @@ func (sess *Session) RequestURI() string {
 	return sess.path
 }
 
-
 // openSetupStream sends this endpoint's SETUP message on a unidirectional
 // Setup Stream and closes it (FIN), per moq-lite-05. A client on a binding
 // without a request URI (native QUIC) includes the Path parameter.

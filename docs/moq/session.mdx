@@ -75,8 +75,8 @@ binding-supplied path, which the `Dialer` and `Server` entry points never produc
 <Note>
 `Session.RequestURI` is the session's request URI, which selects a server-side
 endpoint. It is unrelated to `BroadcastPath`, which identifies a broadcast
-*within* an established session — which is why the accessor is not called
-`Path`: in this package "path" already means `BroadcastPath`.
+*within* an established session — which is why the accessor is named after the
+request URI and not `Path`: in this package "path" already means `BroadcastPath`.
 </Note>
 
 ## Connection State
