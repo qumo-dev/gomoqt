@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.21.0] - 2026-10-02
+
+> Go-only minor release; `@qumo/moq` stays at `0.20.0` (no `moq-web` change). **Breaking Go API change:** `Session.RequestPath` is renamed `Session.RequestURI` and now includes the query, and `ErrQueryNotSupported` is removed. A native-QUIC client now carries a URL's query in the SETUP Path; a `v0.20.x` server sees it as part of its `RequestPath`, so the two interoperate.
+
 ### Changed
 
 - **moqt: `Session.RequestPath` is renamed `Session.RequestURI`, and carries
