@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -352,6 +353,14 @@ func requestPath(r *http.Request) string {
 	return r.URL.Path
 }
 
+// requestQuery returns the WebTransport request's raw query.
+func requestQuery(r *http.Request) string {
+	if r.URL == nil {
+		return ""
+	}
+	return r.URL.RawQuery
+}
+
 // ServeHTTP upgrades an incoming HTTP request to a WebTransport session and
 // dispatches it to the configured handler. If the upgrade fails, it falls back
 // to FallbackHandler or returns a 400 response.
@@ -382,7 +391,7 @@ func (u *WebTransportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	// The session's context is a child of the upgrade request's, which
 	// carries what the Server's ConnContext stored for this connection.
 	sess := newSession(conn, u.TrackMux, manager, u.Config, u.FetchHandler, nil, u.Logger,
-		sessionSetup{path: requestPath(r), ctx: r.Context()}, nil)
+		sessionSetup{path: requestPath(r), query: requestQuery(r), ctx: r.Context()}, nil)
 	// Ensure the session is cleaned up (conn removed from the manager) when
 	// the Handler returns, even if it did not call CloseWithError itself (e.g.
 	// the peer closed the connection). Idempotent.
@@ -422,7 +431,10 @@ func (s *Server) handleNativeQUIC(conn StreamConn) error {
 	if err != nil {
 		return fmt.Errorf("native QUIC setup: %w", err)
 	}
-	path, ok := sm.Path()
+	// The Path parameter carries the query too, after "?", when the client
+	// dialed one (see Dialer.Dial).
+	raw, ok := sm.Path()
+	path, query, _ := strings.Cut(raw, "?")
 	if !ok || len(path) == 0 || path[0] != '/' {
 		return fmt.Errorf("native QUIC setup: missing or invalid Path parameter")
 	}
@@ -431,7 +443,7 @@ func (s *Server) handleNativeQUIC(conn StreamConn) error {
 	// WebTransport's r.URL.Path) along with the decoded SETUP, so it seeds
 	// peer-probe state without re-reading the consumed stream.
 	sess := newSession(conn, s.TrackMux, s.connManager, s.Config, s.FetchHandler, nil, s.Logger,
-		sessionSetup{path: path, peerSetup: &sm, ctx: s.connContext(conn.Context(), conn)}, s.Counters)
+		sessionSetup{path: path, query: query, peerSetup: &sm, ctx: s.connContext(conn.Context(), conn)}, s.Counters)
 	if s.Counters != nil {
 		s.Counters.NativeSessions.Add(1)
 	}

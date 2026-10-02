@@ -57,6 +57,25 @@ A path is always rooted at `/` — dialing `moqt://host` or `https://host` with 
 path yields `"/"`. `RequestPath` returns `""` only for a session constructed without a
 binding-supplied path, which the `Dialer` and `Server` entry points never produce.
 
+## Request query
+
+`Session.RequestQuery` returns the session's raw request query, without the `?`,
+on either binding and either side of the session — `""` when there is none:
+
+```go
+func (h *HandlerImpl) ServeMOQ(sess *moqt.Session) {
+    q, _ := url.ParseQuery(sess.RequestQuery())
+    token := q.Get("jwt")
+    // RequestQuery() == "jwt=x" for a client that dialed
+    // moqt://host/live/alice?jwt=x or https://host/live/alice?jwt=x
+}
+```
+
+On WebTransport it is the HTTP request's `r.URL.RawQuery`. On native QUIC the
+client appends it to the SETUP Path parameter after `?`, and the server splits it
+off before constructing the session, so `RequestPath` never contains it. A query
+commonly carries a credential: avoid logging it.
+
 <Note>
 `Session.RequestPath` is the session's request path, which selects a server-side
 endpoint. It is unrelated to `BroadcastPath`, which identifies a broadcast

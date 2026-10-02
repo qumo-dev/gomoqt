@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **moqt: a URL's query reaches the server on native QUIC too, and
+  `Session.RequestQuery` reports it on both bindings.** A `moqt://` URL's query
+  is now appended to the SETUP Path parameter after `?`, the form
+  draft-ietf-moq-transport's PATH parameter and the moq-lite reference
+  implementation (kixelated/moq) use, and the server splits it off before the
+  session exists. `Session.RequestQuery()` returns the raw query, from
+  `r.URL.RawQuery` on WebTransport and from the SETUP Path on native QUIC, so a
+  handler reads it the same way on both. `Session.RequestPath()` never contains
+  it. This is how a credential in the query (`?jwt=`) reaches a server over
+  native QUIC.
+
+### Removed
+
+- **moqt: `ErrQueryNotSupported`.** `Dialer.Dial` no longer refuses a `moqt://`
+  URL that carries a query; it sends it (see Added). Interop note: a peer
+  running an older gomoqt keeps the whole SETUP Path, query included, as its
+  `RequestPath`.
+
 ## [v0.20.1] - 2026-10-01
 
 > Go-only patch release; `@qumo/moq` stays at `0.20.0` (no `moq-web` change). No exported API change and no wire change, so this interoperates with `v0.20.0` peers. Behavior changes for servers: handlers now see `Server.ConnContext` values, and a subscriber's `AcceptGroup` returns `io.EOF` after SUBSCRIBE_END where it used to block.
