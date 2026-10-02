@@ -9,22 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **moqt: a URL's query reaches the server on native QUIC too, and
-  `Session.RequestPath` carries it on both bindings.** A `moqt://` URL's query
-  is now appended to the SETUP Path parameter after `?`, the form
+- **moqt: `Session.RequestPath` is renamed `Session.RequestURI`, and carries
+  the query; a URL's query now reaches the server over native QUIC too.**
+  `Session.RequestURI()` returns the request URI as received, like
+  `http.Request.RequestURI`: the path, followed by `?` and the query when there
+  is one (`"/live/alice?jwt=x"`), with no scheme or host. It is the same on
+  WebTransport (`r.URL.RequestURI()`) and native QUIC (the SETUP Path), on both
+  sides of a session; split it with `url.Parse`. A `moqt://` URL's query is now
+  appended to the SETUP Path parameter after `?`, the form
   draft-ietf-moq-transport's PATH parameter and the moq-lite reference
-  implementation (kixelated/moq) use. `Session.RequestPath()` now returns the
-  path followed by `?` and the query when there is one (`"/live/alice?jwt=x"`),
-  as received on WebTransport (`r.URL.RequestURI()`) and native QUIC (the SETUP Path) alike, on both sides of a
-  session; split them with `url.Parse`. Without a query it is unchanged. This is
-  how a credential in the query (`?jwt=`) reaches a server over native QUIC.
+  implementation (kixelated/moq) use. This is how a credential in the query
+  (`?jwt=`) reaches a server over native QUIC. **Migration:** replace
+  `RequestPath()` with `RequestURI()`; code that compared it to a bare path
+  should compare `url.Parse(sess.RequestURI())`'s `Path` instead.
 
 ### Removed
 
 - **moqt: `ErrQueryNotSupported`.** `Dialer.Dial` no longer refuses a `moqt://`
   URL that carries a query; it sends it (see Changed). Interop note: a peer
   running an older gomoqt keeps the whole SETUP Path, query included, as its
-  `RequestPath`.
+  `RequestPath`, so it sees the same string.
 
 ## [v0.20.1] - 2026-10-01
 

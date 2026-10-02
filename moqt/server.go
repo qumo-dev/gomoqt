@@ -376,7 +376,7 @@ func (u *WebTransportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// WebTransport resolves the request path in the HTTP handshake, so hand it
-	// to the Session (which exposes it as Session.RequestPath, the same way the
+	// to the Session (which exposes it as Session.RequestURI, the same way the
 	// native-QUIC router does with the path from SETUP). A WebTransport
 	// endpoint must not send a SETUP Path parameter, so sendPath stays false.
 	// The session's context is a child of the upgrade request's, which
@@ -423,13 +423,13 @@ func (s *Server) handleNativeQUIC(conn StreamConn) error {
 		return fmt.Errorf("native QUIC setup: %w", err)
 	}
 	// The Path parameter carries the query too, after "?", when the client
-	// dialed one (see Dialer.Dial); RequestPath reports it as received.
+	// dialed one (see Dialer.Dial); RequestURI reports it as received.
 	path, ok := sm.Path()
 	if !ok || len(path) == 0 || path[0] != '/' {
 		return fmt.Errorf("native QUIC setup: missing or invalid Path parameter")
 	}
 
-	// Hand the Session the learned path (exposed as Session.RequestPath, mirroring
+	// Hand the Session the learned path (exposed as Session.RequestURI, mirroring
 	// WebTransport's r.URL.Path) along with the decoded SETUP, so it seeds
 	// peer-probe state without re-reading the consumed stream.
 	sess := newSession(conn, s.TrackMux, s.connManager, s.Config, s.FetchHandler, nil, s.Logger,

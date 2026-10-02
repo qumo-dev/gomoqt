@@ -605,13 +605,13 @@ func TestServer_handleNativeQUIC_CallsHandlerOnValidSetup(t *testing.T) {
 
 // TestServer_handleNativeQUIC_HandlerSeesSetupPath verifies the end-to-end
 // contract the Path parameter exists for: the path a client puts in its SETUP
-// reaches the handler as Session.RequestPath. Nothing else asserts that the router's
+// reaches the handler as Session.RequestURI. Nothing else asserts that the router's
 // learned path survives into the Session.
 func TestServer_handleNativeQUIC_HandlerSeesSetupPath(t *testing.T) {
 	var got string
 	s := &Server{
 		Handler: HandleFunc(func(sess *Session) {
-			got = sess.RequestPath()
+			got = sess.RequestURI()
 		}),
 	}
 
@@ -623,13 +623,13 @@ func TestServer_handleNativeQUIC_HandlerSeesSetupPath(t *testing.T) {
 
 // TestServer_handleNativeQUIC_HandlerSeesSetupQuery verifies a query the client
 // appended to its SETUP Path after "?" reaches the handler in
-// Session.RequestPath, as received, the same form WebTransport reports.
+// Session.RequestURI, as received, the same form WebTransport reports.
 func TestServer_handleNativeQUIC_HandlerSeesSetupQuery(t *testing.T) {
 	for _, setupPath := range []string{"/live/alice?jwt=a.b.c&hub=east", "/?jwt=a.b.c"} {
 		t.Run(setupPath, func(t *testing.T) {
 			var got string
 			s := &Server{
-				Handler: HandleFunc(func(sess *Session) { got = sess.RequestPath() }),
+				Handler: HandleFunc(func(sess *Session) { got = sess.RequestURI() }),
 			}
 			conn := newTestNativeQUICConn(t, withClientSetup(setupPath))
 
@@ -713,11 +713,11 @@ func TestWebTransportHandler_ServeHTTP_UpgradeSuccess(t *testing.T) {
 	assert.True(t, handlerCalled)
 }
 
-// TestWebTransportHandler_ServeHTTP_HandlerSeesRequestPath verifies the
-// WebTransport half of Session.RequestPath: the handler observes the HTTP request's
+// TestWebTransportHandler_ServeHTTP_HandlerSeesRequestURI verifies the
+// WebTransport half of Session.RequestURI: the handler observes the HTTP request's
 // path, the same value a native-QUIC handler gets from the SETUP Path
 // parameter, so a handler serving both bindings has one way to ask.
-func TestWebTransportHandler_ServeHTTP_HandlerSeesRequestPath(t *testing.T) {
+func TestWebTransportHandler_ServeHTTP_HandlerSeesRequestURI(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		url  string
@@ -739,7 +739,7 @@ func TestWebTransportHandler_ServeHTTP_HandlerSeesRequestPath(t *testing.T) {
 					return sess, nil
 				},
 				Handler: HandleFunc(func(sess *Session) {
-					got = sess.RequestPath()
+					got = sess.RequestURI()
 				}),
 			}
 

@@ -29,14 +29,15 @@ func (s *Session) RemoteAddr() net.Addr
 
 Outgoing requests such as subscribing to tracks, fetching specific groups, probing bitrate, or discovering available tracks are handled by the session.
 
-## Request path
+## Request URI
 
-`Session.RequestPath` returns the session's request path, on either transport binding
-and on either side of the session:
+`Session.RequestURI` returns the session's request URI as received, like Go's
+`http.Request.RequestURI` — the path, plus `?` and the query when there is one, with
+no scheme or host — on either transport binding and on either side of the session:
 
 ```go
 func (h *HandlerImpl) ServeMOQ(sess *moqt.Session) {
-    path := sess.RequestPath()
+    path := sess.RequestURI()
     // path == "/live/alice" for a client that dialed
     // moqt://host/live/alice or https://host/live/alice
 }
@@ -46,7 +47,7 @@ When the request has a query, it follows the path after `?`, as in a request URI
 `"/live/alice?jwt=x"`. Split them with `url.Parse`:
 
 ```go
-u, err := url.Parse(sess.RequestPath())
+u, err := url.Parse(sess.RequestURI())
 if err != nil {
     return
 }
@@ -68,11 +69,11 @@ available immediately — you never wait on the peer's SETUP to read it:
   it, or whose path is not rooted at `/`, is rejected.
 
 A path is always rooted at `/` — dialing `moqt://host` or `https://host` with no
-path yields `"/"`. `RequestPath` returns `""` only for a session constructed without a
+path yields `"/"`. `RequestURI` returns `""` only for a session constructed without a
 binding-supplied path, which the `Dialer` and `Server` entry points never produce.
 
 <Note>
-`Session.RequestPath` is the session's request path, which selects a server-side
+`Session.RequestURI` is the session's request URI, which selects a server-side
 endpoint. It is unrelated to `BroadcastPath`, which identifies a broadcast
 *within* an established session — which is why the accessor is not called
 `Path`: in this package "path" already means `BroadcastPath`.

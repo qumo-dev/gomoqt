@@ -54,7 +54,7 @@ type Dialer struct {
 //
 // Scheme "https" dials WebTransport and "moqt" dials native QUIC; any other
 // scheme returns ErrInvalidScheme. The path, with "?" and the query when
-// there is one, is reported by Session.RequestPath. A URL with no path is
+// there is one, is reported by Session.RequestURI. A URL with no path is
 // dialed as "/".
 //
 // On WebTransport the path and query travel in the HTTP request URI. Native

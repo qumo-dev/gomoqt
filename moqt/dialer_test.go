@@ -158,7 +158,7 @@ func TestDialer_Dial_WebTransportCustomDialError(t *testing.T) {
 	assert.Nil(t, sess)
 }
 
-// TestDialer_Dial_PopulatesSessionPath verifies Session.RequestPath reports the path
+// TestDialer_Dial_PopulatesSessionPath verifies Session.RequestURI reports the path
 // that was actually dialed, on both bindings.
 func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 	newWebTransportDialer := func(recordTarget *string) *Dialer {
@@ -183,7 +183,7 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 		assert.Equal(t, "https://example.com:443/live/alice", target)
-		assert.Equal(t, "/live/alice", sess.RequestPath())
+		assert.Equal(t, "/live/alice", sess.RequestURI())
 	})
 
 	t.Run("WebTransportNoPathDefaultsToRoot", func(t *testing.T) {
@@ -193,7 +193,7 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 		assert.Equal(t, "https://example.com:443/", target)
-		assert.Equal(t, "/", sess.RequestPath())
+		assert.Equal(t, "/", sess.RequestURI())
 	})
 
 	t.Run("NativeQUIC", func(t *testing.T) {
@@ -211,7 +211,7 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
-		assert.Equal(t, "/live/alice", sess.RequestPath())
+		assert.Equal(t, "/live/alice", sess.RequestURI())
 	})
 
 	t.Run("NativeQUICNoPathDefaultsToRoot", func(t *testing.T) {
@@ -229,7 +229,7 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
-		assert.Equal(t, "/", sess.RequestPath())
+		assert.Equal(t, "/", sess.RequestURI())
 	})
 }
 
@@ -256,8 +256,8 @@ func TestDialer_Dial_PreservesQuery(t *testing.T) {
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 	assert.Equal(t, "https://example.com:443/session?token=abc&hub=east", target)
-	// Session.RequestPath carries the query after "?", as the request URI does.
-	assert.Equal(t, "/session?token=abc&hub=east", sess.RequestPath())
+	// Session.RequestURI carries the query after "?", as the request URI does.
+	assert.Equal(t, "/session?token=abc&hub=east", sess.RequestURI())
 }
 
 // TestDialer_Dial_StripsFragment verifies a fragment is not sent to the server.
@@ -282,13 +282,13 @@ func TestDialer_Dial_StripsFragment(t *testing.T) {
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 	assert.Equal(t, "https://example.com:443/session", target)
-	assert.Equal(t, "/session", sess.RequestPath())
+	assert.Equal(t, "/session", sess.RequestURI())
 }
 
 // TestDialer_Dial_QUICCarriesQuery verifies a moqt URL's query reaches the
 // server: it is appended to the SETUP Path parameter after "?", the form
 // draft-ietf-moq-transport's PATH parameter and the moq-lite reference
-// implementation use, and the session's RequestPath carries it the same way.
+// implementation use, and the session's RequestURI carries it the same way.
 func TestDialer_Dial_QUICCarriesQuery(t *testing.T) {
 	setupStream := &FakeQUICSendStream{}
 	d := &Dialer{
@@ -306,7 +306,7 @@ func TestDialer_Dial_QUICCarriesQuery(t *testing.T) {
 
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
-	assert.Equal(t, "/live?jwt=a.b.c&hub=east", sess.RequestPath())
+	assert.Equal(t, "/live?jwt=a.b.c&hub=east", sess.RequestURI())
 	require.Eventually(t, func() bool { return len(setupStream.Written()) > 0 },
 		time.Second, 5*time.Millisecond, "the client SETUP was not written")
 	assert.Equal(t, "/live?jwt=a.b.c&hub=east", sentSetupPath(t, setupStream.Written()))
@@ -331,7 +331,7 @@ func TestDialer_Dial_QUICWithoutQueryAppendsNothing(t *testing.T) {
 
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
-	assert.Equal(t, "/live", sess.RequestPath())
+	assert.Equal(t, "/live", sess.RequestURI())
 	require.Eventually(t, func() bool { return len(setupStream.Written()) > 0 },
 		time.Second, 5*time.Millisecond, "the client SETUP was not written")
 	assert.Equal(t, "/live", sentSetupPath(t, setupStream.Written()))
@@ -421,6 +421,6 @@ func TestDialer_Dial_BareQuestionMarkIsNotAQuery(t *testing.T) {
 		require.NoError(t, err, "a bare ? carries no query")
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
-		assert.Equal(t, "/live", sess.RequestPath())
+		assert.Equal(t, "/live", sess.RequestURI())
 	})
 }

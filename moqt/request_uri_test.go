@@ -16,7 +16,7 @@ import (
 )
 
 // TestDial_NativeQUIC_QueryReachesServer dials a real native-QUIC server with a
-// query and checks the server's handler sees it in RequestPath, after "?", as
+// query and checks the server's handler sees it in RequestURI, after "?", as
 // a WebTransport handler would, and can split it with url.Parse.
 func TestDial_NativeQUIC_QueryReachesServer(t *testing.T) {
 	addr := freePort(t)
@@ -30,7 +30,7 @@ func TestDial_NativeQUIC_QueryReachesServer(t *testing.T) {
 		QUICConfig: &quic.Config{EnableDatagrams: true},
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Handler: HandleFunc(func(sess *Session) {
-			seen <- sess.RequestPath()
+			seen <- sess.RequestURI()
 			<-sess.Context().Done()
 		}),
 	}
@@ -61,5 +61,5 @@ func TestDial_NativeQUIC_QueryReachesServer(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the server handler never ran")
 	}
-	assert.Equal(t, "/live/alice?jwt=a.b.c", sess.RequestPath(), "the client reports what it dialed")
+	assert.Equal(t, "/live/alice?jwt=a.b.c", sess.RequestURI(), "the client reports what it dialed")
 }
