@@ -622,33 +622,20 @@ func TestServer_handleNativeQUIC_HandlerSeesSetupPath(t *testing.T) {
 }
 
 // TestServer_handleNativeQUIC_HandlerSeesSetupQuery verifies a query the client
-// appended to its SETUP Path after "?" reaches the handler as
-// Session.RequestQuery, and is not part of Session.RequestPath.
+// appended to its SETUP Path after "?" reaches the handler in
+// Session.RequestPath, as received, the same form WebTransport reports.
 func TestServer_handleNativeQUIC_HandlerSeesSetupQuery(t *testing.T) {
-	tests := map[string]struct {
-		setupPath string
-		wantPath  string
-		wantQuery string
-	}{
-		"path and query":      {setupPath: "/live/alice?jwt=a.b.c&hub=east", wantPath: "/live/alice", wantQuery: "jwt=a.b.c&hub=east"},
-		"root with query":     {setupPath: "/?jwt=a.b.c", wantPath: "/", wantQuery: "jwt=a.b.c"},
-		"no query":            {setupPath: "/live", wantPath: "/live", wantQuery: ""},
-		"a second ? is query": {setupPath: "/live?a=1?b=2", wantPath: "/live", wantQuery: "a=1?b=2"},
-	}
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			var gotPath, gotQuery string
+	for _, setupPath := range []string{"/live/alice?jwt=a.b.c&hub=east", "/?jwt=a.b.c"} {
+		t.Run(setupPath, func(t *testing.T) {
+			var got string
 			s := &Server{
-				Handler: HandleFunc(func(sess *Session) {
-					gotPath, gotQuery = sess.RequestPath(), sess.RequestQuery()
-				}),
+				Handler: HandleFunc(func(sess *Session) { got = sess.RequestPath() }),
 			}
-			conn := newTestNativeQUICConn(t, withClientSetup(tt.setupPath))
+			conn := newTestNativeQUICConn(t, withClientSetup(setupPath))
 
 			require.NoError(t, s.handleNativeQUIC(conn))
 
-			assert.Equal(t, tt.wantPath, gotPath)
-			assert.Equal(t, tt.wantQuery, gotQuery)
+			assert.Equal(t, setupPath, got)
 		})
 	}
 }
@@ -732,17 +719,17 @@ func TestWebTransportHandler_ServeHTTP_UpgradeSuccess(t *testing.T) {
 // parameter, so a handler serving both bindings has one way to ask.
 func TestWebTransportHandler_ServeHTTP_HandlerSeesRequestPath(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		url       string
-		want      string
-		wantQuery string
+		name string
+		url  string
+		want string
 	}{
 		{name: "Path", url: "https://example.com/live/alice", want: "/live/alice"},
 		{name: "EmptyPathDefaultsToRoot", url: "https://example.com", want: "/"},
-		{name: "Query", url: "https://example.com/live/alice?jwt=a.b.c", want: "/live/alice", wantQuery: "jwt=a.b.c"},
+		{name: "Query", url: "https://example.com/live/alice?jwt=a.b.c", want: "/live/alice?jwt=a.b.c"},
+		{name: "QueryOnRoot", url: "https://example.com?jwt=a.b.c", want: "/?jwt=a.b.c"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var got, gotQuery string
+			var got string
 			u := &WebTransportHandler{
 				TrackMux: NewTrackMux(0),
 				UpgradeFunc: func(w http.ResponseWriter, r *http.Request) (WebTransportSession, error) {
@@ -752,7 +739,7 @@ func TestWebTransportHandler_ServeHTTP_HandlerSeesRequestPath(t *testing.T) {
 					return sess, nil
 				},
 				Handler: HandleFunc(func(sess *Session) {
-					got, gotQuery = sess.RequestPath(), sess.RequestQuery()
+					got = sess.RequestPath()
 				}),
 			}
 
@@ -761,7 +748,6 @@ func TestWebTransportHandler_ServeHTTP_HandlerSeesRequestPath(t *testing.T) {
 
 			u.ServeHTTP(&FakeHTTPResponseWriter{}, r)
 			assert.Equal(t, tc.want, got)
-			assert.Equal(t, tc.wantQuery, gotQuery)
 		})
 	}
 }

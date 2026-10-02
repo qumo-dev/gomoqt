@@ -53,9 +53,9 @@ type Dialer struct {
 // binding, and its path selects the server-side endpoint.
 //
 // Scheme "https" dials WebTransport and "moqt" dials native QUIC; any other
-// scheme returns ErrInvalidScheme. The path and query are reported by
-// Session.RequestPath and Session.RequestQuery. A URL with no path is dialed
-// as "/".
+// scheme returns ErrInvalidScheme. The path, with "?" and the query when
+// there is one, is reported by Session.RequestPath. A URL with no path is
+// dialed as "/".
 //
 // On WebTransport the path and query travel in the HTTP request URI. Native
 // QUIC has no request URI, so they travel in the SETUP Path parameter, with
@@ -96,7 +96,7 @@ func (d *Dialer) Dial(ctx context.Context, rawURL string, mux *TrackMux) (*Sessi
 	case "https":
 		return d.dialWebTransport(ctx, &target, mux)
 	case "moqt":
-		return d.dialQUIC(ctx, target.Host, target.Path, target.RawQuery, mux)
+		return d.dialQUIC(ctx, target.Host, target.RequestURI(), mux)
 	default:
 		return nil, ErrInvalidScheme
 	}
@@ -143,17 +143,18 @@ func (d *Dialer) dialWebTransport(ctx context.Context, target *url.URL, mux *Tra
 	// learns it from the request URI and this endpoint must not send a SETUP
 	// Path parameter.
 	return newSession(conn, mux, nil, d.Config, d.FetchHandler, d.OnGoaway, d.Logger,
-		sessionSetup{path: target.Path, query: target.RawQuery}, nil), nil
+		sessionSetup{path: target.RequestURI()}, nil), nil
 }
 
 // dialQUIC establishes a new session over native QUIC by dialing the provided
 // address and negotiating the transport protocol. This uses the QUIC dial
 // function configured on the Dialer (DialQUICFunc) if present.
 //
-// path and query are conveyed to the server via the SETUP Path parameter,
-// since the native QUIC binding has no request URI of its own. Dial is the only
-// caller and has already normalized path to a rooted, non-empty path.
-func (d *Dialer) dialQUIC(ctx context.Context, addr, path, query string, mux *TrackMux) (*Session, error) {
+// path is the request path, with "?" and the query when there is one,
+// conveyed to the server via the SETUP Path parameter, since the native QUIC
+// binding has no request URI of its own. Dial is the only caller and has
+// already normalized it to a rooted, non-empty path.
+func (d *Dialer) dialQUIC(ctx context.Context, addr, path string, mux *TrackMux) (*Session, error) {
 	dialTimeout := d.Config.setupTimeout()
 	dialCtx, cancelDial := context.WithTimeout(ctx, dialTimeout)
 	defer cancelDial()
@@ -182,5 +183,5 @@ func (d *Dialer) dialQUIC(ctx context.Context, addr, path, query string, mux *Tr
 	// Native QUIC has no handshake-time request URI, so the client is the one
 	// role that conveys the request path in its own SETUP. sendPath drives that.
 	return newSession(conn, mux, nil, d.Config, d.FetchHandler, d.OnGoaway, d.Logger,
-		sessionSetup{path: path, query: query, sendPath: true}, nil), nil
+		sessionSetup{path: path, sendPath: true}, nil), nil
 }

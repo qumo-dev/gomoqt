@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/url"
 	"testing"
 	"time"
 
@@ -15,12 +16,11 @@ import (
 )
 
 // TestDial_NativeQUIC_QueryReachesServer dials a real native-QUIC server with a
-// query and checks the server's handler sees it as RequestQuery, apart from
-// RequestPath, as a WebTransport handler would.
+// query and checks the server's handler sees it in RequestPath, after "?", as
+// a WebTransport handler would, and can split it with url.Parse.
 func TestDial_NativeQUIC_QueryReachesServer(t *testing.T) {
 	addr := freePort(t)
-	type request struct{ path, query string }
-	seen := make(chan request, 1)
+	seen := make(chan string, 1)
 	srv := &Server{
 		Addr: addr,
 		TLSConfig: &tls.Config{
@@ -30,7 +30,7 @@ func TestDial_NativeQUIC_QueryReachesServer(t *testing.T) {
 		QUICConfig: &quic.Config{EnableDatagrams: true},
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Handler: HandleFunc(func(sess *Session) {
-			seen <- request{sess.RequestPath(), sess.RequestQuery()}
+			seen <- sess.RequestPath()
 			<-sess.Context().Done()
 		}),
 	}
@@ -53,9 +53,13 @@ func TestDial_NativeQUIC_QueryReachesServer(t *testing.T) {
 
 	select {
 	case got := <-seen:
-		assert.Equal(t, request{path: "/live/alice", query: "jwt=a.b.c"}, got)
+		assert.Equal(t, "/live/alice?jwt=a.b.c", got)
+		u, err := url.Parse(got)
+		require.NoError(t, err)
+		assert.Equal(t, "/live/alice", u.Path)
+		assert.Equal(t, "a.b.c", u.Query().Get("jwt"))
 	case <-time.After(5 * time.Second):
 		t.Fatal("the server handler never ran")
 	}
-	assert.Equal(t, "jwt=a.b.c", sess.RequestQuery(), "the client reports the query it dialed")
+	assert.Equal(t, "/live/alice?jwt=a.b.c", sess.RequestPath(), "the client reports what it dialed")
 }

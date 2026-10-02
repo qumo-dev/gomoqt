@@ -42,39 +42,34 @@ func (h *HandlerImpl) ServeMOQ(sess *moqt.Session) {
 }
 ```
 
+When the request has a query, it follows the path after `?`, as in a request URI:
+`"/live/alice?jwt=x"`. Split them with `url.Parse`:
+
+```go
+u, err := url.Parse(sess.RequestPath())
+if err != nil {
+    return
+}
+token := u.Query().Get("jwt") // u.Path == "/live/alice"
+```
+
+A query commonly carries a credential, so avoid logging the whole value.
+
 The path is resolved by the binding before the session is constructed, so it is
 available immediately — you never wait on the peer's SETUP to read it:
 
-- **WebTransport:** the path is the HTTP request's `r.URL.Path`, resolved by the
-  HTTP handshake. It is also still available directly on the `*http.Request` in
+- **WebTransport:** the path is the HTTP request's path and query as received
+  (`r.URL.RequestURI()`), resolved by the HTTP handshake. It is also still available directly on the `*http.Request` in
   your `http.Handler`, which is where you route with `http.ServeMux`.
 - **Native QUIC:** native QUIC has no handshake-time request URI, so the client
-  conveys the path in its SETUP message, as the mandatory Path parameter. A
+  conveys the path in its SETUP message, as the mandatory Path parameter, with `?`
+  and the query appended when there is one. A
   server-side router reads it before constructing the session; a SETUP that omits
   it, or whose path is not rooted at `/`, is rejected.
 
 A path is always rooted at `/` — dialing `moqt://host` or `https://host` with no
 path yields `"/"`. `RequestPath` returns `""` only for a session constructed without a
 binding-supplied path, which the `Dialer` and `Server` entry points never produce.
-
-## Request query
-
-`Session.RequestQuery` returns the session's raw request query, without the `?`,
-on either binding and either side of the session — `""` when there is none:
-
-```go
-func (h *HandlerImpl) ServeMOQ(sess *moqt.Session) {
-    q, _ := url.ParseQuery(sess.RequestQuery())
-    token := q.Get("jwt")
-    // RequestQuery() == "jwt=x" for a client that dialed
-    // moqt://host/live/alice?jwt=x or https://host/live/alice?jwt=x
-}
-```
-
-On WebTransport it is the HTTP request's `r.URL.RawQuery`. On native QUIC the
-client appends it to the SETUP Path parameter after `?`, and the server splits it
-off before constructing the session, so `RequestPath` never contains it. A query
-commonly carries a credential: avoid logging it.
 
 <Note>
 `Session.RequestPath` is the session's request path, which selects a server-side

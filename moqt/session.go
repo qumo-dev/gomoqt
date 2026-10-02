@@ -25,15 +25,11 @@ const (
 // unknown path that sends no Path parameter and reads the peer SETUP itself.
 type sessionSetup struct {
 	// path is the session's request path, resolved by the binding before the
-	// Session exists: from r.URL.Path for WebTransport, from the SETUP Path
+	// Session exists: from r.URL for WebTransport, from the SETUP Path
 	// parameter for native QUIC, and from the dialed URL on either client.
-	// It backs Session.RequestPath.
+	// It carries "?" and the query after the path when the request has one,
+	// and backs Session.RequestPath.
 	path string
-	// query is the request's raw query, without the "?": from r.URL.RawQuery
-	// for WebTransport, from what follows "?" in the SETUP Path parameter for
-	// native QUIC, and from the dialed URL on either client. It backs
-	// Session.RequestQuery.
-	query string
 	// sendPath reports whether this endpoint must convey path in its own
 	// outgoing SETUP. True only for the native-QUIC client, whose binding has
 	// no handshake-time request URI; every other role is prohibited from
@@ -82,12 +78,10 @@ type Session struct {
 
 	connManager *connManager
 
-	// path and query are the session's request path and raw query, resolved
-	// by the binding (see sessionSetup). sendPath reports whether they must
-	// also be conveyed in our outgoing SETUP, which only the native-QUIC
-	// client does.
+	// path is the session's request path, resolved by the binding (see
+	// sessionSetup.path). sendPath reports whether it must also be conveyed in
+	// our outgoing SETUP, which only the native-QUIC client does.
 	path     string
-	query    string
 	sendPath bool
 
 	// localProbeLevel is the Probe capability advertised in our SETUP.
@@ -153,7 +147,6 @@ func newSession(
 		onGoaway:        onGoaway,
 		logger:          logger,
 		path:            setup.path,
-		query:           setup.query,
 		sendPath:        setup.sendPath,
 		trackReaders:    make(map[SubscribeID]*TrackReader),
 		trackWriters:    make(map[SubscribeID]*TrackWriter),
@@ -206,8 +199,10 @@ func newSession(
 }
 
 // RequestPath returns the session's request path, such as "/live/alice" for a
-// client that dialed "moqt://host/live/alice?jwt=x" or
-// "https://host/live/alice?jwt=x". The query is reported by RequestQuery.
+// client that dialed "moqt://host/live/alice" or "https://host/live/alice".
+// When the request has a query it follows a "?", as in the request URI:
+// "/live/alice?jwt=x". Split them with url.Parse. A query commonly carries a
+// credential, so avoid logging the whole value.
 //
 // It is the path that selects a server-side endpoint, and is unrelated to
 // BroadcastPath, which identifies a broadcast within an established session.
@@ -223,16 +218,6 @@ func (sess *Session) RequestPath() string {
 	return sess.path
 }
 
-// RequestQuery returns the session's raw request query, without the "?", such
-// as "jwt=x" for a client that dialed "moqt://host/live/alice?jwt=x" or
-// "https://host/live/alice?jwt=x"; "" when there is none. Like RequestPath it
-// is resolved by the binding before the session exists and is identical on
-// both bindings and both sides of a session. Parse it with url.ParseQuery.
-//
-// A query commonly carries a credential: avoid logging it.
-func (sess *Session) RequestQuery() string {
-	return sess.query
-}
 
 // openSetupStream sends this endpoint's SETUP message on a unidirectional
 // Setup Stream and closes it (FIN), per moq-lite-05. A client on a binding
@@ -259,11 +244,7 @@ func (sess *Session) openSetupStream() {
 	// omitting a parameter that is mandatory on this binding should fail at
 	// the peer rather than pass silently.
 	if sess.sendPath {
-		path := sess.path
-		if sess.query != "" {
-			path += "?" + sess.query
-		}
-		sm.AddPath(path)
+		sm.AddPath(sess.path)
 	}
 
 	if err := sm.Encode(stream); err != nil {
