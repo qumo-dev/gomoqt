@@ -117,18 +117,19 @@ type Dialer struct {
 ```
 
 The URL's path selects the server-side endpoint and is reported by
-[`Session.RequestPath`](/moq/session#request-path). A URL with no path is dialed as `/`.
+[`Session.RequestURI`](/moq/session#request-uri). A URL with no path is dialed as `/`.
 On native QUIC the path travels as the SETUP Path parameter, since that binding
 has no request URI of its own.
 
 <Note>
-**Note: Queries and native QUIC**
+**Note: Queries**
 
-A query is carried only by `https://`, where it belongs to the HTTP request URI
-the server receives. Native QUIC conveys only a path, so a `moqt://` URL carrying
-a query returns `moqt.ErrQueryNotSupported` rather than connecting to an endpoint
-you did not ask for. A fragment is client-side only and is never sent on either
-binding.
+A query reaches the server on both bindings, and
+[`Session.RequestURI`](/moq/session#request-uri) carries it after `?` on both
+sides. On `https://` it is part of the HTTP request URI; on `moqt://` it is
+appended to the SETUP Path parameter after `?`, as draft-ietf-moq-transport and
+the moq-lite reference implementation do. That is how a credential such as `?jwt=` reaches a server over native QUIC.
+A fragment is client-side only and is never sent on either binding.
 </Note>
 
 To supply your own connection or handshake, set `DialQUICFunc` or

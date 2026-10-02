@@ -605,13 +605,13 @@ func TestServer_handleNativeQUIC_CallsHandlerOnValidSetup(t *testing.T) {
 
 // TestServer_handleNativeQUIC_HandlerSeesSetupPath verifies the end-to-end
 // contract the Path parameter exists for: the path a client puts in its SETUP
-// reaches the handler as Session.RequestPath. Nothing else asserts that the router's
+// reaches the handler as Session.RequestURI. Nothing else asserts that the router's
 // learned path survives into the Session.
 func TestServer_handleNativeQUIC_HandlerSeesSetupPath(t *testing.T) {
 	var got string
 	s := &Server{
 		Handler: HandleFunc(func(sess *Session) {
-			got = sess.RequestPath()
+			got = sess.RequestURI()
 		}),
 	}
 
@@ -619,6 +619,39 @@ func TestServer_handleNativeQUIC_HandlerSeesSetupPath(t *testing.T) {
 
 	require.NoError(t, s.handleNativeQUIC(conn))
 	assert.Equal(t, "/live/alice", got)
+}
+
+// TestServer_handleNativeQUIC_HandlerSeesSetupQuery verifies a query the client
+// appended to its SETUP Path after "?" reaches the handler in
+// Session.RequestURI, as received, the same form WebTransport reports.
+func TestServer_handleNativeQUIC_HandlerSeesSetupQuery(t *testing.T) {
+	for _, setupPath := range []string{"/live/alice?jwt=a.b.c&hub=east", "/?jwt=a.b.c"} {
+		t.Run(setupPath, func(t *testing.T) {
+			var got string
+			s := &Server{
+				Handler: HandleFunc(func(sess *Session) { got = sess.RequestURI() }),
+			}
+			conn := newTestNativeQUICConn(t, withClientSetup(setupPath))
+
+			require.NoError(t, s.handleNativeQUIC(conn))
+
+			assert.Equal(t, setupPath, got)
+		})
+	}
+}
+
+// TestServer_handleNativeQUIC_RejectsQueryWithoutPath verifies a SETUP Path
+// that is only a query has no rooted path, and is rejected like any other.
+func TestServer_handleNativeQUIC_RejectsQueryWithoutPath(t *testing.T) {
+	s := &Server{
+		Handler: HandleFunc(func(*Session) { t.Fatal("handler must not be called") }),
+	}
+	conn := newTestNativeQUICConn(t, withClientSetup("?jwt=a.b.c"))
+
+	err := s.handleNativeQUIC(conn)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Path")
 }
 
 // TestServer_handleNativeQUIC_RejectsMissingPath verifies the router rejects a
@@ -680,11 +713,11 @@ func TestWebTransportHandler_ServeHTTP_UpgradeSuccess(t *testing.T) {
 	assert.True(t, handlerCalled)
 }
 
-// TestWebTransportHandler_ServeHTTP_HandlerSeesRequestPath verifies the
-// WebTransport half of Session.RequestPath: the handler observes the HTTP request's
+// TestWebTransportHandler_ServeHTTP_HandlerSeesRequestURI verifies the
+// WebTransport half of Session.RequestURI: the handler observes the HTTP request's
 // path, the same value a native-QUIC handler gets from the SETUP Path
 // parameter, so a handler serving both bindings has one way to ask.
-func TestWebTransportHandler_ServeHTTP_HandlerSeesRequestPath(t *testing.T) {
+func TestWebTransportHandler_ServeHTTP_HandlerSeesRequestURI(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		url  string
@@ -692,6 +725,9 @@ func TestWebTransportHandler_ServeHTTP_HandlerSeesRequestPath(t *testing.T) {
 	}{
 		{name: "Path", url: "https://example.com/live/alice", want: "/live/alice"},
 		{name: "EmptyPathDefaultsToRoot", url: "https://example.com", want: "/"},
+		{name: "Query", url: "https://example.com/live/alice?jwt=a.b.c", want: "/live/alice?jwt=a.b.c"},
+		{name: "QueryOnRoot", url: "https://example.com?jwt=a.b.c", want: "/?jwt=a.b.c"},
+		{name: "EscapedPathKeptEscaped", url: "https://example.com/live/alice%20smith?jwt=a.b.c", want: "/live/alice%20smith?jwt=a.b.c"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var got string
@@ -704,7 +740,7 @@ func TestWebTransportHandler_ServeHTTP_HandlerSeesRequestPath(t *testing.T) {
 					return sess, nil
 				},
 				Handler: HandleFunc(func(sess *Session) {
-					got = sess.RequestPath()
+					got = sess.RequestURI()
 				}),
 			}
 

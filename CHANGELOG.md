@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **moqt: `Session.RequestPath` is renamed `Session.RequestURI`, and carries
+  the query; a URL's query now reaches the server over native QUIC too.**
+  `Session.RequestURI()` returns the request URI as received, like
+  `http.Request.RequestURI`: the path, followed by `?` and the query when there
+  is one (`"/live/alice?jwt=x"`), with no scheme or host. It is the same on
+  WebTransport (`r.URL.RequestURI()`) and native QUIC (the SETUP Path), on both
+  sides of a session; split it with `url.Parse`. A `moqt://` URL's query is now
+  appended to the SETUP Path parameter after `?`, the form
+  draft-ietf-moq-transport's PATH parameter and the moq-lite reference
+  implementation (kixelated/moq) use. This is how a credential in the query
+  (`?jwt=`) reaches a server over native QUIC. **Migration:** replace
+  `RequestPath()` with `RequestURI()`; code that compared it to a bare path
+  should compare `url.Parse(sess.RequestURI())`'s `Path` instead.
+
+### Removed
+
+- **moqt: `ErrQueryNotSupported`.** `Dialer.Dial` no longer refuses a `moqt://`
+  URL that carries a query; it sends it (see Changed). Interop note: a peer
+  running an older gomoqt keeps the whole SETUP Path, query included, as its
+  `RequestPath`, so it sees the same string. One wire difference: the
+  native-QUIC client now sends the path in its escaped URI form (`%20` for a
+  space), where it used to send the decoded path, so a path with characters
+  that need escaping reaches an older server escaped.
+
 ## [v0.20.1] - 2026-10-01
 
 > Go-only patch release; `@qumo/moq` stays at `0.20.0` (no `moq-web` change). No exported API change and no wire change, so this interoperates with `v0.20.0` peers. Behavior changes for servers: handlers now see `Server.ConnContext` values, and a subscriber's `AcceptGroup` returns `io.EOF` after SUBSCRIBE_END where it used to block.

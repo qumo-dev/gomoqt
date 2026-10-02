@@ -1,6 +1,7 @@
 package moqt
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/quic-go/quic-go"
+	"github.com/qumo-dev/gomoqt/moqt/internal/message"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -156,7 +158,7 @@ func TestDialer_Dial_WebTransportCustomDialError(t *testing.T) {
 	assert.Nil(t, sess)
 }
 
-// TestDialer_Dial_PopulatesSessionPath verifies Session.RequestPath reports the path
+// TestDialer_Dial_PopulatesSessionPath verifies Session.RequestURI reports the path
 // that was actually dialed, on both bindings.
 func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 	newWebTransportDialer := func(recordTarget *string) *Dialer {
@@ -181,7 +183,7 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 		assert.Equal(t, "https://example.com:443/live/alice", target)
-		assert.Equal(t, "/live/alice", sess.RequestPath())
+		assert.Equal(t, "/live/alice", sess.RequestURI())
 	})
 
 	t.Run("WebTransportNoPathDefaultsToRoot", func(t *testing.T) {
@@ -191,7 +193,7 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 		assert.Equal(t, "https://example.com:443/", target)
-		assert.Equal(t, "/", sess.RequestPath())
+		assert.Equal(t, "/", sess.RequestURI())
 	})
 
 	t.Run("NativeQUIC", func(t *testing.T) {
@@ -209,7 +211,7 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
-		assert.Equal(t, "/live/alice", sess.RequestPath())
+		assert.Equal(t, "/live/alice", sess.RequestURI())
 	})
 
 	t.Run("NativeQUICNoPathDefaultsToRoot", func(t *testing.T) {
@@ -227,7 +229,7 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
-		assert.Equal(t, "/", sess.RequestPath())
+		assert.Equal(t, "/", sess.RequestURI())
 	})
 }
 
@@ -254,9 +256,8 @@ func TestDialer_Dial_PreservesQuery(t *testing.T) {
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 	assert.Equal(t, "https://example.com:443/session?token=abc&hub=east", target)
-	// Session.RequestPath is the path alone; the query reaches the server's
-	// http.Handler as part of the request URI.
-	assert.Equal(t, "/session", sess.RequestPath())
+	// Session.RequestURI carries the query after "?", as the request URI does.
+	assert.Equal(t, "/session?token=abc&hub=east", sess.RequestURI())
 }
 
 // TestDialer_Dial_StripsFragment verifies a fragment is not sent to the server.
@@ -281,28 +282,73 @@ func TestDialer_Dial_StripsFragment(t *testing.T) {
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
 	assert.Equal(t, "https://example.com:443/session", target)
-	assert.Equal(t, "/session", sess.RequestPath())
+	assert.Equal(t, "/session", sess.RequestURI())
 }
 
-// TestDialer_Dial_QUICRejectsQuery verifies a moqt URL carrying a query is
-// refused rather than dialed without it. The native QUIC binding conveys only a
-// path (the SETUP Path parameter), so honoring such a URL is impossible and
-// dropping the query would silently connect to a different endpoint.
-func TestDialer_Dial_QUICRejectsQuery(t *testing.T) {
-	dialed := false
+// TestDialer_Dial_QUICCarriesQuery verifies a moqt URL's query reaches the
+// server: it is appended to the SETUP Path parameter after "?", the form
+// draft-ietf-moq-transport's PATH parameter and the moq-lite reference
+// implementation use, and the session's RequestURI carries it the same way.
+func TestDialer_Dial_QUICCarriesQuery(t *testing.T) {
+	setupStream := &FakeQUICSendStream{}
 	d := &Dialer{
 		Config: &Config{SetupTimeout: 50 * time.Millisecond},
 		DialQUICFunc: func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (StreamConn, error) {
-			dialed = true
-			return &FakeStreamConn{}, nil
+			conn := &FakeStreamConn{}
+			conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
+			conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+			conn.OpenUniStreams = []sendStreamResult{{Stream: setupStream}}
+			return conn, nil
 		},
 	}
 
-	sess, err := d.Dial(context.Background(), "moqt://example.com:9000/live?token=abc", nil)
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrQueryNotSupported)
-	assert.Nil(t, sess)
-	assert.False(t, dialed, "the connection must not be opened")
+	sess, err := d.Dial(context.Background(), "moqt://example.com:9000/live?jwt=a.b.c&hub=east", nil)
+
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
+	assert.Equal(t, "/live?jwt=a.b.c&hub=east", sess.RequestURI())
+	require.Eventually(t, func() bool { return len(setupStream.Written()) > 0 },
+		time.Second, 5*time.Millisecond, "the client SETUP was not written")
+	assert.Equal(t, "/live?jwt=a.b.c&hub=east", sentSetupPath(t, setupStream.Written()))
+}
+
+// TestDialer_Dial_QUICWithoutQueryAppendsNothing verifies a moqt URL with no
+// query sends the bare path, with no trailing "?".
+func TestDialer_Dial_QUICWithoutQueryAppendsNothing(t *testing.T) {
+	setupStream := &FakeQUICSendStream{}
+	d := &Dialer{
+		Config: &Config{SetupTimeout: 50 * time.Millisecond},
+		DialQUICFunc: func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (StreamConn, error) {
+			conn := &FakeStreamConn{}
+			conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
+			conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+			conn.OpenUniStreams = []sendStreamResult{{Stream: setupStream}}
+			return conn, nil
+		},
+	}
+
+	sess, err := d.Dial(context.Background(), "moqt://example.com:9000/live", nil)
+
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
+	assert.Equal(t, "/live", sess.RequestURI())
+	require.Eventually(t, func() bool { return len(setupStream.Written()) > 0 },
+		time.Second, 5*time.Millisecond, "the client SETUP was not written")
+	assert.Equal(t, "/live", sentSetupPath(t, setupStream.Written()))
+}
+
+// sentSetupPath decodes a written Setup Stream and returns its Path parameter.
+func sentSetupPath(t *testing.T, written []byte) string {
+	t.Helper()
+	r := bytes.NewReader(written)
+	var st message.StreamType
+	require.NoError(t, st.Decode(r))
+	require.Equal(t, message.StreamTypeSetup, st)
+	var sm message.SetupMessage
+	require.NoError(t, sm.Decode(r))
+	path, ok := sm.Path()
+	require.True(t, ok, "the native-QUIC client must send a Path parameter")
+	return path
 }
 
 // TestDialer_Dial_DropsUserinfo verifies userinfo does not reach the dialed
@@ -372,22 +418,9 @@ func TestDialer_Dial_BareQuestionMarkIsNotAQuery(t *testing.T) {
 		}
 
 		sess, err := d.Dial(context.Background(), "moqt://example.com:9000/live?", nil)
-		require.NoError(t, err, "a bare ? carries no query and must not be rejected")
+		require.NoError(t, err, "a bare ? carries no query")
 		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
-		assert.Equal(t, "/live", sess.RequestPath())
+		assert.Equal(t, "/live", sess.RequestURI())
 	})
-}
-
-// TestDialer_Dial_QueryErrorDoesNotLeakQuery verifies the rejection does not
-// echo the query back. It is present by construction in that error and commonly
-// carries a credential, and errors are routinely logged.
-func TestDialer_Dial_QueryErrorDoesNotLeakQuery(t *testing.T) {
-	d := &Dialer{Config: &Config{SetupTimeout: 50 * time.Millisecond}}
-
-	_, err := d.Dial(context.Background(), "moqt://example.com:9000/live?token=hunter2", nil)
-	require.ErrorIs(t, err, ErrQueryNotSupported)
-	assert.NotContains(t, err.Error(), "hunter2")
-	assert.NotContains(t, err.Error(), "token")
-	assert.Contains(t, err.Error(), "moqt://example.com:9000/live")
 }

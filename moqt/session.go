@@ -25,9 +25,10 @@ const (
 // unknown path that sends no Path parameter and reads the peer SETUP itself.
 type sessionSetup struct {
 	// path is the session's request path, resolved by the binding before the
-	// Session exists: from r.URL.Path for WebTransport, from the SETUP Path
+	// Session exists: from r.URL for WebTransport, from the SETUP Path
 	// parameter for native QUIC, and from the dialed URL on either client.
-	// It backs Session.RequestPath.
+	// It carries "?" and the query after the path when the request has one,
+	// and backs Session.RequestURI.
 	path string
 	// sendPath reports whether this endpoint must convey path in its own
 	// outgoing SETUP. True only for the native-QUIC client, whose binding has
@@ -197,20 +198,24 @@ func newSession(
 	return sess
 }
 
-// RequestPath returns the session's request path, such as "/live/alice" for a
-// client that dialed "moqt://host/live/alice" or "https://host/live/alice".
+// RequestURI returns the session's request URI as received, like
+// http.Request.RequestURI: the path, followed by "?" and the query when there
+// is one. It is "/live/alice" for a client that dialed "moqt://host/live/alice"
+// or "https://host/live/alice", and "/live/alice?jwt=x" when the URL carried
+// "?jwt=x". It has no scheme or host. Split path and query with url.Parse. A
+// query commonly carries a credential, so avoid logging the whole value.
 //
-// It is the path that selects a server-side endpoint, and is unrelated to
-// BroadcastPath, which identifies a broadcast within an established session.
+// It selects a server-side endpoint, and is unrelated to BroadcastPath, which
+// identifies a broadcast within an established session.
 //
-// The path is resolved by the transport binding before the session exists —
+// It is resolved by the transport binding before the session exists —
 // from the HTTP request's URL for WebTransport, and from the client's SETUP
 // Path parameter for native QUIC — so it is available immediately and is
 // identical on both bindings and on both sides of a session. Every Dialer and
 // Server entry point supplies a path rooted at "/", defaulting to "/" when the
-// dialed URL carries none; RequestPath is empty only for a session constructed
+// dialed URL carries none; RequestURI is empty only for a session constructed
 // without a binding-supplied path.
-func (sess *Session) RequestPath() string {
+func (sess *Session) RequestURI() string {
 	return sess.path
 }
 
