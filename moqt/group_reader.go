@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io"
 	"iter"
-	"sync"
 	"time"
 
 	"github.com/qumo-dev/gomoqt/transport"
@@ -38,17 +37,11 @@ type GroupReader struct {
 
 	groupManager *groupReaderManager
 
-	// done, when set, runs once when the group ends for this reader:
-	// ReadFrame returns an error, or CancelRead is called.
-	done     func()
-	doneOnce sync.Once
-}
-
-// end runs done, once.
-func (s *GroupReader) end() {
-	if s.done != nil {
-		s.doneOnce.Do(s.done)
-	}
+	// stop, when set, stops Fetch watching the request's context. It is
+	// called when the group ends for this reader (ReadFrame returns an error,
+	// or CancelRead is called); like any context.AfterFunc stop, it is safe
+	// to call more than once.
+	stop func() bool
 }
 
 // GroupSequence returns the GroupSequence this reader belongs to.
@@ -65,7 +58,9 @@ func (s *GroupReader) ReadFrame(frame *Frame) error {
 	err := frame.decode(s.stream, s.prevTimestamp)
 	if err != nil {
 		// Any decode error ends the group stream for this reader.
-		s.end()
+		if s.stop != nil {
+			s.stop()
+		}
 		if errors.Is(err, io.EOF) {
 			return err
 		}
@@ -90,7 +85,9 @@ func (s *GroupReader) ReadFrame(frame *Frame) error {
 // CancelRead cancels the group using the provided GroupErrorCode.
 func (s *GroupReader) CancelRead(code GroupErrorCode) {
 	s.stream.CancelRead(transport.StreamErrorCode(code))
-	s.end()
+	if s.stop != nil {
+		s.stop()
+	}
 
 	if s.groupManager != nil {
 		s.groupManager.removeGroup(s)
