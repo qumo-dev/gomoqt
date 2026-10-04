@@ -177,6 +177,12 @@ type serverContextKeyType struct{}
 
 var serverContextKey = serverContextKeyType{}
 
+// connLifetimeKey holds a WebTransport connection's own context (the one
+// Server.ConnContext returned) in the contexts derived from it, so that
+// WebTransportHandler can end a session with the connection rather than with
+// its upgrade request (see sessionSetup.lifetime).
+type connLifetimeKey struct{}
+
 // ServeQUICListener accepts connections on the provided QUIC listener and handles them using the Server's configuration.
 // This runs until the listener is closed or the server shuts down.
 func (s *Server) ServeQUICListener(ln QUICListener) error {
@@ -248,6 +254,7 @@ func (s *Server) ServeQUICConn(conn StreamConn) error {
 	switch protocol := tlsInfo.NegotiatedProtocol; protocol {
 	case NextProtoH3:
 		ctx := s.connContext(conn.Context(), conn)
+		ctx = context.WithValue(ctx, connLifetimeKey{}, ctx)
 		wrapped := &streamConnContext{StreamConn: conn, ctx: ctx}
 		return s.WebTransportServer.ServeQUICConn(wrapped)
 	case NextProtoMOQ:
@@ -379,10 +386,18 @@ func (u *WebTransportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	// to the Session (which exposes it as Session.RequestURI, the same way the
 	// native-QUIC router does with the path from SETUP). A WebTransport
 	// endpoint must not send a SETUP Path parameter, so sendPath stays false.
-	// The session's context is a child of the upgrade request's, which
-	// carries what the Server's ConnContext stored for this connection.
+	// The session takes its values from the upgrade request, which carries
+	// what Server.ConnContext stored. It ends with the transport, which
+	// carries the close reason, or with the connection's own context, so
+	// that an application cancelling ConnContext's context ends it. Used
+	// without a Server, there is no such context, and the transport alone
+	// ends it.
+	lifetime, ok := r.Context().Value(connLifetimeKey{}).(context.Context)
+	if !ok {
+		lifetime = context.Background()
+	}
 	sess := newSession(conn, u.TrackMux, manager, u.Config, u.FetchHandler, nil, u.Logger,
-		sessionSetup{path: requestPath(r), ctx: r.Context()}, nil)
+		sessionSetup{path: requestPath(r), ctx: r.Context(), lifetime: lifetime}, nil)
 	// Ensure the session is cleaned up (conn removed from the manager) when
 	// the Handler returns, even if it did not call CloseWithError itself (e.g.
 	// the peer closed the connection). Idempotent.

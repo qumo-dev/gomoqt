@@ -963,6 +963,48 @@ func TestNewSession_ContextFromConnContext(t *testing.T) {
 	assert.Error(t, session.Context().Err(), "an application's cancellation in ConnContext ends the session's context")
 }
 
+// A WebTransport session (lifetime set) takes its values from the upgrade
+// request but not its cancellation, which comes with the session's own end and
+// no cause. It ends with the transport, keeping the transport's close reason,
+// or with lifetime, the connection's ConnContext context.
+func TestNewSession_WebTransportLifetime(t *testing.T) {
+	peerErr := &transport.ApplicationError{ErrorCode: 2, ErrorMessage: "expired", Remote: true}
+	appErr := errors.New("application ended the connection")
+	tests := map[string]struct {
+		end  func(cancelTransport, cancelLifetime context.CancelCauseFunc)
+		want error
+	}{
+		"the transport ends with the peer's close": {
+			end:  func(cancelTransport, _ context.CancelCauseFunc) { cancelTransport(peerErr) },
+			want: peerErr,
+		},
+		"the application cancels ConnContext's context": {
+			end:  func(_, cancelLifetime context.CancelCauseFunc) { cancelLifetime(appErr) },
+			want: appErr,
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			requestCtx, cancelRequest := context.WithCancel(context.WithValue(context.Background(), connValueKey{}, "conn-value"))
+			defer cancelRequest()
+			transportCtx, cancelTransport := context.WithCancelCause(context.Background())
+			defer cancelTransport(nil)
+			lifetime, cancelLifetime := context.WithCancelCause(context.Background())
+			defer cancelLifetime(nil)
+			session := newSession(&FakeStreamConn{ParentCtx: transportCtx}, NewTrackMux(0), nil, nil, nil, nil, nil,
+				sessionSetup{ctx: requestCtx, lifetime: lifetime}, nil)
+
+			cancelRequest()
+			require.NoError(t, session.Context().Err(), "the upgrade request's own cancellation doesn't end the session")
+			assert.Equal(t, "conn-value", session.Context().Value(connValueKey{}))
+			tt.end(cancelTransport, cancelLifetime)
+
+			<-session.Context().Done()
+			assert.ErrorIs(t, context.Cause(session.Context()), tt.want)
+		})
+	}
+}
+
 // A handler's context is derived like an http.Request's: a child of the
 // session's context that also ends when its stream does, with the stream's
 // cause, or when the server cancels it after the handler returns.
