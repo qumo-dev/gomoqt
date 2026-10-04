@@ -189,16 +189,17 @@ func (w *TrackWriter) OpenGroup(ctx context.Context) (*GroupWriter, error) {
 }
 
 // OpenGroupAt opens a new group with the specified sequence number.
-// It advances the internal next-sequence counter to at least seq+1 so that
-// subsequent OpenGroup calls will not produce a duplicate sequence.
+// It advances the internal counter to at least seq, so the next OpenGroup
+// opens seq+1 and Close's SUBSCRIBE_END names seq rather than a group that
+// was never opened.
 //
 // ctx controls cancellation and backpressure the same way as OpenGroup.
 func (w *TrackWriter) OpenGroupAt(ctx context.Context, seq GroupSequence) (*GroupWriter, error) {
-	// Advance the internal counter to avoid collisions with subsequent
-	// OpenGroup calls. CAS loop ensures correctness under concurrency.
+	// The counter holds the last sequence used: OpenGroup adds 1 and uses
+	// the result. CAS loop ensures correctness under concurrency.
 	for {
 		cur := w.groupSequence.Load()
-		next := max(cur, uint64(seq)+1)
+		next := max(cur, uint64(seq))
 		if next == cur {
 			break
 		}
