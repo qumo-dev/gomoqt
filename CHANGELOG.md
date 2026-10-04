@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **moqt: WebTransport session contexts retain the peer's close code and
+  reason.** A peer close previously canceled `Session.Context()` with only
+  `context.Canceled`, hiding the WebTransport close capsule's code and message.
+  The context cause now carries the peer's application error, as it does for
+  native QUIC sessions.
+
 ## [v0.22.0] - 2026-10-04
 
 > Go-only minor release; `@qumo/moq` stays at `0.20.0` (no `moq-web` change beyond a doc comment). Fixes only, but two behavior changes are visible to callers: after a GOAWAY from the peer, a session keeps serving `Subscribe`, `Fetch`, `AcceptAnnounce`, `Probe` and `TrackInfo` instead of failing them with `ErrClosedSession`; and a control message larger than 64 KiB is now refused (no real one comes close).
