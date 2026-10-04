@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **moqt: WebTransport sessions keep the close code and reason (#444).**
+  Closing with `CloseWithError(code, msg)` used to end the other side's
+  `Session.Context()` with a bare `context.Canceled` over WebTransport. Native
+  QUIC gave the peer's application error. Now both transports give a
+  `*transport.ApplicationError` with the code, the message and `Remote`, so
+  `moqt.Cause` reads a close the same way. For example, a client can tell a
+  relay's `expired` from `refused`.
+  - **The fixes, in three layers:**
+    - **webtransport-go:** bumped to `v0.13.0-okdaichi.2`. The session context now ends with the close error as its cause (okdaichi/webtransport-go#9). A dialed session's QUIC connection now stays open until its close capsule can arrive, instead of closing at once and losing it (#11). The fork also syncs with upstream v0.13.0, and quic-go goes to v0.63.0.
+    - **The WebTransport wrapper** converts that `*webtransport.SessionError` into the `transport.ApplicationError` native QUIC uses.
+    - **On the server,** a WebTransport session still takes its values from the upgrade request. It now ends with the transport, or with the connection's `ConnContext` context. Before, the request's context could end first, with no cause, and hide the close reason. Cancelling `ConnContext`'s context still ends the session, as since v0.20.1.
+
 ## [v0.22.0] - 2026-10-04
 
 > Go-only minor release; `@qumo/moq` stays at `0.20.0` (no `moq-web` change beyond a doc comment). Fixes only, but two behavior changes are visible to callers: after a GOAWAY from the peer, a session keeps serving `Subscribe`, `Fetch`, `AcceptAnnounce`, `Probe` and `TrackInfo` instead of failing them with `ErrClosedSession`; and a control message larger than 64 KiB is now refused (no real one comes close).

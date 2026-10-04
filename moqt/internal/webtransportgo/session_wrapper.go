@@ -3,6 +3,7 @@ package webtransportgo
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"net"
 
 	quicgo_webtransportgo "github.com/okdaichi/webtransport-go"
@@ -12,15 +13,36 @@ import (
 
 type sessionWrapper struct {
 	sess *quicgo_webtransportgo.Session
+	ctx  context.Context
 }
 
 func wrapSession(wtsess *quicgo_webtransportgo.Session) transport.WebTransportSession {
 	if wtsess == nil {
 		return nil
 	}
-	return &sessionWrapper{
-		sess: wtsess,
+	// webtransport-go ends its context with the session's close error as the
+	// cause: a *SessionError with the code and message, local or from the
+	// peer's WT_CLOSE_SESSION capsule. It is carried on as the
+	// transport.ApplicationError a native QUIC connection's context ends with,
+	// so a close reads the same on both transports.
+	ctx, cancel := context.WithCancelCause(context.WithoutCancel(wtsess.Context()))
+	context.AfterFunc(wtsess.Context(), func() {
+		cancel(sessionCloseCause(context.Cause(wtsess.Context())))
+	})
+	return &sessionWrapper{sess: wtsess, ctx: ctx}
+}
+
+// sessionCloseCause converts a WebTransport session close error into the
+// transport.ApplicationError native QUIC reports; any other cause is kept.
+func sessionCloseCause(cause error) error {
+	if sessErr, ok := errors.AsType[*quicgo_webtransportgo.SessionError](cause); ok {
+		return &transport.ApplicationError{
+			ErrorCode:    transport.ApplicationErrorCode(sessErr.ErrorCode),
+			ErrorMessage: sessErr.Message,
+			Remote:       sessErr.Remote,
+		}
 	}
+	return cause
 }
 
 func (conn *sessionWrapper) AcceptStream(ctx context.Context) (transport.Stream, error) {
@@ -45,7 +67,7 @@ func (wrapper *sessionWrapper) TLS() *tls.ConnectionState {
 }
 
 func (conn *sessionWrapper) Context() context.Context {
-	return conn.sess.Context()
+	return conn.ctx
 }
 
 func (conn *sessionWrapper) LocalAddr() net.Addr {
