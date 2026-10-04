@@ -340,6 +340,21 @@ func TestFrame_decode_GrowsWithArrivingBytes(t *testing.T) {
 	assert.LessOrEqual(t, f.Cap(), frameReadChunk)
 }
 
+// TestFrame_decode_TruncatedAtChunkBoundary ensures a stream that ends exactly
+// where a read chunk ends, short of the declared payload, is reported as a
+// truncated frame, not as io.EOF, which ReadFrame passes on as the clean end of
+// the group.
+func TestFrame_decode_TruncatedAtChunkBoundary(t *testing.T) {
+	wire, _ := message.WriteVarint(nil, 0)
+	wire, _ = message.WriteMessageLength(wire, 2*frameReadChunk)
+	wire = append(wire, make([]byte, frameReadChunk)...)
+
+	f := NewFrame(0)
+	err := f.decode(bytes.NewReader(wire), 0)
+
+	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+}
+
 // TestFrame_decode_LargePayload ensures a payload larger than one read chunk
 // decodes intact, both into a fresh frame and into a reused one that already
 // has room for it.

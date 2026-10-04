@@ -1,6 +1,7 @@
 package moqt
 
 import (
+	"errors"
 	"io"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
@@ -152,6 +153,12 @@ func (f *Frame) decode(src io.Reader, prevTimestamp uint64) error {
 		n := min(remaining, cap(f.body)-start)
 		f.body = f.body[:start+n]
 		if _, err := io.ReadFull(src, f.body[start:]); err != nil {
+			// A stream that ends on a chunk boundary after part of the payload
+			// is a truncated frame, as one ReadFull over the whole payload
+			// reports it, not the clean end of the group that io.EOF means.
+			if start > 0 && errors.Is(err, io.EOF) {
+				return io.ErrUnexpectedEOF
+			}
 			return err
 		}
 		remaining -= n
