@@ -307,8 +307,8 @@ func TestDialer_Dial_QUICCarriesQuery(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 	assert.Equal(t, "/live?jwt=a.b.c&hub=east", sess.RequestURI())
-	require.Eventually(t, func() bool { return len(setupStream.Written()) > 0 },
-		time.Second, 5*time.Millisecond, "the client SETUP was not written")
+	require.Eventually(t, func() bool { return setupStream.Context().Err() != nil },
+		time.Second, 5*time.Millisecond, "the client SETUP was not written and closed")
 	assert.Equal(t, "/live?jwt=a.b.c&hub=east", sentSetupPath(t, setupStream.Written()))
 }
 
@@ -332,8 +332,8 @@ func TestDialer_Dial_QUICWithoutQueryAppendsNothing(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 	assert.Equal(t, "/live", sess.RequestURI())
-	require.Eventually(t, func() bool { return len(setupStream.Written()) > 0 },
-		time.Second, 5*time.Millisecond, "the client SETUP was not written")
+	require.Eventually(t, func() bool { return setupStream.Context().Err() != nil },
+		time.Second, 5*time.Millisecond, "the client SETUP was not written and closed")
 	assert.Equal(t, "/live", sentSetupPath(t, setupStream.Written()))
 }
 

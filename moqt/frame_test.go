@@ -311,7 +311,7 @@ func TestFrame_Encode(t *testing.T) {
 }
 
 // TestFrame_decode_RejectsOversizedLength ensures Frame.decode rejects a payload
-// length prefix exceeding MaxMessageSize with ErrMessageTooLarge before growing its
+// length prefix exceeding MaxFrameSize with ErrMessageTooLarge before growing its
 // buffer, preventing an OOM DoS via a maxUint62 payload length.
 func TestFrame_decode_RejectsOversizedLength(t *testing.T) {
 	// Largest value expressible in a QUIC varint (uint62 max), encoded as the
@@ -323,4 +323,55 @@ func TestFrame_decode_RejectsOversizedLength(t *testing.T) {
 	f := NewFrame(0)
 	err := f.decode(bytes.NewReader(lengthPrefix), 0)
 	assert.ErrorIs(t, err, message.ErrMessageTooLarge)
+}
+
+// TestFrame_decode_GrowsWithArrivingBytes ensures a declared frame length
+// reserves nothing by itself: a peer that declares a large frame but sends only
+// a few bytes leaves the buffer at one read chunk, not the declared size.
+func TestFrame_decode_GrowsWithArrivingBytes(t *testing.T) {
+	wire, _ := message.WriteVarint(nil, 0)
+	wire, _ = message.WriteMessageLength(wire, 40<<20)
+	wire = append(wire, "short"...)
+
+	f := NewFrame(0)
+	err := f.decode(bytes.NewReader(wire), 0)
+
+	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	assert.LessOrEqual(t, f.Cap(), frameReadChunk)
+}
+
+// TestFrame_decode_TruncatedAtChunkBoundary ensures a stream that ends exactly
+// where a read chunk ends, short of the declared payload, is reported as a
+// truncated frame, not as io.EOF, which ReadFrame passes on as the clean end of
+// the group.
+func TestFrame_decode_TruncatedAtChunkBoundary(t *testing.T) {
+	wire, _ := message.WriteVarint(nil, 0)
+	wire, _ = message.WriteMessageLength(wire, 2*frameReadChunk)
+	wire = append(wire, make([]byte, frameReadChunk)...)
+
+	f := NewFrame(0)
+	err := f.decode(bytes.NewReader(wire), 0)
+
+	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+}
+
+// TestFrame_decode_LargePayload ensures a payload larger than one read chunk
+// decodes intact, both into a fresh frame and into a reused one that already
+// has room for it.
+func TestFrame_decode_LargePayload(t *testing.T) {
+	payload := bytes.Repeat([]byte("0123456789abcdef"), (5*frameReadChunk+7)/16)
+	wire, _ := message.WriteVarint(nil, 0)
+	wire, _ = message.WriteMessageLength(wire, uint64(len(payload)))
+	wire = append(wire, payload...)
+
+	tests := map[string]*Frame{
+		"fresh":  NewFrame(0),
+		"reused": NewFrame(len(payload)),
+	}
+	for name, f := range tests {
+		t.Run(name, func(t *testing.T) {
+			require.NoError(t, f.decode(bytes.NewReader(wire), 0))
+			assert.Equal(t, payload, f.Body())
+		})
+	}
 }

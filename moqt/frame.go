@@ -1,6 +1,7 @@
 package moqt
 
 import (
+	"errors"
 	"io"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
@@ -10,6 +11,10 @@ import (
 // a Timestamp Delta varint (up to 8 bytes) followed by a Message Length
 // varint (up to 8 bytes).
 const frameHeaderSize = 16
+
+// frameReadChunk is the least a frame's buffer grows by while its payload is
+// read, so a large frame is read in a few doubling steps.
+const frameReadChunk = 64 * 1024
 
 // Frame represents a MOQ frame.
 // It provides methods to build, read, and encode MOQ payloads.
@@ -130,24 +135,36 @@ func (f *Frame) decode(src io.Reader, prevTimestamp uint64) error {
 		return nil
 	}
 
-	// Cap the allocation derived from the untrusted length prefix to prevent an
-	// OOM DoS: a peer can advertise a maxUint62 payload length and force a
-	// multi-GB buffer allocation before any payload bytes are read.
-	if num > message.MaxMessageSize {
+	if num > message.MaxFrameSize {
 		return message.ErrMessageTooLarge
 	}
 
-	// Ensure the payload slice has enough capacity
-	if cap(f.body) < int(num) {
-		// Use init to grow the underlying buffer exponentially,
-		// maintaining the frame invariant that f.body is a subslice of f.buf.
-		f.init(max(int(num), 2*cap(f.body)))
+	// Grow the buffer as payload bytes arrive, not to the declared length up
+	// front: otherwise a peer could declare MaxFrameSize on many streams and
+	// make this endpoint reserve all of it without sending a byte. A reused
+	// buffer that already fits the payload is read into in one go.
+	f.body = f.body[:0]
+	for remaining := int(num); remaining > 0; {
+		if len(f.body) == cap(f.body) {
+			// init keeps the frame invariant that f.body is a subslice of f.buf.
+			f.init(min(len(f.body)+remaining, max(frameReadChunk, 2*cap(f.body))))
+		}
+		start := len(f.body)
+		n := min(remaining, cap(f.body)-start)
+		f.body = f.body[:start+n]
+		if _, err := io.ReadFull(src, f.body[start:]); err != nil {
+			// A stream that ends on a chunk boundary after part of the payload
+			// is a truncated frame, as one ReadFull over the whole payload
+			// reports it, not the clean end of the group that io.EOF means.
+			if start > 0 && errors.Is(err, io.EOF) {
+				return io.ErrUnexpectedEOF
+			}
+			return err
+		}
+		remaining -= n
 	}
-	f.body = f.body[:num]
 
-	_, err = io.ReadFull(src, f.body)
-
-	return err
+	return nil
 }
 
 // Clone creates a deep copy of the frame, including all payload data.

@@ -36,10 +36,16 @@ func TestDecode_RejectsOversizedLength(t *testing.T) {
 		"TrackMessage":            &message.TrackMessage{},
 	}
 
+	// One byte over the control-message cap is refused as well: the cap, not
+	// only the varint range, bounds what a declared length can reserve.
+	overCap, _ := message.WriteMessageLength(nil, message.MaxMessageSize+1)
+
 	for name, dec := range decoders {
 		t.Run(name, func(t *testing.T) {
-			err := dec.Decode(bytes.NewReader(lengthPrefix))
-			assert.ErrorIs(t, err, message.ErrMessageTooLarge)
+			for _, prefix := range [][]byte{lengthPrefix, overCap} {
+				err := dec.Decode(bytes.NewReader(prefix))
+				assert.ErrorIs(t, err, message.ErrMessageTooLarge)
+			}
 		})
 	}
 }
@@ -67,7 +73,7 @@ func TestDecode_RejectsOversizedArrayCount(t *testing.T) {
 
 	// 2. ReadStringArray count
 	b2 := make([]byte, 0, 8)
-	b2, _ = message.WriteVarint(b2, 1000000) // Count = 1,000,000
+	b2, _ = message.WriteVarint(b2, 60000) // Count under the cap, with no strings
 
 	_, _, err2 := message.ReadStringArray(b2)
 	assert.ErrorIs(t, err2, io.EOF) // Should fail with EOF reading first missing string, NOT OOM crash

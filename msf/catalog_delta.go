@@ -14,9 +14,11 @@ import (
 // each shaped as {"op": "add"|"remove"|"clone", "tracks": [...]}.
 //
 // The in-memory model keeps three grouped slices (AddTracks/RemoveTracks/
-// CloneTracks) and records the first-seen block order of each op kind so the
-// wire array round-trips. Interleaved same-type ops (e.g. add,remove,add) are
-// merged into a single group; the resulting catalog is identical in practice.
+// CloneTracks). A decoded delta also records each wire operation in order,
+// so interleaved operations (e.g. remove,add,remove of the same track) apply
+// and re-encode in their declared order. Tracks a delta built or extended in
+// code holds beyond the recorded operations follow as one operation per kind,
+// in add, remove, clone order.
 type CatalogDelta struct {
 	// DefaultNamespace, if set, replaces the base catalog namespace used for
 	// resolving tracks whose namespace field is omitted.
@@ -36,7 +38,23 @@ type CatalogDelta struct {
 	// ExtraFields stores unknown JSON properties for round-tripping.
 	ExtraFields map[string]json.RawMessage `json:"-"`
 
-	deltaOpOrder []deltaOperationKind
+	// ops records the decoded deltaUpdate operations in wire order; see
+	// operations.
+	ops []deltaOp
+}
+
+// deltaOp is one operation of a decoded deltaUpdate array: its kind and how
+// many tracks it carries, taken in order from the slice for that kind.
+type deltaOp struct {
+	kind deltaOperationKind
+	n    int
+}
+
+// deltaSpan is one operation to apply or encode: a kind and the range of the
+// slice for that kind it covers.
+type deltaSpan struct {
+	kind   deltaOperationKind
+	lo, hi int
 }
 
 // TrackRef identifies a track by namespace and name.
@@ -69,7 +87,7 @@ func (d CatalogDelta) Clone() CatalogDelta {
 	clone.RemoveTracks = cloneTrackRefs(d.RemoveTracks)
 	clone.CloneTracks = cloneTrackClones(d.CloneTracks)
 	clone.ExtraFields = cloneRawMessages(d.ExtraFields)
-	clone.deltaOpOrder = slices.Clone(d.deltaOpOrder)
+	clone.ops = slices.Clone(d.ops)
 	return clone
 }
 
@@ -122,23 +140,34 @@ func ParseCatalogDeltaString(s string) (CatalogDelta, error) {
 	return ParseCatalogDelta([]byte(s))
 }
 
-// operationOrder returns the declared delta operation order, preserving JSON order when known.
-func (d CatalogDelta) operationOrder() []deltaOperationKind {
-	if len(d.deltaOpOrder) > 0 {
-		return slices.Clone(d.deltaOpOrder)
+// operations returns the delta's operations in the order to apply and encode
+// them. Decoded operations keep their wire order; tracks beyond what they
+// cover follow as one operation per kind, in add, remove, clone order.
+func (d CatalogDelta) operations() []deltaSpan {
+	kinds := [...]deltaOperationKind{deltaOperationAdd, deltaOperationRemove, deltaOperationClone}
+	lens := map[deltaOperationKind]int{
+		deltaOperationAdd:    len(d.AddTracks),
+		deltaOperationRemove: len(d.RemoveTracks),
+		deltaOperationClone:  len(d.CloneTracks),
 	}
+	next := make(map[deltaOperationKind]int, len(kinds))
 
-	order := make([]deltaOperationKind, 0, 3)
-	if len(d.AddTracks) > 0 {
-		order = append(order, deltaOperationAdd)
+	spans := make([]deltaSpan, 0, len(d.ops)+len(kinds))
+	for _, op := range d.ops {
+		lo := next[op.kind]
+		hi := min(lo+op.n, lens[op.kind])
+		// An empty operation is kept so the wire array round-trips.
+		if hi > lo || op.n == 0 {
+			spans = append(spans, deltaSpan{kind: op.kind, lo: lo, hi: hi})
+		}
+		next[op.kind] = hi
 	}
-	if len(d.RemoveTracks) > 0 {
-		order = append(order, deltaOperationRemove)
+	for _, kind := range kinds {
+		if next[kind] < lens[kind] {
+			spans = append(spans, deltaSpan{kind: kind, lo: next[kind], hi: lens[kind]})
+		}
 	}
-	if len(d.CloneTracks) > 0 {
-		order = append(order, deltaOperationClone)
-	}
-	return order
+	return spans
 }
 
 var (
@@ -158,15 +187,15 @@ func (d CatalogDelta) MarshalJSON() ([]byte, error) {
 		obj[key] = cloneRawMessage(raw)
 	}
 	ops := make([]map[string]any, 0, 3)
-	for _, op := range d.operationOrder() {
-		entry := map[string]any{"op": string(op)}
-		switch op {
+	for _, op := range d.operations() {
+		entry := map[string]any{"op": string(op.kind)}
+		switch op.kind {
 		case deltaOperationAdd:
-			entry["tracks"] = d.AddTracks
+			entry["tracks"] = d.AddTracks[op.lo:op.hi]
 		case deltaOperationRemove:
-			entry["tracks"] = d.RemoveTracks
+			entry["tracks"] = d.RemoveTracks[op.lo:op.hi]
 		case deltaOperationClone:
-			entry["tracks"] = d.CloneTracks
+			entry["tracks"] = d.CloneTracks[op.lo:op.hi]
 		}
 		ops = append(ops, entry)
 	}
@@ -222,7 +251,7 @@ func (d *CatalogDelta) UnmarshalJSON(data []byte) error {
 }
 
 // decodeDeltaOps decodes the draft-01 deltaUpdate array of {op, tracks} objects
-// into the grouped slices, recording first-seen block order.
+// into the grouped slices, recording each operation in order.
 func (d *CatalogDelta) decodeDeltaOps(data []byte) error {
 	var ops []map[string]json.RawMessage
 	if err := json.Unmarshal(data, &ops); err != nil {
@@ -252,35 +281,26 @@ func (d *CatalogDelta) decodeDeltaOps(data []byte) error {
 				return err
 			}
 			d.AddTracks = append(d.AddTracks, add...)
-			d.recordOp(deltaOperationAdd)
+			d.ops = append(d.ops, deltaOp{kind: deltaOperationAdd, n: len(add)})
 		case deltaOperationRemove:
 			var remove []TrackRef
 			if err := json.Unmarshal(tracksRaw, &remove); err != nil {
 				return err
 			}
 			d.RemoveTracks = append(d.RemoveTracks, remove...)
-			d.recordOp(deltaOperationRemove)
+			d.ops = append(d.ops, deltaOp{kind: deltaOperationRemove, n: len(remove)})
 		case deltaOperationClone:
 			var clone []TrackClone
 			if err := json.Unmarshal(tracksRaw, &clone); err != nil {
 				return err
 			}
 			d.CloneTracks = append(d.CloneTracks, clone...)
-			d.recordOp(deltaOperationClone)
+			d.ops = append(d.ops, deltaOp{kind: deltaOperationClone, n: len(clone)})
 		default:
 			return fmt.Errorf("msf: unknown delta update op %q", op)
 		}
 	}
 	return nil
-}
-
-// recordOp appends kind to the declared operation order, ignoring repeats so
-// only first-seen block order is preserved.
-func (d *CatalogDelta) recordOp(kind deltaOperationKind) {
-	if slices.Contains(d.deltaOpOrder, kind) {
-		return
-	}
-	d.deltaOpOrder = append(d.deltaOpOrder, kind)
 }
 
 // Clone returns a deep copy of the reference.
