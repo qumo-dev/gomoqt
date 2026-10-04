@@ -611,10 +611,14 @@ func (sess *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
 
 	group := newGroupReader(req.GroupSequence, stream, nil)
 
-	context.AfterFunc(req.Context(), func() {
-		// Cancel the stream when the context is done
-		group.CancelRead(ExpiredGroupErrorCode)
+	// Cancel the stream when the request's context ends first. Once the group
+	// has ended, stop watching, so a long-lived context does not keep every
+	// finished fetch reachable until it ends. The callback cancels the stream
+	// itself rather than through the reader: it may run before done is set.
+	stop := context.AfterFunc(req.Context(), func() {
+		stream.CancelRead(transport.StreamErrorCode(ExpiredGroupErrorCode))
 	})
+	group.done = func() { stop() }
 
 	return group, nil
 }
