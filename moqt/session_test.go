@@ -963,6 +963,24 @@ func TestNewSession_ContextFromConnContext(t *testing.T) {
 	assert.Error(t, session.Context().Err(), "an application's cancellation in ConnContext ends the session's context")
 }
 
+func TestNewSession_WebTransportPreservesConnectionCause(t *testing.T) {
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	defer cancelRequest()
+	connCtx, cancelConn := context.WithCancelCause(context.Background())
+	conn := &FakeStreamConn{ParentCtx: connCtx}
+	session := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil,
+		sessionSetup{ctx: requestCtx, preferConnCause: true}, nil)
+
+	cancelRequest()
+	assert.NoError(t, session.Context().Err())
+	peerErr := &transport.ApplicationError{
+		ErrorCode: 2, ErrorMessage: "expired", Remote: true,
+	}
+	cancelConn(peerErr)
+	<-session.Context().Done()
+	assert.ErrorIs(t, context.Cause(session.Context()), peerErr)
+}
+
 // A handler's context is derived like an http.Request's: a child of the
 // session's context that also ends when its stream does, with the stream's
 // cause, or when the server cancels it after the handler returns.

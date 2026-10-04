@@ -12,15 +12,32 @@ import (
 
 type sessionWrapper struct {
 	sess *quicgo_webtransportgo.Session
+	ctx  context.Context
 }
 
 func wrapSession(wtsess *quicgo_webtransportgo.Session) transport.WebTransportSession {
 	if wtsess == nil {
 		return nil
 	}
-	return &sessionWrapper{
-		sess: wtsess,
+	// webtransport-go cancels its context without a cause. Its stream methods
+	// retain the actual session error, including the peer's close capsule.
+	ctx, cancel := context.WithCancelCause(context.WithoutCancel(wtsess.Context()))
+	context.AfterFunc(wtsess.Context(), func() {
+		_, err := wtsess.OpenStreamSync(wtsess.Context())
+		cancel(sessionCloseCause(err, context.Cause(wtsess.Context())))
+	})
+	return &sessionWrapper{sess: wtsess, ctx: ctx}
+}
+
+func sessionCloseCause(err, fallback error) error {
+	if sessErr, ok := err.(*quicgo_webtransportgo.SessionError); ok {
+		return &transport.ApplicationError{
+			ErrorCode:    transport.ApplicationErrorCode(sessErr.ErrorCode),
+			ErrorMessage: sessErr.Message,
+			Remote:       sessErr.Remote,
+		}
 	}
+	return fallback
 }
 
 func (conn *sessionWrapper) AcceptStream(ctx context.Context) (transport.Stream, error) {
@@ -45,7 +62,7 @@ func (wrapper *sessionWrapper) TLS() *tls.ConnectionState {
 }
 
 func (conn *sessionWrapper) Context() context.Context {
-	return conn.sess.Context()
+	return conn.ctx
 }
 
 func (conn *sessionWrapper) LocalAddr() net.Addr {

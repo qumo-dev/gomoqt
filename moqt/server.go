@@ -379,10 +379,10 @@ func (u *WebTransportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	// to the Session (which exposes it as Session.RequestURI, the same way the
 	// native-QUIC router does with the path from SETUP). A WebTransport
 	// endpoint must not send a SETUP Path parameter, so sendPath stays false.
-	// The session's context is a child of the upgrade request's, which
-	// carries what the Server's ConnContext stored for this connection.
+	// The upgrade request carries values from Server.ConnContext. The
+	// transport context supplies cancellation and its peer close cause.
 	sess := newSession(conn, u.TrackMux, manager, u.Config, u.FetchHandler, nil, u.Logger,
-		sessionSetup{path: requestPath(r), ctx: r.Context()}, nil)
+		sessionSetup{path: requestPath(r), ctx: r.Context(), preferConnCause: true}, nil)
 	// Ensure the session is cleaned up (conn removed from the manager) when
 	// the Handler returns, even if it did not call CloseWithError itself (e.g.
 	// the peer closed the connection). Idempotent.
