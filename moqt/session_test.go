@@ -1139,7 +1139,7 @@ func TestSession_ProcessBiStream_InvalidStreamType(t *testing.T) {
 		t.Error("processBiStream should complete after invalid stream type")
 	}
 
-	assert.False(t, session.terminating(), "Session should not terminate after invalid bi-stream type")
+	assert.False(t, session.closed.Load(), "Session should not terminate after invalid bi-stream type")
 
 	// CancelWrite check
 	var cancelWriteErr *transport.StreamError
@@ -1175,7 +1175,7 @@ func TestSession_ProcessBiStream_DecodeStreamTypeError(t *testing.T) {
 		t.Error("processBiStream should complete after stream type decode error")
 	}
 
-	assert.False(t, session.terminating(), "Session should not terminate after bi-stream decode error")
+	assert.False(t, session.closed.Load(), "Session should not terminate after bi-stream decode error")
 }
 
 func TestSession_ProcessBiStream_DecodeAnnounceBroadcastMessageError(t *testing.T) {
@@ -1923,7 +1923,7 @@ func TestSession_ProcessUniStream_InvalidStreamType(t *testing.T) {
 		t.Error("processUniStream should complete after invalid stream type")
 	}
 
-	assert.False(t, session.terminating(), "Session should not terminate after invalid uni-stream type")
+	assert.False(t, session.closed.Load(), "Session should not terminate after invalid uni-stream type")
 }
 
 func TestSession_ProcessUniStream_DecodeStreamTypeError(t *testing.T) {

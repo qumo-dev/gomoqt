@@ -16,21 +16,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSession_CloseWithError_AfterGoaway verifies a GOAWAY from the peer only
-// drains the session: the session refuses new work, but CloseWithError still
+// TestSession_handleGoawayStream verifies a GOAWAY from the peer is a hint:
+// it reaches onGoaway and leaves the session open, and CloseWithError still
 // closes the connection, which the server's deferred cleanup relies on.
-func TestSession_CloseWithError_AfterGoaway(t *testing.T) {
+func TestSession_handleGoawayStream(t *testing.T) {
 	session, conn := newTestSessionWithConn(t)
+	var gotURI string
+	session.onGoaway = func(uri string) { gotURI = uri }
 
 	var goaway bytes.Buffer
 	require.NoError(t, message.GoawayMessage{NewSessionURI: "https://example.com/next"}.Encode(&goaway))
 	stream := &FakeQUICStream{Reads: []streamResult{{Data: goaway.Bytes()}, {Err: io.EOF}}}
 
 	require.NoError(t, session.handleGoawayStream(stream))
-	assert.True(t, session.terminating(), "a draining session refuses new work")
 
+	assert.Equal(t, "https://example.com/next", gotURI)
+	assert.False(t, session.closed.Load(), "GOAWAY leaves the session open")
+	conn.OpenStreams = []biStreamResult{{Stream: &FakeQUICStream{}}}
+	_, err := session.Fetch(&FetchRequest{BroadcastPath: "/test", TrackName: "video", GroupSequence: 1})
+	require.NoError(t, err, "the session still serves new work after GOAWAY")
 	require.NoError(t, session.CloseWithError(NoError, "done"))
-
 	assert.Equal(t, []closeCall{{Code: transport.ConnErrorCode(NoError), Reason: "done"}}, conn.CloseCalls())
 }
 
@@ -74,6 +79,38 @@ func TestSession_Subscribe_FailureRemovesTrackReader(t *testing.T) {
 			assert.Empty(t, session.trackReaders)
 		})
 	}
+}
+
+// TestSession_Subscribe_FailureCancelsQueuedGroup verifies a group stream that
+// arrived before the subscription failed is cancelled, not left queued in a
+// reader no one holds.
+func TestSession_Subscribe_FailureCancelsQueuedGroup(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		gate := make(chan struct{})
+		// The response read parks until gate closes, then fails.
+		subStream := &FakeQUICStream{Reads: []streamResult{{Block: true}, {Err: errors.New("read error")}}, ReadGate: gate}
+		session := newTestSession(&FakeStreamConn{OpenStreams: []biStreamResult{{Stream: subStream}}})
+		defer func() { assert.NoError(t, session.CloseWithError(NoError, "")) }()
+
+		errCh := make(chan error, 1)
+		go func() {
+			_, err := session.Subscribe(context.Background(), "/test", "video", nil)
+			errCh <- err
+		}()
+		// Subscribe is registered and parked on the response.
+		synctest.Wait()
+
+		var group bytes.Buffer
+		require.NoError(t, message.StreamTypeGroup.Encode(&group))
+		require.NoError(t, message.GroupMessage{SubscribeID: 1, GroupSequence: 1}.Encode(&group))
+		groupStream := &FakeQUICReceiveStream{Reads: []streamResult{{Data: group.Bytes()}, {Block: true}}}
+		session.processUniStream(groupStream)
+
+		close(gate)
+		require.Error(t, <-errCh)
+
+		assert.Equal(t, []transport.StreamErrorCode{transport.StreamErrorCode(SubscribeErrorCodeInternal)}, groupStream.CancelReadCodes())
+	})
 }
 
 // TestAnnouncementReader_PeerEndsStream verifies that when the peer ends the
