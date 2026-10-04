@@ -409,8 +409,13 @@ func (f HandleFunc) ServeMOQ(sess *Session) {
 	f(sess)
 }
 
+// handleNativeQUIC serves a native-QUIC connection. A connection it cannot
+// turn into a session is closed with an error code before it returns: no
+// Session owns it yet, so nothing else would close it, and the client would
+// otherwise hold it open without ever learning why.
 func (s *Server) handleNativeQUIC(conn StreamConn) error {
 	if s.Handler == nil {
+		_ = conn.CloseWithError(transport.ConnErrorCode(InternalSessionErrorCode), "no handler") // not actionable: the connection is being refused
 		return fmt.Errorf("no native QUIC handler configured")
 	}
 
@@ -420,12 +425,14 @@ func (s *Server) handleNativeQUIC(conn StreamConn) error {
 	// itself stays path/role-agnostic.
 	sm, err := readClientSetup(conn, s.Config.setupTimeout())
 	if err != nil {
+		_ = conn.CloseWithError(transport.ConnErrorCode(ProtocolViolationErrorCode), "setup failed") // not actionable: the connection is being refused
 		return fmt.Errorf("native QUIC setup: %w", err)
 	}
 	// The Path parameter carries the query too, after "?", when the client
 	// dialed one (see Dialer.Dial); RequestURI reports it as received.
 	path, ok := sm.Path()
 	if !ok || len(path) == 0 || path[0] != '/' {
+		_ = conn.CloseWithError(transport.ConnErrorCode(ProtocolViolationErrorCode), "missing or invalid Path parameter") // not actionable: the connection is being refused
 		return fmt.Errorf("native QUIC setup: missing or invalid Path parameter")
 	}
 
