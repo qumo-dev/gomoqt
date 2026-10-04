@@ -402,3 +402,51 @@ Deno.test("GroupReader", async (t) => {
 		}
 	});
 });
+
+Deno.test("GroupReader.readFrame tells its owner when the stream ends", async (t) => {
+	const reader = (read: ReceiveStream["read"]): ReceiveStream => ({
+		read,
+		cancel: async (_code: number) => {},
+		closed: () => new Promise<void>(() => {}),
+	});
+	const cases = [
+		{ name: "at EOF", read: async () => [0, new EOFError()] as [number, Error] },
+		{ name: "on a reset", read: async () => [0, new Error("stream reset")] as [number, Error] },
+	];
+	for (const c of cases) {
+		await t.step(c.name, async () => {
+			const onDone = spy(() => {});
+			const gr = new GroupReader(
+				background(),
+				reader(c.read),
+				new GroupMessage({ sequence: 1 }),
+				onDone,
+			);
+
+			const err = await gr.readFrame(new Frame(new ArrayBuffer(8)));
+
+			assertInstanceOf(err, Error);
+			assertEquals(onDone.calls.length, 1);
+		});
+	}
+
+	await t.step("not for an oversized length: the stream is still open", async () => {
+		const buf = new Buffer(new ArrayBuffer(0));
+		await writeVarint(buf, 0); // timestamp delta
+		await writeVarint(buf, MAX_FRAME_SIZE + 1);
+		const src = new Buffer(new ArrayBuffer(0));
+		src.write(buf.bytes());
+		const onDone = spy(() => {});
+		const gr = new GroupReader(
+			background(),
+			reader(src.read.bind(src)),
+			new GroupMessage({ sequence: 1 }),
+			onDone,
+		);
+
+		const err = await gr.readFrame(new Frame(new ArrayBuffer(8)));
+
+		assertInstanceOf(err, Error);
+		assertEquals(onDone.calls.length, 0);
+	});
+});
