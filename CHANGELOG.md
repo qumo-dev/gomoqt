@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - **webtransport-go:** bumped to `v0.13.0-okdaichi.2`. The session context now ends with the close error as its cause (okdaichi/webtransport-go#9). A dialed session's QUIC connection now stays open until its close capsule can arrive, instead of closing at once and losing it (#11). The fork also syncs with upstream v0.13.0, and quic-go goes to v0.63.0.
     - **`moqt.Cause`** converts that `*webtransport.SessionError` into the same `SessionError` it gives for native QUIC. The WebTransport wrapper passes the session's context through unchanged.
     - **On the server,** a WebTransport session still takes its values from the upgrade request. It now ends with the transport, or with the connection's `ConnContext` context. Before, the request's context could end first, with no cause, and hide the close reason. Cancelling `ConnContext`'s context still ends the session, as since v0.20.1.
+- **@qumo/moq: closing a `TrackReader` now ends its subscription.** A normal
+  `close()` sends FIN on the subscribe stream and cancels queued and active
+  group streams. `closeWithError()` cancels them with the appropriate error
+  codes, and late group streams are cancelled instead of left unread.
 
 ## [v0.22.0] - 2026-10-04
 

@@ -134,20 +134,38 @@ export class GroupReader {
 	#reader: ReceiveStream;
 	readonly context: Context;
 	#cancelFunc: CancelCauseFunc;
+	#onDone?: () => void;
 	// Previous frame's timestamp on this stream, used to resolve the next
 	// frame's delta-encoded timestamp.
 	#prevTimestamp: number = 0;
 	/** Timestamp of the most recently read frame, in timescale units. */
 	lastTimestamp: number = 0;
 
-	constructor(trackCtx: Context, reader: ReceiveStream, group: GroupMessage) {
+	constructor(
+		trackCtx: Context,
+		reader: ReceiveStream,
+		group: GroupMessage,
+		onDone?: () => void,
+	) {
 		this.sequence = group.sequence;
 		this.#reader = reader;
+		this.#onDone = onDone;
 		[this.context, this.#cancelFunc] = withCancelCause(trackCtx);
 
 		trackCtx.done().then(() => {
 			this.cancel(GroupErrorCode.PublishAborted);
 		});
+	}
+
+	/**
+	 * Records that the stream itself ended, at EOF or with a reset or another
+	 * read error, so the reader's owner stops tracking it, and returns err.
+	 * An oversized length or a sink error leaves the stream open: the caller
+	 * still owns it and cancels it.
+	 */
+	#streamEnded(err: Error): Error {
+		this.#onDone?.();
+		return err;
 	}
 
 	/**
@@ -170,14 +188,14 @@ export class GroupReader {
 		// propagate it verbatim so callers can detect a normal end‑of‑stream
 		// and break out of their read loops (see `frames()` below).
 		if (errTs) {
-			return errTs;
+			return this.#streamEnded(errTs);
 		}
 		const ts = this.#prevTimestamp + zigzagDecode(delta);
 
 		// Read length prefix as varint
 		const [len, , err1] = await readVarint(this.#reader);
 		if (err1) {
-			return err1;
+			return this.#streamEnded(err1);
 		}
 
 		// Reject an oversized length before allocating — guards against an
@@ -196,7 +214,7 @@ export class GroupReader {
 				const dst = sink.reserve(len);
 				const [, err2] = await readFull(this.#reader, dst);
 				if (err2) {
-					return err2;
+					return this.#streamEnded(err2);
 				}
 				sink.timestamp = ts;
 				this.#prevTimestamp = ts;
@@ -210,7 +228,7 @@ export class GroupReader {
 			// Read the frame data
 			const [, err2] = await readFull(this.#reader, buf);
 			if (err2) {
-				return err2;
+				return this.#streamEnded(err2);
 			}
 
 			// Write to sink (handle both ByteSink and ByteSinkFunc)
@@ -243,6 +261,7 @@ export class GroupReader {
 			false,
 		);
 		this.#cancelFunc(reason);
+		this.#onDone?.();
 		await this.#reader.cancel(code);
 	}
 

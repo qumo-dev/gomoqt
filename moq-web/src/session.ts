@@ -709,12 +709,13 @@ export class Session {
 
 		const queue = this.#queues.get(req.subscribeId);
 		if (!queue) {
-			// No enqueue function yet.
-			// This can happen if the subscribe call is not completed yet.
+			await reader.cancel(GroupErrorCode.SubscribeCanceled);
 			return;
 		}
 		try {
-			await queue.enqueue([reader, req]);
+			if (!await queue.tryEnqueue([reader, req])) {
+				await reader.cancel(GroupErrorCode.SubscribeCanceled);
+			}
 		} catch (e) {
 			console.error(
 				`moq: failed to enqueue group for subscribe ID ${req.subscribeId}:`,

@@ -192,12 +192,19 @@ export class SendSubscribeStream {
 	}
 
 	async closeWithError(code: SubscribeErrorCode): Promise<void> {
+		if (this.context.err()) return;
 		const err = new WebTransportStreamError({
 			source: "stream",
 			streamErrorCode: code,
 		}, false);
-		await this.#stream.writable.cancel(code);
 		this.#cancelFunc(err);
+		await this.#stream.writable.cancel(code);
+	}
+
+	async close(): Promise<void> {
+		if (this.context.err()) return;
+		this.#cancelFunc(undefined);
+		await this.#stream.writable.close();
 	}
 }
 
