@@ -53,6 +53,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   When the peer closed or reset the stream after ANNOUNCE_OK, a blocked
   `ReceiveAnnouncement` never returned and the announcements still active never
   ended. Both now happen, as they already did for a bad ANNOUNCE_OK.
+- **msf: a catalog delta applies and re-encodes its operations in wire order.**
+  Interleaved same-type operations were merged by type, so
+  `remove X, add X, remove X` applied as remove, remove, add: the second remove
+  failed on an unknown track, or the delta left the wrong set of tracks.
+  `ApplyDelta` and `MarshalJSON` now follow the decoded order; tracks a delta
+  built or extended in code holds beyond its decoded operations follow as one
+  operation per kind, in add, remove, clone order, as before.
+- **moqt: `Session.Fetch` stops watching the request's context once the group
+  ends.** Its `context.AfterFunc` registration was never stopped, so with a
+  long-lived context every finished fetch stayed reachable until that context
+  ended.
 
 ## [v0.21.0] - 2026-10-02
 

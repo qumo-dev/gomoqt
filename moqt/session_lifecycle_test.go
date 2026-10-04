@@ -146,3 +146,53 @@ func TestAnnouncementReader_PeerEndsStream(t *testing.T) {
 		})
 	}
 }
+
+// TestSession_Fetch_ContextLifecycle verifies the request's context cancels a
+// fetch still in progress, and that once the group has ended for the reader
+// (it read to the end, or cancelled) the session stops watching that context,
+// so canceling it later touches nothing.
+func TestSession_Fetch_ContextLifecycle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		expired := transport.StreamErrorCode(ExpiredGroupErrorCode)
+		canceled := transport.StreamErrorCode(SubscribeCanceledErrorCode)
+		cases := []struct {
+			name string
+			// endGroup, when set, ends the group before the context is canceled.
+			endGroup   func(*testing.T, *GroupReader)
+			wantCancel []transport.StreamErrorCode
+		}{
+			{name: "context ends first", wantCancel: []transport.StreamErrorCode{expired}},
+			{
+				name: "group read to the end first",
+				endGroup: func(t *testing.T, group *GroupReader) {
+					require.ErrorIs(t, group.ReadFrame(NewFrame(0)), io.EOF)
+				},
+				wantCancel: []transport.StreamErrorCode{},
+			},
+			{
+				name:       "group cancelled first",
+				endGroup:   func(_ *testing.T, group *GroupReader) { group.CancelRead(SubscribeCanceledErrorCode) },
+				wantCancel: []transport.StreamErrorCode{canceled},
+			},
+		}
+		// t.Run is unsupported inside a synctest bubble, so the cases run in
+		// a plain loop.
+		for _, tc := range cases {
+			stream := &FakeQUICStream{Reads: []streamResult{{Err: io.EOF}}}
+			session := newTestSession(&FakeStreamConn{OpenStreams: []biStreamResult{{Stream: stream}}})
+			ctx, cancel := context.WithCancel(context.Background())
+
+			group, err := session.Fetch((&FetchRequest{BroadcastPath: "/test", TrackName: "video", GroupSequence: 1}).WithContext(ctx))
+			require.NoError(t, err, tc.name)
+			if tc.endGroup != nil {
+				tc.endGroup(t, group)
+			}
+			cancel()
+			// Let a still-registered AfterFunc callback run.
+			synctest.Wait()
+
+			assert.Equal(t, tc.wantCancel, stream.CancelReadCodes(), tc.name)
+			require.NoError(t, session.CloseWithError(NoError, ""), tc.name)
+		}
+	})
+}

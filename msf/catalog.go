@@ -445,23 +445,22 @@ func (c Catalog) ApplyDelta(delta CatalogDelta) (Catalog, error) {
 	}
 	maps.Copy(result.ExtraFields, cloneRawMessages(delta.ExtraFields))
 
-	order := delta.operationOrder()
-	for _, op := range order {
-		switch op {
+	for _, op := range delta.operations() {
+		switch op.kind {
 		case deltaOperationAdd:
-			for _, track := range delta.AddTracks {
+			for _, track := range delta.AddTracks[op.lo:op.hi] {
 				if err := result.addTrack(track); err != nil {
 					return Catalog{}, err
 				}
 			}
 		case deltaOperationRemove:
-			for _, track := range delta.RemoveTracks {
+			for _, track := range delta.RemoveTracks[op.lo:op.hi] {
 				if err := result.removeTrack(track); err != nil {
 					return Catalog{}, err
 				}
 			}
 		case deltaOperationClone:
-			for _, track := range delta.CloneTracks {
+			for _, track := range delta.CloneTracks[op.lo:op.hi] {
 				if err := result.cloneTrack(track); err != nil {
 					return Catalog{}, err
 				}
