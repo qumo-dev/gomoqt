@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **moqt: SUBSCRIBE_END no longer names a group that was never opened after
+  `OpenGroupAt`.** `OpenGroupAt(seq)` advanced the sequence counter to
+  `seq+1`, while the counter holds the last sequence used. `TrackWriter.Close`
+  then sent SUBSCRIBE_END for `seq+1`, so a subscriber's `AcceptGroup` waited
+  for that group until the publisher closed the stream and the grace period
+  passed, instead of returning `io.EOF` at once. A relay forwarding groups with
+  `OpenGroupAt` delayed the end of every track this way. The next `OpenGroup`
+  after `OpenGroupAt(seq)` now opens `seq+1`, not `seq+2`.
+- **moqt: a native QUIC connection that fails SETUP is closed.** When the
+  client's Setup Stream did not arrive, was malformed, or carried a missing or
+  unrooted Path, or the Server had no Handler, the server returned without
+  closing the connection: no Session owned it, so it stayed open for as long
+  as the client kept it alive, and the client never learned why. It is now
+  closed with `PROTOCOL_VIOLATION` (SETUP failures) or `INTERNAL_ERROR` (no
+  Handler).
+- **moqt: a declared message length no longer reserves memory the peer never
+  sends.** Every message decoder allocated the declared body before reading it,
+  up to the 50 MiB `MaxMessageSize`, so a peer could open many streams, declare
+  near-50 MiB messages on each and make the endpoint reserve gigabytes without
+  sending the bytes. This includes a native-QUIC SETUP, read before any
+  application auth. Control messages are now capped at 64 KiB
+  (`MaxMessageSize`); the largest real one, a SETUP whose Path carries a
+  credential, is a few KiB. Frames keep a 50 MiB cap (`MaxFrameSize`), and their
+  buffer now grows as payload bytes arrive instead of to the declared length.
+- **moqt: a GOAWAY from the peer is only a hint; the session stays usable
+  until it is closed.** Receiving GOAWAY set the same flag `CloseWithError`
+  used to close only once, so a later `CloseWithError` returned without closing
+  the connection: the server's deferred cleanup left the session in its
+  connection set, and `Shutdown` could hang. GOAWAY now only calls `OnGoaway`.
+  **Behavior change:** after a GOAWAY, `Subscribe`, `Fetch`, `AcceptAnnounce`,
+  `Probe` and `TrackInfo` no longer fail with `ErrClosedSession` on a session
+  that is still open; the application decides when to move, from `OnGoaway`.
+  `CloseWithError` now claims the close with an atomic swap, so two concurrent
+  callers can no longer both close.
+- **moqt: a failed `Subscribe` no longer leaks its registration.** The
+  subscription is registered before the response is read, so a group stream
+  that arrives first is routed. A timeout, reset, read error or leading
+  SUBSCRIBE_DROP left it registered for the life of the session, along with any
+  group stream it had already queued; every failure now closes it, which
+  unregisters it and cancels those streams.
+- **moqt: an announce stream the peer ends now ends the `AnnouncementReader`.**
+  When the peer closed or reset the stream after ANNOUNCE_OK, a blocked
+  `ReceiveAnnouncement` never returned and the announcements still active never
+  ended. Both now happen, as they already did for a bad ANNOUNCE_OK.
+- **msf: a catalog delta applies and re-encodes its operations in wire order.**
+  Interleaved same-type operations were merged by type, so
+  `remove X, add X, remove X` applied as remove, remove, add: the second remove
+  failed on an unknown track, or the delta left the wrong set of tracks.
+  `ApplyDelta` and `MarshalJSON` now follow the decoded order; tracks a delta
+  built or extended in code holds beyond its decoded operations follow as one
+  operation per kind, in add, remove, clone order, as before.
+- **moqt: `Session.Fetch` stops watching the request's context once the group
+  ends.** Its `context.AfterFunc` registration was never stopped, so with a
+  long-lived context every finished fetch stayed reachable until that context
+  ended.
+
 ## [v0.21.0] - 2026-10-02
 
 > Go-only minor release; `@qumo/moq` stays at `0.20.0` (no `moq-web` change). **Breaking Go API change:** `Session.RequestPath` is renamed `Session.RequestURI` and now includes the query, and `ErrQueryNotSupported` is removed. A native-QUIC client now carries a URL's query in the SETUP Path; a `v0.20.x` server sees it as part of its `RequestPath`, so the two interoperate.

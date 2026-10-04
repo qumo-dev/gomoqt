@@ -22,7 +22,7 @@ import { EOFError } from "@okdaichi/golikejs/io";
  * from the peer, so an unbounded length is an out-of-memory denial-of-service
  * vector: one packet can ask for a multi-gigabyte allocation. Lengths above
  * this limit are rejected before allocating. Mirrors the Go implementation's
- * `message.MaxMessageSize` (`moqt/frame.go`).
+ * `message.MaxFrameSize` (`moqt/frame.go`).
  */
 export const MAX_FRAME_SIZE = 50 * 1024 * 1024;
 

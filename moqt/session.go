@@ -73,8 +73,10 @@ type Session struct {
 	onGoaway     func(newSessionURI string)
 	logger       *slog.Logger
 
-	isTerminating atomic.Bool
-	// sessErr       error
+	// closed is set once, by the CloseWithError call that closes the
+	// connection. A GOAWAY from the peer does not set it: GOAWAY is a hint
+	// passed to onGoaway, and the session works until it is closed.
+	closed atomic.Bool
 
 	connManager *connManager
 
@@ -321,10 +323,6 @@ func (sess *Session) waitPeerSetup() error {
 	}
 }
 
-func (sess *Session) terminating() bool {
-	return sess.isTerminating.Load()
-}
-
 func (sess *Session) logError(msg string, err error, args ...any) {
 	if sess == nil || err == nil {
 		return
@@ -384,10 +382,11 @@ func (sess *Session) Stats() SessionStats {
 
 // CloseWithError closes the session with an error code and message.
 func (sess *Session) CloseWithError(code SessionErrorCode, msg string) error {
-	if sess.terminating() {
+	// Only the first call closes. A swap, not a load then a store, so two
+	// concurrent callers cannot both get through.
+	if !sess.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	sess.isTerminating.Store(true)
 
 	// Always remove the conn from the manager exactly once, even if the
 	// underlying conn.CloseWithError fails (e.g. the peer already closed it).
@@ -429,7 +428,7 @@ func (sess *Session) Subscribe(ctx context.Context, path BroadcastPath, name Tra
 		return nil, errors.New("nil context")
 	}
 
-	if sess.terminating() {
+	if sess.closed.Load() {
 		return nil, ErrClosedSession
 	}
 
@@ -494,7 +493,16 @@ func (sess *Session) Subscribe(ctx context.Context, path BroadcastPath, name Tra
 	// A missing group is waited for a few round trips beyond the minimum
 	// after the publisher closes the stream: enough for a loss recovery.
 	track.endGrace = func() time.Duration { return subscribeEndGrace + subscribeEndGraceRTTs*sess.Stats().RTT }
+	// Registered before the response is read, because a group stream can
+	// arrive before SUBSCRIBE_OK. Every failure below closes the reader, which
+	// unregisters it and cancels any group stream it already queued.
 	sess.addTrackReader(id, track)
+	subscribed := false
+	defer func() {
+		if !subscribed {
+			track.CloseWithError(SubscribeErrorCodeInternal)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(ctx, sess.timeout())
 	defer cancel()
 	if deadline, ok := ctx.Deadline(); ok {
@@ -529,6 +537,7 @@ func (sess *Session) Subscribe(ctx context.Context, path BroadcastPath, name Tra
 	}
 	go substr.readSubscribeResponses()
 
+	subscribed = true
 	return track, nil
 }
 
@@ -543,7 +552,7 @@ func (sess *Session) timeout() time.Duration {
 }
 
 func (sess *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
-	if sess.terminating() {
+	if sess.closed.Load() {
 		return nil, ErrClosedSession
 	}
 
@@ -594,9 +603,12 @@ func (sess *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
 
 	group := newGroupReader(req.GroupSequence, stream, nil)
 
-	context.AfterFunc(req.Context(), func() {
-		// Cancel the stream when the context is done
-		group.CancelRead(ExpiredGroupErrorCode)
+	// Cancel the stream when the request's context ends first. Once the group
+	// has ended, stop watching, so a long-lived context does not keep every
+	// finished fetch reachable until it ends. The callback cancels the stream
+	// itself rather than through the reader: it may run before stop is set.
+	group.stop = context.AfterFunc(req.Context(), func() {
+		stream.CancelRead(transport.StreamErrorCode(ExpiredGroupErrorCode))
 	})
 
 	return group, nil
@@ -606,7 +618,7 @@ func (sess *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
 // specified prefix. It opens an announce stream and returns an
 // AnnouncementReader that yields Announcement objects for active tracks.
 func (sess *Session) AcceptAnnounce(prefix string) (*AnnouncementReader, error) {
-	if sess.terminating() {
+	if sess.closed.Load() {
 		return nil, ErrClosedSession
 	}
 
@@ -691,7 +703,7 @@ type ProbeResult struct {
 // Calling Probe again on the same session updates the target bitrate.
 // The channel is closed when the probe stream ends or the session terminates.
 func (sess *Session) Probe(targetBitrate uint64) (<-chan ProbeResult, error) {
-	if sess.terminating() {
+	if sess.closed.Load() {
 		return nil, ErrClosedSession
 	}
 
@@ -997,7 +1009,7 @@ func (sess *Session) TrackInfo(ctx context.Context, path BroadcastPath, name Tra
 		return nil, errors.New("nil context")
 	}
 
-	if sess.terminating() {
+	if sess.closed.Load() {
 		return nil, ErrClosedSession
 	}
 
@@ -1228,7 +1240,8 @@ func (sess *Session) notifyResults(bitrate uint64) {
 func (sess *Session) notifyProbe(ch chan ProbeResult, result ProbeResult) {
 	sess.probeChannelsMu.Lock()
 	defer sess.probeChannelsMu.Unlock()
-	if sess.terminating() {
+	// CloseWithError closes the channels after setting closed.
+	if sess.closed.Load() {
 		return
 	}
 	select {
@@ -1440,8 +1453,6 @@ func (sess *Session) handleGoawayStream(stream transport.Stream) error {
 	if err != nil {
 		return err
 	}
-
-	sess.isTerminating.Store(true)
 
 	if sess.onGoaway != nil {
 		sess.onGoaway(gm.NewSessionURI)

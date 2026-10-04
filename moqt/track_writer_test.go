@@ -584,10 +584,10 @@ func TestTrackWriter_OpenGroupAt(t *testing.T) {
 	assert.NotNil(t, group)
 	assert.Equal(t, GroupSequence(10), group.GroupSequence())
 
-	// Next OpenGroup should be at 12 (counter was advanced to 11, Add(1) → 12)
+	// Next OpenGroup follows it with no gap (counter is 10, Add(1) → 11)
 	group2, err := sender.OpenGroup(context.Background())
 	assert.NoError(t, err)
-	assert.Equal(t, GroupSequence(12), group2.GroupSequence())
+	assert.Equal(t, GroupSequence(11), group2.GroupSequence())
 }
 
 func TestTrackWriter_OpenGroupAt_AdvancesCounter(t *testing.T) {
@@ -611,20 +611,38 @@ func TestTrackWriter_OpenGroupAt_AdvancesCounter(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, GroupSequence(1), g2.GroupSequence())
 
-	// Next OpenGroup should still be at 3 (counter stayed at 2, Add(1) → 3)
+	// Next OpenGroup is 2 (counter stayed at 1, Add(1) → 2)
 	g3, err := sender.OpenGroup(context.Background())
 	assert.NoError(t, err)
-	assert.Equal(t, GroupSequence(3), g3.GroupSequence())
+	assert.Equal(t, GroupSequence(2), g3.GroupSequence())
 
-	// OpenGroupAt at a high sequence advances counter to 101
+	// OpenGroupAt at a high sequence advances counter to 100
 	g4, err := sender.OpenGroupAt(context.Background(), GroupSequence(100))
 	assert.NoError(t, err)
 	assert.Equal(t, GroupSequence(100), g4.GroupSequence())
 
-	// counter is now 101, Add(1) → 102
+	// counter is now 100, Add(1) → 101
 	g5, err := sender.OpenGroup(context.Background())
 	assert.NoError(t, err)
-	assert.Equal(t, GroupSequence(102), g5.GroupSequence())
+	assert.Equal(t, GroupSequence(101), g5.GroupSequence())
+}
+
+func TestTrackWriter_Close_EndNamesLastOpenGroupAt(t *testing.T) {
+	sender, buf := newTrackWriterDropTestSender(t)
+
+	for _, seq := range []GroupSequence{1, 2, 3} {
+		group, err := sender.OpenGroupAt(context.Background(), seq)
+		require.NoError(t, err)
+		require.NoError(t, group.Close())
+	}
+	require.NoError(t, sender.Close())
+
+	// [OK type][OK len][OK group][END type][END body]
+	b := buf.Bytes()
+	require.Equal(t, byte(message.MessageTypeSubscribeEnd), b[3])
+	var end message.SubscribeEndMessage
+	require.NoError(t, end.Decode(bytes.NewReader(b[4:])))
+	assert.Equal(t, uint64(3), end.Group, "SUBSCRIBE_END names the last group opened, not one past it")
 }
 
 func TestTrackWriter_FirstOpenGroupSendsSubscribeOk(t *testing.T) {
