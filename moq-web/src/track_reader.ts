@@ -116,7 +116,7 @@ export class TrackReader {
 		if (this.#closing) return;
 		this.#closing = true;
 		this.#onCloseFunc();
-		await this.#cancelGroups();
+		await this.#cancelGroups(code);
 		await this.#subscribeStream.closeWithError(code);
 	}
 
@@ -124,15 +124,15 @@ export class TrackReader {
 		if (this.#closing) return;
 		this.#closing = true;
 		this.#onCloseFunc();
-		await this.#cancelGroups();
+		await this.#cancelGroups(GroupErrorCode.SubscribeCanceled);
 		await this.#subscribeStream.close();
 	}
 
-	async #cancelGroups(): Promise<void> {
+	async #cancelGroups(queuedCode: number): Promise<void> {
 		this.#queue.close();
 		const pending = await this.#queue.drain();
 		await Promise.all([
-			...pending.map(([reader]) => reader.cancel(GroupErrorCode.SubscribeCanceled)),
+			...pending.map(([reader]) => reader.cancel(queuedCode)),
 			...Array.from(this.#groups, (group) => group.cancel(GroupErrorCode.SubscribeCanceled)),
 		]);
 		this.#groups.clear();

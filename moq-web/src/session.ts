@@ -713,8 +713,9 @@ export class Session {
 			return;
 		}
 		try {
-			await queue.enqueue([reader, req]);
-			if (queue.closed) await reader.cancel(GroupErrorCode.SubscribeCanceled);
+			if (!await queue.tryEnqueue([reader, req])) {
+				await reader.cancel(GroupErrorCode.SubscribeCanceled);
+			}
 		} catch (e) {
 			console.error(
 				`moq: failed to enqueue group for subscribe ID ${req.subscribeId}:`,

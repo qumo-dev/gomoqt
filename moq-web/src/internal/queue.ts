@@ -21,6 +21,22 @@ export class Queue<T> {
 		}
 	}
 
+	async tryEnqueue(item: T): Promise<boolean> {
+		await this.#mutex.lock();
+		try {
+			if (this.#closed) return false;
+			this.#items.push(item);
+			if (this.#pending) {
+				const [resolve] = this.#pending;
+				this.#pending = undefined;
+				resolve();
+			}
+			return true;
+		} finally {
+			this.#mutex.unlock();
+		}
+	}
+
 	async dequeue(): Promise<T | undefined> {
 		while (true) {
 			await this.#mutex.lock();

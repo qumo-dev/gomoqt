@@ -115,6 +115,13 @@ Deno.test("internal/queue - basic enqueue/dequeue and close behavior", async (t)
 		assertEquals(v, 1);
 	});
 
+	await t.step("tryEnqueue rejects items after close", async () => {
+		const q = new Queue<number>();
+		q.close();
+		assertEquals(await q.tryEnqueue(1), false);
+		assertEquals(await q.dequeue(), undefined);
+	});
+
 	await t.step("dequeue after multiple enqueues and closes", async () => {
 		const q = new Queue<number>();
 		await q.enqueue(1);

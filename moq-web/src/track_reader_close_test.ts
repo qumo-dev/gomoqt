@@ -103,6 +103,6 @@ Deno.test("TrackReader.closeWithError resets subscription and cancels groups", a
 
 	assertEquals(writable.closeCount, 0);
 	assertEquals(writable.cancelCodes, [7]);
-	assertEquals(queued.cancelCodes, [GroupErrorCode.SubscribeCanceled]);
+	assertEquals(queued.cancelCodes, [7]);
 	assertExists(track.context.err());
 });
