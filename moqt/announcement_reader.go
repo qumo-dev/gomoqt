@@ -54,6 +54,11 @@ func newAnnouncementReader(stream transport.Stream, prefix prefix, initSuffixes 
 		for {
 			err = am.Decode(ar.stream)
 			if err != nil {
+				// The peer ended or reset the stream, or sent a malformed
+				// message. Cancel the reader, as for ANNOUNCE_OK above:
+				// that releases a blocked ReceiveAnnouncement and ends every
+				// announcement still active, which are children of ar.ctx.
+				ar.fail(err)
 				return
 			}
 

@@ -2141,7 +2141,7 @@ func TestSession_CloseWithError_AlreadyTerminating(t *testing.T) {
 
 	// Second termination should return immediately without error
 	err2 := session.CloseWithError(InternalSessionErrorCode, "second termination")
-	// The second call returns nil because terminating() is already true
+	// The second call returns nil because the session is already closed
 	assert.NoError(t, err2)
 
 	// Verify CloseWithError reached the connection only once

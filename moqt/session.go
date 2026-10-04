@@ -73,8 +73,13 @@ type Session struct {
 	onGoaway     func(newSessionURI string)
 	logger       *slog.Logger
 
-	isTerminating atomic.Bool
-	// sessErr       error
+	// draining is set when the peer sends GOAWAY: the session starts no new
+	// work, but stays open until CloseWithError closes it.
+	draining atomic.Bool
+	// closed is set once, by the CloseWithError call that closes the
+	// connection. It is separate from draining so that a GOAWAY never turns
+	// that close into a no-op.
+	closed atomic.Bool
 
 	connManager *connManager
 
@@ -321,8 +326,10 @@ func (sess *Session) waitPeerSetup() error {
 	}
 }
 
+// terminating reports whether the session refuses new work: it is draining
+// after a GOAWAY, or closed.
 func (sess *Session) terminating() bool {
-	return sess.isTerminating.Load()
+	return sess.draining.Load() || sess.closed.Load()
 }
 
 func (sess *Session) logError(msg string, err error, args ...any) {
@@ -384,10 +391,11 @@ func (sess *Session) Stats() SessionStats {
 
 // CloseWithError closes the session with an error code and message.
 func (sess *Session) CloseWithError(code SessionErrorCode, msg string) error {
-	if sess.terminating() {
+	// Only the first call closes. A swap, not a load then a store, so two
+	// concurrent callers cannot both get through.
+	if !sess.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	sess.isTerminating.Store(true)
 
 	// Always remove the conn from the manager exactly once, even if the
 	// underlying conn.CloseWithError fails (e.g. the peer already closed it).
@@ -494,7 +502,15 @@ func (sess *Session) Subscribe(ctx context.Context, path BroadcastPath, name Tra
 	// A missing group is waited for a few round trips beyond the minimum
 	// after the publisher closes the stream: enough for a loss recovery.
 	track.endGrace = func() time.Duration { return subscribeEndGrace + subscribeEndGraceRTTs*sess.Stats().RTT }
+	// Registered before the response is read, because a group stream can
+	// arrive before SUBSCRIBE_OK. Every failure below rolls it back.
 	sess.addTrackReader(id, track)
+	subscribed := false
+	defer func() {
+		if !subscribed {
+			sess.removeTrackReader(id)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(ctx, sess.timeout())
 	defer cancel()
 	if deadline, ok := ctx.Deadline(); ok {
@@ -529,6 +545,7 @@ func (sess *Session) Subscribe(ctx context.Context, path BroadcastPath, name Tra
 	}
 	go substr.readSubscribeResponses()
 
+	subscribed = true
 	return track, nil
 }
 
@@ -1228,7 +1245,8 @@ func (sess *Session) notifyResults(bitrate uint64) {
 func (sess *Session) notifyProbe(ch chan ProbeResult, result ProbeResult) {
 	sess.probeChannelsMu.Lock()
 	defer sess.probeChannelsMu.Unlock()
-	if sess.terminating() {
+	// CloseWithError closes the channels after setting closed.
+	if sess.closed.Load() {
 		return
 	}
 	select {
@@ -1441,7 +1459,7 @@ func (sess *Session) handleGoawayStream(stream transport.Stream) error {
 		return err
 	}
 
-	sess.isTerminating.Store(true)
+	sess.draining.Store(true)
 
 	if sess.onGoaway != nil {
 		sess.onGoaway(gm.NewSessionURI)

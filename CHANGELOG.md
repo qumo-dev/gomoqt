@@ -33,6 +33,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`MaxMessageSize`); the largest real one, a SETUP whose Path carries a
   credential, is a few KiB. Frames keep a 50 MiB cap (`MaxFrameSize`), and their
   buffer now grows as payload bytes arrive instead of to the declared length.
+- **moqt: a GOAWAY no longer stops the session from closing.** Receiving
+  GOAWAY set the same flag `CloseWithError` used to close only once, so a later
+  `CloseWithError` returned without closing the connection. The server's
+  deferred cleanup then left the session in its connection set, and `Shutdown`
+  could hang. A session now tracks draining (after GOAWAY: no new work) apart
+  from closed, and `CloseWithError` claims the close with an atomic swap, so two
+  concurrent callers can no longer both close.
+- **moqt: a failed `Subscribe` no longer leaks its registration.** The
+  subscription is registered before the response is read, so a group stream
+  that arrives first is routed. A timeout, reset, read error or leading
+  SUBSCRIBE_DROP left it registered for the life of the session; it is now
+  removed on every failure.
+- **moqt: an announce stream the peer ends now ends the `AnnouncementReader`.**
+  When the peer closed or reset the stream after ANNOUNCE_OK, a blocked
+  `ReceiveAnnouncement` never returned and the announcements still active never
+  ended. Both now happen, as they already did for a bad ANNOUNCE_OK.
 
 ## [v0.21.0] - 2026-10-02
 
