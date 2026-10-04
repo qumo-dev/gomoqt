@@ -134,15 +134,22 @@ export class GroupReader {
 	#reader: ReceiveStream;
 	readonly context: Context;
 	#cancelFunc: CancelCauseFunc;
+	#onDone?: () => void;
 	// Previous frame's timestamp on this stream, used to resolve the next
 	// frame's delta-encoded timestamp.
 	#prevTimestamp: number = 0;
 	/** Timestamp of the most recently read frame, in timescale units. */
 	lastTimestamp: number = 0;
 
-	constructor(trackCtx: Context, reader: ReceiveStream, group: GroupMessage) {
+	constructor(
+		trackCtx: Context,
+		reader: ReceiveStream,
+		group: GroupMessage,
+		onDone?: () => void,
+	) {
 		this.sequence = group.sequence;
 		this.#reader = reader;
+		this.#onDone = onDone;
 		[this.context, this.#cancelFunc] = withCancelCause(trackCtx);
 
 		trackCtx.done().then(() => {
@@ -170,6 +177,7 @@ export class GroupReader {
 		// propagate it verbatim so callers can detect a normal end‑of‑stream
 		// and break out of their read loops (see `frames()` below).
 		if (errTs) {
+			if (errTs instanceof EOFError) this.#onDone?.();
 			return errTs;
 		}
 		const ts = this.#prevTimestamp + zigzagDecode(delta);
@@ -243,6 +251,7 @@ export class GroupReader {
 			false,
 		);
 		this.#cancelFunc(reason);
+		this.#onDone?.();
 		await this.#reader.cancel(code);
 	}
 

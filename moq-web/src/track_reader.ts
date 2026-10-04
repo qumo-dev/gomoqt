@@ -7,6 +7,7 @@ import { GroupMessage } from "./internal/message/mod.ts";
 import type { BroadcastPath } from "./broadcast_path.ts";
 import { Queue } from "./internal/queue.ts";
 import type { SubscribeID } from "./alias.ts";
+import { GroupErrorCode } from "./error.ts";
 
 /**
  * Subscriber-side handle for reading groups from a subscribed track.
@@ -22,6 +23,8 @@ export class TrackReader {
 	#subscribeStream: SendSubscribeStream;
 	#queue: Queue<[ReceiveStream, GroupMessage]>;
 	#onCloseFunc: () => void;
+	#groups = new Set<GroupReader>();
+	#closing = false;
 
 	constructor(
 		broadcastPath: BroadcastPath,
@@ -45,6 +48,7 @@ export class TrackReader {
 	async acceptGroup(
 		signal: Promise<void>,
 	): Promise<[GroupReader, undefined] | [undefined, Error]> {
+		if (this.#closing) return [undefined, new ContextCancelledError()];
 		// Check if context is already cancelled
 		const err = this.context.err();
 		if (err) {
@@ -69,13 +73,22 @@ export class TrackReader {
 				return [undefined, dequeued];
 			}
 			if (dequeued === undefined) {
-				// This is
-				throw new Error("dequeue returned undefined");
+				return [undefined, new ContextCancelledError()];
 			}
 
 			const [reader, msg] = dequeued;
+			if (this.#closing) {
+				await reader.cancel(GroupErrorCode.SubscribeCanceled);
+				return [undefined, new ContextCancelledError()];
+			}
 
-			const group = new GroupReader(this.context, reader, msg);
+			const group = new GroupReader(
+				this.context,
+				reader,
+				msg,
+				() => this.#groups.delete(group),
+			);
+			this.#groups.add(group);
 
 			return [group, undefined];
 		}
@@ -100,12 +113,29 @@ export class TrackReader {
 	}
 
 	async closeWithError(code: number): Promise<void> {
-		await this.#subscribeStream.closeWithError(code);
+		if (this.#closing) return;
+		this.#closing = true;
 		this.#onCloseFunc();
+		await this.#cancelGroups();
+		await this.#subscribeStream.closeWithError(code);
 	}
 
 	async close(): Promise<void> {
+		if (this.#closing) return;
+		this.#closing = true;
 		this.#onCloseFunc();
+		await this.#cancelGroups();
+		await this.#subscribeStream.close();
+	}
+
+	async #cancelGroups(): Promise<void> {
+		this.#queue.close();
+		const pending = await this.#queue.drain();
+		await Promise.all([
+			...pending.map(([reader]) => reader.cancel(GroupErrorCode.SubscribeCanceled)),
+			...Array.from(this.#groups, (group) => group.cancel(GroupErrorCode.SubscribeCanceled)),
+		]);
+		this.#groups.clear();
 	}
 
 	get subscribeId(): SubscribeID {

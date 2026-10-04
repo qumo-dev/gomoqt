@@ -65,6 +65,15 @@ export class Queue<T> {
 		}
 	}
 
+	async drain(): Promise<T[]> {
+		await this.#mutex.lock();
+		try {
+			return this.#items.splice(0);
+		} finally {
+			this.#mutex.unlock();
+		}
+	}
+
 	close(): void {
 		if (this.#closed) {
 			return;
