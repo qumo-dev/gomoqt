@@ -278,6 +278,76 @@ func TestParseCatalogDelta_RepeatedSameTypeOpsAccumulate(t *testing.T) {
 	assert.Equal(t, "old", delta.RemoveTracks[0].Name)
 }
 
+// TestCatalogApplyDelta_InterleavedOperations verifies interleaved same-type
+// operations apply in wire order, not grouped by type: remove, add, remove of
+// one track leaves it removed. Grouped, the second remove would run before the
+// add and fail on an unknown track.
+func TestCatalogApplyDelta_InterleavedOperations(t *testing.T) {
+	base := Catalog{
+		Version: 1,
+		Tracks: []Track{
+			{Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+			{Name: "audio", Packaging: PackagingLOC, IsLive: new(true)},
+		},
+	}
+	delta, err := ParseCatalogDeltaString(`{
+		"deltaUpdate": [
+			{"op": "remove", "tracks": [{"name": "video"}]},
+			{"op": "add", "tracks": [{"name": "video", "packaging": "loc", "isLive": true}]},
+			{"op": "remove", "tracks": [{"name": "video"}]}
+		]
+	}`)
+	require.NoError(t, err)
+
+	updated, err := base.ApplyDelta(delta)
+
+	require.NoError(t, err)
+	require.Len(t, updated.Tracks, 1)
+	assert.Equal(t, "audio", updated.Tracks[0].Name)
+}
+
+// TestCatalogDelta_MarshalJSON_Operations verifies the encoded deltaUpdate
+// array keeps decoded operations in wire order, and that tracks added in code
+// beyond them follow as one operation of their kind.
+func TestCatalogDelta_MarshalJSON_Operations(t *testing.T) {
+	const wire = `{"deltaUpdate":[` +
+		`{"op":"remove","tracks":[{"name":"a"}]},` +
+		`{"op":"add","tracks":[{"isLive":true,"name":"a","packaging":"loc"}]},` +
+		`{"op":"remove","tracks":[{"name":"a"}]}]}`
+
+	tests := map[string]struct {
+		extend func(*CatalogDelta)
+		ops    []string
+	}{
+		"decoded":          {ops: []string{"remove", "add", "remove"}},
+		"extended in code": {extend: func(d *CatalogDelta) { d.AddTracks = append(d.AddTracks, Track{Name: "b"}) }, ops: []string{"remove", "add", "remove", "add"}},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			delta, err := ParseCatalogDeltaString(wire)
+			require.NoError(t, err)
+			if tt.extend != nil {
+				tt.extend(&delta)
+			}
+
+			data, err := json.Marshal(delta)
+			require.NoError(t, err)
+
+			var got struct {
+				DeltaUpdate []struct {
+					Op string `json:"op"`
+				} `json:"deltaUpdate"`
+			}
+			require.NoError(t, json.Unmarshal(data, &got))
+			ops := make([]string, 0, len(got.DeltaUpdate))
+			for _, op := range got.DeltaUpdate {
+				ops = append(ops, op.Op)
+			}
+			assert.Equal(t, tt.ops, ops)
+		})
+	}
+}
+
 func TestCatalogApplyDelta_PreservesDeclaredOperationOrder(t *testing.T) {
 	base := Catalog{
 		Version: 1,
@@ -968,7 +1038,7 @@ func TestCatalogDelta_Clone(t *testing.T) {
 		RemoveTracks:     []TrackRef{{Name: "old", Namespace: "ns"}},
 		CloneTracks:      []TrackClone{{Name: "video-720", ParentName: "video-1080"}},
 		ExtraFields:      map[string]json.RawMessage{"ext": json.RawMessage(`1`)},
-		deltaOpOrder:     []deltaOperationKind{deltaOperationAdd, deltaOperationRemove, deltaOperationClone},
+		ops:              []deltaOp{{kind: deltaOperationAdd, n: 1}, {kind: deltaOperationRemove, n: 1}, {kind: deltaOperationClone, n: 1}},
 	}
 
 	clone := delta.Clone()
@@ -983,14 +1053,14 @@ func TestCatalogDelta_Clone(t *testing.T) {
 	require.Len(t, clone.CloneTracks, 1)
 	assert.Equal(t, "video-720", clone.CloneTracks[0].Name)
 	assert.Contains(t, clone.ExtraFields, "ext")
-	assert.Equal(t, []deltaOperationKind{deltaOperationAdd, deltaOperationRemove, deltaOperationClone}, clone.deltaOpOrder)
+	assert.Equal(t, []deltaOp{{kind: deltaOperationAdd, n: 1}, {kind: deltaOperationRemove, n: 1}, {kind: deltaOperationClone, n: 1}}, clone.ops)
 
 	// Mutating clone should not affect original.
 	clone.AddTracks[0].Name = "mutated"
 	assert.Equal(t, "video", delta.AddTracks[0].Name)
 
-	clone.deltaOpOrder[0] = deltaOperationRemove
-	assert.Equal(t, []deltaOperationKind{deltaOperationAdd, deltaOperationRemove, deltaOperationClone}, delta.deltaOpOrder)
+	clone.ops[0].kind = deltaOperationRemove
+	assert.Equal(t, []deltaOp{{kind: deltaOperationAdd, n: 1}, {kind: deltaOperationRemove, n: 1}, {kind: deltaOperationClone, n: 1}}, delta.ops)
 }
 
 func TestCatalogDelta_MarshalJSON_RoundTrip(t *testing.T) {
