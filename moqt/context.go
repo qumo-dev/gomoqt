@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
+	webtransport "github.com/okdaichi/webtransport-go"
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
-	"github.com/qumo-dev/gomoqt/moqt/internal/webtransportgo"
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
@@ -22,7 +22,7 @@ var uniStreamTypeCtxKey uniStreamTypeCtxKeyType = uniStreamTypeCtxKeyType{}
 // too, with the same code, message and Remote flag as over native QUIC.
 // If no specific translation is available, the original context cause is returned unchanged.
 func Cause(ctx context.Context) error {
-	reason := webtransportgo.CloseCause(context.Cause(ctx))
+	reason := context.Cause(ctx)
 
 	if strErr, ok := errors.AsType[*transport.StreamError](reason); ok {
 		st, ok := ctx.Value(biStreamTypeCtxKey).(message.StreamType)
@@ -60,6 +60,16 @@ func Cause(ctx context.Context) error {
 		}
 
 		return reason
+	}
+
+	if sessErr, ok := errors.AsType[*webtransport.SessionError](reason); ok {
+		return &SessionError{
+			ApplicationError: &transport.ApplicationError{
+				ErrorCode:    transport.ApplicationErrorCode(sessErr.ErrorCode),
+				ErrorMessage: sessErr.Message,
+				Remote:       sessErr.Remote,
+			},
+		}
 	}
 
 	if appErr, ok := errors.AsType[*transport.ApplicationError](reason); ok {
