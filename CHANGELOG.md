@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.22.0] - 2026-10-04
+
+> Go-only minor release; `@qumo/moq` stays at `0.20.0` (no `moq-web` change beyond a doc comment). Fixes only, but two behavior changes are visible to callers: after a GOAWAY from the peer, a session keeps serving `Subscribe`, `Fetch`, `AcceptAnnounce`, `Probe` and `TrackInfo` instead of failing them with `ErrClosedSession`; and a control message larger than 64 KiB is now refused (no real one comes close).
+
 ### Fixed
 
 - **moqt: SUBSCRIBE_END no longer names a group that was never opened after
