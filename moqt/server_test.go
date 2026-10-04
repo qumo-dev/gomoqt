@@ -15,6 +15,7 @@ import (
 
 	"github.com/quic-go/quic-go"
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
+	"github.com/qumo-dev/gomoqt/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -583,9 +584,37 @@ func TestWebTransportHandler_upgradeWebTransport_UsesCustomUpgradeFunc(t *testin
 
 func TestServer_handleNativeQUIC_NoHandlerConfigured(t *testing.T) {
 	s := &Server{}
-	err := s.handleNativeQUIC(&FakeStreamConn{})
+	conn := &FakeStreamConn{}
+	err := s.handleNativeQUIC(conn)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no native QUIC handler configured")
+	assert.Equal(t, []closeCall{{Code: transport.ConnErrorCode(InternalSessionErrorCode), Reason: "no handler"}}, conn.CloseCalls())
+}
+
+// TestServer_handleNativeQUIC_ClosesConnOnSetupFailure verifies a connection
+// that never becomes a session is closed with PROTOCOL_VIOLATION: no Session
+// owns it, so nothing else would close it.
+func TestServer_handleNativeQUIC_ClosesConnOnSetupFailure(t *testing.T) {
+	tests := map[string]struct {
+		opts   []func(*FakeStreamConn)
+		reason string
+	}{
+		"no setup stream": {reason: "setup failed"},
+		"missing path":    {opts: []func(*FakeStreamConn){withClientSetup("")}, reason: "missing or invalid Path parameter"},
+		"unrooted path":   {opts: []func(*FakeStreamConn){withClientSetup("live")}, reason: "missing or invalid Path parameter"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			s := &Server{
+				Handler: HandleFunc(func(*Session) { t.Fatal("handler must not be called") }),
+			}
+			conn := newTestNativeQUICConn(t, tt.opts...)
+
+			require.Error(t, s.handleNativeQUIC(conn))
+
+			assert.Equal(t, []closeCall{{Code: transport.ConnErrorCode(ProtocolViolationErrorCode), Reason: tt.reason}}, conn.CloseCalls())
+		})
+	}
 }
 
 func TestServer_handleNativeQUIC_CallsHandlerOnValidSetup(t *testing.T) {

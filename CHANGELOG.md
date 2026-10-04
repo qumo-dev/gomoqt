@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **moqt: SUBSCRIBE_END no longer names a group that was never opened after
+  `OpenGroupAt`.** `OpenGroupAt(seq)` advanced the sequence counter to
+  `seq+1`, while the counter holds the last sequence used. `TrackWriter.Close`
+  then sent SUBSCRIBE_END for `seq+1`, so a subscriber's `AcceptGroup` waited
+  for that group until the publisher closed the stream and the grace period
+  passed, instead of returning `io.EOF` at once. A relay forwarding groups with
+  `OpenGroupAt` delayed the end of every track this way. The next `OpenGroup`
+  after `OpenGroupAt(seq)` now opens `seq+1`, not `seq+2`.
+- **moqt: a native QUIC connection that fails SETUP is closed.** When the
+  client's Setup Stream did not arrive, was malformed, or carried a missing or
+  unrooted Path, or the Server had no Handler, the server returned without
+  closing the connection: no Session owned it, so it stayed open for as long
+  as the client kept it alive, and the client never learned why. It is now
+  closed with `PROTOCOL_VIOLATION` (SETUP failures) or `INTERNAL_ERROR` (no
+  Handler).
+
 ## [v0.21.0] - 2026-10-02
 
 > Go-only minor release; `@qumo/moq` stays at `0.20.0` (no `moq-web` change). **Breaking Go API change:** `Session.RequestPath` is renamed `Session.RequestURI` and now includes the query, and `ErrQueryNotSupported` is removed. A native-QUIC client now carries a URL's query in the SETUP Path; a `v0.20.x` server sees it as part of its `RequestPath`, so the two interoperate.
