@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/okdaichi/webtransport-go"
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
 	"github.com/qumo-dev/gomoqt/transport"
 	"github.com/stretchr/testify/assert"
@@ -107,6 +108,16 @@ func TestCause(t *testing.T) {
 			},
 			expected: &SessionError{
 				ApplicationError: &transport.ApplicationError{Remote: false, ErrorCode: 5, ErrorMessage: "app error"},
+			},
+		},
+		"with a WebTransport session close error": {
+			setupCtx: func() context.Context {
+				ctx, cancel := context.WithCancelCause(context.Background())
+				cancel(&webtransport.SessionError{Remote: true, ErrorCode: 2, Message: "expired"})
+				return ctx
+			},
+			expected: &SessionError{
+				ApplicationError: &transport.ApplicationError{Remote: true, ErrorCode: 2, ErrorMessage: "expired"},
 			},
 		},
 	}

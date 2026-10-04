@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSessionCloseCause_PeerClose(t *testing.T) {
-	cause := sessionCloseCause(&webtransport.SessionError{
+func TestCloseCause_PeerClose(t *testing.T) {
+	cause := CloseCause(&webtransport.SessionError{
 		ErrorCode: 2,
 		Message:   "expired",
 		Remote:    true,
@@ -25,8 +25,8 @@ func TestSessionCloseCause_PeerClose(t *testing.T) {
 	assert.True(t, appErr.Remote)
 }
 
-func TestSessionCloseCause_Wrapped(t *testing.T) {
-	cause := sessionCloseCause(fmt.Errorf("closed: %w", &webtransport.SessionError{ErrorCode: 2, Message: "refused"}))
+func TestCloseCause_Wrapped(t *testing.T) {
+	cause := CloseCause(fmt.Errorf("closed: %w", &webtransport.SessionError{ErrorCode: 2, Message: "refused"}))
 
 	var appErr *transport.ApplicationError
 	require.ErrorAs(t, cause, &appErr)
@@ -34,8 +34,8 @@ func TestSessionCloseCause_Wrapped(t *testing.T) {
 	assert.False(t, appErr.Remote)
 }
 
-func TestSessionCloseCause_OtherCause(t *testing.T) {
-	cause := sessionCloseCause(context.Canceled)
+func TestCloseCause_OtherCause(t *testing.T) {
+	cause := CloseCause(context.Canceled)
 
 	assert.ErrorIs(t, cause, context.Canceled)
 }

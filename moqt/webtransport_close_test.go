@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/quic-go/quic-go"
-	"github.com/qumo-dev/gomoqt/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -65,31 +64,20 @@ func TestWebTransportSession_PeerCloseCause(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("peer session did not close")
 		}
-		var appErr *transport.ApplicationError
-		require.ErrorAs(t, context.Cause(ctx), &appErr)
-		assert.Equal(t, transport.ApplicationErrorCode(2), appErr.ErrorCode)
-		assert.Equal(t, reason, appErr.ErrorMessage)
-		assert.True(t, appErr.Remote)
-	}
-	waitSetup := func(sess *Session) {
-		select {
-		case <-sess.peerSetupCh:
-		case <-time.After(5 * time.Second):
-			t.Fatal("peer SETUP did not arrive")
-		}
+		var sessErr *SessionError
+		require.ErrorAs(t, Cause(ctx), &sessErr)
+		assert.Equal(t, UnauthorizedSessionErrorCode, sessErr.SessionErrorCode())
+		assert.Equal(t, reason, sessErr.ErrorMessage)
+		assert.True(t, sessErr.Remote)
 	}
 
 	client := dial()
 	server := waitServer()
-	waitSetup(client)
-	waitSetup(server)
 	require.NoError(t, server.CloseWithError(UnauthorizedSessionErrorCode, "expired"))
 	assertPeerCause(client.Context(), "expired")
 
 	client = dial()
 	server = waitServer()
-	waitSetup(client)
-	waitSetup(server)
 	require.NoError(t, client.CloseWithError(UnauthorizedSessionErrorCode, "refused"))
 	assertPeerCause(server.Context(), "refused")
 }
