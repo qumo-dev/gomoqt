@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.22.1] - 2026-10-05
+
+> **Dual release.** `v0.22.1` ships the Go module and `@qumo/moq` on JSR at the same version: `@qumo/moq` goes from `0.20.0` to `0.22.1`. Fixes only; no exported Go API changes, and `@qumo/moq` gains only an optional `onDone` parameter on the `GroupReader` constructor. Two behaviour changes are visible to callers:
+> - **Go:** over WebTransport, `moqt.Cause` now returns a `*SessionError` carrying the peer's close code and reason, as over native QUIC. The raw `context.Cause` is a `*webtransport.SessionError` where it used to be `context.Canceled`.
+> - **JS:** `TrackReader.close()` now ends the subscription on the wire (FIN) and cancels its group streams.
+>
+> **Dependencies:** quic-go goes to `v0.63.0`; webtransport-go goes to `v0.13.0-okdaichi.2`, which syncs with upstream v0.13.0. The wire protocol is unchanged, so this interoperates with `v0.22.0` peers.
+
 ### Fixed
 
 - **moqt: WebTransport sessions keep the close code and reason (#444).**
