@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as the client kept it alive, and the client never learned why. It is now
   closed with `PROTOCOL_VIOLATION` (SETUP failures) or `INTERNAL_ERROR` (no
   Handler).
+- **moqt: a declared message length no longer reserves memory the peer never
+  sends.** Every message decoder allocated the declared body before reading it,
+  up to the 50 MiB `MaxMessageSize`, so a peer could open many streams, declare
+  near-50 MiB messages on each and make the endpoint reserve gigabytes without
+  sending the bytes. This includes a native-QUIC SETUP, read before any
+  application auth. Control messages are now capped at 64 KiB
+  (`MaxMessageSize`); the largest real one, a SETUP whose Path carries a
+  credential, is a few KiB. Frames keep a 50 MiB cap (`MaxFrameSize`), and their
+  buffer now grows as payload bytes arrive instead of to the declared length.
 
 ## [v0.21.0] - 2026-10-02
 
