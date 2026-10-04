@@ -9,11 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **moqt: WebTransport session contexts retain the peer's close code and
-  reason.** A peer close previously canceled `Session.Context()` with only
-  `context.Canceled`, hiding the WebTransport close capsule's code and message.
-  The context cause now carries the peer's application error, as it does for
-  native QUIC sessions.
+- **moqt: WebTransport sessions keep the close code and reason (#444).**
+  Closing with `CloseWithError(code, msg)` used to end the other side's
+  `Session.Context()` with a bare `context.Canceled` over WebTransport. Native
+  QUIC gave the peer's application error. Now both transports give a
+  `*transport.ApplicationError` with the code, the message and `Remote`, so
+  `moqt.Cause` reads a close the same way. For example, a client can tell a
+  relay's `expired` from `refused`.
+  - **The fixes, in three layers:**
+    - **webtransport-go:** bumped to `v0.13.0-okdaichi.2`. The session context now ends with the close error as its cause (okdaichi/webtransport-go#9). A dialed session's QUIC connection now stays open until its close capsule can arrive, instead of closing at once and losing it (#11). The fork also syncs with upstream v0.13.0, and quic-go goes to v0.63.0.
+    - **The WebTransport wrapper** converts that `*webtransport.SessionError` into the `transport.ApplicationError` native QUIC uses.
+    - **On the server,** a WebTransport session still takes its values from the upgrade request. It now ends with the transport, or with the connection's `ConnContext` context. Before, the request's context could end first, with no cause, and hide the close reason. Cancelling `ConnContext`'s context still ends the session, as since v0.20.1.
 
 ## [v0.22.0] - 2026-10-04
 

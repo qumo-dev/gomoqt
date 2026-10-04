@@ -2,6 +2,7 @@ package webtransportgo
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	webtransport "github.com/okdaichi/webtransport-go"
@@ -15,7 +16,7 @@ func TestSessionCloseCause_PeerClose(t *testing.T) {
 		ErrorCode: 2,
 		Message:   "expired",
 		Remote:    true,
-	}, context.Canceled)
+	})
 
 	var appErr *transport.ApplicationError
 	require.ErrorAs(t, cause, &appErr)
@@ -24,7 +25,17 @@ func TestSessionCloseCause_PeerClose(t *testing.T) {
 	assert.True(t, appErr.Remote)
 }
 
-func TestSessionCloseCause_Fallback(t *testing.T) {
-	cause := sessionCloseCause(context.Canceled, context.Canceled)
+func TestSessionCloseCause_Wrapped(t *testing.T) {
+	cause := sessionCloseCause(fmt.Errorf("closed: %w", &webtransport.SessionError{ErrorCode: 2, Message: "refused"}))
+
+	var appErr *transport.ApplicationError
+	require.ErrorAs(t, cause, &appErr)
+	assert.Equal(t, "refused", appErr.ErrorMessage)
+	assert.False(t, appErr.Remote)
+}
+
+func TestSessionCloseCause_OtherCause(t *testing.T) {
+	cause := sessionCloseCause(context.Canceled)
+
 	assert.ErrorIs(t, cause, context.Canceled)
 }

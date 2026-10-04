@@ -46,9 +46,14 @@ type sessionSetup struct {
 	// request's context, which carries it (WebTransport). Nil means
 	// conn.Context() alone (clients).
 	ctx context.Context
-	// preferConnCause keeps WebTransport's close capsule cause when the HTTP
-	// request context is canceled before the transport wrapper reports it.
-	preferConnCause bool
+	// lifetime, when set, replaces ctx's cancellation: the session's context
+	// takes only ctx's values, and ends when the transport or lifetime ends.
+	// A WebTransport session sets it. The upgrade request's context ends
+	// together with the session, with no cause, and could win over the
+	// transport's close reason. lifetime is instead the connection's context
+	// from Server.ConnContext, so an application cancelling that still ends
+	// the session.
+	lifetime context.Context
 }
 
 // Session represents an active MOQ session over a QUIC connection.
@@ -135,15 +140,19 @@ func newSession(
 
 	connCtx := conn.Context()
 	if setup.ctx != nil {
-		// Keep values from the server context. For WebTransport, let the
-		// transport provide cancellation so its close capsule cause wins.
+		// As net/http derives a connection's context from ConnContext's and
+		// cancels it when the connection ends: a child of the parent, ended
+		// with the connection's cause when the connection closes.
 		parent := setup.ctx
-		if setup.preferConnCause {
+		if setup.lifetime != nil {
 			parent = context.WithoutCancel(parent)
 		}
 		ctx, cancel := context.WithCancelCause(parent)
 		transportCtx := connCtx
 		context.AfterFunc(transportCtx, func() { cancel(context.Cause(transportCtx)) })
+		if lifetime := setup.lifetime; lifetime != nil {
+			context.AfterFunc(lifetime, func() { cancel(context.Cause(lifetime)) })
+		}
 		connCtx = ctx
 	}
 	sess := &Session{
