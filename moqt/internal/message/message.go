@@ -36,7 +36,15 @@ func StringArrayLen(arr []string) int {
 	return total
 }
 
-// MaxMessageSize is the maximum size of a message payload in bytes (50MB).
-// This limit prevents out-of-memory (OOM) denial-of-service attacks
-// when reading maliciously crafted message length prefixes.
-const MaxMessageSize = 50 * 1024 * 1024
+// MaxMessageSize is the largest control message body a decoder accepts
+// (64 KiB). Decoders allocate the declared body before reading it, so this
+// bounds what a peer can make this endpoint reserve per stream without
+// sending the bytes, including a native-QUIC SETUP read before any
+// application auth. No control message comes close: the largest, a SETUP
+// whose Path carries a credential in its query, is a few KiB.
+const MaxMessageSize = 64 * 1024
+
+// MaxFrameSize is the largest frame payload accepted (50 MiB). Unlike a
+// control message, a frame is read into a buffer that grows as its bytes
+// arrive, so a declared length alone reserves nothing.
+const MaxFrameSize = 50 * 1024 * 1024
