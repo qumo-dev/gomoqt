@@ -71,6 +71,11 @@ type Session struct {
 
 	subscribeIDCounter atomic.Uint64
 
+	// contributed holds the tracks this endpoint is contributing, so TRACK
+	// can be answered for a path it does not announce (see Contribute).
+	contributedMu sync.Mutex
+	contributed   map[contributionKey]*contributedTrack
+
 	trackReaders         map[SubscribeID]*TrackReader
 	trackReaderMapLocker sync.RWMutex
 
@@ -455,8 +460,6 @@ func (sess *Session) Subscribe(ctx context.Context, path BroadcastPath, name Tra
 		config = &SubscribeConfig{}
 	}
 
-	id := sess.nextSubscribeID()
-
 	stream, err := sess.conn.OpenStreamSync(ctx)
 	if err != nil {
 		if appErr, ok := errors.AsType[*transport.ApplicationError](err); ok {
@@ -479,7 +482,16 @@ func (sess *Session) Subscribe(ctx context.Context, path BroadcastPath, name Tra
 		return nil, fmt.Errorf("failed to encode stream type message: %w", err)
 	}
 
-	err = message.SubscribeMessage{
+	return sess.subscribeOn(ctx, stream, path, name, config)
+}
+
+// subscribeOn sends SUBSCRIBE on stream and waits for the answer. stream is a
+// Subscribe Stream this endpoint opened, or a Contribute Stream the publisher
+// opened (see Contribution.Subscribe).
+func (sess *Session) subscribeOn(ctx context.Context, stream transport.Stream, path BroadcastPath, name TrackName, config *SubscribeConfig) (*TrackReader, error) {
+	id := sess.nextSubscribeID()
+
+	err := message.SubscribeMessage{
 		SubscribeID:          uint64(id),
 		BroadcastPath:        string(path),
 		TrackName:            string(name),
@@ -853,6 +865,8 @@ func (sess *Session) processBiStream(stream transport.Stream) {
 		sess.handleFetchStream(stream)
 	case message.StreamTypeTrack:
 		sess.handleTrackStream(stream)
+	case message.StreamTypeContribute:
+		sess.handleContributeStream(stream)
 	case message.StreamTypeProbe:
 		if sess.localProbeLevel == message.ProbeLevelNone {
 			// We did not advertise the Probe capability; the spec requires
@@ -934,6 +948,20 @@ func (sess *Session) handleSubscribeStream(stream transport.Stream) {
 	if sess.counters != nil {
 		sess.counters.SubscribesReceived.Add(1)
 	}
+	track, cancelTrack := sess.newSubscriptionWriter(stream, sm)
+
+	sess.mux.serveTrack(track)
+
+	// Ensure the track writer is closed when done
+	track.Close()
+	cancelTrack()
+}
+
+// newSubscriptionWriter registers a track writer for a decoded SUBSCRIBE.
+// stream is a Subscribe Stream the peer opened, or a Contribute Stream this
+// endpoint opened (see Contribute). The caller closes the writer and then
+// calls the returned function.
+func (sess *Session) newSubscriptionWriter(stream transport.Stream, sm message.SubscribeMessage) (*TrackWriter, context.CancelFunc) {
 	config := &SubscribeConfig{
 		Priority:   TrackPriority(sm.SubscriberPriority),
 		Ordered:    boolFromWireFlag(sm.SubscriberOrdered),
@@ -967,11 +995,7 @@ func (sess *Session) handleSubscribeStream(stream transport.Stream) {
 		sess.counters.SubscribesServed.Add(1)
 	}
 
-	sess.mux.serveTrack(track)
-
-	// Ensure the track writer is closed when done
-	track.Close()
-	cancelTrack()
+	return track, cancelTrack
 }
 
 // handleTrackStream decodes a TRACK message and responds with the track's
@@ -986,20 +1010,23 @@ func (sess *Session) handleTrackStream(stream transport.Stream) {
 		return
 	}
 
-	ann, handler := sess.mux.TrackHandler(BroadcastPath(tm.BroadcastPath))
-	if ann == nil {
-		cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeNotFound))
-		return
-	}
-
-	var info PublishInfo
-	if provider, ok := handler.(TrackInfoProvider); ok {
-		i, found := provider.TrackInfo(TrackName(tm.TrackName))
-		if !found {
+	// A contributed track is answered for a path this endpoint does not
+	// announce, so it is looked up before the mux.
+	info, contributed := sess.contributedInfo(BroadcastPath(tm.BroadcastPath), TrackName(tm.TrackName))
+	if !contributed {
+		ann, handler := sess.mux.TrackHandler(BroadcastPath(tm.BroadcastPath))
+		if ann == nil {
 			cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeNotFound))
 			return
 		}
-		info = i
+		if provider, ok := handler.(TrackInfoProvider); ok {
+			i, found := provider.TrackInfo(TrackName(tm.TrackName))
+			if !found {
+				cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeNotFound))
+				return
+			}
+			info = i
+		}
 	}
 
 	err := message.TrackInfoMessage{

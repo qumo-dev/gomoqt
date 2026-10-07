@@ -12,6 +12,8 @@ const (
 	StreamTypeProbe     StreamType = 0x4
 	StreamTypeGoaway    StreamType = 0x5
 	StreamTypeTrack     StreamType = 0x6
+	// StreamTypeContribute is opened by the publisher, unlike the others.
+	StreamTypeContribute StreamType = 0x7
 
 	// Uni-directional Stream Types
 	StreamTypeGroup StreamType = 0x0

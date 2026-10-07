@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **moqt: the Contribute Stream, for adding a track to a broadcast another publisher announces (#450).**
+  A publisher opens a bidirectional stream (type `0x7`) and sends `CONTRIBUTE_REQUEST` with a broadcast path and track name. The receiver sends `SUBSCRIBE` on that same stream when it wants the track, and from there the stream is an ordinary Subscribe Stream. Nothing is delivered before that `SUBSCRIBE`, so a contribution with no subscriber carries nothing.
+  - **Experimental.** This is not part of moq-lite. It follows a local draft against moq-lite-07 that has not been proposed upstream, and it is not negotiated in SETUP: a peer without it resets the unknown stream type, which reads as a refusal. Go only; `@qumo/moq` does not have it yet.
+  - **Publisher:** `Session.Contribute(ctx, path, name, info)` returns a `*TrackWriter` once the peer subscribes, as `Session.Subscribe` returns a `*TrackReader`. While the writer is open, the session answers `TRACK` for that track with `info`.
+  - **Receiver:** `ContributeHandler`, with `ServeContribute(w *ContributeResponseWriter, r *ContributeRequest)`, in the shape of `FetchHandler`. It is an optional interface of the `TrackHandler` registered for a broadcast path, as `TrackInfoProvider` is: a request is offered to the handler registered for exactly its path, and refused when that handler does not implement it or no handler is registered. The handler accepts with `w.Subscribe`, or refuses with `w.CloseWithError`.
+  - A Contribute Stream carries one subscription. To stay available after it ends, the publisher calls `Contribute` again.
+
 ## [v0.22.1] - 2026-10-05
 
 > **Dual release.** `v0.22.1` ships the Go module and `@qumo/moq` on JSR at the same version: `@qumo/moq` goes from `0.20.0` to `0.22.1`. Fixes only; no exported Go API changes, and `@qumo/moq` gains only an optional `onDone` parameter on the `GroupReader` constructor. Two behaviour changes are visible to callers:
