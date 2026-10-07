@@ -22,6 +22,7 @@ func TestDecode_RejectsOversizedLength(t *testing.T) {
 		"AnnounceBroadcastMessage":         &message.AnnounceBroadcastMessage{},
 		"AnnounceRequestMessage": &message.AnnounceRequestMessage{},
 		"AnnounceOkMessage":      &message.AnnounceOkMessage{},
+		"ContributeRequestMessage": &message.ContributeRequestMessage{},
 		"FetchMessage":            &message.FetchMessage{},
 		"GoawayMessage":           &message.GoawayMessage{},
 		"GroupMessage":            &message.GroupMessage{},
