@@ -487,7 +487,7 @@ func (sess *Session) Subscribe(ctx context.Context, path BroadcastPath, name Tra
 
 // subscribeOn sends SUBSCRIBE on stream and waits for the answer. stream is a
 // Subscribe Stream this endpoint opened, or a Contribute Stream the publisher
-// opened (see Contribution.Subscribe).
+// opened.
 func (sess *Session) subscribeOn(ctx context.Context, stream transport.Stream, path BroadcastPath, name TrackName, config *SubscribeConfig) (*TrackReader, error) {
 	id := sess.nextSubscribeID()
 

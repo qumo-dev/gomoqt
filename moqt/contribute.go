@@ -10,23 +10,13 @@ import (
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
-// A Contribute Stream is a Subscribe Stream opened from the publisher's end
-// (qumo-dev/gomoqt#450). The publisher sends CONTRIBUTE_REQUEST, naming one
-// track of a broadcast it does not announce, and then waits. The receiver
-// sends SUBSCRIBE on the same stream once it wants the track, and from there
-// the stream is an ordinary Subscribe Stream: nothing is delivered before that
-// SUBSCRIBE.
-//
-// The API follows the rest of the package, which follows net/http:
-//
-//   - The publisher calls [Session.Contribute] and gets a [TrackWriter], as a
-//     subscriber calls [Session.Subscribe] and gets a [TrackReader].
-//   - The receiver handles the request in a [ContributeHandler], which takes
-//     a writer and a request as [FetchHandler] does.
+// A Contribute Stream is a Subscribe Stream opened from the publisher's end.
+// The publisher sends CONTRIBUTE_REQUEST, naming one track of a broadcast it
+// does not announce. The receiver sends SUBSCRIBE on the same stream once it
+// wants the track, and nothing is delivered before that.
 
 // ErrContributeSubscribed is returned by a second
-// [ContributeResponseWriter.Subscribe]: a Contribute Stream carries one
-// subscription.
+// [ContributeResponseWriter.Subscribe].
 var ErrContributeSubscribed = errors.New("moqt: contribute stream already subscribed")
 
 // ContributeRequest is a publisher's request to contribute one track to a
@@ -68,14 +58,11 @@ func (r *ContributeRequest) WithContext(ctx context.Context) *ContributeRequest 
 // A ContributeHandler responds to a request to contribute a track.
 //
 // It is an optional interface of the [TrackHandler] registered for a broadcast
-// path, as [TrackInfoProvider] is: a request naming that path is served by the
-// handler when it implements ContributeHandler, and is refused otherwise. A
-// path with no handler takes no contribution.
+// path. A request naming that path is served by the handler when it implements
+// ContributeHandler, and is refused otherwise.
 //
-// ServeContribute accepts the track by calling w.Subscribe, when it wants the
-// track and not before, or refuses it with w.CloseWithError. Returning from
-// ServeContribute ends the contribution, so a handler that subscribed blocks
-// until it is done with the track or r.Context() ends.
+// ServeContribute accepts the track with w.Subscribe or refuses it with
+// w.CloseWithError. Returning from ServeContribute ends the contribution.
 type ContributeHandler interface {
 	ServeContribute(w *ContributeResponseWriter, r *ContributeRequest)
 }
@@ -198,18 +185,13 @@ func safeServeContribute(handler ContributeHandler, w *ContributeResponseWriter,
 }
 
 // Contribute offers one track of a broadcast this endpoint does not announce,
-// and returns its writer once the peer subscribes. ctx bounds only that wait,
-// which may be long: the peer subscribes when it wants the track, and may
-// never. Nothing is sent to the peer before it subscribes.
+// and returns its writer once the peer subscribes. ctx bounds that wait.
 //
 // info is the track's properties, answered to the peer's TRACK requests while
 // the writer is open. If info is nil, the defaults are used.
 //
-// The caller closes the returned TrackWriter. A Contribute Stream carries one
-// subscription, so to stay available afterwards, call Contribute again.
-//
-// A peer that refuses the contribution resets the stream, and Contribute
-// returns a [SubscribeError].
+// The caller closes the returned TrackWriter. If the peer refuses the
+// contribution, Contribute returns a [SubscribeError].
 func (sess *Session) Contribute(ctx context.Context, path BroadcastPath, name TrackName, info *PublishInfo) (*TrackWriter, error) {
 	if ctx == nil {
 		return nil, errors.New("nil context")
@@ -231,8 +213,7 @@ func (sess *Session) Contribute(ctx context.Context, path BroadcastPath, name Tr
 		}
 		return nil, fmt.Errorf("failed to open bidirectional stream: %w", err)
 	}
-	// Reading the peer's SUBSCRIBE has no deadline of its own. Reset the
-	// stream when the caller gives up, so the read returns.
+	// Reset the stream when ctx ends, so the read of SUBSCRIBE returns.
 	stop := context.AfterFunc(ctx, func() {
 		cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeInternal))
 	})
@@ -268,8 +249,7 @@ func (sess *Session) Contribute(ctx context.Context, path BroadcastPath, name Tr
 	}
 
 	track, cancelTrack := sess.newSubscriptionWriter(stream, sm)
-	// The writer outlives this call, so what a handler's return would release
-	// is released when the caller closes it.
+	// Release the contribution when the caller closes the writer.
 	removeWriter := track.onCloseTrackFunc
 	track.onCloseTrackFunc = func() {
 		removeWriter()
