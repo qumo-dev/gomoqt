@@ -13,10 +13,14 @@ import (
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
+// Config is an alias for quicgo_webtransportgo.Config
+type Config = quicgo_webtransportgo.Config
+
 // Server is a wrapper for (quic-go/webtransport-go).Server
 type Server struct {
 	internalServer *quicgo_webtransportgo.Server
 	Handler        http.Handler
+	Config         *quicgo_webtransportgo.Config
 	connContexts   sync.Map // *quicgo_quicgo.Conn -> context.Context
 	initOnce       sync.Once
 }
@@ -28,7 +32,11 @@ func (s *Server) init() {
 				H3: &http3.Server{
 					Handler: s.Handler,
 				},
+				Config: s.Config,
 			}
+		}
+		if s.internalServer.Config == nil && s.Config != nil {
+			s.internalServer.Config = s.Config
 		}
 		if s.internalServer.H3 == nil {
 			s.internalServer.H3 = &http3.Server{

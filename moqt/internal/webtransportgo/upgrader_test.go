@@ -23,3 +23,17 @@ func TestWrapSession_NilSession(t *testing.T) {
 	conn := wrapSession(nil)
 	assert.Nil(t, conn)
 }
+
+func TestUpgrader_Upgrade_ProtocolMismatch(t *testing.T) {
+	u := &Upgrader{
+		ApplicationProtocols: []string{"moq-lite-05"},
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("CONNECT", "https://example.com/moq", nil)
+	r.Header.Set("WT-Available-Protocols", `"moq-lite-04"`)
+
+	conn, err := u.Upgrade(w, r)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no supported application protocol")
+	assert.Nil(t, conn)
+}

@@ -50,16 +50,89 @@ func ListenAndServe(addr string, tlsConfig *tls.Config) error {
 	return server.ListenAndServe()
 }
 
+const (
+	// DefaultWebTransportMaxStreams is the default maximum number of concurrent
+	// bidirectional streams the peer may open in a WebTransport session.
+	DefaultWebTransportMaxStreams = 100
+	// DefaultWebTransportMaxUniStreams is the default maximum number of concurrent
+	// unidirectional streams the peer may open in a WebTransport session.
+	// Providing a non-zero initial stream limit is required for browsers such as
+	// Safari (WebKit), which treat absence of this setting as a stream limit of zero.
+	DefaultWebTransportMaxUniStreams = 100
+	// DefaultWebTransportMaxData is the default initial data limit (10MB) for WebTransport streams.
+	DefaultWebTransportMaxData = 10 * 1024 * 1024
+)
+
+// WebTransportConfig contains configuration parameters for WebTransport sessions.
+type WebTransportConfig struct {
+	// MaxIncomingStreams is the maximum number of concurrent bidirectional streams
+	// that the peer is allowed to open in a WebTransport session.
+	// If zero, the value from Server.QUICConfig.MaxIncomingStreams is used if positive,
+	// otherwise DefaultWebTransportMaxStreams (100) is used.
+	MaxIncomingStreams int64
+
+	// MaxIncomingUniStreams is the maximum number of concurrent unidirectional streams
+	// that the peer is allowed to open in a WebTransport session.
+	// If zero, the value from Server.QUICConfig.MaxIncomingUniStreams is used if positive,
+	// otherwise DefaultWebTransportMaxUniStreams (100) is used.
+	MaxIncomingUniStreams int64
+
+	// MaxIncomingData is the initial maximum number of bytes that the peer is allowed
+	// to send in WebTransport streams.
+	// If zero, DefaultWebTransportMaxData (10MB) is used.
+	MaxIncomingData int64
+}
+
+func resolveWebTransportConfig(wtCfg *WebTransportConfig, quicCfg *quic.Config) *webtransportgo.Config {
+	out := &webtransportgo.Config{
+		MaxIncomingStreams:    DefaultWebTransportMaxStreams,
+		MaxIncomingUniStreams: DefaultWebTransportMaxUniStreams,
+		MaxIncomingData:       DefaultWebTransportMaxData,
+	}
+
+	if quicCfg != nil {
+		if quicCfg.MaxIncomingStreams > 0 {
+			out.MaxIncomingStreams = quicCfg.MaxIncomingStreams
+		}
+		if quicCfg.MaxIncomingUniStreams > 0 {
+			out.MaxIncomingUniStreams = quicCfg.MaxIncomingUniStreams
+		}
+	}
+
+	if wtCfg != nil {
+		if wtCfg.MaxIncomingStreams != 0 {
+			out.MaxIncomingStreams = wtCfg.MaxIncomingStreams
+		}
+		if wtCfg.MaxIncomingUniStreams != 0 {
+			out.MaxIncomingUniStreams = wtCfg.MaxIncomingUniStreams
+		}
+		if wtCfg.MaxIncomingData != 0 {
+			out.MaxIncomingData = wtCfg.MaxIncomingData
+		}
+	}
+
+	return out
+}
+
 type WebTransportServer interface {
 	ServeQUICConn(conn StreamConn) error
 	Close() error
 }
 
-// NewWebTransportServer creates a new WebTransportServer instance utilizing the optional HTTP handler.
+// NewWebTransportServer creates a new WebTransportServer instance utilizing the optional HTTP handler
+// and default WebTransport stream limits.
 // By default, if the handler is nil, http.DefaultServeMux is used.
 func NewWebTransportServer(handler http.Handler) WebTransportServer {
+	return NewWebTransportServerWithConfig(handler, nil)
+}
+
+// NewWebTransportServerWithConfig creates a new WebTransportServer instance utilizing the optional HTTP handler
+// and specified WebTransport configuration. If config is nil, default WebTransport stream limits are used.
+func NewWebTransportServerWithConfig(handler http.Handler, config *WebTransportConfig) WebTransportServer {
+	wtConfig := resolveWebTransportConfig(config, nil)
 	return &webtransportgo.Server{
 		Handler: handler,
+		Config:  wtConfig,
 	}
 }
 
@@ -81,6 +154,10 @@ type Server struct {
 
 	// QUIC configuration
 	QUICConfig *quic.Config
+
+	// WebTransport configuration.
+	// If nil, stream limits are derived from QUICConfig and built-in defaults.
+	WebTransportConfig *WebTransportConfig
 
 	// MoQ configuration
 	Config *Config
@@ -148,7 +225,11 @@ func (s *Server) init() {
 			// sessions and dispatch to s.Handler. Passing nil here previously
 			// fell back to http.DefaultServeMux (via webtransportgo.Server),
 			// which serves no MOQ route, so every WebTransport request 404'd.
-			s.WebTransportServer = NewWebTransportServer(s.defaultWebTransportHandler())
+			wtConfig := resolveWebTransportConfig(s.WebTransportConfig, s.QUICConfig)
+			s.WebTransportServer = &webtransportgo.Server{
+				Handler: s.defaultWebTransportHandler(),
+				Config:  wtConfig,
+			}
 		}
 	})
 }
