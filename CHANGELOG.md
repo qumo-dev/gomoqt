@@ -21,8 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **`WebSocketHandler`** is an `http.Handler` for an HTTP/1.1 server, the
     counterpart of `WebTransportHandler`. A session behaves as a WebTransport
     one: the request URI is its path, and SETUP carries no Path. Setting its
-    `Server` field makes that Server's `Shutdown` (GOAWAY) and `Close` reach
-    its sessions.
+    `Server` field makes its sessions that Server's: `Shutdown` (GOAWAY) and
+    `Close` reach them, and `ConnContext` gives them their context, under the
+    values of the upgrade request.
+  - **`WebSocketHandler.Accepts` and `IsWebSocketUpgrade`** tell a server,
+    before the upgrade, whether a request is one the handler would take. A
+    server that admits sessions itself asks them first.
   - **`Dialer.Dial` accepts `wss://` and `ws://`.** `Dialer.QMuxConfig` and
     `Dialer.DialWebSocketFunc` configure and replace the dial.
   - **The WebSocket subprotocol is the version negotiation**, since a
@@ -34,9 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     stream, and there are no unreliable datagrams. Stream priorities order
     what waits for the connection.
 - **@qumo/moq: `connect` picks the transport.** WebTransport where it works,
-  and QMux over WebSocket on WebKit and where there is no `WebTransport`.
-  `ConnectInit.transport` (`"auto"`, `"webtransport"`, `"websocket"`) forces
-  one. `selectTransport` and `isWebKit` are exported. The WebSocket transport
+  and QMux over WebSocket on WebKit and where there is no `WebTransport`. On
+  WebKit, a server that takes no WebSocket is reached over WebTransport
+  instead, as before. `ConnectInit.transport` (`"auto"`, `"webtransport"`,
+  `"websocket"`) forces one. `transportCandidates`, `selectTransport` and
+  `isWebKit` are exported. The WebSocket transport
   is [`@moq/qmux`](https://www.npmjs.com/package/@moq/qmux), which an `https:`
   URL reaches as `wss:`.
 - **interop:** the Go server takes `-ws-addr` to also serve WebSocket, and the

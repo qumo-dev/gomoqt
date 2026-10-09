@@ -45,7 +45,7 @@ func TestSelectProtocol(t *testing.T) {
 	}
 }
 
-func TestIsWebSocketUpgrade(t *testing.T) {
+func TestIsUpgrade(t *testing.T) {
 	tests := map[string]struct {
 		method   string
 		header   http.Header
@@ -81,7 +81,7 @@ func TestIsWebSocketUpgrade(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			r := &http.Request{Method: tt.method, Header: tt.header}
-			assert.Equal(t, tt.expected, isWebSocketUpgrade(r))
+			assert.Equal(t, tt.expected, IsUpgrade(r))
 		})
 	}
 }

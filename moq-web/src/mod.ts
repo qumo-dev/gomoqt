@@ -25,7 +25,7 @@ export * from "./track_prefix.ts";
 export * from "./options.ts";
 export * from "./info.ts";
 export * from "./client.ts";
-export { isWebKit, QMUX_VERSION, selectTransport } from "./transport.ts";
+export { isWebKit, QMUX_VERSION, selectTransport, transportCandidates } from "./transport.ts";
 export type { TransportEnvironment, TransportKind } from "./transport.ts";
 export * from "./announce_stream.ts";
 export * from "./group_stream.ts";

@@ -12,7 +12,8 @@ export const QMUX_VERSION = "qmux-02";
 /**
  * Which transport {@link connect} uses.
  *
- * - `"auto"` picks WebTransport where it works, and WebSocket elsewhere.
+ * - `"auto"` picks WebTransport where it works, and WebSocket elsewhere. On
+ *   WebKit it falls back to WebTransport when the server takes no WebSocket.
  * - `"webtransport"` and `"websocket"` force one, for testing.
  */
 export type TransportKind = "auto" | "webtransport" | "websocket";
@@ -44,28 +45,42 @@ export function isWebKit(userAgent: string): boolean {
 }
 
 /**
- * Resolves a {@link TransportKind} to the transport to use.
+ * Resolves a {@link TransportKind} to the transports to try, in order.
  *
- * WebKit is sent to WebSocket even though it has a `WebTransport`: its
+ * WebKit is sent to WebSocket first even though it has a `WebTransport`: its
  * implementation never raises the stream and data limits it grants, so a
  * session stalls after about 7,600 streams or 16 MB
  * (https://bugs.webkit.org/show_bug.cgi?id=319818). The stall cannot be
  * detected after connecting, as the session looks healthy until then.
+ *
+ * WebTransport stays as the second choice there, for a server that takes no
+ * WebSocket: a session that will stall is better than none.
+ */
+export function transportCandidates(
+	kind: TransportKind = "auto",
+	env: TransportEnvironment = currentEnvironment(),
+): readonly ("webtransport" | "websocket")[] {
+	if (kind !== "auto") {
+		return [kind];
+	}
+	if (!env.hasWebTransport) {
+		return ["websocket"];
+	}
+	if (env.userAgent !== undefined && isWebKit(env.userAgent)) {
+		return ["websocket", "webtransport"];
+	}
+	return ["webtransport"];
+}
+
+/**
+ * Resolves a {@link TransportKind} to the transport {@link connect} tries
+ * first. See {@link transportCandidates}.
  */
 export function selectTransport(
 	kind: TransportKind = "auto",
 	env: TransportEnvironment = currentEnvironment(),
 ): "webtransport" | "websocket" {
-	if (kind !== "auto") {
-		return kind;
-	}
-	if (!env.hasWebTransport) {
-		return "websocket";
-	}
-	if (env.userAgent !== undefined && isWebKit(env.userAgent)) {
-		return "websocket";
-	}
-	return "webtransport";
+	return transportCandidates(kind, env)[0] ?? "webtransport";
 }
 
 /**

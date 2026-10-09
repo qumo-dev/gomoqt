@@ -101,9 +101,9 @@ func TestUpgrader_Upgrade(t *testing.T) {
 	assert.Equal(t, "down", string(got))
 
 	// The non-blocking opens work once the handshake is done.
-	_, err = client.OpenStream()
+	_, err = client.OpenStream() //nolint:staticcheck // deprecated in the interface, and still the adapter's to implement
 	require.NoError(t, err)
-	_, err = client.OpenUniStream()
+	_, err = client.OpenUniStream() //nolint:staticcheck // deprecated in the interface, and still the adapter's to implement
 	require.NoError(t, err)
 
 	stats, ok := server.(interface {
@@ -142,9 +142,9 @@ func TestSession_CloseWithError(t *testing.T) {
 	assert.ErrorAs(t, err, &appErr)
 	_, err = server.OpenUniStreamSync(ctx)
 	assert.ErrorAs(t, err, &appErr)
-	_, err = server.OpenStream()
+	_, err = server.OpenStream() //nolint:staticcheck // deprecated in the interface, and still the adapter's to implement
 	assert.ErrorAs(t, err, &appErr)
-	_, err = server.OpenUniStream()
+	_, err = server.OpenUniStream() //nolint:staticcheck // deprecated in the interface, and still the adapter's to implement
 	assert.ErrorAs(t, err, &appErr)
 }
 
@@ -185,7 +185,7 @@ func TestUpgrader_Upgrade_Refused(t *testing.T) {
 			if tt.subprotocols == nil {
 				rsp, err := http.Get("http" + strings.TrimPrefix(url, "ws"))
 				require.NoError(t, err)
-				defer rsp.Body.Close()
+				defer func() { _ = rsp.Body.Close() }() // not actionable: the test is over
 				assert.Equal(t, tt.status, rsp.StatusCode)
 				return
 			}
@@ -288,11 +288,95 @@ func TestDial_Refused(t *testing.T) {
 	}
 }
 
-func TestConfigOrDefault(t *testing.T) {
-	custom := &qmux.Config{MaxIncomingStreams: 7}
+func TestWithDefaults(t *testing.T) {
+	tests := map[string]struct {
+		config   *qmux.Config
+		expected *qmux.Config
+	}{
+		"nil": {
+			config:   nil,
+			expected: &qmux.Config{KeepAlivePeriod: DefaultKeepAlivePeriod},
+		},
+		"another field set keeps the keep-alive": {
+			config:   &qmux.Config{MaxIncomingStreams: 7},
+			expected: &qmux.Config{MaxIncomingStreams: 7, KeepAlivePeriod: DefaultKeepAlivePeriod},
+		},
+		"a keep-alive period of the caller's": {
+			config:   &qmux.Config{KeepAlivePeriod: time.Second},
+			expected: &qmux.Config{KeepAlivePeriod: time.Second},
+		},
+		"a negative period sends no pings": {
+			config:   &qmux.Config{KeepAlivePeriod: -1},
+			expected: &qmux.Config{KeepAlivePeriod: -1},
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := withDefaults(tt.config)
 
-	assert.Same(t, custom, configOrDefault(custom))
-	assert.Equal(t, &qmux.Config{KeepAlivePeriod: DefaultKeepAlivePeriod}, configOrDefault(nil))
+			assert.Equal(t, tt.expected, got)
+			assert.NotSame(t, tt.config, got, "the caller's configuration is not modified")
+		})
+	}
+}
+
+func TestUpgrader_Accepts(t *testing.T) {
+	u := &Upgrader{Protocols: []string{testProtocol}}
+	upgrade := func(subprotocol string) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Connection", "Upgrade")
+		r.Header.Set("Upgrade", "websocket")
+		if subprotocol != "" {
+			r.Header.Set("Sec-WebSocket-Protocol", subprotocol)
+		}
+		return r
+	}
+	tests := map[string]struct {
+		request  *http.Request
+		expected bool
+	}{
+		"an upgrade offering the protocol": {request: upgrade(Version + "." + testProtocol), expected: true},
+		"an upgrade offering another":      {request: upgrade(Version + ".other")},
+		"an upgrade offering none":         {request: upgrade("")},
+		"not an upgrade":                   {request: httptest.NewRequest(http.MethodGet, "/", nil)},
+		"a refused Origin is not its matter": {request: func() *http.Request {
+			r := upgrade(Version + "." + testProtocol)
+			r.Header.Set("Origin", "https://evil.example")
+			return r
+		}(), expected: true},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, u.Accepts(tt.request))
+		})
+	}
+}
+
+// A write deadline drops a connection whose peer has stopped reading, so
+// that closing it does not wait for the peer.
+func TestMessageConn_SetWriteDeadline(t *testing.T) {
+	url, sessions := newUpgradeServer(t, &Upgrader{Protocols: []string{testProtocol}})
+	ctx := testContext(t)
+	ws, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{Subprotocols: []string{Version + "." + testProtocol}})
+	require.NoError(t, err)
+	defer func() { _ = ws.CloseNow() }() // not actionable: the test is over
+	mc := newMessageConn(ws, &qmux.Config{}, addr("local"), addr("remote"))
+	// The server waits for transport parameters that never come.
+	_ = sessions
+
+	require.NoError(t, mc.SetWriteDeadline(time.Now().Add(20*time.Millisecond)))
+
+	select {
+	case <-mc.ctx.Done():
+	case <-ctx.Done():
+		require.FailNow(t, "the deadline did not drop the connection")
+	}
+	assert.Error(t, mc.WriteMessage([]byte("late")))
+
+	// A cleared deadline does nothing, and closing twice is fine.
+	require.NoError(t, mc.SetWriteDeadline(time.Time{}))
+	require.NoError(t, mc.Close())
+	require.NoError(t, mc.Close())
 }
 
 func TestUpgradeError(t *testing.T) {

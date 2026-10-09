@@ -1,7 +1,8 @@
 import { Session } from "./session.ts";
 import type { ConnectInit } from "./options.ts";
 import { WebTransportSession } from "./internal/webtransport/mod.ts";
-import { ALPN, openWebSocketTransport, selectTransport } from "./transport.ts";
+import type { TransportFactory } from "./options.ts";
+import { ALPN, openWebSocketTransport, transportCandidates } from "./transport.ts";
 
 export { ALPN };
 
@@ -44,8 +45,9 @@ const DefaultWebTransportOptions: WebTransportOptions = {
  * ```
  *
  * The transport is WebTransport where it works, and QMux over WebSocket
- * elsewhere: on WebKit, and where there is no `WebTransport`. See
- * {@link selectTransport}.
+ * elsewhere: on WebKit, and where there is no `WebTransport`. On WebKit a
+ * server that takes no WebSocket is reached over WebTransport instead. See
+ * {@link transportCandidates}.
  *
  * @param url - MOQ server endpoint URL.
  * @param init - Connection init object (mux, onGoaway, transport, transportOptions, transportFactory).
@@ -60,25 +62,34 @@ export async function connect(
 		...(init?.transportOptions ?? {}),
 	};
 
-	const factory = init?.transportFactory ??
-		(selectTransport(init?.transport) === "websocket"
-			? (u: string | URL) => openWebSocketTransport(u)
-			: (u: string | URL, o?: WebTransportOptions) => new WebTransport(u, o));
+	const factories: readonly TransportFactory[] = init?.transportFactory
+		? [init.transportFactory]
+		: transportCandidates(init?.transport).map((kind): TransportFactory =>
+			kind === "websocket"
+				? (u) => openWebSocketTransport(u)
+				: (u, o) => new WebTransport(u, o)
+		);
 
-	try {
-		const transport = new WebTransportSession(factory(url, transportOptions));
-		const session = new Session({
-			transport,
-			mux: init?.mux,
-			fetchHandler: init?.fetchHandler,
-			onGoaway: init?.onGoaway,
-			options: init?.options,
-		});
-		await session.ready;
-		return session;
-	} catch (err) {
-		throw new Error(`failed to connect: ${err}`);
+	// The last transport's failure is the one reported: an earlier one was
+	// only tried first.
+	let failure: unknown;
+	for (const factory of factories) {
+		try {
+			const transport = new WebTransportSession(factory(url, transportOptions));
+			const session = new Session({
+				transport,
+				mux: init?.mux,
+				fetchHandler: init?.fetchHandler,
+				onGoaway: init?.onGoaway,
+				options: init?.options,
+			});
+			await session.ready;
+			return session;
+		} catch (err) {
+			failure = err;
+		}
 	}
+	throw new Error(`failed to connect: ${failure}`);
 }
 
 // Back-compat shim — kept so existing code compiled against the old Client

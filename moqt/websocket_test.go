@@ -153,7 +153,7 @@ func TestWebSocketHandler_ServeHTTP_Refused(t *testing.T) {
 			if tt.subprotocols == nil {
 				rsp, err := http.Get(srv.URL)
 				require.NoError(t, err)
-				defer rsp.Body.Close()
+				defer func() { _ = rsp.Body.Close() }() // not actionable: the test is over
 				assert.Equal(t, tt.status, rsp.StatusCode)
 				return
 			}
@@ -290,4 +290,81 @@ func TestDialer_Dial_WebSocketWithoutSubprotocol(t *testing.T) {
 	assert.Nil(t, sess)
 	assert.NotErrorIs(t, err, io.EOF)
 	assert.Contains(t, err.Error(), "subprotocol")
+}
+
+// With Server set, a session has the values of the Server's ConnContext,
+// under those of its upgrade request.
+func TestWebSocketHandler_ServeHTTP_ConnContext(t *testing.T) {
+	type key string
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	server := &Server{
+		ConnContext: func(ctx context.Context, _ StreamConn) context.Context {
+			ctx = context.WithValue(ctx, key("conn"), "from ConnContext")
+			return context.WithValue(ctx, key("both"), "from ConnContext")
+		},
+	}
+	defer closeServer(t, server)
+	served := make(chan *Session, 1)
+	handler := &WebSocketHandler{
+		Server: server,
+		Handler: HandleFunc(func(sess *Session) {
+			served <- sess
+			<-sess.Context().Done()
+		}),
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), key("both"), "from the request")))
+	}))
+	defer srv.Close()
+
+	client, err := (&Dialer{}).Dial(ctx, wsURL(srv, "/"), nil)
+	require.NoError(t, err)
+	defer func() { _ = client.CloseWithError(NoError, "done") }() // not actionable: the test is over
+
+	select {
+	case sess := <-served:
+		assert.Equal(t, "from ConnContext", sess.Context().Value(key("conn")))
+		assert.Equal(t, "from the request", sess.Context().Value(key("both")), "the request's value hides ConnContext's")
+		assert.Nil(t, sess.Context().Value(key("neither")))
+	case <-ctx.Done():
+		require.FailNow(t, "the handler did not get the session")
+	}
+}
+
+func TestWebSocketHandler_Accepts(t *testing.T) {
+	upgrade := func(subprotocol string) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Connection", "Upgrade")
+		r.Header.Set("Upgrade", "websocket")
+		r.Header.Set("Sec-WebSocket-Protocol", subprotocol)
+		return r
+	}
+	tests := map[string]struct {
+		handler  *WebSocketHandler
+		request  *http.Request
+		expected bool
+	}{
+		"the default protocol": {
+			handler: &WebSocketHandler{}, request: upgrade(NextProtoQMux), expected: true,
+		},
+		"another protocol": {
+			handler: &WebSocketHandler{}, request: upgrade("qmux-02.moq-lite-99"),
+		},
+		"a configured protocol": {
+			handler:  &WebSocketHandler{ApplicationProtocols: []string{"moq-lite-99"}},
+			request:  upgrade("qmux-02.moq-lite-99"),
+			expected: true,
+		},
+		"not a WebSocket upgrade": {
+			handler: &WebSocketHandler{}, request: httptest.NewRequest(http.MethodGet, "/", nil),
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.handler.Accepts(tt.request))
+			assert.Equal(t, tt.request.Header.Get("Upgrade") != "", IsWebSocketUpgrade(tt.request))
+		})
+	}
 }

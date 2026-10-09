@@ -9,7 +9,15 @@ import (
 
 	"github.com/okdaichi/qmux-go/qmux"
 	"github.com/qumo-dev/gomoqt/moqt/internal/qmuxgo"
+	"github.com/qumo-dev/gomoqt/transport"
 )
+
+// IsWebSocketUpgrade reports whether r asks to upgrade to WebSocket. A
+// server that takes WebTransport and WebSocket on one route tells them apart
+// with it.
+func IsWebSocketUpgrade(r *http.Request) bool {
+	return qmuxgo.IsUpgrade(r)
+}
 
 // WebSocketHandler upgrades HTTP requests to MOQ sessions over QMux on
 // WebSocket: the binding for clients that cannot use WebTransport, such as
@@ -37,8 +45,8 @@ type WebSocketHandler struct {
 	// empty, NextProtoMOQ is.
 	ApplicationProtocols []string
 
-	// QMuxConfig configures the QMux connections. If nil, the defaults
-	// apply, with a keep-alive ping every 10 seconds.
+	// QMuxConfig configures the QMux connections. A zero KeepAlivePeriod
+	// is 10 seconds; a negative one sends no keep-alive pings.
 	QMuxConfig *qmux.Config
 
 	// Handler handles the session after the upgrade. If nil, no request
@@ -49,10 +57,12 @@ type WebSocketHandler struct {
 	// fetch requests are not handled.
 	FetchHandler FetchHandler
 
-	// Server, if set, is the Server whose Shutdown and Close reach the
-	// sessions of this handler, and which stops the handler from taking
-	// new ones. Without it the handler stands alone, as a
-	// WebTransportHandler does outside a Server.
+	// Server, if set, is the Server the sessions of this handler belong
+	// to: its Shutdown and Close reach them, it stops the handler from
+	// taking new ones, and its ConnContext gives them their context, as it
+	// does for the Server's other sessions. A value of the upgrade request
+	// hides one ConnContext set under the same key. Without Server the
+	// handler stands alone, as a WebTransportHandler does outside one.
 	Server *Server
 
 	// UpgradeFunc performs the upgrade in place of the default one. A
@@ -63,25 +73,53 @@ type WebSocketHandler struct {
 	Logger *slog.Logger
 }
 
-func (h *WebSocketHandler) upgrade(w http.ResponseWriter, r *http.Request) (WebTransportSession, error) {
-	if h.UpgradeFunc != nil {
-		return h.UpgradeFunc(w, r)
-	}
+func (h *WebSocketHandler) upgrader() *qmuxgo.Upgrader {
 	protocols := h.ApplicationProtocols
 	if len(protocols) == 0 {
 		protocols = []string{NextProtoMOQ}
 	}
-	upgrader := qmuxgo.Upgrader{
+	return &qmuxgo.Upgrader{
 		CheckOrigin: h.CheckOrigin,
 		Protocols:   protocols,
 		Config:      h.QMuxConfig,
 	}
-	conn, err := upgrader.Upgrade(w, r)
+}
+
+// Accepts reports whether r is a WebSocket upgrade that offers a
+// subprotocol the handler speaks. It does not check the Origin: call
+// CheckOrigin for that. A server that decides something of its own before
+// the upgrade, such as whether to admit the session, asks first whether the
+// upgrade would be refused anyway.
+func (h *WebSocketHandler) Accepts(r *http.Request) bool {
+	return h.upgrader().Accepts(r)
+}
+
+func (h *WebSocketHandler) upgrade(w http.ResponseWriter, r *http.Request) (WebTransportSession, error) {
+	if h.UpgradeFunc != nil {
+		return h.UpgradeFunc(w, r)
+	}
+	conn, err := h.upgrader().Upgrade(w, r)
 	var uerr *qmuxgo.UpgradeError
 	if errors.As(err, &uerr) && uerr.Status != 0 {
 		http.Error(w, uerr.Err.Error(), uerr.Status)
 	}
 	return conn, err
+}
+
+// layeredContext is a context whose values come from itself first, and
+// from under for the keys it does not have. A WebSocket session's context
+// is the upgrade request's over its Server's ConnContext, as a WebTransport
+// session's request context derives from its connection's.
+type layeredContext struct {
+	context.Context
+	under context.Context
+}
+
+func (c layeredContext) Value(key any) any {
+	if v := c.Context.Value(key); v != nil {
+		return v
+	}
+	return c.under.Value(key)
 }
 
 // ServeHTTP upgrades the request to a session and serves it with Handler,
@@ -92,14 +130,13 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no handler configured", http.StatusServiceUnavailable)
 		return
 	}
-	var manager *connManager
-	if s := h.Server; s != nil {
+	s := h.Server
+	if s != nil {
 		s.init()
 		if s.shuttingDown() {
 			http.Error(w, ErrServerClosed.Error(), http.StatusServiceUnavailable)
 			return
 		}
-		manager = s.connManager
 	}
 
 	conn, err := h.upgrade(w, r)
@@ -112,11 +149,29 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// As on WebTransport, the session takes its values from the upgrade
 	// request and ends with the transport, which carries the close reason.
-	sess := newSession(conn, h.TrackMux, manager, h.Config, h.FetchHandler, nil, h.Logger,
-		sessionSetup{path: requestPath(r), ctx: r.Context(), lifetime: context.Background()}, nil)
+	setup := sessionSetup{path: requestPath(r), ctx: r.Context(), lifetime: context.Background()}
+	var manager *connManager
+	if s != nil {
+		// The upgrade took time: the Server may have shut down meanwhile,
+		// and would not know of this session.
+		manager = s.currentConnManager()
+		if manager == nil {
+			_ = conn.CloseWithError(transport.ConnErrorCode(NoError), "server shutdown") // not actionable: the session is refused
+			return
+		}
+		connCtx := s.connContext(conn.Context(), conn)
+		setup.ctx = layeredContext{Context: r.Context(), under: connCtx}
+		setup.lifetime = connCtx
+	}
+	sess := newSession(conn, h.TrackMux, manager, h.Config, h.FetchHandler, nil, h.Logger, setup, nil)
 	// Clean up when the Handler returns, even if it did not close the
 	// session itself. Idempotent.
 	defer sess.CloseWithError(NoError, "session ended")
+	if s != nil && s.shuttingDown() {
+		// Shut down between the check above and the session joining the
+		// manager: nothing else would close it.
+		return
+	}
 
 	h.Handler.ServeMOQ(sess)
 }

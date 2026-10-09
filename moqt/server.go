@@ -124,7 +124,10 @@ type Server struct {
 	listeners     map[QUICListener]struct{}
 	listenerGroup sync.WaitGroup
 
-	connManager *connManager
+	// connManager is nil once Close or Shutdown has taken it. Guarded by
+	// connManagerMu: a handler may read it while the server shuts down.
+	connManagerMu sync.Mutex
+	connManager   *connManager
 
 	initOnce sync.Once
 
@@ -264,8 +267,26 @@ func (s *Server) ServeQUICConn(conn StreamConn) error {
 	}
 }
 
+// currentConnManager returns the manager that tracks the server's sessions,
+// or nil once the server has shut down.
+func (s *Server) currentConnManager() *connManager {
+	s.connManagerMu.Lock()
+	defer s.connManagerMu.Unlock()
+	return s.connManager
+}
+
+// takeConnManager hands the manager to Close or Shutdown: sessions that
+// start afterwards find none.
+func (s *Server) takeConnManager() *connManager {
+	s.connManagerMu.Lock()
+	defer s.connManagerMu.Unlock()
+	m := s.connManager
+	s.connManager = nil
+	return m
+}
+
 func (s *Server) connContext(ctx context.Context, conn StreamConn) context.Context {
-	ctx = context.WithValue(ctx, serverContextKey, s.connManager)
+	ctx = context.WithValue(ctx, serverContextKey, s.currentConnManager())
 
 	if s.ConnContext != nil {
 		custom := s.ConnContext(ctx, conn)
@@ -454,7 +475,7 @@ func (s *Server) handleNativeQUIC(conn StreamConn) error {
 	// Hand the Session the learned path (exposed as Session.RequestURI, mirroring
 	// WebTransport's r.URL.RequestURI()) along with the decoded SETUP, so it seeds
 	// peer-probe state without re-reading the consumed stream.
-	sess := newSession(conn, s.TrackMux, s.connManager, s.Config, s.FetchHandler, nil, s.Logger,
+	sess := newSession(conn, s.TrackMux, s.currentConnManager(), s.Config, s.FetchHandler, nil, s.Logger,
 		sessionSetup{path: path, peerSetup: &sm, ctx: s.connContext(conn.Context(), conn)}, s.Counters)
 	if s.Counters != nil {
 		s.Counters.NativeSessions.Add(1)
@@ -601,8 +622,7 @@ func (s *Server) Close() error {
 	}
 	s.listenerMu.Unlock()
 
-	connectionManager := s.connManager
-	s.connManager = nil
+	connectionManager := s.takeConnManager()
 
 	// Terminate all active connections so their sessions unblock and run their
 	// cleanup (ServeHTTP/handleNativeQUIC defer CloseWithError -> removeConn),
@@ -664,8 +684,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	s.listenerMu.Unlock()
 
-	connManager := s.connManager
-	s.connManager = nil
+	connManager := s.takeConnManager()
 
 	for _, conn := range connManager.conns() {
 		// Send goaway to sessions concurrently; log potential errors.
