@@ -5,7 +5,12 @@ async function main() {
 	const args = parseArgs(Deno.args, {
 		string: ["addr", "cert-hash", "transport"],
 		boolean: ["insecure", "debug"],
-		default: { addr: "https://localhost:9000", insecure: false, debug: false, transport: "auto" },
+		default: {
+			addr: "https://localhost:9000",
+			insecure: false,
+			debug: false,
+			transport: "auto",
+		},
 	});
 
 	// Suppress debug logs unless --debug flag is provided
