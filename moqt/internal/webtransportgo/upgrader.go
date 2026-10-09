@@ -40,20 +40,15 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (transport.We
 }
 
 func (u *Upgrader) hasMatchingProtocol(theirs []string) bool {
-	if len(u.ApplicationProtocols) == 0 {
-		return false
-	}
 	list, err := httpsfv.UnmarshalList(theirs)
 	if err != nil {
 		return false
 	}
 	for _, item := range list {
-		if i, ok := item.(httpsfv.Item); ok {
-			if protocol, ok := i.Value.(string); ok {
-				if slices.Contains(u.ApplicationProtocols, protocol) {
-					return true
-				}
-			}
+		it, ok := item.(httpsfv.Item)
+		proto, isStr := it.Value.(string)
+		if ok && isStr && slices.Contains(u.ApplicationProtocols, proto) {
+			return true
 		}
 	}
 	return false
