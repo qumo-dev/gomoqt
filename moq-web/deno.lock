@@ -12,6 +12,7 @@
     "jsr:@std/path@^1.1.5": "1.1.6",
     "jsr:@std/path@^1.1.6": "1.1.6",
     "jsr:@std/testing@^1.0.19": "1.0.19",
+    "npm:@moq/qmux@~0.3.3": "0.3.3",
     "npm:zod@^4.4.3": "4.4.3"
   },
   "jsr": {
@@ -64,6 +65,15 @@
     }
   },
   "npm": {
+    "@moq/qmux@0.3.3": {
+      "integrity": "sha512-Ez1GCVwpyNGB0eWvhKIXOjXrfRlMdmO0lpJ7gqInZFzsOsYTyML0WRgh24Itczp9Kev0CXsUA/K+XrGs1dRKUA==",
+      "dependencies": [
+        "@moq/web-socket-stream"
+      ]
+    },
+    "@moq/web-socket-stream@0.1.1": {
+      "integrity": "sha512-VKi/GE/CLqmbEZlgNbBLbAFk2pQTxT+KUD2DjCSoxqZxbS3KBe5BBZ0m3fila4fEGyll2JT5MmgEyVr4zkZEVA=="
+    },
     "zod@4.4.3": {
       "integrity": "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="
     }
@@ -115,6 +125,7 @@
       "jsr:@std/cli@^1.0.32",
       "jsr:@std/path@^1.1.6",
       "jsr:@std/testing@^1.0.19",
+      "npm:@moq/qmux@~0.3.3",
       "npm:zod@^4.4.3"
     ]
   }

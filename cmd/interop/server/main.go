@@ -25,6 +25,7 @@ const (
 
 func main() {
 	addr := flag.String("addr", ":9000", "server address")
+	wsAddr := flag.String("ws-addr", "", "TCP address to also serve MOQ over WebSocket (QMux) on, with TLS; empty for none")
 	flag.Parse()
 
 	if err := mkcert(); err != nil {
@@ -114,6 +115,32 @@ func main() {
 
 	// Serve MOQ over WebTransport
 	http.Handle("/", handler)
+
+	// Serve MOQ over QMux on WebSocket, for clients without WebTransport.
+	// Server ties its sessions to the shutdown above, so they get the GOAWAY.
+	if *wsAddr != "" {
+		wsServer := &http.Server{
+			Addr: *wsAddr,
+			Handler: &moqt.WebSocketHandler{
+				CheckOrigin:  func(r *http.Request) bool { return true },
+				TrackMux:     mux,
+				FetchHandler: fetchHandler,
+				Server:       &server,
+				Handler: moqt.HandleFunc(func(sess *moqt.Session) {
+					runInteropSession(sess, serverDone)
+				}),
+			},
+			TLSConfig:         &tls.Config{Certificates: []tls.Certificate{generateCert()}},
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+		go func() {
+			if err := wsServer.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				fmt.Fprintf(os.Stderr, "failed to serve WebSocket: %v\n", err)
+			}
+		}()
+		defer wsServer.Close()
+		fmt.Printf("[OK] WebSocket on %s\n", *wsAddr)
+	}
 
 	fmt.Println("Listening...")
 	err := server.ListenAndServe()

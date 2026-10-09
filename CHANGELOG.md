@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **moqt: MOQ over QMux on WebSocket, for clients that cannot use
+  WebTransport.** WebKit's WebTransport never raises the stream and data
+  limits it grants, so a session stalls after about 7,600 streams or 16 MB
+  ([WebKit bug 319818](https://bugs.webkit.org/show_bug.cgi?id=319818)), and
+  every browser on iOS is WebKit. QMux
+  ([draft-ietf-quic-qmux-02](https://www.ietf.org/archive/id/draft-ietf-quic-qmux-02.html))
+  carries QUIC's streams over one reliable connection, so the session layer
+  is unchanged; the transport is
+  [qmux-go](https://github.com/okdaichi/qmux-go) v0.3.0.
+  - **`WebSocketHandler`** is an `http.Handler` for an HTTP/1.1 server, the
+    counterpart of `WebTransportHandler`. A session behaves as a WebTransport
+    one: the request URI is its path, and SETUP carries no Path. Setting its
+    `Server` field makes that Server's `Shutdown` (GOAWAY) and `Close` reach
+    its sessions.
+  - **`Dialer.Dial` accepts `wss://` and `ws://`.** `Dialer.QMuxConfig` and
+    `Dialer.DialWebSocketFunc` configure and replace the dial.
+  - **The WebSocket subprotocol is the version negotiation**, since a
+    WebSocket has no ALPN: `NextProtoQMux`, `qmux-02.moq-lite-05`. A request
+    that offers no supported subprotocol is refused with 400.
+  - **`CheckOrigin` matters here.** Browsers do not apply CORS to WebSocket.
+    Without it only same-origin requests are accepted.
+  - Everything shares one TCP connection: a lost segment delays every
+    stream, and there are no unreliable datagrams. Stream priorities order
+    what waits for the connection.
+- **@qumo/moq: `connect` picks the transport.** WebTransport where it works,
+  and QMux over WebSocket on WebKit and where there is no `WebTransport`.
+  `ConnectInit.transport` (`"auto"`, `"webtransport"`, `"websocket"`) forces
+  one. `selectTransport` and `isWebKit` are exported. The WebSocket transport
+  is [`@moq/qmux`](https://www.npmjs.com/package/@moq/qmux), which an `https:`
+  URL reaches as `wss:`.
+- **interop:** the Go server takes `-ws-addr` to also serve WebSocket, and the
+  TypeScript client takes `--transport`.
+
+### Dependencies
+
+- Added `github.com/okdaichi/qmux-go` v0.3.0 and `github.com/coder/websocket`
+  v1.8.15 (Go), and `npm:@moq/qmux` ^0.3.3 (`@qumo/moq`).
+
 ## [v0.22.1] - 2026-10-05
 
 > **Dual release.** `v0.22.1` ships the Go module and `@qumo/moq` on JSR at the same version: `@qumo/moq` goes from `0.20.0` to `0.22.1`. Fixes only; no exported Go API changes, and `@qumo/moq` gains only an optional `onDone` parameter on the `GroupReader` constructor. Two behaviour changes are visible to callers:

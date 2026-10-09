@@ -1,5 +1,6 @@
 import type { TrackMux } from "./track_mux.ts";
 import type { FetchHandler } from "./fetch.ts";
+import type { TransportKind } from "./transport.ts";
 
 /** Default poll interval for the publisher-side probe detection loop (ms). */
 export const defaultProbeIntervalMs = 100;
@@ -51,7 +52,16 @@ export interface ConnectInit {
 	onGoaway?: (newSessionURI: string) => void;
 	/** Low-level MOQ tuning options (probe intervals, thresholds, etc.). */
 	options?: MoqOptions;
-	/** Low-level WebTransport options forwarded to the transport factory. */
+	/**
+	 * Which transport to use. Defaults to `"auto"`: WebTransport where it
+	 * works, and QMux over WebSocket on WebKit and where there is no
+	 * `WebTransport`. Ignored when {@link transportFactory} is set.
+	 */
+	transport?: TransportKind;
+	/**
+	 * Low-level WebTransport options forwarded to the transport factory.
+	 * The WebSocket transport takes none.
+	 */
 	transportOptions?: WebTransportOptions;
 	/**
 	 * Custom transport factory.

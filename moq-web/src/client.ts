@@ -1,9 +1,9 @@
 import { Session } from "./session.ts";
 import type { ConnectInit } from "./options.ts";
 import { WebTransportSession } from "./internal/webtransport/mod.ts";
+import { ALPN, openWebSocketTransport, selectTransport } from "./transport.ts";
 
-/** ALPN protocol identifier for MOQ Lite draft-05. */
-export const ALPN = "moq-lite-05";
+export { ALPN };
 
 const DefaultWebTransportOptions: WebTransportOptions = {
 	allowPooling: false,
@@ -31,15 +31,24 @@ const DefaultWebTransportOptions: WebTransportOptions = {
  * });
  * ```
  *
+ * @example Force the WebSocket transport
+ * ```ts
+ * const session = await connect(url, { transport: "websocket" });
+ * ```
+ *
  * @example Custom transport (e.g. for testing)
  * ```ts
  * const session = await connect(url, {
- *   transportFactory: (u) => new MyWebSocketTransport(u),
+ *   transportFactory: (u) => new MyTransport(u),
  * });
  * ```
  *
+ * The transport is WebTransport where it works, and QMux over WebSocket
+ * elsewhere: on WebKit, and where there is no `WebTransport`. See
+ * {@link selectTransport}.
+ *
  * @param url - MOQ server endpoint URL.
- * @param init - Connection init object (mux, onGoaway, transportOptions, transportFactory).
+ * @param init - Connection init object (mux, onGoaway, transport, transportOptions, transportFactory).
  * @returns A ready-to-use {@link Session}.
  */
 export async function connect(
@@ -52,7 +61,9 @@ export async function connect(
 	};
 
 	const factory = init?.transportFactory ??
-		((u: string | URL, o?: WebTransportOptions) => new WebTransport(u, o));
+		(selectTransport(init?.transport) === "websocket"
+			? (u: string | URL) => openWebSocketTransport(u)
+			: (u: string | URL, o?: WebTransportOptions) => new WebTransport(u, o));
 
 	try {
 		const transport = new WebTransportSession(factory(url, transportOptions));
