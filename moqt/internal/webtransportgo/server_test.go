@@ -77,12 +77,14 @@ func TestServer_Init_WithCustomHandler(t *testing.T) {
 func TestServer_Init_WithPresetInternalServer(t *testing.T) {
 	h3 := &http3.Server{}
 	internal := &quicgo_webtransportgo.Server{H3: h3}
-	srv := &Server{internalServer: internal}
+	cfg := &Config{MaxIncomingStreams: 42}
+	srv := &Server{internalServer: internal, Config: cfg}
 	srv.init()
 
-	// Should use the pre-set internalServer
+	// Should use the pre-set internalServer and propagate Config
 	assert.Same(t, internal, srv.internalServer)
 	assert.Same(t, h3, srv.internalServer.H3)
+	assert.Same(t, cfg, srv.internalServer.Config)
 	// ConnContext should be wired
 	assert.NotNil(t, srv.internalServer.H3.ConnContext)
 }

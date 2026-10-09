@@ -37,3 +37,26 @@ func TestUpgrader_Upgrade_ProtocolMismatch(t *testing.T) {
 	assert.Contains(t, err.Error(), "no supported application protocol")
 	assert.Nil(t, conn)
 }
+
+func TestUpgrader_hasMatchingProtocol(t *testing.T) {
+	t.Run("empty application protocols", func(t *testing.T) {
+		u := &Upgrader{}
+		assert.False(t, u.hasMatchingProtocol([]string{`"moq-lite-05"`}))
+	})
+
+	t.Run("invalid structured header syntax", func(t *testing.T) {
+		u := &Upgrader{ApplicationProtocols: []string{"moq-lite-05"}}
+		assert.False(t, u.hasMatchingProtocol([]string{`invalid,,,///`}))
+	})
+
+	t.Run("non-string items in list", func(t *testing.T) {
+		u := &Upgrader{ApplicationProtocols: []string{"moq-lite-05"}}
+		assert.False(t, u.hasMatchingProtocol([]string{`12345`}))
+	})
+
+	t.Run("matching protocol found", func(t *testing.T) {
+		u := &Upgrader{ApplicationProtocols: []string{"moq-lite-05"}}
+		assert.True(t, u.hasMatchingProtocol([]string{`"moq-lite-04", "moq-lite-05"`}))
+	})
+}
+

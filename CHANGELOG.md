@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **moqt: configure WebTransport initial stream limits and reject unmatched application protocols (#452).**
+  - **Safari stream creation:** WebTransport servers now send default initial stream limits (`MaxIncomingStreams: 100`, `MaxIncomingUniStreams: 100`, `MaxIncomingData: 10MB`). Previously, omitting these settings caused browsers like Safari (WebKit) to treat the initial stream limits as zero, blocking peer unidirectional and bidirectional stream creation (such as media ingestion).
+  - **Configuration & inheritance:** `Server.QUICConfig` stream limits (`MaxIncomingStreams`, `MaxIncomingUniStreams`) are now automatically inherited by the WebTransport server if set. Callers can also explicitly override stream limits via the new `Server.WebTransportConfig` field or `NewWebTransportServerWithConfig`.
+  - **Protocol mismatch rejection:** Per draft-ietf-webtrans-http3-15 Section 3.3, incoming WebTransport sessions offering `WT-Available-Protocols` that do not match any server-supported `ApplicationProtocols` are now rejected with an HTTP 400 Bad Request error rather than silently accepted without agreement.
+
+
 ## [v0.22.1] - 2026-10-05
 
 > **Dual release.** `v0.22.1` ships the Go module and `@qumo/moq` on JSR at the same version: `@qumo/moq` goes from `0.20.0` to `0.22.1`. Fixes only; no exported Go API changes, and `@qumo/moq` gains only an optional `onDone` parameter on the `GroupReader` constructor. Two behaviour changes are visible to callers:
