@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.23.0] - 2026-10-10
+
+> **Dual release.** `v0.23.0` ships the Go module and `@qumo/moq` on JSR at the same version: `@qumo/moq` goes from `0.22.1` to `0.23.0`. It adds MOQ over QMux on WebSocket, for browsers whose WebTransport does not work (every browser on WebKit). Nothing changes for code that does not use it, with one exception in Go:
+> - **Go:** `Server.Shutdown` and `Server.Close` now take their connections atomically. A session that joins once a shutdown has begun is no longer tracked by it: the shutdown neither sends it a GOAWAY nor waits for it. Before, it could be tracked and then missed.
+> - **JS:** `connect` is unchanged by default. WebSocket is opted into with `transport: "websocket"`; the library neither picks by browser nor falls back.
+>
+> **Dependencies:** adds `github.com/okdaichi/qmux-go` v0.3.0 and `github.com/coder/websocket` v1.8.15 (Go), and `npm:@moq/qmux` ^0.3.3 (`@qumo/moq`). The MOQ wire protocol is unchanged, so this interoperates with `v0.22` peers over WebTransport and native QUIC.
+
 ### Added
 
 - **moqt: MOQ over QMux on WebSocket, for clients that cannot use
