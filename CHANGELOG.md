@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.23.0] - 2026-10-10
+
+> **Dual release.** `v0.23.0` ships the Go module and `@qumo/moq` on JSR at the same version: `@qumo/moq` goes from `0.22.1` to `0.23.0`. It adds MOQ over QMux on WebSocket, for browsers whose WebTransport does not work (every browser on WebKit). It also fixes stream creation over WebTransport on Safari. Three behaviour changes are visible to callers:
+> - **Go:** `Server.Shutdown` and `Server.Close` now take their connections atomically. A session that joins once a shutdown has begun is no longer tracked by it: the shutdown neither sends it a GOAWAY nor waits for it. Before, it could be tracked and then missed.
+> - **Go:** a WebTransport server now grants initial stream limits (100 bidirectional, 100 unidirectional, 10 MB), or those of `Server.QUICConfig`, and refuses with 400 a session whose offered protocols match none of its own. Before, it granted none, which Safari took as zero, and accepted a mismatch silently.
+> - **JS:** `connect` is unchanged by default. WebSocket is opted into with `transport: "websocket"`; the library neither picks by browser nor falls back.
+>
+> **Dependencies:** adds `github.com/okdaichi/qmux-go` v0.3.0 and `github.com/coder/websocket` v1.8.15 (Go), and `npm:@moq/qmux` ^0.3.3 (`@qumo/moq`). The MOQ wire protocol is unchanged, so this interoperates with `v0.22` peers over WebTransport and native QUIC.
+
+### Added
+
+- **moqt: MOQ over QMux on WebSocket, for clients that cannot use
+  WebTransport.** WebKit's WebTransport never raises the stream and data
+  limits it grants, so a session stalls after about 7,600 streams or 16 MB
+  ([WebKit bug 319818](https://bugs.webkit.org/show_bug.cgi?id=319818)), and
+  every browser on iOS is WebKit. QMux
+  ([draft-ietf-quic-qmux-02](https://www.ietf.org/archive/id/draft-ietf-quic-qmux-02.html))
+  carries QUIC's streams over one reliable connection, so the session layer
+  is unchanged; the transport is
+  [qmux-go](https://github.com/okdaichi/qmux-go) v0.3.0.
+  - **`WebSocketHandler`** is an `http.Handler` for an HTTP/1.1 server, the
+    counterpart of `WebTransportHandler`. A session behaves as a WebTransport
+    one: the request URI is its path, and SETUP carries no Path. Setting its
+    `Server` field makes its sessions that Server's: `Shutdown` (GOAWAY) and
+    `Close` reach them, and `ConnContext` derives their context from the
+    upgrade request's.
+  - **`WebSocketHandler.Accepts`** tells a server, before the upgrade,
+    whether a request is one the handler would take. A server that takes
+    both transports on one route, or admits sessions itself, asks it first.
+  - **`Dialer.Dial` accepts `wss://` and `ws://`.** `Dialer.DialWebSocketFunc`
+    replaces the dial.
+  - **`QUICConfig` configures WebSocket sessions too.** QMux provides QUIC's
+    streams, so the settings that govern them carry over: the stream limits,
+    the receive windows, the keep-alive period, the idle and handshake
+    timeouts, and datagrams. A `Dialer` uses its `QUICConfig`; a
+    `WebSocketHandler` its own, or its `Server`'s. Limits are set once for
+    every transport. The keep-alive is the exception: a zero
+    `KeepAlivePeriod` is 10 seconds over WebSocket, where QUIC would send
+    none, since proxies close an idle WebSocket and QMux measures the
+    round-trip time from its pings. A negative one sends none.
+  - **The WebSocket subprotocol is the version negotiation**, since a
+    WebSocket has no ALPN: `NextProtoQMux`, `qmux-02.moq-lite-05`. A request
+    that does not offer it is refused with 400.
+  - **`CheckOrigin` matters here.** Browsers do not apply CORS to WebSocket.
+    Without it only same-origin requests are accepted.
+  - Everything shares one TCP connection: a lost segment delays every
+    stream, and there are no unreliable datagrams. Stream priorities order
+    what waits for the connection.
+- **@qumo/moq: `connect` takes `transport: "websocket"`.** It opens QMux
+  over WebSocket in place of WebTransport, which stays the default. The
+  WebSocket transport is
+  [`@moq/qmux`](https://www.npmjs.com/package/@moq/qmux), which an `https:`
+  URL reaches as `wss:`.
+  - **The application chooses the transport.** `connect` opens the one it
+    is told to, and fails if it cannot: it neither picks by browser nor
+    falls back to another. Which transport a session runs on is then never
+    in doubt, and a server that takes no WebSocket is an error at once, not
+    a session that freezes later.
+  - **`isWebKit(userAgent)`** tells the browsers that need WebSocket:
+    `connect(url, { transport: isWebKit(navigator.userAgent) ? "websocket" : "webtransport" })`.
+- **@qumo/moq: `ConnectInit.webSocketURL`** names where to dial WebSocket for
+  a server that takes it at another host, port or path than WebTransport. By
+  default it is the URL given to `connect`, with `wss:` for `https:`: a
+  server reachable at one `https` URL over both transports needs no setting.
+- **interop:** the Go server takes WebSocket on the TCP port of `-addr`, so one
+  URL reaches it over either transport, and `go run ./cmd/interop` takes
+  `-transport` (`webtransport`, `websocket`) for both clients.
+
 ### Fixed
 
 - **moqt: configure WebTransport initial stream limits and reject unmatched application protocols (#452).**
@@ -14,6 +82,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Configuration & inheritance:** `Server.QUICConfig` stream limits (`MaxIncomingStreams`, `MaxIncomingUniStreams`) are now automatically inherited by the WebTransport server if set. Callers can also explicitly override stream limits via the new `Server.WebTransportConfig` field or `NewWebTransportServerWithConfig`.
   - **Protocol mismatch rejection:** Per draft-ietf-webtrans-http3-15 Section 3.3, incoming WebTransport sessions offering `WT-Available-Protocols` that do not match any server-supported `ApplicationProtocols` are now rejected with an HTTP 400 Bad Request error rather than silently accepted without agreement.
 
+### Dependencies
+
+- Added `github.com/okdaichi/qmux-go` v0.3.0 and `github.com/coder/websocket`
+  v1.8.15 (Go), and `npm:@moq/qmux` ^0.3.3 (`@qumo/moq`).
 
 ## [v0.22.1] - 2026-10-05
 

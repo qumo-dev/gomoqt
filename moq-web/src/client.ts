@@ -1,9 +1,9 @@
 import { Session } from "./session.ts";
 import type { ConnectInit } from "./options.ts";
 import { WebTransportSession } from "./internal/webtransport/mod.ts";
+import { ALPN, openWebSocketTransport } from "./transport.ts";
 
-/** ALPN protocol identifier for MOQ Lite draft-05. */
-export const ALPN = "moq-lite-05";
+export { ALPN };
 
 const DefaultWebTransportOptions: WebTransportOptions = {
 	allowPooling: false,
@@ -31,16 +31,32 @@ const DefaultWebTransportOptions: WebTransportOptions = {
  * });
  * ```
  *
+ * @example Over WebSocket, for a browser whose WebTransport does not work
+ * ```ts
+ * const transport = isWebKit(navigator.userAgent) ? "websocket" : "webtransport";
+ * const session = await connect(url, { transport });
+ * ```
+ *
  * @example Custom transport (e.g. for testing)
  * ```ts
  * const session = await connect(url, {
- *   transportFactory: (u) => new MyWebSocketTransport(u),
+ *   transportFactory: (u) => new MyTransport(u),
  * });
  * ```
  *
+ * The transport is WebTransport unless {@link ConnectInit.transport} says
+ * `"websocket"`. The application chooses, and a transport that cannot be
+ * opened fails the connection: nothing is chosen or switched for it. See
+ * {@link isWebKit} for the browsers that need WebSocket.
+ *
+ * The WebSocket is dialed at the same host and port as `url`, with `wss:`
+ * for `https:`. A server that takes WebSocket elsewhere is reached with
+ * {@link ConnectInit.webSocketURL}.
+ *
  * @param url - MOQ server endpoint URL.
- * @param init - Connection init object (mux, onGoaway, transportOptions, transportFactory).
+ * @param init - Connection init object (mux, onGoaway, transport, transportOptions, transportFactory).
  * @returns A ready-to-use {@link Session}.
+ * @throws TypeError if `init.transport` is neither `"webtransport"` nor `"websocket"`.
  */
 export async function connect(
 	url: string | URL,
@@ -51,8 +67,16 @@ export async function connect(
 		...(init?.transportOptions ?? {}),
 	};
 
+	const kind: unknown = init?.transport ?? "webtransport";
+	if (kind !== "webtransport" && kind !== "websocket") {
+		// A value from JavaScript or from configuration: opening WebTransport
+		// for a misspelt "websocket" would be the wrong transport, silently.
+		throw new TypeError(`transport must be "webtransport" or "websocket", not ${String(kind)}`);
+	}
 	const factory = init?.transportFactory ??
-		((u: string | URL, o?: WebTransportOptions) => new WebTransport(u, o));
+		(kind === "websocket"
+			? () => openWebSocketTransport(init?.webSocketURL ?? url)
+			: (u: string | URL, o?: WebTransportOptions) => new WebTransport(u, o));
 
 	try {
 		const transport = new WebTransportSession(factory(url, transportOptions));

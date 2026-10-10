@@ -190,3 +190,84 @@ Deno.test("Client - ALPN constant is moq-lite-05", () => {
 Deno.test("Client - Cleanup", () => {
 	(globalThis as any).WebTransport = OriginalWebTransport;
 });
+
+/**
+ * Starts a local HTTP server that refuses every request with 400 and records
+ * what was asked of it: enough to see where and how `connect` dials a
+ * WebSocket, without a QMux peer.
+ */
+function startRefusingServer(): {
+	port: number;
+	requests: { path: string; subprotocols: string | null }[];
+	stop: () => Promise<void>;
+} {
+	const requests: { path: string; subprotocols: string | null }[] = [];
+	const server = Deno.serve({ port: 0, hostname: "127.0.0.1", onListen: () => {} }, (req) => {
+		const url = new URL(req.url);
+		requests.push({
+			path: url.pathname + url.search,
+			subprotocols: req.headers.get("sec-websocket-protocol"),
+		});
+		return new Response("refused", { status: 400 });
+	});
+	return { port: server.addr.port, requests, stop: () => server.shutdown() };
+}
+
+const webSocketDialCases = [
+	{
+		name: "at the URL it was given",
+		init: { transport: "websocket" },
+		expectedPath: "/moq?jwt=a.b.c",
+	},
+	{
+		name: "at webSocketURL when there is one",
+		init: { transport: "websocket", webSocketURL: "/elsewhere?jwt=x.y.z" },
+		expectedPath: "/elsewhere?jwt=x.y.z",
+	},
+] as const;
+
+for (const c of webSocketDialCases) {
+	Deno.test({
+		name: `connect dials the WebSocket ${c.name}`,
+		// reason: the QMux transport keeps timers of its own past a refused dial.
+		sanitizeOps: false,
+		sanitizeResources: false,
+		fn: async () => {
+			const server = startRefusingServer();
+			const base = `http://127.0.0.1:${server.port}`;
+			const init = "webSocketURL" in c.init
+				? { ...c.init, webSocketURL: base + c.init.webSocketURL }
+				: c.init;
+
+			try {
+				await assertRejects(
+					() => connect(`${base}/moq?jwt=a.b.c`, init),
+					Error,
+					"failed to connect",
+				);
+			} finally {
+				await server.stop();
+			}
+
+			assertEquals(server.requests, [{
+				path: c.expectedPath,
+				subprotocols: "qmux-02.moq-lite-05",
+			}]);
+		},
+	});
+}
+
+const invalidTransports = ["ws", "WebSocket", "auto", ""] as const;
+
+for (const transport of invalidTransports) {
+	Deno.test(`connect rejects the transport ${JSON.stringify(transport)}`, async () => {
+		// reason: a value that the type forbids, as JavaScript or configuration can pass.
+		const init = { transport } as unknown as Parameters<typeof connect>[1];
+
+		await assertRejects(
+			() => connect("https://example.com", init),
+			TypeError,
+			'transport must be "webtransport" or "websocket"',
+		);
+	});
+}

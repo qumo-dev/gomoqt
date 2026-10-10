@@ -1,4 +1,5 @@
 import { connect, FetchRequest, Frame, TrackMux, TrackWriter } from "@qumo/moq";
+import type { TransportKind } from "@qumo/moq";
 import { background } from "@okdaichi/golikejs/context";
 
 // shared client logic exported as function
@@ -6,6 +7,7 @@ export async function runClient(
 	addr: string,
 	transportOptions: WebTransportOptions,
 	debugEnabled: boolean,
+	transport: TransportKind = "webtransport",
 ): Promise<void> {
 	// GOAWAY handling
 	let goawayResolve: ((uri: string) => void) | undefined;
@@ -94,6 +96,7 @@ export async function runClient(
 	const session = await step("Connecting to server", () =>
 		connect(addr, {
 			mux,
+			transport,
 			transportOptions,
 			onGoaway: (newSessionURI: string) => {
 				if (goawayResolve) goawayResolve(newSessionURI);

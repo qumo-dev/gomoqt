@@ -6,7 +6,11 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestComputeCertHash(t *testing.T) {
@@ -46,7 +50,7 @@ func TestBuildTSClientCmd_missingMoqWeb(t *testing.T) {
 		t.Fatalf("chdir to tmpDir: %v", err)
 	}
 
-	_, err := buildTSClientCmd(context.Background(), "localhost:1234")
+	_, err := buildTSClientCmd(context.Background(), "localhost:1234", "websocket")
 	if err == nil {
 		t.Fatal("expected error when moq-web is missing")
 	}
@@ -67,11 +71,15 @@ func TestBuildTSClientCmd_success(t *testing.T) {
 		t.Fatalf("chdir to tmpDir: %v", err)
 	}
 
-	cmd, err := buildTSClientCmd(context.Background(), "localhost:1234")
+	cmd, err := buildTSClientCmd(context.Background(), "localhost:1234", "websocket")
 	if err != nil {
 		t.Fatalf("unexpected error building client cmd: %v", err)
 	}
 	if cmd.Dir != filepath.Join(tmpDir, "moq-web") {
 		t.Fatalf("cmd.Dir = %s; want %s", cmd.Dir, filepath.Join(tmpDir, "moq-web"))
 	}
+	flag := slices.Index(cmd.Args, "--transport")
+	require.NotEqual(t, -1, flag, "the transport is passed on: %v", cmd.Args)
+	require.Less(t, flag+1, len(cmd.Args))
+	assert.Equal(t, "websocket", cmd.Args[flag+1])
 }

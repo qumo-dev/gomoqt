@@ -3,9 +3,14 @@ import { runClient } from "./client.ts";
 
 async function main() {
 	const args = parseArgs(Deno.args, {
-		string: ["addr", "cert-hash"],
+		string: ["addr", "cert-hash", "transport"],
 		boolean: ["insecure", "debug"],
-		default: { addr: "https://localhost:9000", insecure: false, debug: false },
+		default: {
+			addr: "https://localhost:9000",
+			insecure: false,
+			debug: false,
+			transport: "webtransport",
+		},
 	});
 
 	// Suppress debug logs unless --debug flag is provided
@@ -34,8 +39,13 @@ async function main() {
 		console.log("[DEV] Using provided certificate hash for self-signed cert");
 	}
 
+	const transport = args.transport;
+	if (transport !== "webtransport" && transport !== "websocket") {
+		throw new Error(`--transport must be webtransport or websocket, not ${transport}`);
+	}
+
 	// delegate the heavy lifting to shared client logic
-	await runClient(addr, transportOptions, args.debug);
+	await runClient(addr, transportOptions, args.debug, transport);
 }
 
 if (import.meta.main) {

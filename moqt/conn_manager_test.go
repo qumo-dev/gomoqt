@@ -156,3 +156,35 @@ func TestConnManager_Close(t *testing.T) {
 		assert.Zero(t, manager.countSessions())
 	})
 }
+
+// A shutdown ends every connection the manager had when it drained, and
+// the manager takes none after: no connection is left that the shutdown
+// neither ends nor is told to wait for.
+func TestConnManager_drain(t *testing.T) {
+	before, after := &FakeStreamConn{}, &FakeStreamConn{}
+	manager := newConnManager()
+	manager.addConn(before)
+
+	drained := manager.drain()
+	manager.addConn(after)
+
+	assert.Equal(t, []StreamConn{before}, drained)
+	assert.True(t, manager.tracks(before))
+	assert.False(t, manager.tracks(after), "a connection that comes while draining is refused")
+	assert.Equal(t, 1, manager.countSessions())
+
+	// The drained connection still counts until it is removed.
+	manager.removeConn(before)
+	select {
+	case <-manager.Done():
+	case <-time.After(time.Second):
+		require.FailNow(t, "the manager is not done once its connections are gone")
+	}
+}
+
+func TestConnManager_drain_Empty(t *testing.T) {
+	manager := newConnManager()
+
+	assert.Empty(t, manager.drain())
+	assert.False(t, manager.tracks(&FakeStreamConn{}))
+}
