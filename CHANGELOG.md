@@ -44,12 +44,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     stream, and there are no unreliable datagrams. Stream priorities order
     what waits for the connection.
 - **@qumo/moq: `connect` picks the transport.** WebTransport where it works,
-  and QMux over WebSocket on WebKit and where there is no `WebTransport`. On
-  WebKit, a server that takes no WebSocket is reached over WebTransport
-  instead, as before, after at most five seconds; a server that takes the
-  WebSocket and then closes the session is not tried again. `ConnectInit.transport` (`"auto"`, `"webtransport"`,
-  `"websocket"`) forces one. `transportCandidates`, `selectTransport` and
-  `isWebKit` are exported. The WebSocket transport
+  and QMux over WebSocket on WebKit and where there is no `WebTransport`.
+  `ConnectInit.transport` (`"auto"`, `"webtransport"`, `"websocket"`) names
+  one. `selectTransport` and `isWebKit` are exported.
+  - **The choice is made once, and there is no fallback.** `selectTransport`
+    is a function of the option and the browser alone, so an application can
+    call it to learn which transport a session uses. A transport that cannot
+    be opened fails the connection.
+  - **A WebKit client needs the server to take WebSocket.** Falling back to
+    WebTransport there would hide a server that takes none until a session
+    froze. A deployment that has only WebTransport passes
+    `transport: "webtransport"`, and gets the sessions it had before. The WebSocket transport
   is [`@moq/qmux`](https://www.npmjs.com/package/@moq/qmux), which an `https:`
   URL reaches as `wss:`.
 - **@qumo/moq: `ConnectInit.webSocketURL`** names where to dial WebSocket for

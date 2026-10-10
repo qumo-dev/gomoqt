@@ -12,9 +12,8 @@ export const QMUX_VERSION = "qmux-02";
 /**
  * Which transport {@link connect} uses.
  *
- * - `"auto"` picks WebTransport where it works, and WebSocket elsewhere. On
- *   WebKit it falls back to WebTransport when the server takes no WebSocket.
- * - `"webtransport"` and `"websocket"` force one, for testing.
+ * - `"auto"` picks WebTransport where it works, and WebSocket elsewhere.
+ * - `"webtransport"` and `"websocket"` name one.
  */
 export type TransportKind = "auto" | "webtransport" | "websocket";
 
@@ -45,42 +44,35 @@ export function isWebKit(userAgent: string): boolean {
 }
 
 /**
- * Resolves a {@link TransportKind} to the transports to try, in order.
+ * Resolves a {@link TransportKind} to the transport {@link connect} uses.
+ * It is a function of its arguments alone: the same browser always gets
+ * the same transport, and an application can call it to learn which.
  *
- * WebKit is sent to WebSocket first even though it has a `WebTransport`: its
+ * WebKit is sent to WebSocket even though it has a `WebTransport`: its
  * implementation never raises the stream and data limits it grants, so a
  * session stalls after about 7,600 streams or 16 MB
  * (https://bugs.webkit.org/show_bug.cgi?id=319818). The stall cannot be
  * detected after connecting, as the session looks healthy until then.
  *
- * WebTransport stays as the second choice there, for a server that takes no
- * WebSocket: a session that will stall is better than none.
- */
-export function transportCandidates(
-	kind: TransportKind = "auto",
-	env: TransportEnvironment = currentEnvironment(),
-): readonly ("webtransport" | "websocket")[] {
-	if (kind !== "auto") {
-		return [kind];
-	}
-	if (!env.hasWebTransport) {
-		return ["websocket"];
-	}
-	if (env.userAgent !== undefined && isWebKit(env.userAgent)) {
-		return ["websocket", "webtransport"];
-	}
-	return ["webtransport"];
-}
-
-/**
- * Resolves a {@link TransportKind} to the transport {@link connect} tries
- * first. See {@link transportCandidates}.
+ * There is no second choice. A transport that cannot be opened fails the
+ * connection: falling back from WebSocket to the WebTransport that stalls
+ * would hide a server that takes no WebSocket until a session froze. An
+ * application that wants another attempt makes it, with `transport` set.
  */
 export function selectTransport(
 	kind: TransportKind = "auto",
 	env: TransportEnvironment = currentEnvironment(),
 ): "webtransport" | "websocket" {
-	return transportCandidates(kind, env)[0] ?? "webtransport";
+	if (kind !== "auto") {
+		return kind;
+	}
+	if (!env.hasWebTransport) {
+		return "websocket";
+	}
+	if (env.userAgent !== undefined && isWebKit(env.userAgent)) {
+		return "websocket";
+	}
+	return "webtransport";
 }
 
 /**

@@ -55,7 +55,9 @@ export interface ConnectInit {
 	/**
 	 * Which transport to use. Defaults to `"auto"`: WebTransport where it
 	 * works, and QMux over WebSocket on WebKit and where there is no
-	 * `WebTransport`. Ignored when {@link transportFactory} is set.
+	 * `WebTransport`. The choice is made once; a transport that cannot be
+	 * opened fails the connection. Ignored when {@link transportFactory} is
+	 * set.
 	 */
 	transport?: TransportKind;
 	/**

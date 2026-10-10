@@ -1,18 +1,9 @@
 import { Session } from "./session.ts";
 import type { ConnectInit } from "./options.ts";
-import { openFirstReady } from "./internal/open_transport.ts";
-import type { TransportOpener } from "./internal/open_transport.ts";
-import { ALPN, openWebSocketTransport, transportCandidates } from "./transport.ts";
+import { WebTransportSession } from "./internal/webtransport/mod.ts";
+import { ALPN, openWebSocketTransport, selectTransport } from "./transport.ts";
 
 export { ALPN };
-
-/**
- * How long {@link connect} waits for WebSocket before it falls back to
- * WebTransport, on WebKit. A network that drops the WebSocket's TCP port
- * without answering would otherwise hold the fallback up for as long as the
- * browser keeps trying.
- */
-const webSocketFallbackTimeoutMs = 5000;
 
 const DefaultWebTransportOptions: WebTransportOptions = {
 	allowPooling: false,
@@ -53,9 +44,9 @@ const DefaultWebTransportOptions: WebTransportOptions = {
  * ```
  *
  * The transport is WebTransport where it works, and QMux over WebSocket
- * elsewhere: on WebKit, and where there is no `WebTransport`. On WebKit a
- * server that takes no WebSocket is reached over WebTransport instead. See
- * {@link transportCandidates}.
+ * elsewhere: on WebKit, and where there is no `WebTransport`. The choice is
+ * made once, by {@link selectTransport}, and a transport that cannot be
+ * opened fails the connection: there is no fallback to another.
  *
  * The WebSocket is dialed at the same host and port as `url`, with `wss:`
  * for `https:`. A server that takes WebSocket elsewhere is reached with
@@ -74,20 +65,13 @@ export async function connect(
 		...(init?.transportOptions ?? {}),
 	};
 
-	const customFactory = init?.transportFactory;
-	const openers: readonly TransportOpener[] = customFactory
-		? [() => customFactory(url, transportOptions)]
-		: transportCandidates(init?.transport).map((kind): TransportOpener =>
-			kind === "websocket"
-				? () => openWebSocketTransport(init?.webSocketURL ?? url)
-				: () => new WebTransport(url, transportOptions)
-		);
+	const factory = init?.transportFactory ??
+		(selectTransport(init?.transport) === "websocket"
+			? () => openWebSocketTransport(init?.webSocketURL ?? url)
+			: (u: string | URL, o?: WebTransportOptions) => new WebTransport(u, o));
 
 	try {
-		// Only a transport that cannot be opened is passed over for the next.
-		// Once one is open, the session is its own: a server that closes it,
-		// as one that refuses the client does, is not asked again another way.
-		const transport = await openFirstReady(openers, webSocketFallbackTimeoutMs);
+		const transport = new WebTransportSession(factory(url, transportOptions));
 		const session = new Session({
 			transport,
 			mux: init?.mux,
