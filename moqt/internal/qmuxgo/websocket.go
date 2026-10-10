@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/netip"
 	"slices"
 	"strings"
@@ -102,9 +103,14 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (transport.We
 // session on it, offering protocols as application protocols.
 func Dial(ctx context.Context, rawURL string, header http.Header, tlsConfig *tls.Config, protocols []string, config *qmux.Config) (*http.Response, transport.WebTransportSession, error) {
 	// A transport of its own, for the TLS configuration, with the default
-	// one's proxy settings. The WebSocket takes its connection out of the
-	// pool; a refused handshake leaves one in it, closed on return.
-	httpTransport := http.DefaultTransport.(*http.Transport).Clone()
+	// one's proxy settings when it has any: an application may have put
+	// something else in http.DefaultTransport. The WebSocket takes its
+	// connection out of the pool; a refused handshake leaves one in it,
+	// closed on return.
+	httpTransport := &http.Transport{Proxy: http.ProxyFromEnvironment}
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		httpTransport = base.Clone()
+	}
 	defer httpTransport.CloseIdleConnections()
 	if tlsConfig != nil {
 		// The WebSocket handshake is HTTP/1.1, whatever else the
@@ -118,6 +124,13 @@ func Dial(ctx context.Context, rawURL string, header http.Header, tlsConfig *tls
 	for i, p := range protocols {
 		offered[i] = Version + "." + p
 	}
+	// The addresses of the connection the handshake ran on.
+	var local, remote net.Addr
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GotConn: func(info httptrace.GotConnInfo) {
+			local, remote = info.Conn.LocalAddr(), info.Conn.RemoteAddr()
+		},
+	})
 	ws, rsp, err := websocket.Dial(ctx, rawURL, &websocket.DialOptions{
 		HTTPClient:   &http.Client{Transport: httpTransport},
 		HTTPHeader:   header,
@@ -133,7 +146,12 @@ func Dial(ctx context.Context, rawURL string, header http.Header, tlsConfig *tls
 	}
 
 	config = withDefaults(config)
-	mc := newMessageConn(ws, config, addr("local"), addr(rsp.Request.URL.Host))
+	if local == nil || remote == nil {
+		// A transport that reports no connection, such as one behind a
+		// custom RoundTripper.
+		local, remote = addr("local"), addr(rsp.Request.URL.Host)
+	}
+	mc := newMessageConn(ws, config, local, remote)
 	conn, err := qmux.DialMessages(ctx, mc, config)
 	if err != nil {
 		return rsp, nil, fmt.Errorf("qmuxgo: dial: %w", err)

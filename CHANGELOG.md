@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `Dialer.DialWebSocketFunc` configure and replace the dial.
   - **The WebSocket subprotocol is the version negotiation**, since a
     WebSocket has no ALPN: `NextProtoQMux`, `qmux-02.moq-lite-05`. A request
-    that offers no supported subprotocol is refused with 400.
+    that does not offer it is refused with 400.
   - **`CheckOrigin` matters here.** Browsers do not apply CORS to WebSocket.
     Without it only same-origin requests are accepted.
   - Everything shares one TCP connection: a lost segment delays every
@@ -40,13 +40,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **@qumo/moq: `connect` picks the transport.** WebTransport where it works,
   and QMux over WebSocket on WebKit and where there is no `WebTransport`. On
   WebKit, a server that takes no WebSocket is reached over WebTransport
-  instead, as before. `ConnectInit.transport` (`"auto"`, `"webtransport"`,
+  instead, as before, after at most five seconds; a server that takes the
+  WebSocket and then closes the session is not tried again. `ConnectInit.transport` (`"auto"`, `"webtransport"`,
   `"websocket"`) forces one. `transportCandidates`, `selectTransport` and
   `isWebKit` are exported. The WebSocket transport
   is [`@moq/qmux`](https://www.npmjs.com/package/@moq/qmux), which an `https:`
   URL reaches as `wss:`.
-- **interop:** the Go server takes `-ws-addr` to also serve WebSocket, and the
-  TypeScript client takes `--transport`.
+- **@qumo/moq: `ConnectInit.webSocketURL`** names where to dial WebSocket for
+  a server that takes it at another host, port or path than WebTransport. By
+  default it is the URL given to `connect`, with `wss:` for `https:`: a
+  server reachable at one `https` URL over both transports needs no setting.
+- **interop:** the Go server takes WebSocket on the TCP port of `-addr`, so one
+  URL reaches it over either transport, and `go run ./cmd/interop` takes
+  `-transport` (`auto`, `webtransport`, `websocket`) for both clients.
 
 ### Dependencies
 

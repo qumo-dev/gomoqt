@@ -73,8 +73,8 @@ func TestUpgrader_Upgrade(t *testing.T) {
 	assert.Nil(t, server.TLS())
 	assert.IsType(t, &net.TCPAddr{}, server.RemoteAddr())
 	assert.IsType(t, &net.TCPAddr{}, server.LocalAddr())
-	assert.Equal(t, "websocket", client.RemoteAddr().Network())
-	assert.Equal(t, "local", client.LocalAddr().String())
+	assert.Equal(t, server.LocalAddr().String(), client.RemoteAddr().String(), "the client reports the socket it dialed")
+	assert.Equal(t, server.RemoteAddr().String(), client.LocalAddr().String())
 
 	// Client to server, on a unidirectional stream.
 	send, err := client.OpenUniStreamSync(ctx)

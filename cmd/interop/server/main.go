@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -24,8 +25,7 @@ const (
 )
 
 func main() {
-	addr := flag.String("addr", ":9000", "server address")
-	wsAddr := flag.String("ws-addr", "", "TCP address to also serve MOQ over WebSocket (QMux) on, with TLS; empty for none")
+	addr := flag.String("addr", ":9000", "server address: UDP for QUIC and WebTransport, TCP for WebSocket")
 	flag.Parse()
 
 	if err := mkcert(); err != nil {
@@ -116,31 +116,35 @@ func main() {
 	// Serve MOQ over WebTransport
 	http.Handle("/", handler)
 
-	// Serve MOQ over QMux on WebSocket, for clients without WebTransport.
-	// Server ties its sessions to the shutdown above, so they get the GOAWAY.
-	if *wsAddr != "" {
-		wsServer := &http.Server{
-			Addr: *wsAddr,
-			Handler: &moqt.WebSocketHandler{
-				CheckOrigin:  func(r *http.Request) bool { return true },
-				TrackMux:     mux,
-				FetchHandler: fetchHandler,
-				Server:       &server,
-				Handler: moqt.HandleFunc(func(sess *moqt.Session) {
-					runInteropSession(sess, serverDone)
-				}),
-			},
-			TLSConfig:         &tls.Config{Certificates: []tls.Certificate{generateCert()}},
-			ReadHeaderTimeout: 5 * time.Second,
-		}
-		go func() {
-			if err := wsServer.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
-				fmt.Fprintf(os.Stderr, "failed to serve WebSocket: %v\n", err)
-			}
-		}()
-		defer wsServer.Close()
-		fmt.Printf("[OK] WebSocket on %s\n", *wsAddr)
+	// Serve MOQ over QMux on WebSocket too, on the TCP port of the same
+	// number, so that one https URL reaches the server over either
+	// transport. Server ties the sessions to the shutdown above, so they
+	// get the GOAWAY.
+	wsListener, lerr := net.Listen("tcp", *addr)
+	if lerr != nil {
+		fmt.Fprintf(os.Stderr, "failed to listen for WebSocket on %s: %v\n", *addr, lerr)
+		os.Exit(1)
 	}
+	wsServer := &http.Server{
+		Handler: &moqt.WebSocketHandler{
+			CheckOrigin:  func(r *http.Request) bool { return true },
+			TrackMux:     mux,
+			FetchHandler: fetchHandler,
+			Server:       &server,
+			Handler: moqt.HandleFunc(func(sess *moqt.Session) {
+				runInteropSession(sess, serverDone)
+			}),
+		},
+		TLSConfig:         &tls.Config{Certificates: []tls.Certificate{generateCert()}},
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		if err := wsServer.ServeTLS(wsListener, "", ""); err != nil && err != http.ErrServerClosed {
+			fmt.Fprintf(os.Stderr, "failed to serve WebSocket: %v\n", err)
+		}
+	}()
+	defer wsServer.Close()
+	fmt.Printf("[OK] WebSocket on %s (TCP)\n", wsListener.Addr())
 
 	fmt.Println("Listening...")
 	err := server.ListenAndServe()

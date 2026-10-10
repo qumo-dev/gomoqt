@@ -29,9 +29,9 @@ func IsWebSocketUpgrade(r *http.Request) bool {
 // connection: a lost segment delays every stream, and there are no
 // unreliable datagrams.
 //
-// The client offers the subprotocol "qmux-02.<protocol>" for each
-// application protocol it speaks, as NextProtoQMux for this package's. A
-// request that offers none the handler supports is refused with 400.
+// The client offers the subprotocol NextProtoQMux, "qmux-02.moq-lite-05":
+// the QMux draft and the MOQ version this package speaks. A request that
+// does not offer it is refused with 400.
 type WebSocketHandler struct {
 	Config   *Config
 	TrackMux *TrackMux
@@ -40,10 +40,6 @@ type WebSocketHandler struct {
 	// not apply CORS to WebSocket, so a server reachable from browsers
 	// must set it. If nil, only same-origin requests are accepted.
 	CheckOrigin func(r *http.Request) bool
-
-	// ApplicationProtocols lists the application protocols accepted. If
-	// empty, NextProtoMOQ is.
-	ApplicationProtocols []string
 
 	// QMuxConfig configures the QMux connections. A zero KeepAlivePeriod
 	// is 10 seconds; a negative one sends no keep-alive pings.
@@ -73,14 +69,12 @@ type WebSocketHandler struct {
 	Logger *slog.Logger
 }
 
+// upgrader accepts the one application protocol the session layer speaks:
+// a subprotocol it agreed to and then did not speak would garble the session.
 func (h *WebSocketHandler) upgrader() *qmuxgo.Upgrader {
-	protocols := h.ApplicationProtocols
-	if len(protocols) == 0 {
-		protocols = []string{NextProtoMOQ}
-	}
 	return &qmuxgo.Upgrader{
 		CheckOrigin: h.CheckOrigin,
-		Protocols:   protocols,
+		Protocols:   []string{NextProtoMOQ},
 		Config:      h.QMuxConfig,
 	}
 }

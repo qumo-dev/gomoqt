@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -46,7 +47,7 @@ func TestBuildTSClientCmd_missingMoqWeb(t *testing.T) {
 		t.Fatalf("chdir to tmpDir: %v", err)
 	}
 
-	_, err := buildTSClientCmd(context.Background(), "localhost:1234")
+	_, err := buildTSClientCmd(context.Background(), "localhost:1234", "websocket")
 	if err == nil {
 		t.Fatal("expected error when moq-web is missing")
 	}
@@ -67,11 +68,14 @@ func TestBuildTSClientCmd_success(t *testing.T) {
 		t.Fatalf("chdir to tmpDir: %v", err)
 	}
 
-	cmd, err := buildTSClientCmd(context.Background(), "localhost:1234")
+	cmd, err := buildTSClientCmd(context.Background(), "localhost:1234", "websocket")
 	if err != nil {
 		t.Fatalf("unexpected error building client cmd: %v", err)
 	}
 	if cmd.Dir != filepath.Join(tmpDir, "moq-web") {
 		t.Fatalf("cmd.Dir = %s; want %s", cmd.Dir, filepath.Join(tmpDir, "moq-web"))
+	}
+	if !slices.Contains(cmd.Args, "--transport") || !slices.Contains(cmd.Args, "websocket") {
+		t.Fatalf("cmd.Args = %v; want the transport passed on", cmd.Args)
 	}
 }

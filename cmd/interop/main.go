@@ -44,7 +44,12 @@ func findRootDir() (string, error) {
 func main() {
 	addr := flag.String("addr", "localhost:9000", "server address")
 	lang := flag.String("lang", "go", "client language: go or ts")
+	transport := flag.String("transport", "auto", "client transport: auto, webtransport or websocket")
 	flag.Parse()
+	if *transport != "auto" && *transport != "webtransport" && *transport != "websocket" {
+		slog.Error("invalid interop transport", "transport", *transport)
+		return
+	}
 
 	slog.Info(" === MOQ Interop Test ===")
 
@@ -138,7 +143,7 @@ func main() {
 	var clientCmd *exec.Cmd
 	var errClient error
 	if *lang == "ts" {
-		clientCmd, errClient = buildTSClientCmd(ctx, *addr)
+		clientCmd, errClient = buildTSClientCmd(ctx, *addr, *transport)
 		if errClient != nil {
 			slog.Error("failed to prepare TypeScript client", "error", errClient)
 			return
@@ -146,7 +151,12 @@ func main() {
 	} else {
 		// Go client
 		clientPath := filepath.Join(root, "cmd", "interop", "client")
-		clientCmd = exec.CommandContext(ctx, "go", "run", clientPath, "-addr", clientURL)
+		goURL := clientURL
+		if *transport == "websocket" {
+			// The Go client picks its transport from the URL's scheme.
+			goURL = "wss://" + strings.TrimPrefix(clientURL, "https://")
+		}
+		clientCmd = exec.CommandContext(ctx, "go", "run", clientPath, "-addr", goURL)
 	}
 
 	clientStdout, err := clientCmd.StdoutPipe()
@@ -201,7 +211,7 @@ func main() {
 // It locates the project root, computes the certificate hash for the server
 // cert (used for pinning), and constructs the command invocation with the
 // proper working directory.
-func buildTSClientCmd(ctx context.Context, addr string) (*exec.Cmd, error) {
+func buildTSClientCmd(ctx context.Context, addr, transport string) (*exec.Cmd, error) {
 	root, err := findRootDir()
 	if err != nil {
 		// fallback to cwd; most tests run from repository root so this should work
@@ -229,7 +239,7 @@ func buildTSClientCmd(ctx context.Context, addr string) (*exec.Cmd, error) {
 	}
 
 	args := []string{"run", "--unstable-net", "--allow-all",
-		"cli/interop/run_secure.ts", "--addr", "https://" + addr}
+		"cli/interop/run_secure.ts", "--addr", "https://" + addr, "--transport", transport}
 	if hash != "" {
 		args = append(args, "--insecure", "--cert-hash", hash)
 	}

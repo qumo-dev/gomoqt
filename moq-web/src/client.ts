@@ -1,10 +1,18 @@
 import { Session } from "./session.ts";
 import type { ConnectInit } from "./options.ts";
-import { WebTransportSession } from "./internal/webtransport/mod.ts";
-import type { TransportFactory } from "./options.ts";
+import { openFirstReady } from "./internal/open_transport.ts";
+import type { TransportOpener } from "./internal/open_transport.ts";
 import { ALPN, openWebSocketTransport, transportCandidates } from "./transport.ts";
 
 export { ALPN };
+
+/**
+ * How long {@link connect} waits for WebSocket before it falls back to
+ * WebTransport, on WebKit. A network that drops the WebSocket's TCP port
+ * without answering would otherwise hold the fallback up for as long as the
+ * browser keeps trying.
+ */
+const webSocketFallbackTimeoutMs = 5000;
 
 const DefaultWebTransportOptions: WebTransportOptions = {
 	allowPooling: false,
@@ -49,6 +57,10 @@ const DefaultWebTransportOptions: WebTransportOptions = {
  * server that takes no WebSocket is reached over WebTransport instead. See
  * {@link transportCandidates}.
  *
+ * The WebSocket is dialed at the same host and port as `url`, with `wss:`
+ * for `https:`. A server that takes WebSocket elsewhere is reached with
+ * {@link ConnectInit.webSocketURL}.
+ *
  * @param url - MOQ server endpoint URL.
  * @param init - Connection init object (mux, onGoaway, transport, transportOptions, transportFactory).
  * @returns A ready-to-use {@link Session}.
@@ -62,34 +74,32 @@ export async function connect(
 		...(init?.transportOptions ?? {}),
 	};
 
-	const factories: readonly TransportFactory[] = init?.transportFactory
-		? [init.transportFactory]
-		: transportCandidates(init?.transport).map((kind): TransportFactory =>
+	const customFactory = init?.transportFactory;
+	const openers: readonly TransportOpener[] = customFactory
+		? [() => customFactory(url, transportOptions)]
+		: transportCandidates(init?.transport).map((kind): TransportOpener =>
 			kind === "websocket"
-				? (u) => openWebSocketTransport(u)
-				: (u, o) => new WebTransport(u, o)
+				? () => openWebSocketTransport(init?.webSocketURL ?? url)
+				: () => new WebTransport(url, transportOptions)
 		);
 
-	// The last transport's failure is the one reported: an earlier one was
-	// only tried first.
-	let failure: unknown;
-	for (const factory of factories) {
-		try {
-			const transport = new WebTransportSession(factory(url, transportOptions));
-			const session = new Session({
-				transport,
-				mux: init?.mux,
-				fetchHandler: init?.fetchHandler,
-				onGoaway: init?.onGoaway,
-				options: init?.options,
-			});
-			await session.ready;
-			return session;
-		} catch (err) {
-			failure = err;
-		}
+	try {
+		// Only a transport that cannot be opened is passed over for the next.
+		// Once one is open, the session is its own: a server that closes it,
+		// as one that refuses the client does, is not asked again another way.
+		const transport = await openFirstReady(openers, webSocketFallbackTimeoutMs);
+		const session = new Session({
+			transport,
+			mux: init?.mux,
+			fetchHandler: init?.fetchHandler,
+			onGoaway: init?.onGoaway,
+			options: init?.options,
+		});
+		await session.ready;
+		return session;
+	} catch (err) {
+		throw new Error(`failed to connect: ${err}`);
 	}
-	throw new Error(`failed to connect: ${failure}`);
 }
 
 // Back-compat shim — kept so existing code compiled against the old Client

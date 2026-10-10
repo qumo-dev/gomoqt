@@ -59,6 +59,12 @@ export interface ConnectInit {
 	 */
 	transport?: TransportKind;
 	/**
+	 * Where to dial the WebSocket transport, for a server that takes
+	 * WebSocket at another host, port or path than WebTransport. Defaults to
+	 * the URL given to {@link connect}, with `wss:` for `https:`.
+	 */
+	webSocketURL?: string | URL;
+	/**
 	 * Low-level WebTransport options forwarded to the transport factory.
 	 * The WebSocket transport takes none.
 	 */

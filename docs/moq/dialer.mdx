@@ -2,7 +2,7 @@
 title: "Client"
 ---
 
-`moqt.Dialer` manages client-side operations for the MoQ protocol. It establishes sessions with MoQ servers over both WebTransport and native QUIC connections.
+`moqt.Dialer` manages client-side operations for the MoQ protocol. It establishes sessions with MoQ servers over WebTransport, native QUIC, and QMux over WebSocket.
 
 <Accordion title="Overview">
 
@@ -104,6 +104,9 @@ type Dialer struct {
 `Dial` is the only way to establish a session. It selects the transport from the URL scheme:
 - `https://` — WebTransport (HTTP/3)
 - `moqt://` — Native QUIC
+- `wss://` — QMux over WebSocket, the binding for clients that cannot use WebTransport (`ws://` does without TLS)
+
+Over WebSocket everything shares one TCP connection: a lost segment delays every stream, and there are no unreliable datagrams. Prefer the other two where they work. `Dialer.QMuxConfig` configures the QMux connection, and `Dialer.DialWebSocketFunc` replaces the dial.
 
 ```go
 	var mux *moqt.TrackMux

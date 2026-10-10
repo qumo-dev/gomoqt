@@ -187,7 +187,7 @@ func TestWebSocketHandler_ServeHTTP_ServerClose(t *testing.T) {
 	sess, err := (&Dialer{}).Dial(ctx, wsURL(srv, "/"), nil)
 	require.NoError(t, err)
 	// The server tracks the session once its handler runs.
-	require.Eventually(t, func() bool { return server.connManager.countSessions() == 1 },
+	require.Eventually(t, func() bool { return server.currentConnManager().countSessions() == 1 },
 		5*time.Second, 5*time.Millisecond)
 
 	closeServer(t, server)
@@ -199,6 +199,44 @@ func TestWebSocketHandler_ServeHTTP_ServerClose(t *testing.T) {
 		assert.True(t, serr.Remote)
 	case <-ctx.Done():
 		require.FailNow(t, "the session outlived its Server")
+	}
+}
+
+// With Server set, shutting the Server down sends the handler's sessions a
+// GOAWAY with the next session URI, as it does its other sessions.
+func TestWebSocketHandler_ServeHTTP_ServerShutdown(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	server := &Server{NextSessionURI: "https://next.example/session"}
+	srv := httptest.NewServer(&WebSocketHandler{
+		Server:  server,
+		Handler: HandleFunc(func(sess *Session) { <-sess.Context().Done() }),
+	})
+	defer srv.Close()
+
+	goaway := make(chan string, 1)
+	sess, err := (&Dialer{OnGoaway: func(uri string) { goaway <- uri }}).Dial(ctx, wsURL(srv, "/"), nil)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return server.currentConnManager().countSessions() == 1 },
+		5*time.Second, 5*time.Millisecond)
+
+	shutdownDone := make(chan error, 1)
+	go func() { shutdownDone <- server.Shutdown(ctx) }()
+
+	select {
+	case uri := <-goaway:
+		assert.Equal(t, "https://next.example/session", uri)
+	case <-ctx.Done():
+		require.FailNow(t, "the session got no GOAWAY")
+	}
+	// The client leaves, which lets the shutdown finish.
+	require.NoError(t, sess.CloseWithError(NoError, "going away"))
+	select {
+	case err := <-shutdownDone:
+		assert.NoError(t, err)
+	case <-ctx.Done():
+		require.FailNow(t, "Shutdown did not return after the session left")
 	}
 }
 
@@ -351,11 +389,6 @@ func TestWebSocketHandler_Accepts(t *testing.T) {
 		},
 		"another protocol": {
 			handler: &WebSocketHandler{}, request: upgrade("qmux-02.moq-lite-99"),
-		},
-		"a configured protocol": {
-			handler:  &WebSocketHandler{ApplicationProtocols: []string{"moq-lite-99"}},
-			request:  upgrade("qmux-02.moq-lite-99"),
-			expected: true,
 		},
 		"not a WebSocket upgrade": {
 			handler: &WebSocketHandler{}, request: httptest.NewRequest(http.MethodGet, "/", nil),
