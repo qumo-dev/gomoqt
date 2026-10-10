@@ -211,7 +211,7 @@ WebTransport does not work in every browser: on WebKit, which is every browser o
 ```
 
 - **Set `CheckOrigin`.** Browsers do not apply CORS to WebSocket, so this is the only origin check. Without it only same-origin requests are accepted.
-- **`Server` ties the sessions to a `moqt.Server`:** its `Shutdown` (GOAWAY) and `Close` reach them, its `ConnContext` gives them their context, and its `QUICConfig` configures them: stream limits, receive windows, keep-alive, and idle and handshake timeouts are set once for every transport.
+- **`Server` ties the sessions to a `moqt.Server`:** its `Shutdown` (GOAWAY) and `Close` reach them, its `ConnContext` derives their context from the upgrade request's, and its `QUICConfig` configures them: stream limits, receive windows, keep-alive, and idle and handshake timeouts are set once for every transport.
 - **The subprotocol is the version negotiation.** A client offers `moqt.NextProtoQMux` (`qmux-02.moq-lite-05`); a request that does not is refused with 400.
 - **Serve it on the TCP port of the same number as the QUIC listener.** `@qumo/moq` dials `wss:` at the host and port of the `https:` URL it was given, so one URL then reaches the server over either transport.
 - A session behaves as a WebTransport one: the request URI is its path. Everything shares one TCP connection, so a lost segment delays every stream, and there are no unreliable datagrams.

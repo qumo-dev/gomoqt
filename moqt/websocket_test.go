@@ -331,8 +331,8 @@ func TestDialer_Dial_WebSocketWithoutSubprotocol(t *testing.T) {
 	assert.Contains(t, err.Error(), "subprotocol")
 }
 
-// With Server set, a session has the values of the Server's ConnContext,
-// under those of its upgrade request.
+// With Server set, the Server's ConnContext derives a session's context
+// from its upgrade request's.
 func TestWebSocketHandler_ServeHTTP_ConnContext(t *testing.T) {
 	type key string
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -340,8 +340,9 @@ func TestWebSocketHandler_ServeHTTP_ConnContext(t *testing.T) {
 
 	server := &Server{
 		ConnContext: func(ctx context.Context, _ StreamConn) context.Context {
-			ctx = context.WithValue(ctx, key("conn"), "from ConnContext")
-			return context.WithValue(ctx, key("both"), "from ConnContext")
+			// It is given the request's context, values and all.
+			seen, _ := ctx.Value(key("request")).(string)
+			return context.WithValue(ctx, key("conn"), "saw "+seen)
 		},
 	}
 	defer closeServer(t, server)
@@ -354,7 +355,7 @@ func TestWebSocketHandler_ServeHTTP_ConnContext(t *testing.T) {
 		}),
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handler.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), key("both"), "from the request")))
+		handler.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), key("request"), "the request")))
 	}))
 	defer srv.Close()
 
@@ -364,8 +365,8 @@ func TestWebSocketHandler_ServeHTTP_ConnContext(t *testing.T) {
 
 	select {
 	case sess := <-served:
-		assert.Equal(t, "from ConnContext", sess.Context().Value(key("conn")))
-		assert.Equal(t, "from the request", sess.Context().Value(key("both")), "the request's value hides ConnContext's")
+		assert.Equal(t, "the request", sess.Context().Value(key("request")))
+		assert.Equal(t, "saw the request", sess.Context().Value(key("conn")))
 		assert.Nil(t, sess.Context().Value(key("neither")))
 	case <-ctx.Done():
 		require.FailNow(t, "the handler did not get the session")

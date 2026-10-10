@@ -22,8 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     counterpart of `WebTransportHandler`. A session behaves as a WebTransport
     one: the request URI is its path, and SETUP carries no Path. Setting its
     `Server` field makes its sessions that Server's: `Shutdown` (GOAWAY) and
-    `Close` reach them, and `ConnContext` gives them their context, under the
-    values of the upgrade request.
+    `Close` reach them, and `ConnContext` derives their context from the
+    upgrade request's.
   - **`WebSocketHandler.Accepts`** tells a server, before the upgrade,
     whether a request is one the handler would take. A server that takes
     both transports on one route, or admits sessions itself, asks it first.

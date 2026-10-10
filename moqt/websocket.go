@@ -53,9 +53,8 @@ type WebSocketHandler struct {
 	// Server, if set, is the Server the sessions of this handler belong
 	// to: its Shutdown and Close reach them, it stops the handler from
 	// taking new ones, its QUICConfig configures them unless QUICConfig
-	// does, and its ConnContext gives them their context, as it does for
-	// the Server's other sessions. A value of the upgrade request
-	// hides one ConnContext set under the same key. Without Server the
+	// does, and its ConnContext derives their context from the upgrade
+	// request's, as it derives its QUIC connections'. Without Server the
 	// handler stands alone, as a WebTransportHandler does outside one.
 	Server *Server
 
@@ -103,22 +102,6 @@ func (h *WebSocketHandler) upgrade(w http.ResponseWriter, r *http.Request) (WebT
 	return conn, err
 }
 
-// layeredContext is a context whose values come from itself first, and
-// from under for the keys it does not have. A WebSocket session's context
-// is the upgrade request's over its Server's ConnContext, as a WebTransport
-// session's request context derives from its connection's.
-type layeredContext struct {
-	context.Context
-	under context.Context
-}
-
-func (c layeredContext) Value(key any) any {
-	if v := c.Context.Value(key); v != nil {
-		return v
-	}
-	return c.under.Value(key)
-}
-
 // ServeHTTP upgrades the request to a session and serves it with Handler,
 // returning when the session ends. A request that is not upgraded has been
 // answered with an HTTP error.
@@ -156,9 +139,11 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_ = conn.CloseWithError(transport.ConnErrorCode(NoError), "server shutdown") // not actionable: the session is refused
 			return
 		}
-		connCtx := s.connContext(conn.Context(), conn)
-		setup.ctx = layeredContext{Context: r.Context(), under: connCtx}
-		setup.lifetime = connCtx
+		// The Server's ConnContext derives the session's context from the
+		// upgrade request's, as it derives a QUIC connection's from the
+		// connection's. Cancelling what it returns ends the session.
+		ctx := s.connContext(r.Context(), conn)
+		setup.ctx, setup.lifetime = ctx, ctx
 	}
 	sess := newSession(conn, h.TrackMux, manager, h.Config, h.FetchHandler, nil, h.Logger, setup, nil)
 	// Clean up when the Handler returns, even if it did not close the
