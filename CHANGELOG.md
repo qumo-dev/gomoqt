@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v0.23.0] - 2026-10-10
 
-> **Dual release.** `v0.23.0` ships the Go module and `@qumo/moq` on JSR at the same version: `@qumo/moq` goes from `0.22.1` to `0.23.0`. It adds MOQ over QMux on WebSocket, for browsers whose WebTransport does not work (every browser on WebKit). Nothing changes for code that does not use it, with one exception in Go:
+> **Dual release.** `v0.23.0` ships the Go module and `@qumo/moq` on JSR at the same version: `@qumo/moq` goes from `0.22.1` to `0.23.0`. It adds MOQ over QMux on WebSocket, for browsers whose WebTransport does not work (every browser on WebKit). It also fixes stream creation over WebTransport on Safari. Three behaviour changes are visible to callers:
 > - **Go:** `Server.Shutdown` and `Server.Close` now take their connections atomically. A session that joins once a shutdown has begun is no longer tracked by it: the shutdown neither sends it a GOAWAY nor waits for it. Before, it could be tracked and then missed.
+> - **Go:** a WebTransport server now grants initial stream limits (100 bidirectional, 100 unidirectional, 10 MB), or those of `Server.QUICConfig`, and refuses with 400 a session whose offered protocols match none of its own. Before, it granted none, which Safari took as zero, and accepted a mismatch silently.
 > - **JS:** `connect` is unchanged by default. WebSocket is opted into with `transport: "websocket"`; the library neither picks by browser nor falls back.
 >
 > **Dependencies:** adds `github.com/okdaichi/qmux-go` v0.3.0 and `github.com/coder/websocket` v1.8.15 (Go), and `npm:@moq/qmux` ^0.3.3 (`@qumo/moq`). The MOQ wire protocol is unchanged, so this interoperates with `v0.22` peers over WebTransport and native QUIC.
@@ -73,6 +74,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **interop:** the Go server takes WebSocket on the TCP port of `-addr`, so one
   URL reaches it over either transport, and `go run ./cmd/interop` takes
   `-transport` (`webtransport`, `websocket`) for both clients.
+
+### Fixed
+
+- **moqt: configure WebTransport initial stream limits and reject unmatched application protocols (#452).**
+  - **Safari stream creation:** WebTransport servers now send default initial stream limits (`MaxIncomingStreams: 100`, `MaxIncomingUniStreams: 100`, `MaxIncomingData: 10MB`). Previously, omitting these settings caused browsers like Safari (WebKit) to treat the initial stream limits as zero, blocking peer unidirectional and bidirectional stream creation (such as media ingestion).
+  - **Configuration & inheritance:** `Server.QUICConfig` stream limits (`MaxIncomingStreams`, `MaxIncomingUniStreams`) are now automatically inherited by the WebTransport server if set. Callers can also explicitly override stream limits via the new `Server.WebTransportConfig` field or `NewWebTransportServerWithConfig`.
+  - **Protocol mismatch rejection:** Per draft-ietf-webtrans-http3-15 Section 3.3, incoming WebTransport sessions offering `WT-Available-Protocols` that do not match any server-supported `ApplicationProtocols` are now rejected with an HTTP 400 Bad Request error rather than silently accepted without agreement.
 
 ### Dependencies
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/quic-go/quic-go"
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
+	"github.com/qumo-dev/gomoqt/moqt/internal/webtransportgo"
 	"github.com/qumo-dev/gomoqt/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1085,3 +1086,93 @@ func TestNewWebTransportServer_NilHandler(t *testing.T) {
 	wts := NewWebTransportServer(nil)
 	assert.NotNil(t, wts)
 }
+
+func TestNewWebTransportServer_DefaultConfig(t *testing.T) {
+	wts := NewWebTransportServer(nil)
+	wtsImpl, ok := wts.(*webtransportgo.Server)
+	require.True(t, ok)
+	require.NotNil(t, wtsImpl.Config)
+	assert.Equal(t, int64(DefaultWebTransportMaxStreams), wtsImpl.Config.MaxIncomingStreams)
+	assert.Equal(t, int64(DefaultWebTransportMaxUniStreams), wtsImpl.Config.MaxIncomingUniStreams)
+	assert.Equal(t, int64(DefaultWebTransportMaxData), wtsImpl.Config.MaxIncomingData)
+}
+
+func TestNewWebTransportServerWithConfig(t *testing.T) {
+	customCfg := &WebTransportConfig{
+		MaxIncomingStreams:    50,
+		MaxIncomingUniStreams: 200,
+		MaxIncomingData:       5 * 1024 * 1024,
+	}
+	wts := NewWebTransportServerWithConfig(nil, customCfg)
+	wtsImpl, ok := wts.(*webtransportgo.Server)
+	require.True(t, ok)
+	require.NotNil(t, wtsImpl.Config)
+	assert.Equal(t, int64(50), wtsImpl.Config.MaxIncomingStreams)
+	assert.Equal(t, int64(200), wtsImpl.Config.MaxIncomingUniStreams)
+	assert.Equal(t, int64(5*1024*1024), wtsImpl.Config.MaxIncomingData)
+}
+
+func TestServer_Init_ResolvesWebTransportConfig(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		s := &Server{}
+		s.init()
+		wtsImpl, ok := s.WebTransportServer.(*webtransportgo.Server)
+		require.True(t, ok)
+		require.NotNil(t, wtsImpl.Config)
+		assert.Equal(t, int64(DefaultWebTransportMaxStreams), wtsImpl.Config.MaxIncomingStreams)
+		assert.Equal(t, int64(DefaultWebTransportMaxUniStreams), wtsImpl.Config.MaxIncomingUniStreams)
+	})
+
+	t.Run("inherits from QUICConfig", func(t *testing.T) {
+		s := &Server{
+			QUICConfig: &quic.Config{
+				MaxIncomingStreams:    42,
+				MaxIncomingUniStreams: 84,
+			},
+		}
+		s.init()
+		wtsImpl, ok := s.WebTransportServer.(*webtransportgo.Server)
+		require.True(t, ok)
+		require.NotNil(t, wtsImpl.Config)
+		assert.Equal(t, int64(42), wtsImpl.Config.MaxIncomingStreams)
+		assert.Equal(t, int64(84), wtsImpl.Config.MaxIncomingUniStreams)
+	})
+
+	t.Run("WebTransportConfig overrides QUICConfig", func(t *testing.T) {
+		s := &Server{
+			QUICConfig: &quic.Config{
+				MaxIncomingStreams:    42,
+				MaxIncomingUniStreams: 84,
+			},
+			WebTransportConfig: &WebTransportConfig{
+				MaxIncomingStreams: 123,
+			},
+		}
+		s.init()
+		wtsImpl, ok := s.WebTransportServer.(*webtransportgo.Server)
+		require.True(t, ok)
+		require.NotNil(t, wtsImpl.Config)
+		assert.Equal(t, int64(123), wtsImpl.Config.MaxIncomingStreams)
+		assert.Equal(t, int64(84), wtsImpl.Config.MaxIncomingUniStreams)
+	})
+}
+
+func TestWebTransportHandler_ServeHTTP_ProtocolMismatchFallsBack(t *testing.T) {
+	var fallbackCalled bool
+	h := &WebTransportHandler{
+		Handler: HandleFunc(func(sess *Session) {}),
+		FallbackHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fallbackCalled = true
+			w.WriteHeader(http.StatusBadRequest)
+		}),
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("CONNECT", "https://example.com/moq", nil)
+	r.Header.Set("WT-Available-Protocols", `"moq-lite-04"`)
+
+	h.ServeHTTP(w, r)
+	assert.True(t, fallbackCalled, "unmatched application protocol should trigger fallback")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
