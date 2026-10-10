@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/okdaichi/qmux-go/qmux"
+	"github.com/quic-go/quic-go"
 	"github.com/qumo-dev/gomoqt/moqt/internal/qmuxgo"
 	"github.com/qumo-dev/gomoqt/transport"
 )
@@ -34,9 +34,13 @@ type WebSocketHandler struct {
 	// must set it. If nil, only same-origin requests are accepted.
 	CheckOrigin func(r *http.Request) bool
 
-	// QMuxConfig configures the QMux connections. A zero KeepAlivePeriod
-	// is 10 seconds; a negative one sends no keep-alive pings.
-	QMuxConfig *qmux.Config
+	// QUICConfig configures the sessions with the settings QMux shares
+	// with QUIC: the stream limits, the receive windows, the keep-alive
+	// period, the idle and handshake timeouts, and datagrams. The rest of
+	// it has no meaning over WebSocket. If nil, Server's QUICConfig is
+	// used; with neither, the defaults apply, with a keep-alive ping every
+	// 10 seconds.
+	QUICConfig *quic.Config
 
 	// Handler handles the session after the upgrade. If nil, no request
 	// is upgraded.
@@ -48,8 +52,9 @@ type WebSocketHandler struct {
 
 	// Server, if set, is the Server the sessions of this handler belong
 	// to: its Shutdown and Close reach them, it stops the handler from
-	// taking new ones, and its ConnContext gives them their context, as it
-	// does for the Server's other sessions. A value of the upgrade request
+	// taking new ones, its QUICConfig configures them unless QUICConfig
+	// does, and its ConnContext gives them their context, as it does for
+	// the Server's other sessions. A value of the upgrade request
 	// hides one ConnContext set under the same key. Without Server the
 	// handler stands alone, as a WebTransportHandler does outside one.
 	Server *Server
@@ -65,10 +70,14 @@ type WebSocketHandler struct {
 // upgrader accepts the one application protocol the session layer speaks:
 // a subprotocol it agreed to and then did not speak would garble the session.
 func (h *WebSocketHandler) upgrader() *qmuxgo.Upgrader {
+	config := h.QUICConfig
+	if config == nil && h.Server != nil {
+		config = h.Server.QUICConfig
+	}
 	return &qmuxgo.Upgrader{
 		CheckOrigin: h.CheckOrigin,
 		Protocols:   []string{NextProtoMOQ},
-		Config:      h.QMuxConfig,
+		Config:      config,
 	}
 }
 
@@ -165,6 +174,6 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // dialWebSocket opens a WebSocket to rawURL and starts a QMux session on it.
-func dialWebSocket(ctx context.Context, rawURL string, header http.Header, tlsConfig *tls.Config, config *qmux.Config) (*http.Response, WebTransportSession, error) {
-	return qmuxgo.Dial(ctx, rawURL, header, tlsConfig, []string{NextProtoMOQ}, config)
+func dialWebSocket(ctx context.Context, rawURL string, header http.Header, tlsConfig *tls.Config, quicConfig *quic.Config) (*http.Response, WebTransportSession, error) {
+	return qmuxgo.Dial(ctx, rawURL, header, tlsConfig, []string{NextProtoMOQ}, quicConfig)
 }

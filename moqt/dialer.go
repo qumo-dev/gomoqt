@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/okdaichi/qmux-go/qmux"
 	"github.com/quic-go/quic-go"
 	"github.com/qumo-dev/gomoqt/moqt/internal/quicgo"
 	"github.com/qumo-dev/gomoqt/moqt/internal/webtransportgo"
@@ -23,7 +22,10 @@ type Dialer struct {
 	// TLS configuration for WebTransport, QUIC and WebSocket connections.
 	TLSConfig *tls.Config
 
-	// QUIC configuration for raw QUIC connections.
+	// QUIC configuration for raw QUIC connections. A WebSocket session
+	// takes from it the settings QMux shares with QUIC: the stream limits,
+	// the receive windows, the keep-alive period, the idle and handshake
+	// timeouts, and datagrams.
 	QUICConfig *quic.Config
 
 	// Config contains additional configuration options for the Dialer.
@@ -36,10 +38,6 @@ type Dialer struct {
 	// DialWebTransportFunc performs the WebTransport handshake and establishes a connection.
 	// If nil, the default dialer is used.
 	DialWebTransportFunc func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config) (*http.Response, WebTransportSession, error)
-
-	// QMuxConfig configures the QMux connection of a WebSocket session. If
-	// nil, the defaults apply, with a keep-alive ping every 10 seconds.
-	QMuxConfig *qmux.Config
 
 	// DialWebSocketFunc opens the WebSocket and starts the QMux session on
 	// it. If nil, the default dialer is used.
@@ -169,7 +167,7 @@ func (d *Dialer) dialWebSocket(ctx context.Context, target *url.URL, mux *TrackM
 	dial := d.DialWebSocketFunc
 	if dial == nil {
 		dial = func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config) (*http.Response, WebTransportSession, error) {
-			return dialWebSocket(ctx, addr, header, tlsConfig, d.QMuxConfig)
+			return dialWebSocket(ctx, addr, header, tlsConfig, d.QUICConfig)
 		}
 	}
 	_, conn, err := dial(dialCtx, target.String(), nil, d.TLSConfig)

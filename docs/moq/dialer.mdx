@@ -106,7 +106,7 @@ type Dialer struct {
 - `moqt://` — Native QUIC
 - `wss://` — QMux over WebSocket, the binding for clients that cannot use WebTransport (`ws://` does without TLS)
 
-Over WebSocket everything shares one TCP connection: a lost segment delays every stream, and there are no unreliable datagrams. Prefer the other two where they work. `Dialer.QMuxConfig` configures the QMux connection, and `Dialer.DialWebSocketFunc` replaces the dial.
+Over WebSocket everything shares one TCP connection: a lost segment delays every stream, and there are no unreliable datagrams. Prefer the other two where they work. `Dialer.QUICConfig` configures a WebSocket session too, with the settings QMux shares with QUIC (stream limits, receive windows, keep-alive, idle and handshake timeouts, datagrams), and `Dialer.DialWebSocketFunc` replaces the dial.
 
 ```go
 	var mux *moqt.TrackMux

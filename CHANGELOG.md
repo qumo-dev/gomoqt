@@ -27,8 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **`WebSocketHandler.Accepts`** tells a server, before the upgrade,
     whether a request is one the handler would take. A server that takes
     both transports on one route, or admits sessions itself, asks it first.
-  - **`Dialer.Dial` accepts `wss://` and `ws://`.** `Dialer.QMuxConfig` and
-    `Dialer.DialWebSocketFunc` configure and replace the dial.
+  - **`Dialer.Dial` accepts `wss://` and `ws://`.** `Dialer.DialWebSocketFunc`
+    replaces the dial.
+  - **`QUICConfig` configures WebSocket sessions too.** QMux provides QUIC's
+    streams, so the settings that govern them carry over: the stream limits,
+    the receive windows, the keep-alive period, the idle and handshake
+    timeouts, and datagrams. A `Dialer` uses its `QUICConfig`; a
+    `WebSocketHandler` its own, or its `Server`'s. Limits are set once for
+    every transport.
   - **The WebSocket subprotocol is the version negotiation**, since a
     WebSocket has no ALPN: `NextProtoQMux`, `qmux-02.moq-lite-05`. A request
     that does not offer it is refused with 400.

@@ -17,12 +17,13 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/okdaichi/qmux-go/qmux"
+	"github.com/quic-go/quic-go"
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
-// DefaultKeepAlivePeriod is the interval between QX_PING frames unless the
-// configuration sets one. The pings measure the round-trip time, find a
-// peer that is gone, and keep proxies from closing an idle WebSocket.
+// DefaultKeepAlivePeriod is the interval between QX_PING frames when there
+// is no configuration. The pings measure the round-trip time, find a peer
+// that is gone, and keep proxies from closing an idle WebSocket.
 const DefaultKeepAlivePeriod = 10 * time.Second
 
 // closeGrace is how long a closing connection waits for the WebSocket
@@ -49,9 +50,9 @@ type Upgrader struct {
 	// Protocols lists the application protocols accepted, in order of
 	// preference. A client offers each as "qmux-02.<protocol>".
 	Protocols []string
-	// Config configures the QMux connection. A zero KeepAlivePeriod is
-	// DefaultKeepAlivePeriod; a negative one sends no pings.
-	Config *qmux.Config
+	// Config configures the QMux connection with the settings it shares
+	// with QUIC: see configFrom.
+	Config *quic.Config
 }
 
 // Accepts reports whether r is a WebSocket upgrade that offers one of
@@ -90,7 +91,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (transport.We
 		return nil, &UpgradeError{Err: err}
 	}
 
-	config := withDefaults(u.Config)
+	config := configFrom(u.Config)
 	mc := newMessageConn(ws, config, localAddrOf(r), parseAddr(r.RemoteAddr))
 	conn, err := qmux.ServerMessages(r.Context(), mc, config)
 	if err != nil {
@@ -100,8 +101,9 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (transport.We
 }
 
 // Dial opens a WebSocket to rawURL ("wss://" or "ws://") and starts a QMux
-// session on it, offering protocols as application protocols.
-func Dial(ctx context.Context, rawURL string, header http.Header, tlsConfig *tls.Config, protocols []string, config *qmux.Config) (*http.Response, transport.WebTransportSession, error) {
+// session on it, offering protocols as application protocols. quicConfig
+// configures the QMux connection: see configFrom.
+func Dial(ctx context.Context, rawURL string, header http.Header, tlsConfig *tls.Config, protocols []string, quicConfig *quic.Config) (*http.Response, transport.WebTransportSession, error) {
 	// A transport of its own, for the TLS configuration, with the default
 	// one's proxy settings when it has any: an application may have put
 	// something else in http.DefaultTransport. The WebSocket takes its
@@ -145,7 +147,7 @@ func Dial(ctx context.Context, rawURL string, header http.Header, tlsConfig *tls
 		return rsp, nil, fmt.Errorf("qmuxgo: dial: server selected subprotocol %q, which was not offered", ws.Subprotocol())
 	}
 
-	config = withDefaults(config)
+	config := configFrom(quicConfig)
 	if local == nil || remote == nil {
 		// A transport that reports no connection, such as one behind a
 		// custom RoundTripper.
@@ -159,17 +161,30 @@ func Dial(ctx context.Context, rawURL string, header http.Header, tlsConfig *tls
 	return rsp, &session{conn: conn, protocol: protocol, tls: rsp.TLS}, nil
 }
 
-// withDefaults returns a copy of config with a keep-alive period: a caller
-// that sets another field has not asked for a connection without pings.
-func withDefaults(config *qmux.Config) *qmux.Config {
-	var c qmux.Config
-	if config != nil {
-		c = *config
+// configFrom returns the QMux configuration that a QUIC one stands for.
+// QMux provides QUIC's streams, so the settings that govern them are the
+// same and carry over: the stream limits, the receive windows, the
+// keep-alive period, the idle and handshake timeouts, and datagrams. The
+// rest of a quic.Config is about QUIC's own transport and has no meaning
+// here.
+//
+// Without a configuration there is a keep-alive every
+// DefaultKeepAlivePeriod. With one, its KeepAlivePeriod applies as it does
+// to QUIC, where zero sends none.
+func configFrom(c *quic.Config) *qmux.Config {
+	if c == nil {
+		return &qmux.Config{KeepAlivePeriod: DefaultKeepAlivePeriod}
 	}
-	if c.KeepAlivePeriod == 0 {
-		c.KeepAlivePeriod = DefaultKeepAlivePeriod
+	return &qmux.Config{
+		MaxIncomingStreams:             c.MaxIncomingStreams,
+		MaxIncomingUniStreams:          c.MaxIncomingUniStreams,
+		InitialStreamReceiveWindow:     c.InitialStreamReceiveWindow,
+		InitialConnectionReceiveWindow: c.InitialConnectionReceiveWindow,
+		KeepAlivePeriod:                c.KeepAlivePeriod,
+		MaxIdleTimeout:                 c.MaxIdleTimeout,
+		HandshakeIdleTimeout:           c.HandshakeIdleTimeout,
+		EnableDatagrams:                c.EnableDatagrams,
 	}
-	return &c
 }
 
 // IsUpgrade reports whether r asks to upgrade to WebSocket.

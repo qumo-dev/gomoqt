@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/quic-go/quic-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -397,6 +398,30 @@ func TestWebSocketHandler_Accepts(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			assert.Equal(t, tt.expected, tt.handler.Accepts(tt.request))
+		})
+	}
+}
+
+// A handler's sessions are configured by its QUICConfig, or else by its
+// Server's: limits are set once for every transport.
+func TestWebSocketHandler_upgrader_Config(t *testing.T) {
+	own := &quic.Config{MaxIncomingStreams: 1}
+	servers := &quic.Config{MaxIncomingStreams: 2}
+	tests := map[string]struct {
+		handler  *WebSocketHandler
+		expected *quic.Config
+	}{
+		"its own":                   {handler: &WebSocketHandler{QUICConfig: own}, expected: own},
+		"its own over the Server's": {handler: &WebSocketHandler{QUICConfig: own, Server: &Server{QUICConfig: servers}}, expected: own},
+		"the Server's":              {handler: &WebSocketHandler{Server: &Server{QUICConfig: servers}}, expected: servers},
+		"a Server without one":      {handler: &WebSocketHandler{Server: &Server{}}, expected: nil},
+		"neither":                   {handler: &WebSocketHandler{}, expected: nil},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := tt.handler.upgrader().Config
+
+			assert.Same(t, tt.expected, got)
 		})
 	}
 }

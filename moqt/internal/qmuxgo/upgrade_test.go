@@ -13,6 +13,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/okdaichi/qmux-go/qmux"
+	"github.com/quic-go/quic-go"
 	"github.com/qumo-dev/gomoqt/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -288,34 +289,51 @@ func TestDial_Refused(t *testing.T) {
 	}
 }
 
-func TestWithDefaults(t *testing.T) {
+func TestConfigFrom(t *testing.T) {
 	tests := map[string]struct {
-		config   *qmux.Config
+		config   *quic.Config
 		expected *qmux.Config
 	}{
-		"nil": {
+		"no configuration keeps the connection alive": {
 			config:   nil,
 			expected: &qmux.Config{KeepAlivePeriod: DefaultKeepAlivePeriod},
 		},
-		"another field set keeps the keep-alive": {
-			config:   &qmux.Config{MaxIncomingStreams: 7},
-			expected: &qmux.Config{MaxIncomingStreams: 7, KeepAlivePeriod: DefaultKeepAlivePeriod},
+		"the settings QMux shares with QUIC carry over": {
+			config: &quic.Config{
+				MaxIncomingStreams:             7,
+				MaxIncomingUniStreams:          8,
+				InitialStreamReceiveWindow:     1 << 16,
+				InitialConnectionReceiveWindow: 1 << 17,
+				KeepAlivePeriod:                5 * time.Second,
+				MaxIdleTimeout:                 time.Minute,
+				HandshakeIdleTimeout:           3 * time.Second,
+				EnableDatagrams:                true,
+			},
+			expected: &qmux.Config{
+				MaxIncomingStreams:             7,
+				MaxIncomingUniStreams:          8,
+				InitialStreamReceiveWindow:     1 << 16,
+				InitialConnectionReceiveWindow: 1 << 17,
+				KeepAlivePeriod:                5 * time.Second,
+				MaxIdleTimeout:                 time.Minute,
+				HandshakeIdleTimeout:           3 * time.Second,
+				EnableDatagrams:                true,
+			},
 		},
-		"a keep-alive period of the caller's": {
-			config:   &qmux.Config{KeepAlivePeriod: time.Second},
-			expected: &qmux.Config{KeepAlivePeriod: time.Second},
+		"a configuration without a keep-alive sends none, as for QUIC": {
+			config:   &quic.Config{MaxIncomingStreams: 7},
+			expected: &qmux.Config{MaxIncomingStreams: 7},
 		},
-		"a negative period sends no pings": {
-			config:   &qmux.Config{KeepAlivePeriod: -1},
-			expected: &qmux.Config{KeepAlivePeriod: -1},
+		"what is QUIC's own is left out": {
+			config:   &quic.Config{Allow0RTT: true, DisablePathMTUDiscovery: true, MaxStreamReceiveWindow: 1 << 20},
+			expected: &qmux.Config{},
 		},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			got := withDefaults(tt.config)
+			got := configFrom(tt.config)
 
 			assert.Equal(t, tt.expected, got)
-			assert.NotSame(t, tt.config, got, "the caller's configuration is not modified")
 		})
 	}
 }
