@@ -24,9 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `Server` field makes its sessions that Server's: `Shutdown` (GOAWAY) and
     `Close` reach them, and `ConnContext` gives them their context, under the
     values of the upgrade request.
-  - **`WebSocketHandler.Accepts` and `IsWebSocketUpgrade`** tell a server,
-    before the upgrade, whether a request is one the handler would take. A
-    server that admits sessions itself asks them first.
+  - **`WebSocketHandler.Accepts`** tells a server, before the upgrade,
+    whether a request is one the handler would take. A server that takes
+    both transports on one route, or admits sessions itself, asks it first.
   - **`Dialer.Dial` accepts `wss://` and `ws://`.** `Dialer.QMuxConfig` and
     `Dialer.DialWebSocketFunc` configure and replace the dial.
   - **The WebSocket subprotocol is the version negotiation**, since a

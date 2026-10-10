@@ -397,7 +397,6 @@ func TestWebSocketHandler_Accepts(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			assert.Equal(t, tt.expected, tt.handler.Accepts(tt.request))
-			assert.Equal(t, tt.request.Header.Get("Upgrade") != "", IsWebSocketUpgrade(tt.request))
 		})
 	}
 }

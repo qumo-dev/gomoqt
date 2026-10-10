@@ -12,13 +12,6 @@ import (
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
-// IsWebSocketUpgrade reports whether r asks to upgrade to WebSocket. A
-// server that takes WebTransport and WebSocket on one route tells them apart
-// with it.
-func IsWebSocketUpgrade(r *http.Request) bool {
-	return qmuxgo.IsUpgrade(r)
-}
-
 // WebSocketHandler upgrades HTTP requests to MOQ sessions over QMux on
 // WebSocket: the binding for clients that cannot use WebTransport, such as
 // browsers on WebKit. It is the counterpart of WebTransportHandler for an
@@ -79,11 +72,12 @@ func (h *WebSocketHandler) upgrader() *qmuxgo.Upgrader {
 	}
 }
 
-// Accepts reports whether r is a WebSocket upgrade that offers a
+// Accepts reports whether r is a WebSocket upgrade that offers the
 // subprotocol the handler speaks. It does not check the Origin: call
-// CheckOrigin for that. A server that decides something of its own before
-// the upgrade, such as whether to admit the session, asks first whether the
-// upgrade would be refused anyway.
+// CheckOrigin for that. A server that takes WebTransport and WebSocket on
+// one route tells them apart with it, and one that decides something of its
+// own before the upgrade, such as whether to admit the session, asks first
+// whether the upgrade would be refused anyway.
 func (h *WebSocketHandler) Accepts(r *http.Request) bool {
 	return h.upgrader().Accepts(r)
 }
