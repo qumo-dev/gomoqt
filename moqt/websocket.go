@@ -154,9 +154,10 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Clean up when the Handler returns, even if it did not close the
 	// session itself. Idempotent.
 	defer sess.CloseWithError(NoError, "session ended")
-	if s != nil && s.shuttingDown() {
-		// Shut down between the check above and the session joining the
-		// manager: nothing else would close it.
+	if manager != nil && !manager.tracks(conn) {
+		// The Server began to shut down before the session joined it, so
+		// the shutdown will not end this session: end it here. One that
+		// joined in time is left to the shutdown, which sends it a GOAWAY.
 		return
 	}
 
