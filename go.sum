@@ -1,5 +1,11 @@
+github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=
+github.com/coder/websocket v1.8.15/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
 github.com/dunglas/httpsfv v1.1.1 h1:HoSs101zIE9I23DlqlmljJ/OIi7ILwrH347pXhRZdxI=
 github.com/dunglas/httpsfv v1.1.1/go.mod h1:zID2mqw9mFsnt7YC3vYQ9/cjq30q41W+1AnDwH8TiMg=
+github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
+github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
+github.com/okdaichi/qmux-go v0.3.0 h1:uiG3XRiabglaTklBUDmX+dnlBkEXre0EEaxTAmEVm8U=
+github.com/okdaichi/qmux-go v0.3.0/go.mod h1:sOt2VCexJZ+midUNi3SR0K/0QQwDtJxwRI87YaF3wR4=
 github.com/okdaichi/webtransport-go v0.13.0-okdaichi.2 h1:INtTyplF3uLquFDyIa6unkQ7T7fJRCJ01FfX9abE+dE=
 github.com/okdaichi/webtransport-go v0.13.0-okdaichi.2/go.mod h1:TTvw4NOrc4R62weL6rkqNxyN0hFluy5KFFzm90pf1vE=
 github.com/quic-go/go-ossfuzz-seeds v0.1.0 h1:APacT+iIaNF6fd8AGEiN3bT/Jtkd2jz4v4TzM7MFjy0=

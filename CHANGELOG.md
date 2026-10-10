@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **moqt: MOQ over QMux on WebSocket, for clients that cannot use
+  WebTransport.** WebKit's WebTransport never raises the stream and data
+  limits it grants, so a session stalls after about 7,600 streams or 16 MB
+  ([WebKit bug 319818](https://bugs.webkit.org/show_bug.cgi?id=319818)), and
+  every browser on iOS is WebKit. QMux
+  ([draft-ietf-quic-qmux-02](https://www.ietf.org/archive/id/draft-ietf-quic-qmux-02.html))
+  carries QUIC's streams over one reliable connection, so the session layer
+  is unchanged; the transport is
+  [qmux-go](https://github.com/okdaichi/qmux-go) v0.3.0.
+  - **`WebSocketHandler`** is an `http.Handler` for an HTTP/1.1 server, the
+    counterpart of `WebTransportHandler`. A session behaves as a WebTransport
+    one: the request URI is its path, and SETUP carries no Path. Setting its
+    `Server` field makes its sessions that Server's: `Shutdown` (GOAWAY) and
+    `Close` reach them, and `ConnContext` derives their context from the
+    upgrade request's.
+  - **`WebSocketHandler.Accepts`** tells a server, before the upgrade,
+    whether a request is one the handler would take. A server that takes
+    both transports on one route, or admits sessions itself, asks it first.
+  - **`Dialer.Dial` accepts `wss://` and `ws://`.** `Dialer.DialWebSocketFunc`
+    replaces the dial.
+  - **`QUICConfig` configures WebSocket sessions too.** QMux provides QUIC's
+    streams, so the settings that govern them carry over: the stream limits,
+    the receive windows, the keep-alive period, the idle and handshake
+    timeouts, and datagrams. A `Dialer` uses its `QUICConfig`; a
+    `WebSocketHandler` its own, or its `Server`'s. Limits are set once for
+    every transport. The keep-alive is the exception: a zero
+    `KeepAlivePeriod` is 10 seconds over WebSocket, where QUIC would send
+    none, since proxies close an idle WebSocket and QMux measures the
+    round-trip time from its pings. A negative one sends none.
+  - **The WebSocket subprotocol is the version negotiation**, since a
+    WebSocket has no ALPN: `NextProtoQMux`, `qmux-02.moq-lite-05`. A request
+    that does not offer it is refused with 400.
+  - **`CheckOrigin` matters here.** Browsers do not apply CORS to WebSocket.
+    Without it only same-origin requests are accepted.
+  - Everything shares one TCP connection: a lost segment delays every
+    stream, and there are no unreliable datagrams. Stream priorities order
+    what waits for the connection.
+- **@qumo/moq: `connect` takes `transport: "websocket"`.** It opens QMux
+  over WebSocket in place of WebTransport, which stays the default. The
+  WebSocket transport is
+  [`@moq/qmux`](https://www.npmjs.com/package/@moq/qmux), which an `https:`
+  URL reaches as `wss:`.
+  - **The application chooses the transport.** `connect` opens the one it
+    is told to, and fails if it cannot: it neither picks by browser nor
+    falls back to another. Which transport a session runs on is then never
+    in doubt, and a server that takes no WebSocket is an error at once, not
+    a session that freezes later.
+  - **`isWebKit(userAgent)`** tells the browsers that need WebSocket:
+    `connect(url, { transport: isWebKit(navigator.userAgent) ? "websocket" : "webtransport" })`.
+- **@qumo/moq: `ConnectInit.webSocketURL`** names where to dial WebSocket for
+  a server that takes it at another host, port or path than WebTransport. By
+  default it is the URL given to `connect`, with `wss:` for `https:`: a
+  server reachable at one `https` URL over both transports needs no setting.
+- **interop:** the Go server takes WebSocket on the TCP port of `-addr`, so one
+  URL reaches it over either transport, and `go run ./cmd/interop` takes
+  `-transport` (`webtransport`, `websocket`) for both clients.
+
+### Dependencies
+
+- Added `github.com/okdaichi/qmux-go` v0.3.0 and `github.com/coder/websocket`
+  v1.8.15 (Go), and `npm:@moq/qmux` ^0.3.3 (`@qumo/moq`).
+
 ## [v0.22.1] - 2026-10-05
 
 > **Dual release.** `v0.22.1` ships the Go module and `@qumo/moq` on JSR at the same version: `@qumo/moq` goes from `0.20.0` to `0.22.1`. Fixes only; no exported Go API changes, and `@qumo/moq` gains only an optional `onDone` parameter on the `GroupReader` constructor. Two behaviour changes are visible to callers:

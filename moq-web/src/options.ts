@@ -1,5 +1,6 @@
 import type { TrackMux } from "./track_mux.ts";
 import type { FetchHandler } from "./fetch.ts";
+import type { TransportKind } from "./transport.ts";
 
 /** Default poll interval for the publisher-side probe detection loop (ms). */
 export const defaultProbeIntervalMs = 100;
@@ -51,7 +52,23 @@ export interface ConnectInit {
 	onGoaway?: (newSessionURI: string) => void;
 	/** Low-level MOQ tuning options (probe intervals, thresholds, etc.). */
 	options?: MoqOptions;
-	/** Low-level WebTransport options forwarded to the transport factory. */
+	/**
+	 * Which transport to use: `"webtransport"`, the default, or
+	 * `"websocket"`. The application chooses, and a transport that cannot be
+	 * opened fails the connection. WebKit browsers need `"websocket"`: see
+	 * {@link isWebKit}. Ignored when {@link transportFactory} is set.
+	 */
+	transport?: TransportKind;
+	/**
+	 * Where to dial the WebSocket transport, for a server that takes
+	 * WebSocket at another host, port or path than WebTransport. Defaults to
+	 * the URL given to {@link connect}, with `wss:` for `https:`.
+	 */
+	webSocketURL?: string | URL;
+	/**
+	 * Low-level WebTransport options forwarded to the transport factory.
+	 * The WebSocket transport takes none.
+	 */
 	transportOptions?: WebTransportOptions;
 	/**
 	 * Custom transport factory.

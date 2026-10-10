@@ -3,6 +3,7 @@
   "specifiers": {
     "jsr:@okdaichi/golikejs@0.10.0": "0.10.0",
     "jsr:@std/assert@^1.0.19": "1.0.19",
+    "jsr:@std/async@^1.4.0": "1.4.0",
     "jsr:@std/cli@^1.0.32": "1.0.32",
     "jsr:@std/data-structures@^1.1.0": "1.1.0",
     "jsr:@std/fmt@^1.0.10": "1.0.10",
@@ -12,6 +13,7 @@
     "jsr:@std/path@^1.1.5": "1.1.6",
     "jsr:@std/path@^1.1.6": "1.1.6",
     "jsr:@std/testing@^1.0.19": "1.0.19",
+    "npm:@moq/qmux@~0.3.3": "0.3.3",
     "npm:zod@^4.4.3": "4.4.3"
   },
   "jsr": {
@@ -23,6 +25,9 @@
       "dependencies": [
         "jsr:@std/internal@^1.0.12"
       ]
+    },
+    "@std/async@1.4.0": {
+      "integrity": "4d70b008634f571cff9b554090d628c76141c32613aae0ff283fd5fa23d0c379"
     },
     "@std/cli@1.0.32": {
       "integrity": "188b3a100d6202d64e3f5bd3d799c7fa4f6d77f92cc65eb7f641c1fa0aa92a66",
@@ -56,6 +61,7 @@
       "integrity": "f4236172365b216728dc3cc8b5e80a9f4c33083d1e4ede7613d5b25b4014898e",
       "dependencies": [
         "jsr:@std/assert",
+        "jsr:@std/async",
         "jsr:@std/data-structures",
         "jsr:@std/fs",
         "jsr:@std/internal@^1.0.14",
@@ -64,6 +70,15 @@
     }
   },
   "npm": {
+    "@moq/qmux@0.3.3": {
+      "integrity": "sha512-Ez1GCVwpyNGB0eWvhKIXOjXrfRlMdmO0lpJ7gqInZFzsOsYTyML0WRgh24Itczp9Kev0CXsUA/K+XrGs1dRKUA==",
+      "dependencies": [
+        "@moq/web-socket-stream"
+      ]
+    },
+    "@moq/web-socket-stream@0.1.1": {
+      "integrity": "sha512-VKi/GE/CLqmbEZlgNbBLbAFk2pQTxT+KUD2DjCSoxqZxbS3KBe5BBZ0m3fila4fEGyll2JT5MmgEyVr4zkZEVA=="
+    },
     "zod@4.4.3": {
       "integrity": "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="
     }
@@ -115,6 +130,7 @@
       "jsr:@std/cli@^1.0.32",
       "jsr:@std/path@^1.1.6",
       "jsr:@std/testing@^1.0.19",
+      "npm:@moq/qmux@~0.3.3",
       "npm:zod@^4.4.3"
     ]
   }
