@@ -8,6 +8,7 @@ import (
 	"net/url"
 
 	"github.com/quic-go/quic-go"
+	"github.com/qumo-dev/gomoqt/moqt/internal/qmuxgo"
 	"github.com/qumo-dev/gomoqt/moqt/internal/quicgo"
 	"github.com/qumo-dev/gomoqt/moqt/internal/webtransportgo"
 )
@@ -167,7 +168,7 @@ func (d *Dialer) dialWebSocket(ctx context.Context, target *url.URL, mux *TrackM
 	dial := d.DialWebSocketFunc
 	if dial == nil {
 		dial = func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config) (*http.Response, WebTransportSession, error) {
-			return dialWebSocket(ctx, addr, header, tlsConfig, d.QUICConfig)
+			return qmuxgo.Dial(ctx, addr, header, tlsConfig, []string{NextProtoMOQ}, d.QUICConfig)
 		}
 	}
 	_, conn, err := dial(dialCtx, target.String(), nil, d.TLSConfig)

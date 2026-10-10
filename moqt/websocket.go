@@ -2,7 +2,6 @@ package moqt
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -156,9 +155,4 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.Handler.ServeMOQ(sess)
-}
-
-// dialWebSocket opens a WebSocket to rawURL and starts a QMux session on it.
-func dialWebSocket(ctx context.Context, rawURL string, header http.Header, tlsConfig *tls.Config, quicConfig *quic.Config) (*http.Response, WebTransportSession, error) {
-	return qmuxgo.Dial(ctx, rawURL, header, tlsConfig, []string{NextProtoMOQ}, quicConfig)
 }
