@@ -7,7 +7,7 @@ export async function runClient(
 	addr: string,
 	transportOptions: WebTransportOptions,
 	debugEnabled: boolean,
-	transport: TransportKind = "auto",
+	transport: TransportKind = "webtransport",
 ): Promise<void> {
 	// GOAWAY handling
 	let goawayResolve: ((uri: string) => void) | undefined;

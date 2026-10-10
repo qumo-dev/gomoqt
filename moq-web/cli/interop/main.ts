@@ -9,7 +9,7 @@ async function main() {
 			addr: "https://localhost:9000",
 			insecure: false,
 			debug: false,
-			transport: "auto",
+			transport: "webtransport",
 		},
 	});
 
@@ -40,8 +40,8 @@ async function main() {
 	}
 
 	const transport = args.transport;
-	if (transport !== "auto" && transport !== "webtransport" && transport !== "websocket") {
-		throw new Error(`--transport must be auto, webtransport or websocket, not ${transport}`);
+	if (transport !== "webtransport" && transport !== "websocket") {
+		throw new Error(`--transport must be webtransport or websocket, not ${transport}`);
 	}
 
 	// delegate the heavy lifting to shared client logic

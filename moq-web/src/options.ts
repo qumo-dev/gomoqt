@@ -53,11 +53,10 @@ export interface ConnectInit {
 	/** Low-level MOQ tuning options (probe intervals, thresholds, etc.). */
 	options?: MoqOptions;
 	/**
-	 * Which transport to use. Defaults to `"auto"`: WebTransport where it
-	 * works, and QMux over WebSocket on WebKit and where there is no
-	 * `WebTransport`. The choice is made once; a transport that cannot be
-	 * opened fails the connection. Ignored when {@link transportFactory} is
-	 * set.
+	 * Which transport to use: `"webtransport"`, the default, or
+	 * `"websocket"`. The application chooses, and a transport that cannot be
+	 * opened fails the connection. WebKit browsers need `"websocket"`: see
+	 * {@link isWebKit}. Ignored when {@link transportFactory} is set.
 	 */
 	transport?: TransportKind;
 	/**

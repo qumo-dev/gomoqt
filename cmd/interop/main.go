@@ -44,9 +44,9 @@ func findRootDir() (string, error) {
 func main() {
 	addr := flag.String("addr", "localhost:9000", "server address")
 	lang := flag.String("lang", "go", "client language: go or ts")
-	transport := flag.String("transport", "auto", "client transport: auto, webtransport or websocket")
+	transport := flag.String("transport", "webtransport", "client transport: webtransport or websocket")
 	flag.Parse()
-	if *transport != "auto" && *transport != "webtransport" && *transport != "websocket" {
+	if *transport != "webtransport" && *transport != "websocket" {
 		slog.Error("invalid interop transport", "transport", *transport)
 		return
 	}

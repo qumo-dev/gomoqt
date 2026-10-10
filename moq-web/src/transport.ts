@@ -10,69 +10,39 @@ export const ALPN = "moq-lite-05";
 export const QMUX_VERSION = "qmux-02";
 
 /**
- * Which transport {@link connect} uses.
+ * A transport {@link connect} can use.
  *
- * - `"auto"` picks WebTransport where it works, and WebSocket elsewhere.
- * - `"webtransport"` and `"websocket"` name one.
+ * - `"webtransport"` is WebTransport, over QUIC. It is the default.
+ * - `"websocket"` is QMux over WebSocket: the same streams over one TCP
+ *   connection, for a browser whose WebTransport does not work. A lost
+ *   segment delays every stream, and there are no datagrams.
+ *
+ * The application chooses. See {@link isWebKit} for the browsers that need
+ * `"websocket"`.
  */
-export type TransportKind = "auto" | "webtransport" | "websocket";
-
-/** What {@link selectTransport} decides from. Defaults to the running environment. */
-export interface TransportEnvironment {
-	/** The browser's user agent string, or `undefined` outside a browser. */
-	userAgent?: string;
-	/** Whether a `WebTransport` constructor exists. */
-	hasWebTransport: boolean;
-}
-
-function currentEnvironment(): TransportEnvironment {
-	return {
-		userAgent: globalThis.navigator?.userAgent,
-		hasWebTransport: typeof globalThis.WebTransport === "function",
-	};
-}
+export type TransportKind = "webtransport" | "websocket";
 
 /**
  * Reports whether a user agent string is that of a WebKit browser: Safari,
  * and every browser on iOS, where Chrome, Firefox and Edge are WebKit too.
  *
+ * WebKit's `WebTransport` never raises the stream and data limits it
+ * grants, so a session stalls after about 7,600 streams or 16 MB
+ * (https://bugs.webkit.org/show_bug.cgi?id=319818). The stall cannot be
+ * detected after connecting, as the session looks healthy until then, so an
+ * application that serves these browsers chooses the transport up front:
+ *
+ * ```ts
+ * const transport = isWebKit(navigator.userAgent) ? "websocket" : "webtransport";
+ * const session = await connect(url, { transport });
+ * ```
+ *
  * Chromium browsers also say `AppleWebKit`, so they are told apart by the
- * `Chrome/`, `Chromium/` and `Edg/` tokens, which no WebKit browser sends.
+ * `Chrome/`, `Chromium/`, `Edg/` and `OPR/` tokens, which no WebKit browser
+ * sends.
  */
 export function isWebKit(userAgent: string): boolean {
 	return /AppleWebKit\//.test(userAgent) && !/(Chrome|Chromium|Edg|OPR)\//.test(userAgent);
-}
-
-/**
- * Resolves a {@link TransportKind} to the transport {@link connect} uses.
- * It is a function of its arguments alone: the same browser always gets
- * the same transport, and an application can call it to learn which.
- *
- * WebKit is sent to WebSocket even though it has a `WebTransport`: its
- * implementation never raises the stream and data limits it grants, so a
- * session stalls after about 7,600 streams or 16 MB
- * (https://bugs.webkit.org/show_bug.cgi?id=319818). The stall cannot be
- * detected after connecting, as the session looks healthy until then.
- *
- * There is no second choice. A transport that cannot be opened fails the
- * connection: falling back from WebSocket to the WebTransport that stalls
- * would hide a server that takes no WebSocket until a session froze. An
- * application that wants another attempt makes it, with `transport` set.
- */
-export function selectTransport(
-	kind: TransportKind = "auto",
-	env: TransportEnvironment = currentEnvironment(),
-): "webtransport" | "websocket" {
-	if (kind !== "auto") {
-		return kind;
-	}
-	if (!env.hasWebTransport) {
-		return "websocket";
-	}
-	if (env.userAgent !== undefined && isWebKit(env.userAgent)) {
-		return "websocket";
-	}
-	return "webtransport";
 }
 
 /**

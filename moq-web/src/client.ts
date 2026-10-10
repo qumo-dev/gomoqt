@@ -1,7 +1,7 @@
 import { Session } from "./session.ts";
 import type { ConnectInit } from "./options.ts";
 import { WebTransportSession } from "./internal/webtransport/mod.ts";
-import { ALPN, openWebSocketTransport, selectTransport } from "./transport.ts";
+import { ALPN, openWebSocketTransport } from "./transport.ts";
 
 export { ALPN };
 
@@ -31,9 +31,10 @@ const DefaultWebTransportOptions: WebTransportOptions = {
  * });
  * ```
  *
- * @example Force the WebSocket transport
+ * @example Over WebSocket, for a browser whose WebTransport does not work
  * ```ts
- * const session = await connect(url, { transport: "websocket" });
+ * const transport = isWebKit(navigator.userAgent) ? "websocket" : "webtransport";
+ * const session = await connect(url, { transport });
  * ```
  *
  * @example Custom transport (e.g. for testing)
@@ -43,10 +44,10 @@ const DefaultWebTransportOptions: WebTransportOptions = {
  * });
  * ```
  *
- * The transport is WebTransport where it works, and QMux over WebSocket
- * elsewhere: on WebKit, and where there is no `WebTransport`. The choice is
- * made once, by {@link selectTransport}, and a transport that cannot be
- * opened fails the connection: there is no fallback to another.
+ * The transport is WebTransport unless {@link ConnectInit.transport} says
+ * `"websocket"`. The application chooses, and a transport that cannot be
+ * opened fails the connection: nothing is chosen or switched for it. See
+ * {@link isWebKit} for the browsers that need WebSocket.
  *
  * The WebSocket is dialed at the same host and port as `url`, with `wss:`
  * for `https:`. A server that takes WebSocket elsewhere is reached with
@@ -66,7 +67,7 @@ export async function connect(
 	};
 
 	const factory = init?.transportFactory ??
-		(selectTransport(init?.transport) === "websocket"
+		(init?.transport === "websocket"
 			? () => openWebSocketTransport(init?.webSocketURL ?? url)
 			: (u: string | URL, o?: WebTransportOptions) => new WebTransport(u, o));
 

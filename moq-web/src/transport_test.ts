@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { isWebKit, selectTransport } from "./transport.ts";
+import { isWebKit } from "./transport.ts";
 
 const userAgents = {
 	safariMac:
@@ -47,71 +47,6 @@ const webKitCases = [
 for (const c of webKitCases) {
 	Deno.test(`isWebKit is ${c.expected} for ${c.name}`, () => {
 		const got = isWebKit(c.userAgent);
-
-		assertEquals(got, c.expected);
-	});
-}
-
-const selectCases = [
-	{
-		name: "auto picks WebTransport on Chrome",
-		kind: "auto",
-		env: { userAgent: userAgents.chromeDesktop, hasWebTransport: true },
-		expected: "webtransport",
-	},
-	{
-		name: "auto picks WebTransport on Firefox",
-		kind: "auto",
-		env: { userAgent: userAgents.firefoxDesktop, hasWebTransport: true },
-		expected: "webtransport",
-	},
-	{
-		name: "auto picks WebSocket on Safari, though it has WebTransport",
-		kind: "auto",
-		env: { userAgent: userAgents.safariMac, hasWebTransport: true },
-		expected: "websocket",
-	},
-	{
-		name: "auto picks WebSocket on Chrome on iOS, which is WebKit",
-		kind: "auto",
-		env: { userAgent: userAgents.chromeIOS, hasWebTransport: true },
-		expected: "websocket",
-	},
-	{
-		name: "auto picks WebSocket where there is no WebTransport",
-		kind: "auto",
-		env: { userAgent: userAgents.chromeDesktop, hasWebTransport: false },
-		expected: "websocket",
-	},
-	{
-		name: "auto picks WebTransport outside a browser that has one",
-		kind: "auto",
-		env: { userAgent: undefined, hasWebTransport: true },
-		expected: "webtransport",
-	},
-	{
-		name: "webtransport is forced on WebKit",
-		kind: "webtransport",
-		env: { userAgent: userAgents.safariIPhone, hasWebTransport: true },
-		expected: "webtransport",
-	},
-	{
-		name: "webtransport is forced even where there is none",
-		kind: "webtransport",
-		env: { userAgent: userAgents.chromeDesktop, hasWebTransport: false },
-		expected: "webtransport",
-	},
-	{
-		name: "websocket is forced on Chrome",
-		kind: "websocket",
-		env: { userAgent: userAgents.chromeDesktop, hasWebTransport: true },
-		expected: "websocket",
-	},
-] as const;
-
-for (const c of selectCases) {
-	Deno.test(`selectTransport: ${c.name}`, () => {
-		const got = selectTransport(c.kind, c.env);
 
 		assertEquals(got, c.expected);
 	});

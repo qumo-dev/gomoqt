@@ -43,27 +43,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Everything shares one TCP connection: a lost segment delays every
     stream, and there are no unreliable datagrams. Stream priorities order
     what waits for the connection.
-- **@qumo/moq: `connect` picks the transport.** WebTransport where it works,
-  and QMux over WebSocket on WebKit and where there is no `WebTransport`.
-  `ConnectInit.transport` (`"auto"`, `"webtransport"`, `"websocket"`) names
-  one. `selectTransport` and `isWebKit` are exported.
-  - **The choice is made once, and there is no fallback.** `selectTransport`
-    is a function of the option and the browser alone, so an application can
-    call it to learn which transport a session uses. A transport that cannot
-    be opened fails the connection.
-  - **A WebKit client needs the server to take WebSocket.** Falling back to
-    WebTransport there would hide a server that takes none until a session
-    froze. A deployment that has only WebTransport passes
-    `transport: "webtransport"`, and gets the sessions it had before. The WebSocket transport
-  is [`@moq/qmux`](https://www.npmjs.com/package/@moq/qmux), which an `https:`
+- **@qumo/moq: `connect` takes `transport: "websocket"`.** It opens QMux
+  over WebSocket in place of WebTransport, which stays the default. The
+  WebSocket transport is
+  [`@moq/qmux`](https://www.npmjs.com/package/@moq/qmux), which an `https:`
   URL reaches as `wss:`.
+  - **The application chooses the transport.** `connect` opens the one it
+    is told to, and fails if it cannot: it neither picks by browser nor
+    falls back to another. Which transport a session runs on is then never
+    in doubt, and a server that takes no WebSocket is an error at once, not
+    a session that freezes later.
+  - **`isWebKit(userAgent)`** tells the browsers that need WebSocket:
+    `connect(url, { transport: isWebKit(navigator.userAgent) ? "websocket" : "webtransport" })`.
 - **@qumo/moq: `ConnectInit.webSocketURL`** names where to dial WebSocket for
   a server that takes it at another host, port or path than WebTransport. By
   default it is the URL given to `connect`, with `wss:` for `https:`: a
   server reachable at one `https` URL over both transports needs no setting.
 - **interop:** the Go server takes WebSocket on the TCP port of `-addr`, so one
   URL reaches it over either transport, and `go run ./cmd/interop` takes
-  `-transport` (`auto`, `webtransport`, `websocket`) for both clients.
+  `-transport` (`webtransport`, `websocket`) for both clients.
 
 ### Dependencies
 
