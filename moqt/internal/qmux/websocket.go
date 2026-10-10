@@ -1,4 +1,4 @@
-package qmuxgo
+package qmux
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/okdaichi/qmux-go/qmux"
+	qmuxgo "github.com/okdaichi/qmux-go/qmux"
 	"github.com/quic-go/quic-go"
 	"github.com/qumo-dev/gomoqt/transport"
 )
@@ -38,7 +38,7 @@ type UpgradeError struct {
 	Err    error
 }
 
-func (e *UpgradeError) Error() string { return "qmuxgo: upgrade: " + e.Err.Error() }
+func (e *UpgradeError) Error() string { return "qmux: upgrade: " + e.Err.Error() }
 func (e *UpgradeError) Unwrap() error { return e.Err }
 
 // Upgrader upgrades HTTP requests to QMux sessions over WebSocket.
@@ -93,7 +93,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (transport.We
 
 	config := configFrom(u.Config)
 	mc := newMessageConn(ws, config, localAddrOf(r), parseAddr(r.RemoteAddr))
-	conn, err := qmux.ServerMessages(r.Context(), mc, config)
+	conn, err := qmuxgo.ServerMessages(r.Context(), mc, config)
 	if err != nil {
 		return nil, &UpgradeError{Err: err}
 	}
@@ -139,12 +139,12 @@ func Dial(ctx context.Context, rawURL string, header http.Header, tlsConfig *tls
 		Subprotocols: offered,
 	})
 	if err != nil {
-		return rsp, nil, fmt.Errorf("qmuxgo: dial: %w", err)
+		return rsp, nil, fmt.Errorf("qmux: dial: %w", err)
 	}
 	protocol, ok := strings.CutPrefix(ws.Subprotocol(), Version+".")
 	if !ok || !slices.Contains(protocols, protocol) {
 		_ = ws.CloseNow() // not actionable: the connection is refused
-		return rsp, nil, fmt.Errorf("qmuxgo: dial: server selected subprotocol %q, which was not offered", ws.Subprotocol())
+		return rsp, nil, fmt.Errorf("qmux: dial: server selected subprotocol %q, which was not offered", ws.Subprotocol())
 	}
 
 	config := configFrom(quicConfig)
@@ -154,9 +154,9 @@ func Dial(ctx context.Context, rawURL string, header http.Header, tlsConfig *tls
 		local, remote = addr("local"), addr(rsp.Request.URL.Host)
 	}
 	mc := newMessageConn(ws, config, local, remote)
-	conn, err := qmux.DialMessages(ctx, mc, config)
+	conn, err := qmuxgo.DialMessages(ctx, mc, config)
 	if err != nil {
-		return rsp, nil, fmt.Errorf("qmuxgo: dial: %w", err)
+		return rsp, nil, fmt.Errorf("qmux: dial: %w", err)
 	}
 	return rsp, &session{conn: conn, protocol: protocol, tls: rsp.TLS}, nil
 }
@@ -171,11 +171,11 @@ func Dial(ctx context.Context, rawURL string, header http.Header, tlsConfig *tls
 // Without a configuration there is a keep-alive every
 // DefaultKeepAlivePeriod. With one, its KeepAlivePeriod applies as it does
 // to QUIC, where zero sends none.
-func configFrom(c *quic.Config) *qmux.Config {
+func configFrom(c *quic.Config) *qmuxgo.Config {
 	if c == nil {
-		return &qmux.Config{KeepAlivePeriod: DefaultKeepAlivePeriod}
+		return &qmuxgo.Config{KeepAlivePeriod: DefaultKeepAlivePeriod}
 	}
-	return &qmux.Config{
+	return &qmuxgo.Config{
 		MaxIncomingStreams:             c.MaxIncomingStreams,
 		MaxIncomingUniStreams:          c.MaxIncomingUniStreams,
 		InitialStreamReceiveWindow:     c.InitialStreamReceiveWindow,
@@ -222,7 +222,7 @@ func selectProtocol(offered, supported []string) (string, bool) {
 	return "", false
 }
 
-var _ qmux.MessageConn = (*messageConn)(nil)
+var _ qmuxgo.MessageConn = (*messageConn)(nil)
 
 // messageConn carries QMux records as binary WebSocket messages.
 type messageConn struct {
@@ -241,7 +241,7 @@ type messageConn struct {
 	closeOnce sync.Once
 }
 
-func newMessageConn(ws *websocket.Conn, config *qmux.Config, local, remote net.Addr) *messageConn {
+func newMessageConn(ws *websocket.Conn, config *qmuxgo.Config, local, remote net.Addr) *messageConn {
 	// QMux enforces max_record_size itself; the WebSocket limit only has
 	// to let a full record through.
 	limit := int64(max(config.MaxRecordSize, 16382)) + 1
@@ -257,7 +257,7 @@ func (c *messageConn) ReadMessage() ([]byte, error) {
 		return nil, err
 	}
 	if typ != websocket.MessageBinary {
-		return nil, errors.New("qmuxgo: text message on a QMux WebSocket")
+		return nil, errors.New("qmux: text message on a QMux WebSocket")
 	}
 	c.buf = c.buf[:0]
 	for {

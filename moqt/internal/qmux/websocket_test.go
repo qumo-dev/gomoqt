@@ -1,4 +1,4 @@
-package qmuxgo
+package qmux
 
 import (
 	"net"

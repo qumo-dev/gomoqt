@@ -1,4 +1,4 @@
-package qmuxgo
+package qmux
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/okdaichi/qmux-go/qmux"
+	qmuxgo "github.com/okdaichi/qmux-go/qmux"
 	"github.com/quic-go/quic-go"
 	"github.com/qumo-dev/gomoqt/transport"
 	"github.com/stretchr/testify/assert"
@@ -292,11 +292,11 @@ func TestDial_Refused(t *testing.T) {
 func TestConfigFrom(t *testing.T) {
 	tests := map[string]struct {
 		config   *quic.Config
-		expected *qmux.Config
+		expected *qmuxgo.Config
 	}{
 		"no configuration keeps the connection alive": {
 			config:   nil,
-			expected: &qmux.Config{KeepAlivePeriod: DefaultKeepAlivePeriod},
+			expected: &qmuxgo.Config{KeepAlivePeriod: DefaultKeepAlivePeriod},
 		},
 		"the settings QMux shares with QUIC carry over": {
 			config: &quic.Config{
@@ -309,7 +309,7 @@ func TestConfigFrom(t *testing.T) {
 				HandshakeIdleTimeout:           3 * time.Second,
 				EnableDatagrams:                true,
 			},
-			expected: &qmux.Config{
+			expected: &qmuxgo.Config{
 				MaxIncomingStreams:             7,
 				MaxIncomingUniStreams:          8,
 				InitialStreamReceiveWindow:     1 << 16,
@@ -322,11 +322,11 @@ func TestConfigFrom(t *testing.T) {
 		},
 		"a configuration without a keep-alive sends none, as for QUIC": {
 			config:   &quic.Config{MaxIncomingStreams: 7},
-			expected: &qmux.Config{MaxIncomingStreams: 7},
+			expected: &qmuxgo.Config{MaxIncomingStreams: 7},
 		},
 		"what is QUIC's own is left out": {
 			config:   &quic.Config{Allow0RTT: true, DisablePathMTUDiscovery: true, MaxStreamReceiveWindow: 1 << 20},
-			expected: &qmux.Config{},
+			expected: &qmuxgo.Config{},
 		},
 	}
 	for name, tt := range tests {
@@ -378,7 +378,7 @@ func TestMessageConn_SetWriteDeadline(t *testing.T) {
 	ws, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{Subprotocols: []string{Version + "." + testProtocol}})
 	require.NoError(t, err)
 	defer func() { _ = ws.CloseNow() }() // not actionable: the test is over
-	mc := newMessageConn(ws, &qmux.Config{}, addr("local"), addr("remote"))
+	mc := newMessageConn(ws, &qmuxgo.Config{}, addr("local"), addr("remote"))
 	// The server waits for transport parameters that never come.
 	_ = sessions
 
@@ -402,5 +402,5 @@ func TestUpgradeError(t *testing.T) {
 	err := &UpgradeError{Status: http.StatusForbidden, Err: cause}
 
 	assert.ErrorIs(t, err, cause)
-	assert.Equal(t, "qmuxgo: upgrade: origin not allowed", err.Error())
+	assert.Equal(t, "qmux: upgrade: origin not allowed", err.Error())
 }

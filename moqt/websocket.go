@@ -7,7 +7,7 @@ import (
 	"net/http"
 
 	"github.com/quic-go/quic-go"
-	"github.com/qumo-dev/gomoqt/moqt/internal/qmuxgo"
+	"github.com/qumo-dev/gomoqt/moqt/internal/qmux"
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
@@ -67,12 +67,12 @@ type WebSocketHandler struct {
 
 // upgrader accepts the one application protocol the session layer speaks:
 // a subprotocol it agreed to and then did not speak would garble the session.
-func (h *WebSocketHandler) upgrader() *qmuxgo.Upgrader {
+func (h *WebSocketHandler) upgrader() *qmux.Upgrader {
 	config := h.QUICConfig
 	if config == nil && h.Server != nil {
 		config = h.Server.QUICConfig
 	}
-	return &qmuxgo.Upgrader{
+	return &qmux.Upgrader{
 		CheckOrigin: h.CheckOrigin,
 		Protocols:   []string{NextProtoMOQ},
 		Config:      config,
@@ -94,7 +94,7 @@ func (h *WebSocketHandler) upgrade(w http.ResponseWriter, r *http.Request) (WebT
 		return h.UpgradeFunc(w, r)
 	}
 	conn, err := h.upgrader().Upgrade(w, r)
-	var uerr *qmuxgo.UpgradeError
+	var uerr *qmux.UpgradeError
 	if errors.As(err, &uerr) && uerr.Status != 0 {
 		http.Error(w, uerr.Err.Error(), uerr.Status)
 	}

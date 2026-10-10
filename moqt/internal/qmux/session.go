@@ -1,14 +1,14 @@
-// Package qmuxgo runs MOQ sessions over QMux on WebSocket, for clients that
+// Package qmux runs MOQ sessions over QMux on WebSocket, for clients that
 // cannot use WebTransport. It adapts github.com/okdaichi/qmux-go to the
 // transport interfaces.
-package qmuxgo
+package qmux
 
 import (
 	"context"
 	"crypto/tls"
 	"net"
 
-	"github.com/okdaichi/qmux-go/qmux"
+	qmuxgo "github.com/okdaichi/qmux-go/qmux"
 	"github.com/quic-go/quic-go"
 	"github.com/qumo-dev/gomoqt/transport"
 )
@@ -23,7 +23,7 @@ var _ transport.WebTransportSession = (*session)(nil)
 // QUIC's streams under an HTTP upgrade that settled the path and the
 // application protocol.
 type session struct {
-	conn *qmux.Conn
+	conn *qmuxgo.Conn
 	// protocol is the application protocol the subprotocol named.
 	protocol string
 	// tls is the state of the TLS connection under the WebSocket, or nil
