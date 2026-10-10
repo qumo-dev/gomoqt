@@ -37,8 +37,9 @@ type WebSocketHandler struct {
 	// with QUIC: the stream limits, the receive windows, the keep-alive
 	// period, the idle and handshake timeouts, and datagrams. The rest of
 	// it has no meaning over WebSocket. If nil, Server's QUICConfig is
-	// used; with neither, the defaults apply, with a keep-alive ping every
-	// 10 seconds.
+	// used. A zero KeepAlivePeriod is 10 seconds here, where QUIC would
+	// send none: an idle WebSocket is closed by the proxies on its way. A
+	// negative one sends none.
 	QUICConfig *quic.Config
 
 	// Handler handles the session after the upgrade. If nil, no request
@@ -79,13 +80,18 @@ func (h *WebSocketHandler) upgrader() *qmux.Upgrader {
 	}
 }
 
-// Accepts reports whether r is a WebSocket upgrade that offers the
-// subprotocol the handler speaks. It does not check the Origin: call
-// CheckOrigin for that. A server that takes WebTransport and WebSocket on
-// one route tells them apart with it, and one that decides something of its
-// own before the upgrade, such as whether to admit the session, asks first
-// whether the upgrade would be refused anyway.
+// Accepts reports whether ServeHTTP would upgrade r, as far as can be told
+// before trying: r is a WebSocket upgrade that offers the subprotocol the
+// handler speaks, and the handler has a Handler and a Server, if any, that
+// is not shutting down. It does not check the Origin: call CheckOrigin for
+// that. A server that takes WebTransport and WebSocket on one route tells
+// them apart with it, and one that decides something of its own before the
+// upgrade, such as whether to admit the session, asks first whether the
+// upgrade would be refused anyway.
 func (h *WebSocketHandler) Accepts(r *http.Request) bool {
+	if h.Handler == nil || (h.Server != nil && h.Server.shuttingDown()) {
+		return false
+	}
 	return h.upgrader().Accepts(r)
 }
 

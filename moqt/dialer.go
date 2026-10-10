@@ -26,7 +26,8 @@ type Dialer struct {
 	// QUIC configuration for raw QUIC connections. A WebSocket session
 	// takes from it the settings QMux shares with QUIC: the stream limits,
 	// the receive windows, the keep-alive period, the idle and handshake
-	// timeouts, and datagrams.
+	// timeouts, and datagrams. A zero KeepAlivePeriod is 10 seconds over
+	// WebSocket; a negative one sends no pings.
 	QUICConfig *quic.Config
 
 	// Config contains additional configuration options for the Dialer.

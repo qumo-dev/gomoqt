@@ -56,6 +56,7 @@ const DefaultWebTransportOptions: WebTransportOptions = {
  * @param url - MOQ server endpoint URL.
  * @param init - Connection init object (mux, onGoaway, transport, transportOptions, transportFactory).
  * @returns A ready-to-use {@link Session}.
+ * @throws TypeError if `init.transport` is neither `"webtransport"` nor `"websocket"`.
  */
 export async function connect(
 	url: string | URL,
@@ -66,8 +67,14 @@ export async function connect(
 		...(init?.transportOptions ?? {}),
 	};
 
+	const kind: unknown = init?.transport ?? "webtransport";
+	if (kind !== "webtransport" && kind !== "websocket") {
+		// A value from JavaScript or from configuration: opening WebTransport
+		// for a misspelt "websocket" would be the wrong transport, silently.
+		throw new TypeError(`transport must be "webtransport" or "websocket", not ${String(kind)}`);
+	}
 	const factory = init?.transportFactory ??
-		(init?.transport === "websocket"
+		(kind === "websocket"
 			? () => openWebSocketTransport(init?.webSocketURL ?? url)
 			: (u: string | URL, o?: WebTransportOptions) => new WebTransport(u, o));
 

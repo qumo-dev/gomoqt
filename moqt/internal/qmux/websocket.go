@@ -21,10 +21,10 @@ import (
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
-// DefaultKeepAlivePeriod is the interval between QX_PING frames when there
-// is no configuration. The pings measure the round-trip time, find a peer
-// that is gone, and keep proxies from closing an idle WebSocket.
-const DefaultKeepAlivePeriod = 10 * time.Second
+// defaultKeepAlivePeriod is the interval between QX_PING frames unless the
+// configuration sets one. The pings measure the round-trip time, find a
+// peer that is gone, and keep proxies from closing an idle WebSocket.
+const defaultKeepAlivePeriod = 10 * time.Second
 
 // closeGrace is how long a closing connection waits for the WebSocket
 // closing handshake before it drops the connection.
@@ -58,7 +58,7 @@ type Upgrader struct {
 // Accepts reports whether r is a WebSocket upgrade that offers one of
 // Protocols. It does not check the Origin.
 func (u *Upgrader) Accepts(r *http.Request) bool {
-	if !IsUpgrade(r) {
+	if !isUpgrade(r) {
 		return false
 	}
 	_, ok := selectProtocol(r.Header.Values("Sec-WebSocket-Protocol"), u.Protocols)
@@ -69,7 +69,7 @@ func (u *Upgrader) Accepts(r *http.Request) bool {
 // parameters. A request that names none of Protocols is refused: without a
 // negotiated subprotocol neither side knows what the other speaks.
 func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (transport.WebTransportSession, error) {
-	if !IsUpgrade(r) {
+	if !isUpgrade(r) {
 		return nil, &UpgradeError{Status: http.StatusUpgradeRequired, Err: errors.New("not a WebSocket upgrade")}
 	}
 	if u.CheckOrigin != nil && !u.CheckOrigin(r) {
@@ -168,27 +168,30 @@ func Dial(ctx context.Context, rawURL string, header http.Header, tlsConfig *tls
 // rest of a quic.Config is about QUIC's own transport and has no meaning
 // here.
 //
-// Without a configuration there is a keep-alive every
-// DefaultKeepAlivePeriod. With one, its KeepAlivePeriod applies as it does
-// to QUIC, where zero sends none.
+// The keep-alive is the exception to "as in QUIC". A zero KeepAlivePeriod
+// is defaultKeepAlivePeriod here, where QUIC would send none: a WebSocket
+// goes through proxies that close an idle connection, and QMux measures the
+// round-trip time from its pings alone. A negative period sends none.
 func configFrom(c *quic.Config) *qmuxgo.Config {
+	config := &qmuxgo.Config{KeepAlivePeriod: defaultKeepAlivePeriod}
 	if c == nil {
-		return &qmuxgo.Config{KeepAlivePeriod: DefaultKeepAlivePeriod}
+		return config
 	}
-	return &qmuxgo.Config{
-		MaxIncomingStreams:             c.MaxIncomingStreams,
-		MaxIncomingUniStreams:          c.MaxIncomingUniStreams,
-		InitialStreamReceiveWindow:     c.InitialStreamReceiveWindow,
-		InitialConnectionReceiveWindow: c.InitialConnectionReceiveWindow,
-		KeepAlivePeriod:                c.KeepAlivePeriod,
-		MaxIdleTimeout:                 c.MaxIdleTimeout,
-		HandshakeIdleTimeout:           c.HandshakeIdleTimeout,
-		EnableDatagrams:                c.EnableDatagrams,
+	config.MaxIncomingStreams = c.MaxIncomingStreams
+	config.MaxIncomingUniStreams = c.MaxIncomingUniStreams
+	config.InitialStreamReceiveWindow = c.InitialStreamReceiveWindow
+	config.InitialConnectionReceiveWindow = c.InitialConnectionReceiveWindow
+	config.MaxIdleTimeout = c.MaxIdleTimeout
+	config.HandshakeIdleTimeout = c.HandshakeIdleTimeout
+	config.EnableDatagrams = c.EnableDatagrams
+	if c.KeepAlivePeriod != 0 {
+		config.KeepAlivePeriod = c.KeepAlivePeriod
 	}
+	return config
 }
 
-// IsUpgrade reports whether r asks to upgrade to WebSocket.
-func IsUpgrade(r *http.Request) bool {
+// isUpgrade reports whether r asks to upgrade to WebSocket.
+func isUpgrade(r *http.Request) bool {
 	return r.Method == http.MethodGet &&
 		headerHasToken(r.Header, "Connection", "upgrade") &&
 		headerHasToken(r.Header, "Upgrade", "websocket")
@@ -306,6 +309,9 @@ func (c *messageConn) drop() {
 // connection is dropped if the handshake has not ended after closeGrace.
 func (c *messageConn) Close() error {
 	c.closeOnce.Do(func() {
+		// The write deadline was for what was written before the close.
+		// The closing handshake has closeGrace.
+		_ = c.SetWriteDeadline(time.Time{}) // not actionable: it only stops a timer
 		forced := time.AfterFunc(closeGrace, c.drop)
 		go func() {
 			_ = c.ws.Close(websocket.StatusNormalClosure, "") // not actionable: the connection has ended

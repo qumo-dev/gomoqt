@@ -374,6 +374,9 @@ func TestWebSocketHandler_ServeHTTP_ConnContext(t *testing.T) {
 }
 
 func TestWebSocketHandler_Accepts(t *testing.T) {
+	serve := HandleFunc(func(*Session) {})
+	closed := &Server{}
+	require.NoError(t, closed.Close())
 	upgrade := func(subprotocol string) *http.Request {
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.Header.Set("Connection", "Upgrade")
@@ -386,14 +389,23 @@ func TestWebSocketHandler_Accepts(t *testing.T) {
 		request  *http.Request
 		expected bool
 	}{
-		"the default protocol": {
-			handler: &WebSocketHandler{}, request: upgrade(NextProtoQMux), expected: true,
+		"an upgrade offering the subprotocol": {
+			handler: &WebSocketHandler{Handler: serve}, request: upgrade(NextProtoQMux), expected: true,
+		},
+		"with a Server that is running": {
+			handler: &WebSocketHandler{Handler: serve, Server: &Server{}}, request: upgrade(NextProtoQMux), expected: true,
 		},
 		"another protocol": {
-			handler: &WebSocketHandler{}, request: upgrade("qmux-02.moq-lite-99"),
+			handler: &WebSocketHandler{Handler: serve}, request: upgrade("qmux-02.moq-lite-99"),
 		},
 		"not a WebSocket upgrade": {
-			handler: &WebSocketHandler{}, request: httptest.NewRequest(http.MethodGet, "/", nil),
+			handler: &WebSocketHandler{Handler: serve}, request: httptest.NewRequest(http.MethodGet, "/", nil),
+		},
+		"no Handler": {
+			handler: &WebSocketHandler{}, request: upgrade(NextProtoQMux),
+		},
+		"a Server that has shut down": {
+			handler: &WebSocketHandler{Handler: serve, Server: closed}, request: upgrade(NextProtoQMux),
 		},
 	}
 	for name, tt := range tests {

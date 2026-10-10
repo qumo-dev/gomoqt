@@ -47,8 +47,9 @@ func main() {
 	transport := flag.String("transport", "webtransport", "client transport: webtransport or websocket")
 	flag.Parse()
 	if *transport != "webtransport" && *transport != "websocket" {
+		// Not a run that passed: a typo here must not look like one.
 		slog.Error("invalid interop transport", "transport", *transport)
-		return
+		os.Exit(2)
 	}
 
 	slog.Info(" === MOQ Interop Test ===")

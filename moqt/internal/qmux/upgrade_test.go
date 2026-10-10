@@ -296,7 +296,7 @@ func TestConfigFrom(t *testing.T) {
 	}{
 		"no configuration keeps the connection alive": {
 			config:   nil,
-			expected: &qmuxgo.Config{KeepAlivePeriod: DefaultKeepAlivePeriod},
+			expected: &qmuxgo.Config{KeepAlivePeriod: defaultKeepAlivePeriod},
 		},
 		"the settings QMux shares with QUIC carry over": {
 			config: &quic.Config{
@@ -320,13 +320,17 @@ func TestConfigFrom(t *testing.T) {
 				EnableDatagrams:                true,
 			},
 		},
-		"a configuration without a keep-alive sends none, as for QUIC": {
+		"a configuration without a keep-alive still gets one": {
 			config:   &quic.Config{MaxIncomingStreams: 7},
-			expected: &qmuxgo.Config{MaxIncomingStreams: 7},
+			expected: &qmuxgo.Config{MaxIncomingStreams: 7, KeepAlivePeriod: defaultKeepAlivePeriod},
+		},
+		"a negative keep-alive sends none": {
+			config:   &quic.Config{KeepAlivePeriod: -1},
+			expected: &qmuxgo.Config{KeepAlivePeriod: -1},
 		},
 		"what is QUIC's own is left out": {
 			config:   &quic.Config{Allow0RTT: true, DisablePathMTUDiscovery: true, MaxStreamReceiveWindow: 1 << 20},
-			expected: &qmuxgo.Config{},
+			expected: &qmuxgo.Config{KeepAlivePeriod: defaultKeepAlivePeriod},
 		},
 	}
 	for name, tt := range tests {
@@ -395,6 +399,24 @@ func TestMessageConn_SetWriteDeadline(t *testing.T) {
 	require.NoError(t, mc.SetWriteDeadline(time.Time{}))
 	require.NoError(t, mc.Close())
 	require.NoError(t, mc.Close())
+}
+
+// Closing stops the write deadline: the closing handshake has its own grace,
+// which a deadline set just before the close must not cut short.
+func TestMessageConn_Close_ClearsWriteDeadline(t *testing.T) {
+	url, _ := newUpgradeServer(t, &Upgrader{Protocols: []string{testProtocol}})
+	ctx := testContext(t)
+	ws, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{Subprotocols: []string{Version + "." + testProtocol}})
+	require.NoError(t, err)
+	defer func() { _ = ws.CloseNow() }() // not actionable: the test is over
+	mc := newMessageConn(ws, &qmuxgo.Config{}, addr("local"), addr("remote"))
+	require.NoError(t, mc.SetWriteDeadline(time.Now().Add(time.Hour)))
+
+	require.NoError(t, mc.Close())
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	assert.Nil(t, mc.deadline)
 }
 
 func TestUpgradeError(t *testing.T) {

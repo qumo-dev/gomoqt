@@ -40,6 +40,10 @@ export type TransportKind = "webtransport" | "websocket";
  * Chromium browsers also say `AppleWebKit`, so they are told apart by the
  * `Chrome/`, `Chromium/`, `Edg/` and `OPR/` tokens, which no WebKit browser
  * sends.
+ *
+ * It looks at the engine, not at its version: the bug has no fix to date.
+ * An application that wants WebTransport back on a WebKit that has one
+ * adds its own version bound to this check.
  */
 export function isWebKit(userAgent: string): boolean {
 	return /AppleWebKit\//.test(userAgent) && !/(Chrome|Chromium|Edg|OPR)\//.test(userAgent);

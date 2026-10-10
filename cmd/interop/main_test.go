@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestComputeCertHash(t *testing.T) {
@@ -75,7 +78,8 @@ func TestBuildTSClientCmd_success(t *testing.T) {
 	if cmd.Dir != filepath.Join(tmpDir, "moq-web") {
 		t.Fatalf("cmd.Dir = %s; want %s", cmd.Dir, filepath.Join(tmpDir, "moq-web"))
 	}
-	if !slices.Contains(cmd.Args, "--transport") || !slices.Contains(cmd.Args, "websocket") {
-		t.Fatalf("cmd.Args = %v; want the transport passed on", cmd.Args)
-	}
+	flag := slices.Index(cmd.Args, "--transport")
+	require.NotEqual(t, -1, flag, "the transport is passed on: %v", cmd.Args)
+	require.Less(t, flag+1, len(cmd.Args))
+	assert.Equal(t, "websocket", cmd.Args[flag+1])
 }

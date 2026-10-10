@@ -34,7 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the receive windows, the keep-alive period, the idle and handshake
     timeouts, and datagrams. A `Dialer` uses its `QUICConfig`; a
     `WebSocketHandler` its own, or its `Server`'s. Limits are set once for
-    every transport.
+    every transport. The keep-alive is the exception: a zero
+    `KeepAlivePeriod` is 10 seconds over WebSocket, where QUIC would send
+    none, since proxies close an idle WebSocket and QMux measures the
+    round-trip time from its pings. A negative one sends none.
   - **The WebSocket subprotocol is the version negotiation**, since a
     WebSocket has no ALPN: `NextProtoQMux`, `qmux-02.moq-lite-05`. A request
     that does not offer it is refused with 400.

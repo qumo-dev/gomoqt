@@ -81,7 +81,7 @@ func TestIsUpgrade(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			r := &http.Request{Method: tt.method, Header: tt.header}
-			assert.Equal(t, tt.expected, IsUpgrade(r))
+			assert.Equal(t, tt.expected, isUpgrade(r))
 		})
 	}
 }
