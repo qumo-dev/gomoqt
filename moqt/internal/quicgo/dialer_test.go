@@ -169,17 +169,20 @@ func startEchoServer(tb testing.TB) *echoServer {
 	}, &quic.Config{MaxIdleTimeout: 10 * time.Second})
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = ln.Close() }) // not actionable: cleanup
+	// The server's goroutines end with the test: its context is cancelled
+	// before cleanups run, and the listener and connections close with it.
+	ctx := tb.Context()
 	go func() {
 		for {
-			conn, err := ln.Accept(context.Background())
+			conn, err := ln.Accept(ctx)
 			if err != nil {
-				return // the listener is closed
+				return // the test is over or the listener is closed
 			}
 			go func() {
 				for {
-					str, err := conn.AcceptStream(context.Background())
+					str, err := conn.AcceptStream(ctx)
 					if err != nil {
-						return // the connection is closed
+						return // the test is over or the connection is closed
 					}
 					go func() {
 						_, _ = io.Copy(str, str) // not actionable: the client checks the echo

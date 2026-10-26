@@ -14,6 +14,8 @@ type netChangeTolerantConn struct {
 	*net.UDPConn
 }
 
+// WriteTo writes b to addr, reporting a send refused for a network change as
+// sent.
 func (c netChangeTolerantConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	n, err := c.UDPConn.WriteTo(b, addr)
 	if err != nil && isNetChangeErr(err) {
@@ -22,6 +24,8 @@ func (c netChangeTolerantConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	return n, err
 }
 
+// WriteMsgUDP writes b with its control data oob to addr, reporting a send
+// refused for a network change as sent.
 func (c netChangeTolerantConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (int, int, error) {
 	n, oobn, err := c.UDPConn.WriteMsgUDP(b, oob, addr)
 	if err != nil && isNetChangeErr(err) {
