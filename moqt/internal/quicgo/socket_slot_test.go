@@ -61,65 +61,33 @@ func TestSocketSlot_Clear(t *testing.T) {
 	assert.Equal(t, conn.LocalAddr(), slot.LocalAddr(), "the address is kept while empty")
 }
 
-func TestSocketSlot_Set_Closed(t *testing.T) {
-	slot := newSlot(&fakePacketConn{})
-	require.NoError(t, slot.Close())
-	conn := &fakePacketConn{}
-
-	slot.Set(conn)
-
-	assert.True(t, conn.isClosed(), "a closed slot closes the socket it is given")
-}
-
-// A read on an empty slot waits for the next socket and reads from it.
-func TestSocketSlot_ReadFrom_WaitsForNextSocket(t *testing.T) {
-	slot := newSlot(&fakePacketConn{})
-	slot.Clear()
-	next := listenLoopback(t)
-	type result struct {
-		data string
-		err  error
-	}
-	got := make(chan result, 1)
-	go func() {
-		buf := make([]byte, 16)
-		n, _, err := slot.ReadFrom(buf)
-		got <- result{string(buf[:n]), err}
-	}()
-
-	slot.Set(next)
-	sendTo(t, next.LocalAddr(), "hello")
-
-	select {
-	case r := <-got:
-		assert.NoError(t, r.err)
-		assert.Equal(t, "hello", r.data)
-	case <-time.After(3 * time.Second):
-		t.Fatal("the read did not move to the next socket")
-	}
-}
-
-// A socket closed under the slot, not by it, leaves the slot empty: reads
-// wait for the next socket instead of failing the transport.
-func TestSocketSlot_ReadFrom_SocketClosedUnderSlot(t *testing.T) {
-	first := listenLoopback(t)
-	slot := newSlot(first)
+// A socket closed under the slot, not by it, leaves the slot empty, not
+// failed: writes are lost, and reads wait until the slot is closed.
+func TestSocketSlot_SocketClosedUnderSlot(t *testing.T) {
+	sock := listenLoopback(t)
+	slot := newSlot(sock)
 	got := make(chan error, 1)
 	go func() {
 		_, _, err := slot.ReadFrom(make([]byte, 16))
 		got <- err
 	}()
 
-	require.NoError(t, first.Close())
-	next := listenLoopback(t)
-	slot.Set(next)
-	sendTo(t, next.LocalAddr(), "after")
+	require.NoError(t, sock.Close())
 
+	n, err := slot.WriteTo([]byte("data"), &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 9})
+	assert.NoError(t, err, "a write to an empty slot is lost, not failed")
+	assert.Equal(t, 4, n)
 	select {
 	case err := <-got:
-		assert.NoError(t, err)
+		t.Fatalf("the read ended before the slot closed: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	require.NoError(t, slot.Close())
+	select {
+	case err := <-got:
+		assert.ErrorIs(t, err, net.ErrClosed)
 	case <-time.After(3 * time.Second):
-		t.Fatal("the read did not move to the next socket")
+		t.Fatal("the read did not end with the slot")
 	}
 }
 
@@ -143,22 +111,17 @@ func TestSocketSlot_ReadFrom_Deadline(t *testing.T) {
 	}
 }
 
-// Buffer sizes quic-go sets reach the socket, and every socket put in the
-// slot after it.
+// Buffer sizes quic-go sets reach the slot's socket.
 func TestSocketSlot_SetBuffers(t *testing.T) {
-	first := &fakePacketConn{}
-	slot := newSlot(first)
+	conn := &fakePacketConn{}
+	slot := newSlot(conn)
 
 	require.NoError(t, slot.SetReadBuffer(7<<20))
 	require.NoError(t, slot.SetWriteBuffer(7<<20))
-	next := &fakePacketConn{}
-	slot.Set(next)
 
-	for name, conn := range map[string]*fakePacketConn{"first socket": first, "next socket": next} {
-		read, write := conn.buffers()
-		assert.Equal(t, 7<<20, read, name)
-		assert.Equal(t, 7<<20, write, name)
-	}
+	read, write := conn.buffers()
+	assert.Equal(t, 7<<20, read)
+	assert.Equal(t, 7<<20, write)
 }
 
 func TestSocketSlot_ReadFrom_EndsWhenClosed(t *testing.T) {
@@ -187,9 +150,3 @@ func listenLoopback(tb testing.TB) *net.UDPConn {
 	return conn
 }
 
-func sendTo(tb testing.TB, addr net.Addr, msg string) {
-	tb.Helper()
-	conn := listenLoopback(tb)
-	_, err := conn.WriteTo([]byte(msg), addr)
-	require.NoError(tb, err)
-}

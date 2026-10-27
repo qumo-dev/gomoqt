@@ -16,7 +16,10 @@ import (
 )
 
 // Path tests run on a bare QUIC connection whose server only sends, so that
-// what moves is the connection itself, not a session's streams.
+// what moves is the connection itself, not a session's streams. The client
+// reaches the server through a fakeNAT, which can move the default path's
+// socket to a new public address, as the OS does when it sends that socket,
+// bound to no network, over cellular once Wi-Fi is gone.
 
 // A receive-only client moves back and forth between two networks, as a
 // phone between Wi-Fi and cellular, and the server keeps sending to it over
@@ -64,66 +67,82 @@ func TestPath_Switch_RepeatedMoves(t *testing.T) {
 	}
 }
 
-// Rebinding the path the connection is on moves the connection onto the new
-// socket without a probe, whether or not the old one's network still works,
-// and closes the old socket at once.
-func TestPath_Rebind_Active(t *testing.T) {
+// The default path, probed while the connection was on another network,
+// still takes the connection after the OS has moved its socket to another
+// network, so that the server sees it at an address it never validated:
+// the server follows the connection to that address and keeps sending.
+//
+// quic-go's Switch does not validate again, so this shows end to end that
+// the server, not the client's earlier probe, validates the new address.
+func TestDefaultPath_AfterRouteChange(t *testing.T) {
 	tests := map[string]struct {
-		cutBeforeRebind bool
+		probeBeforeChange bool
 	}{
-		"old network still up": {},
-		"old network gone":     {cutBeforeRebind: true},
+		// Kept ready: probed while Wi-Fi was up, switched to without a probe.
+		"probed before the route change": {probeBeforeChange: true},
+		// Not kept ready: probed after the route change, then switched to.
+		"probed after the route change": {},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			c := dialPushed(t)
-			p, link := c.addLink(t)
-			c.moveTo(t, p)
-			c.requireDataOn(t, link)
-			if tt.cutBeforeRebind {
-				link.down.Store(true)
+			wifi, wifiLink := c.addLink(t)
+			c.moveTo(t, wifi)
+			c.requireDataOn(t, wifiLink)
+			def := c.set.def
+			if tt.probeBeforeChange {
+				c.probe(t, def)
 			}
-			next := &fakeLink{PacketConn: listenLoopback(t)}
 
-			require.NoError(t, p.Rebind(next))
+			// Wi-Fi is gone: the bound path's network with it, and the OS
+			// sends the default path's socket over cellular.
+			wifiLink.down.Store(true)
+			newAddr := c.nat.remap(t, c.defaultSocketAddr())
+			start := time.Now()
+			if !tt.probeBeforeChange {
+				c.probe(t, def)
+			}
+			require.NoError(t, def.Switch())
 
-			assert.True(t, link.closed.Load(), "the old socket should be closed at once")
-			c.requireDataOn(t, next, "data should arrive over the new socket")
+			before := c.received.Load()
+			require.Eventually(t, func() bool { return c.received.Load() > before+4000 }, moveTimeout, 5*time.Millisecond,
+				"data should resume over the default path")
+			t.Logf("data resumed %s after the switch", time.Since(start).Round(time.Millisecond))
+			assert.Eventually(t, func() bool { return c.server().RemoteAddr().String() == newAddr.String() },
+				moveTimeout, 10*time.Millisecond, "the server should send to the default path's new address")
 		})
 	}
 }
 
-// Rebinding a path not active drops its validation, which held for its old
-// socket: it must be probed again over the new one.
-func TestPath_Rebind_Inactive(t *testing.T) {
+// On the default path, the connection follows the OS's default network by
+// itself: when the OS moves the socket to another network, the server
+// follows, with nothing for the application to do.
+func TestDefaultPath_PassiveFallback(t *testing.T) {
 	c := dialPushed(t)
-	p, _ := c.addLink(t)
-	ctx, cancel := context.WithTimeout(t.Context(), moveTimeout)
-	defer cancel()
-	require.NoError(t, p.Probe(ctx))
-	next := &fakeLink{PacketConn: listenLoopback(t)}
 
-	require.NoError(t, p.Rebind(next))
+	newAddr := c.nat.remap(t, c.defaultSocketAddr())
 
-	assert.ErrorIs(t, p.Switch(), ErrPathNotValidated)
-	c.moveTo(t, p)
-	c.requireDataOn(t, next)
+	before := c.received.Load()
+	require.Eventually(t, func() bool { return c.received.Load() > before+4000 }, moveTimeout, 5*time.Millisecond)
+	assert.Eventually(t, func() bool { return c.server().RemoteAddr().String() == newAddr.String() },
+		moveTimeout, 10*time.Millisecond)
 }
 
-func TestPath_Rebind_Closed(t *testing.T) {
+// The default path lives as long as the session, active or not.
+func TestDefaultPath_Close(t *testing.T) {
 	c := dialPushed(t)
-	p, _ := c.addLink(t)
-	require.NoError(t, p.Close())
-	next := &fakeLink{PacketConn: listenLoopback(t)}
+	def := c.set.def
+	assert.ErrorIs(t, def.Close(), ErrDefaultPath, "while active")
 
-	err := p.Rebind(next)
+	p, link := c.addLink(t)
+	c.moveTo(t, p)
+	c.requireDataOn(t, link)
 
-	assert.ErrorIs(t, err, ErrPathClosed)
-	assert.True(t, next.closed.Load(), "a socket no path takes should be closed")
+	assert.ErrorIs(t, def.Close(), ErrDefaultPath, "while not active")
 }
 
 // The path the connection is on cannot be closed: the application switches
-// away from it, or rebinds it, first.
+// away from it first.
 func TestPath_Close_Active(t *testing.T) {
 	c := dialPushed(t)
 	p, link := c.addLink(t)
@@ -154,17 +173,37 @@ func TestPath_Close_Left(t *testing.T) {
 	c.requireDataOn(t, nextLink)
 }
 
+// A path never used gives up its socket as soon as it is closed.
+func TestPath_Close_Unused(t *testing.T) {
+	c := dialPushed(t)
+	p, link := c.addLink(t)
+
+	require.NoError(t, p.Close())
+
+	assert.True(t, link.closed.Load())
+}
+
+func TestPath_Closed(t *testing.T) {
+	c := dialPushed(t)
+	p, _ := c.addLink(t)
+	require.NoError(t, p.Close())
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+
+	assert.ErrorIs(t, p.Probe(ctx), ErrPathClosed)
+	assert.ErrorIs(t, p.Switch(), ErrPathClosed)
+	assert.NoError(t, p.Close(), "closing again is a no-op")
+}
+
 // Probing a path already validated returns at once, and the path stays
 // ready to switch to.
 func TestPath_Probe_AlreadyValidated(t *testing.T) {
 	c := dialPushed(t)
 	p, link := c.addLink(t)
-	ctx, cancel := context.WithTimeout(t.Context(), moveTimeout)
-	defer cancel()
-	require.NoError(t, p.Probe(ctx))
+	c.probe(t, p)
 
 	start := time.Now()
-	require.NoError(t, p.Probe(ctx))
+	c.probe(t, p)
 
 	assert.Less(t, time.Since(start), 100*time.Millisecond)
 	require.NoError(t, p.Switch())
@@ -189,31 +228,9 @@ func TestPath_Probe_EndsWithConnection(t *testing.T) {
 	}
 }
 
-// A path never used gives up its socket as soon as it is closed.
-func TestPath_Close_Unused(t *testing.T) {
-	c := dialPushed(t)
-	p, link := c.addLink(t)
-
-	require.NoError(t, p.Close())
-
-	assert.True(t, link.closed.Load())
-}
-
-func TestPath_Closed(t *testing.T) {
-	c := dialPushed(t)
-	p, _ := c.addLink(t)
-	require.NoError(t, p.Close())
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-
-	assert.ErrorIs(t, p.Probe(ctx), ErrPathClosed)
-	assert.ErrorIs(t, p.Switch(), ErrPathClosed)
-	assert.NoError(t, p.Close(), "closing again is a no-op")
-}
-
 // Moves made back to back, each probe right after the switch before it,
-// keep finding a connection ID to probe with: the path left is retired as
-// the next probe starts, and the server replaces its connection ID.
+// keep finding a connection ID to probe with: Switch closes the path left,
+// and the server replaces its connection ID.
 func TestPath_Switch_BackToBack(t *testing.T) {
 	c := dialPushed(t)
 	a, _ := c.addLink(t)
@@ -257,22 +274,27 @@ func TestPathSet_ClosesPathSocketsWithConnection(t *testing.T) {
 // stream, and it sends nothing but acknowledgements and keep-alives.
 type pushedClient struct {
 	conn     *quic.Conn
+	tr       *quic.Transport
 	set      *pathSet
+	nat      *fakeNAT
+	servers  chan *quic.Conn
+	srv      atomic.Pointer[quic.Conn]
 	received atomic.Int64 // bytes read from the server's stream
 }
 
 func dialPushed(tb testing.TB) *pushedClient {
 	tb.Helper()
-	addr := startPushServer(tb)
+	addr, servers := startPushServer(tb)
+	nat := startFakeNAT(tb, addr)
 	ctx, cancel := context.WithTimeout(tb.Context(), 5*time.Second)
 	defer cancel()
-	conn, err := quicgo.Dial(ctx, addr, &tls.Config{
+	conn, tr, err := quicgo.Dial(ctx, nat.addr(), &tls.Config{
 		InsecureSkipVerify: true, //nolint:gosec // test-only self-signed cert
 		NextProtos:         []string{pushALPN},
 		MinVersion:         tls.VersionTLS13,
 	}, &quic.Config{
 		// The keep-alive tells the server of a move when nothing else would:
-		// the first move off the dialed socket, from a network already gone.
+		// a move from a network already gone.
 		KeepAlivePeriod: time.Second,
 		MaxIdleTimeout:  10 * time.Second,
 	})
@@ -280,9 +302,7 @@ func dialPushed(tb testing.TB) *pushedClient {
 	tb.Cleanup(func() { _ = conn.CloseWithError(0, "test done") }) // not actionable: cleanup
 	str, err := conn.AcceptUniStream(ctx)
 	require.NoError(tb, err)
-	set := &pathSet{conn: conn}
-	context.AfterFunc(conn.Context(), set.close)
-	c := &pushedClient{conn: conn, set: set}
+	c := &pushedClient{conn: conn, tr: tr, set: newPathSet(conn, tr), nat: nat, servers: servers}
 	// The read ends with the connection, closed by the cleanup above.
 	go func() {
 		buf := make([]byte, 4096)
@@ -297,6 +317,23 @@ func dialPushed(tb testing.TB) *pushedClient {
 	return c
 }
 
+// server is the server's side of the connection.
+func (c *pushedClient) server() *quic.Conn {
+	if s := c.srv.Load(); s != nil {
+		return s
+	}
+	s := <-c.servers
+	c.srv.Store(s)
+	return s
+}
+
+// defaultSocketAddr is the address the default path's socket sends from,
+// as the fakeNAT sees it.
+func (c *pushedClient) defaultSocketAddr() net.Addr {
+	port := c.tr.Conn.LocalAddr().(*net.UDPAddr).Port
+	return &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port}
+}
+
 // addLink adds a path over a new loopback socket the test can cut.
 func (c *pushedClient) addLink(tb testing.TB) (*Path, *fakeLink) {
 	tb.Helper()
@@ -306,11 +343,16 @@ func (c *pushedClient) addLink(tb testing.TB) (*Path, *fakeLink) {
 	return p, link
 }
 
-func (c *pushedClient) moveTo(tb testing.TB, p *Path) {
+func (c *pushedClient) probe(tb testing.TB, p *Path) {
 	tb.Helper()
 	ctx, cancel := context.WithTimeout(tb.Context(), moveTimeout)
 	defer cancel()
 	require.NoError(tb, p.Probe(ctx))
+}
+
+func (c *pushedClient) moveTo(tb testing.TB, p *Path) {
+	tb.Helper()
+	c.probe(tb, p)
 	require.NoError(tb, p.Switch())
 }
 
@@ -325,8 +367,9 @@ func (c *pushedClient) requireDataOn(tb testing.TB, link *fakeLink, msgAndArgs .
 const pushALPN = "moqt-path-test"
 
 // startPushServer starts a QUIC server that, on each connection, sends 200
-// bytes every 10 ms on a unidirectional stream, and returns its address.
-func startPushServer(tb testing.TB) string {
+// bytes every 10 ms on a unidirectional stream. It returns its address and
+// the connections it accepts.
+func startPushServer(tb testing.TB) (string, chan *quic.Conn) {
 	tb.Helper()
 	ln, err := quic.ListenAddrEarly("127.0.0.1:0", &tls.Config{
 		Certificates: []tls.Certificate{generateTestCert(tb)},
@@ -335,6 +378,7 @@ func startPushServer(tb testing.TB) string {
 	}, &quic.Config{MaxIdleTimeout: 10 * time.Second})
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = ln.Close() }) // not actionable: cleanup
+	conns := make(chan *quic.Conn, 1)
 	// The server's goroutines end with the test: its context is cancelled
 	// before cleanups run, and the listener and connections close with it.
 	ctx := tb.Context()
@@ -344,10 +388,14 @@ func startPushServer(tb testing.TB) string {
 			if err != nil {
 				return // the test is over or the listener is closed
 			}
+			select {
+			case conns <- conn:
+			default:
+			}
 			go push(ctx, conn)
 		}
 	}()
-	return ln.Addr().(*net.UDPAddr).String()
+	return ln.Addr().(*net.UDPAddr).String(), conns
 }
 
 func push(ctx context.Context, conn *quic.Conn) {

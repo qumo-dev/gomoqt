@@ -83,7 +83,7 @@ func TestDial_ClosesSocketWithConnection(t *testing.T) {
 }
 
 func TestDial_UnresolvableAddress(t *testing.T) {
-	conn, err := Dial(t.Context(), "no-port", &tls.Config{NextProtos: []string{testALPN}}, nil)
+	conn, _, err := Dial(t.Context(), "no-port", &tls.Config{NextProtos: []string{testALPN}}, nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, conn)
@@ -112,7 +112,7 @@ func dialTest(tb testing.TB, addr string, tlsConf *tls.Config) *quic.Conn {
 	tb.Helper()
 	ctx, cancel := context.WithTimeout(tb.Context(), 5*time.Second)
 	defer cancel()
-	conn, err := Dial(ctx, addr, tlsConf, &quic.Config{MaxIdleTimeout: 10 * time.Second})
+	conn, _, err := Dial(ctx, addr, tlsConf, &quic.Config{MaxIdleTimeout: 10 * time.Second})
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = conn.CloseWithError(0, "test done") }) // not actionable: cleanup
 	return conn

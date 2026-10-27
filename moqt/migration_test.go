@@ -73,21 +73,26 @@ func TestSession_AddPath_Moves(t *testing.T) {
 	}
 }
 
-// A session whose active network is gone carries on once the application
-// rebinds the path to another socket, and its groups keep arriving.
-func TestSession_Path_Rebind(t *testing.T) {
-	sub := subscribeMigrating(t, "moqt")
+// A subscriber on a bound Wi-Fi path that keeps its default path ready
+// switches to it when Wi-Fi goes, after the OS has moved the default path's
+// socket to cellular, and its groups keep arriving.
+func TestSession_DefaultPath_AfterRouteChange(t *testing.T) {
+	sub := subscribeMigrating(t, "moqt", withNAT)
 	sub.requireGroups(t)
-	p, link := sub.addLink(t)
-	sub.moveTo(t, p)
-	sub.requireGroupsOn(t, link, "on the added path")
-	link.down.Store(true) // its network is gone
-	next := &fakeLink{PacketConn: listenLoopback(t)}
+	wifi, wifiLink := sub.addLink(t)
+	sub.moveTo(t, wifi)
+	sub.requireGroupsOn(t, wifiLink, "on Wi-Fi")
+	def := sub.sess.DefaultPath()
+	ctx, cancel := context.WithTimeout(t.Context(), moveTimeout)
+	defer cancel()
+	require.NoError(t, def.Probe(ctx), "keeping the default path ready")
 
-	require.NoError(t, p.Rebind(next))
+	wifiLink.down.Store(true)
+	sub.nat.remap(t, def.tr.Conn.LocalAddr())
+	require.NoError(t, def.Switch())
 
-	sub.requireGroupsOn(t, next, "after the rebind")
-	assert.True(t, link.closed.Load(), "the replaced socket should be closed")
+	sub.requireGroups(t)
+	assert.NoError(t, sub.sess.Context().Err())
 }
 
 func TestPath_Switch_NotValidated(t *testing.T) {
@@ -178,10 +183,14 @@ const moveTimeout = 5 * time.Second
 // migratingSub is a session subscribed to a track published every 20 ms.
 type migratingSub struct {
 	sess   *Session
+	nat    *fakeNAT     // nil unless dialed through one
 	groups atomic.Int64 // groups received
 }
 
-func subscribeMigrating(tb testing.TB, scheme string) *migratingSub {
+// withNAT has subscribeMigrating dial through a fakeNAT.
+const withNAT = true
+
+func subscribeMigrating(tb testing.TB, scheme string, viaNAT ...bool) *migratingSub {
 	tb.Helper()
 	addr := freePort(tb)
 	mux := NewTrackMux(0)
@@ -212,16 +221,22 @@ func subscribeMigrating(tb testing.TB, scheme string) *migratingSub {
 	}
 	ctx, cancel := context.WithTimeout(tb.Context(), 10*time.Second)
 	defer cancel()
+	dialAddr := addr
+	var nat *fakeNAT
+	if len(viaNAT) > 0 && viaNAT[0] {
+		nat = startFakeNAT(tb, addr)
+		dialAddr = nat.addr()
+	}
 	var sess *Session
 	require.Eventually(tb, func() bool {
 		var err error
-		sess, err = dialer.Dial(ctx, scheme+"://"+addr+"/", nil)
+		sess, err = dialer.Dial(ctx, scheme+"://"+dialAddr+"/", nil)
 		return err == nil
 	}, 10*time.Second, 50*time.Millisecond)
 	tb.Cleanup(func() { _ = sess.CloseWithError(NoError, "test done") }) // not actionable: cleanup
 	tr, err := sess.Subscribe(ctx, migrationTrackPath, "audio", nil)
 	require.NoError(tb, err)
-	sub := &migratingSub{sess: sess}
+	sub := &migratingSub{sess: sess, nat: nat}
 	// The reader ends with the session, closed by the cleanup above.
 	go func() {
 		frame := NewFrame(64)

@@ -12,7 +12,14 @@ import (
 
 type sessionWrapper struct {
 	sess  *quicgo_webtransportgo.Session
-	qconn *quic.Conn // the QUIC connection under a dialed session, else nil
+	qconn *quic.Conn      // the QUIC connection under a dialed session, else nil
+	qtr   *quic.Transport // the transport it was dialed from, else nil
+}
+
+// QUICTransport is the transport a dialed session's QUIC connection was
+// dialed from, or nil for a server's.
+func (conn *sessionWrapper) QUICTransport() *quic.Transport {
+	return conn.qtr
 }
 
 // QUICConn is the QUIC connection under a dialed session, or nil for a

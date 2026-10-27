@@ -25,52 +25,77 @@ var (
 	ErrPathNotValidated = errors.New("moqt: path not validated")
 
 	// ErrPathActive is returned by [Path.Close] for the path the connection
-	// is on: switch to another path, or rebind this one, first.
+	// is on: switch to another path first.
 	ErrPathActive = errors.New("moqt: path is active")
+
+	// ErrDefaultPath is returned by [Path.Close] for the default path, which
+	// lives as long as the session.
+	ErrDefaultPath = errors.New("moqt: the default path cannot be closed")
 )
 
-// Path is a network path a client session's QUIC connection can move onto
-// (RFC 9000 §9): a socket bound to one network, such as cellular while the
-// connection runs over Wi-Fi. The connection, and the session on it, stay
-// the same across a move.
+// Path is one socket a client session's QUIC connection can send and
+// receive over (RFC 9000 §9), for the path's whole life: a socket bound to
+// one network, such as cellular while the connection runs over Wi-Fi, or
+// the session's default path, the socket it was dialed from. The
+// connection, and the session on it, stay the same across a move.
 //
-// The application decides which networks to use and when to move: it adds
-// a path per network, probes and switches to the one it prefers, rebinds
-// the active path to another socket, and closes paths it no longer needs.
-// A move from a network still working loses nothing; one from a network
-// already gone takes until the server sees the client on the new path,
-// which the client's next packet shows it: set [quic.Config.KeepAlivePeriod]
-// to bound that for a session that only receives.
-//
-// The session starts on the socket it was dialed from, which is bound to no
-// network and follows the OS's default one.
+// gomoqt chooses no migration policy and never changes a path's socket: the
+// application adds a path per network, probes it, switches to the one it
+// prefers and closes the ones it no longer needs. A move from a network
+// still working loses nothing; one from a network already gone takes until
+// the server sees the client on the new path, which the client's next
+// packet shows it: set [quic.Config.KeepAlivePeriod] to bound that for a
+// session that only receives.
 type Path struct {
-	set  *pathSet
-	tr   *quic.Transport
-	slot *quicgo.Slot
+	set       *pathSet
+	tr        *quic.Transport
+	slot      *quicgo.Slot // nil for the default path, whose socket the dial owns
+	isDefault bool
 
 	// Guarded by set.mu.
-	qp        *quic.Path // nil once closed or left
+	qp        *quic.Path // nil until probed, and once left or closed
 	validated bool       // qp has been validated
 	closed    bool
 }
 
-// pathSet is a session's network paths. Closing a transport destroys the
-// connection (quic-go#5975), so a closed path closes only its socket, and
-// its transport, idle, is closed with the connection: each path added costs
-// a transport until the session ends.
+// pathSet is a session's paths. Closing a transport destroys the connection
+// (quic-go#5975), so a closed path closes only its socket, and its
+// transport, idle, is closed with the connection: each path added costs a
+// transport until the session ends.
 type pathSet struct {
 	conn *quic.Conn
+	def  *Path // the default path
 
 	mu     sync.Mutex
-	closed bool  // the connection is gone
-	active *Path // nil while on the dialed socket
-	all    []*Path
+	closed bool // the connection is gone
+	active *Path
+	added  []*Path
 }
 
-// quicConn is implemented by a connection with a QUIC connection under it.
+// quicConn is implemented by a connection dialed from a quic.Transport.
 type quicConn interface {
 	QUICConn() *quic.Conn
+	QUICTransport() *quic.Transport
+}
+
+// DefaultPath is the path over the socket the session was dialed from,
+// which is bound to no network, so the OS sends it over whichever network
+// is its default: the connection starts on it, and moves with the OS's
+// default network while on it, without the application doing anything.
+// It is nil for a session that cannot move (see [Session.AddPath]).
+//
+// Switching back to it, as when the active path's network is gone, needs a
+// probe, unless it was probed after the connection left it. Keeping it
+// ready that way costs one probe after each move off it, and, while it is
+// validated but not active, holds one of the few connection IDs the server
+// grants the client (quic-go grants three beyond the one in use), which
+// other paths then cannot probe with.
+func (s *Session) DefaultPath() *Path {
+	ps := s.pathSet()
+	if ps == nil {
+		return nil
+	}
+	return ps.def
 }
 
 // AddPath adds a path over conn, a UDP socket bound to the network the path
@@ -89,20 +114,28 @@ func (s *Session) AddPath(conn net.PacketConn) (*Path, error) {
 }
 
 // pathSet is the session's paths, created on first use, or nil if its
-// connection has no QUIC connection under it.
+// connection was not dialed from a quic.Transport by gomoqt.
 func (s *Session) pathSet() *pathSet {
 	s.pathsMu.Lock()
 	defer s.pathsMu.Unlock()
 	if s.paths == nil {
 		qc, ok := s.conn.(quicConn)
-		if !ok || qc.QUICConn() == nil {
+		if !ok || qc.QUICConn() == nil || qc.QUICTransport() == nil {
 			return nil
 		}
-		ps := &pathSet{conn: qc.QUICConn()}
-		context.AfterFunc(ps.conn.Context(), ps.close)
-		s.paths = ps
+		s.paths = newPathSet(qc.QUICConn(), qc.QUICTransport())
 	}
 	return s.paths
+}
+
+// newPathSet returns the paths of conn, dialed from tr, which is the default
+// path's transport and the one the connection starts on.
+func newPathSet(conn *quic.Conn, tr *quic.Transport) *pathSet {
+	ps := &pathSet{conn: conn}
+	ps.def = &Path{set: ps, tr: tr, isDefault: true}
+	ps.active = ps.def
+	context.AfterFunc(conn.Context(), ps.close)
+	return ps
 }
 
 func (ps *pathSet) add(conn net.PacketConn) (*Path, error) {
@@ -121,7 +154,7 @@ func (ps *pathSet) add(conn net.PacketConn) (*Path, error) {
 		return nil, errors.Join(ErrMigrationUnsupported, err)
 	}
 	p := &Path{set: ps, tr: tr, slot: slot, qp: qp}
-	ps.all = append(ps.all, p)
+	ps.added = append(ps.added, p)
 	return p, nil
 }
 
@@ -139,8 +172,8 @@ func (ps *pathSet) gone() error {
 
 // Probe validates the path: it checks that the server answers over it,
 // without moving the connection. It returns once the server has answered,
-// at once for a path already validated, or with ctx's error or the
-// connection's.
+// at once for the active path or one already validated, or with ctx's
+// error or the connection's.
 func (p *Path) Probe(ctx context.Context) error {
 	qp, err := p.startProbe()
 	if err != nil || qp == nil {
@@ -237,45 +270,20 @@ func (p *Path) Switch() error {
 	// quic-go makes the new path active at once, so the one left can be
 	// closed now, which returns its connection ID to the server for the
 	// next move.
-	if prev := ps.active; prev != nil {
-		prev.abandon()
-	}
+	ps.active.abandon()
 	ps.active = p
 	return nil
 }
 
-// Rebind replaces the path's socket with conn, which the path owns from
-// here on, and closes the socket it replaces. On the active path the
-// connection carries on from conn, and the server follows it as it follows
-// any client whose address changes, without a probe: a quick way off a
-// network that is gone, to a socket bound to no network or to another
-// network. On a path not active, the next probe goes out from conn.
-func (p *Path) Rebind(conn net.PacketConn) error {
-	ps := p.set
-	ps.mu.Lock()
-	defer ps.mu.Unlock()
-	if err := ps.gone(); err != nil {
-		_ = conn.Close() // not actionable: the connection is gone
-		return err
-	}
-	if p.closed {
-		_ = conn.Close() // not actionable: the path is closed
-		return ErrPathClosed
-	}
-	if ps.active != p {
-		// A validation holds for the socket it was made over.
-		p.abandon()
-	}
-	p.slot.Set(conn)
-	return nil
-}
-
 // Close closes the path and its socket. It returns [ErrPathActive] for the
-// path the connection is on.
+// path the connection is on, and [ErrDefaultPath] for the default path.
 func (p *Path) Close() error {
 	ps := p.set
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
+	if p.isDefault {
+		return ErrDefaultPath
+	}
 	if p.closed {
 		return nil
 	}
@@ -298,14 +306,14 @@ func (p *Path) abandon() {
 }
 
 // close closes the socket and transport of every path added, once the
-// connection has ended.
+// connection has ended. The default path's are its dial's to close.
 func (ps *pathSet) close() {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	ps.closed = true
-	for _, p := range ps.all {
+	for _, p := range ps.added {
 		_ = p.slot.Close() // not actionable: the connection is gone
 		_ = p.tr.Close()   // not actionable: as above
 	}
-	ps.all = nil
+	ps.added = nil
 }

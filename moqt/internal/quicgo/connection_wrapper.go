@@ -22,6 +22,13 @@ var _ transport.StreamConn = (*connWrapper)(nil)
 
 type connWrapper struct {
 	conn *quicgo_quicgo.Conn
+	tr   *quicgo_quicgo.Transport // the transport a dialed connection was dialed from, else nil
+}
+
+// QUICTransport is the transport a dialed connection was dialed from, or
+// nil for a server's.
+func (wrapper *connWrapper) QUICTransport() *quicgo_quicgo.Transport {
+	return wrapper.tr
 }
 
 func (wrapper *connWrapper) AcceptStream(ctx context.Context) (transport.Stream, error) {

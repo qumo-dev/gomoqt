@@ -20,18 +20,21 @@ import (
 // through a network change, and moves between paths, as a native QUIC one
 // does.
 func Dial(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config, quicConfig *quic.Config, appProtocols []string) (*http.Response, transport.WebTransportSession, error) {
-	var qconn *quic.Conn
+	var (
+		qconn *quic.Conn
+		qtr   *quic.Transport
+	)
 	tr := quicgo_webtransportgo.Transport{
 		TLSClientConfig:      tlsConfig,
 		QUICConfig:           quicConfig,
 		ApplicationProtocols: appProtocols,
 		// Called once, before Dial returns.
 		DialAddr: func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (*quic.Conn, error) {
-			conn, err := quicgo.Dial(ctx, addr, tlsConfig, quicConfig)
+			conn, tr, err := quicgo.Dial(ctx, addr, tlsConfig, quicConfig)
 			if err != nil {
 				return nil, err
 			}
-			qconn = conn
+			qconn, qtr = conn, tr
 			return conn, nil
 		},
 	}
@@ -39,5 +42,5 @@ func Dial(ctx context.Context, addr string, header http.Header, tlsConfig *tls.C
 	if wtsess == nil {
 		return rsp, nil, err
 	}
-	return rsp, &sessionWrapper{sess: wtsess, qconn: qconn}, err
+	return rsp, &sessionWrapper{sess: wtsess, qconn: qconn, qtr: qtr}, err
 }

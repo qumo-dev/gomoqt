@@ -9,29 +9,27 @@ import (
 	"time"
 )
 
-// Slot is the socket under a quic.Transport, which it lets change. quic-go
-// destroys a connection when any transport it has used is closed
-// (quic-go#5975), so a path gives up its socket, not its transport: the
-// slot swaps sockets under the transport, which never sees the change.
+// Slot is the socket under a quic.Transport. quic-go destroys a connection
+// when any transport it has used is closed, or fails to read (quic-go#5975),
+// so a path that is done gives up its socket, not its transport: Clear
+// closes the socket and leaves the slot empty, and the transport, idle, is
+// closed with the connection.
 //
 // Neither direction fails the transport for a network going away, which
 // would end the connection with it: a write while the slot is empty, or one
 // the OS refuses for a network change, is reported as sent, so QUIC treats
-// the packet as lost. A socket closed under the slot by anyone but the slot
-// leaves it empty until the next Set. Only closing the slot ends its reads.
+// the packet as lost, and a socket closed under the slot leaves it empty.
+// Only closing the slot ends its reads.
 type Slot struct {
 	state atomic.Pointer[slotState]
-
-	mu       sync.Mutex // serializes changes to state
-	readBuf  int        // receive buffer size quic-go asked for, applied to each socket
-	writeBuf int        // send buffer size likewise
+	mu    sync.Mutex // serializes changes to state
 }
 
-// slotState is the slot's socket, nil while empty, and a channel closed when
-// the socket changes. A closed slot has closed set.
+// slotState is the slot's socket, nil once empty, and a channel closed when
+// the state changes.
 type slotState struct {
 	conn    net.PacketConn
-	addr    net.Addr // the last socket's address, kept while empty
+	addr    net.Addr // the socket's address, kept once empty
 	changed chan struct{}
 	closed  bool
 }
@@ -45,62 +43,34 @@ func newSlot(conn net.PacketConn) *Slot {
 	return s
 }
 
-// Set puts conn in the slot, closing the socket it replaces. A closed slot
-// closes conn instead.
-func (s *Slot) Set(conn net.PacketConn) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.state.Load().closed {
-		_ = conn.Close() // not actionable: the slot is gone with its connection
-		return
-	}
-	s.applyBuffers(conn)
-	s.replace(conn, false)
-}
-
 // Clear closes the slot's socket and leaves the slot empty.
 func (s *Slot) Clear() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.state.Load().closed {
-		return
+	if st := s.state.Load(); !st.closed && st.conn != nil {
+		s.next(false)
 	}
-	s.replace(nil, false)
 }
 
 // Close closes the slot and its socket, ending its reads.
 func (s *Slot) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.state.Load().closed {
-		return nil
+	if !s.state.Load().closed {
+		s.next(true)
 	}
-	s.replace(nil, true)
 	return nil
 }
 
-// replace swaps conn in, closes the socket it replaces and wakes reads
-// waiting on the old state. s.mu is held.
-func (s *Slot) replace(conn net.PacketConn, closed bool) {
+// next closes the socket, stores the empty state, closed or not, and wakes
+// reads waiting on the old state. s.mu is held.
+func (s *Slot) next(closed bool) {
 	old := s.state.Load()
 	if old.conn != nil {
 		_ = old.conn.Close() // not actionable: the socket is being given up
 	}
-	next := &slotState{conn: conn, addr: old.addr, changed: make(chan struct{}), closed: closed}
-	if conn != nil {
-		next.addr = conn.LocalAddr()
-	}
-	s.state.Store(next)
+	s.state.Store(&slotState{addr: old.addr, changed: make(chan struct{}), closed: closed})
 	close(old.changed)
-}
-
-// empty empties the slot if conn, closed under it, is still its socket.
-func (s *Slot) empty(conn net.PacketConn) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if st := s.state.Load(); !st.closed && st.conn == conn {
-		s.replace(nil, false)
-	}
 }
 
 // ReadFrom reads a datagram from the slot's socket, waiting while the slot
@@ -122,7 +92,7 @@ func (s *Slot) ReadFrom(p []byte) (int, net.Addr, error) {
 			return n, addr, nil
 		}
 		if errors.Is(err, net.ErrClosed) {
-			s.empty(st.conn)
+			s.Clear() // closed under the slot: empty it
 			continue
 		}
 		if errors.Is(err, os.ErrDeadlineExceeded) {
@@ -154,50 +124,25 @@ func (s *Slot) WriteTo(p []byte, addr net.Addr) (int, error) {
 	return n, err
 }
 
-// readBuffered and writeBuffered are sockets whose buffers can be sized, as
-// a *net.UDPConn's can.
-type (
-	readBuffered  interface{ SetReadBuffer(int) error }
-	writeBuffered interface{ SetWriteBuffer(int) error }
-)
-
-// SetReadBuffer sets the receive buffer of the slot's socket, and of every
-// socket put in it later. quic-go raises it through this method.
+// SetReadBuffer sets the receive buffer of the slot's socket, if it has
+// one that can be sized. quic-go raises it through this method.
 func (s *Slot) SetReadBuffer(bytes int) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.readBuf = bytes
-	if c, ok := s.state.Load().conn.(readBuffered); ok {
+	if c, ok := s.state.Load().conn.(interface{ SetReadBuffer(int) error }); ok {
 		return c.SetReadBuffer(bytes)
 	}
 	return nil
 }
 
-// SetWriteBuffer sets the send buffer of the slot's socket, and of every
-// socket put in it later.
+// SetWriteBuffer sets the send buffer of the slot's socket likewise.
 func (s *Slot) SetWriteBuffer(bytes int) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.writeBuf = bytes
-	if c, ok := s.state.Load().conn.(writeBuffered); ok {
+	if c, ok := s.state.Load().conn.(interface{ SetWriteBuffer(int) error }); ok {
 		return c.SetWriteBuffer(bytes)
 	}
 	return nil
 }
 
-// applyBuffers gives conn the buffer sizes asked for so far; the OS caps
-// them, as it does for quic-go's own sockets. s.mu is held.
-func (s *Slot) applyBuffers(conn net.PacketConn) {
-	if c, ok := conn.(readBuffered); ok && s.readBuf > 0 {
-		_ = c.SetReadBuffer(s.readBuf) // not actionable: the OS's cap stands
-	}
-	if c, ok := conn.(writeBuffered); ok && s.writeBuf > 0 {
-		_ = c.SetWriteBuffer(s.writeBuf) // not actionable: as above
-	}
-}
-
-// LocalAddr is the address of the slot's socket, or of the last one while
-// the slot is empty.
+// LocalAddr is the address of the slot's socket, kept once the slot is
+// empty.
 func (s *Slot) LocalAddr() net.Addr { return s.state.Load().addr }
 
 // SetDeadline sets the deadlines of the slot's socket.
