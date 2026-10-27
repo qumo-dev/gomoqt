@@ -149,4 +149,3 @@ func listenLoopback(tb testing.TB) *net.UDPConn {
 	tb.Cleanup(func() { _ = conn.Close() }) // not actionable: cleanup
 	return conn
 }
-
