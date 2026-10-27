@@ -62,7 +62,7 @@ func TestPath_Switch_RepeatedMoves(t *testing.T) {
 // Closing the path the connection is on moves it onto a new socket bound to
 // no network, which follows the OS's default network, and gives up the
 // closed path's socket at once.
-func TestPath_Close_ActiveFallsBackHome(t *testing.T) {
+func TestPath_Close_Active(t *testing.T) {
 	tests := map[string]struct {
 		cutBeforeClose bool
 	}{
@@ -84,28 +84,38 @@ func TestPath_Close_ActiveFallsBackHome(t *testing.T) {
 			assert.True(t, link.closed.Load(), "the closed path's socket should be given up at once")
 			before := c.received.Load()
 			assert.Eventually(t, func() bool { return c.received.Load() > before+4000 }, 5*time.Second, 10*time.Millisecond,
-				"data should keep arriving over the home path")
+				"data should keep arriving over the new socket")
 		})
 	}
 }
 
-// A path closed while not active gives up its socket at once, and its
-// transport carries the next path added, since closing a transport would
-// end the connection.
-func TestMigrator_AddPath_ReusesClosedPathsTransport(t *testing.T) {
+// A path the connection has left, then closed, gives up its socket once it
+// is retired, on the next call, and the connection stays on the new path.
+func TestPath_Close_Left(t *testing.T) {
 	c := dialPushed(t)
 	old, oldLink := c.addLink(t)
-	c.moveTo(t, old)
-	c.moveTo(t, c.m.home)
-
-	require.NoError(t, old.Close())
 	next, nextLink := c.addLink(t)
-
-	assert.True(t, oldLink.closed.Load(), "a closed path's socket should be closed at once")
-	assert.Same(t, old.tr, next.tr, "the next path should reuse the closed path's transport")
-	assert.Len(t, c.m.added, 1, "no transport should be added while one is spare")
+	c.moveTo(t, old)
 	c.moveTo(t, next)
 	c.requireDataOn(t, nextLink)
+
+	require.NoError(t, old.Close())
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	require.NoError(t, next.Probe(ctx)) // any call retires the paths left
+
+	assert.True(t, oldLink.closed.Load(), "the closed path's socket should be given up once retired")
+	c.requireDataOn(t, nextLink)
+}
+
+// A path never used gives up its socket as soon as it is closed.
+func TestPath_Close_Unused(t *testing.T) {
+	c := dialPushed(t)
+	p, link := c.addLink(t)
+
+	require.NoError(t, p.Close())
+
+	assert.True(t, link.closed.Load())
 }
 
 func TestPath_Switch_NotValidated(t *testing.T) {
@@ -129,18 +139,24 @@ func TestPath_Closed(t *testing.T) {
 	assert.NoError(t, p.Close(), "closing again is a no-op")
 }
 
-// A probe right after a switch waits out the spacing that lets the server
-// replace the connection ID the switch retired.
-func TestPath_Probe_SpacedAfterSwitch(t *testing.T) {
+// Moves made back to back, each probe right after the switch before it,
+// keep finding a connection ID to probe with: the path left is retired as
+// the next probe starts, and the server replaces its connection ID.
+func TestPath_Switch_BackToBack(t *testing.T) {
 	c := dialPushed(t)
 	a, _ := c.addLink(t)
-	b, _ := c.addLink(t)
-	c.moveTo(t, a)
-	start := time.Now()
+	b, bLink := c.addLink(t)
 
-	c.probe(t, b)
+	for move := range 12 {
+		p := a
+		if move%2 == 1 {
+			p = b
+		}
+		c.moveTo(t, p)
+	}
 
-	assert.GreaterOrEqual(t, time.Since(start), minSwitchSpacing)
+	c.requireDataOn(t, bLink)
+	assert.NoError(t, c.m.conn.Context().Err())
 }
 
 func TestMigrator_AddPath_ConnectionGone(t *testing.T) {

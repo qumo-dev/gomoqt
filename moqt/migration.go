@@ -70,8 +70,7 @@ func (s *Session) AddPath(conn net.PacketConn) (*Path, error) {
 
 // Probe validates the path: it checks that the server answers over it,
 // without moving the connection. It returns once the server has answered,
-// or with ctx's error. A probe right after a switch first waits out a short
-// spacing, a couple of round trips, that the connection needs between moves.
+// or with ctx's error.
 func (p *Path) Probe(ctx context.Context) error {
 	return p.path.Probe(ctx)
 }

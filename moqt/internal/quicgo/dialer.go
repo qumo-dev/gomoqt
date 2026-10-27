@@ -61,7 +61,7 @@ func Dial(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *q
 		_ = tr.Close()   // not actionable: as above
 		return nil, err
 	}
-	m := newMigrator(conn, tr)
+	m := newMigrator(conn)
 	// The transport and socket are ours, not quic-go's: close them, and
 	// every path added, with the connection. A slot closes before its
 	// transport, so the transport's read ends.

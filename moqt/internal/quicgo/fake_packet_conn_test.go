@@ -53,14 +53,37 @@ func (c *fakeLink) Close() error {
 
 // fakePacketConn is a socket with no network: writes return writeErrs in
 // order, the last repeating, or succeed once it is empty; reads block until
-// it is closed. Close is idempotent.
+// it is closed; buffer sizes set are recorded. Close is idempotent.
 type fakePacketConn struct {
 	writeErrs []error
 
-	mu     sync.Mutex
-	writes int
-	once   sync.Once
-	done   chan struct{}
+	mu       sync.Mutex
+	writes   int
+	readBuf  int // last receive buffer size set
+	writeBuf int // last send buffer size set
+	once     sync.Once
+	done     chan struct{}
+}
+
+func (c *fakePacketConn) SetReadBuffer(bytes int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.readBuf = bytes
+	return nil
+}
+
+func (c *fakePacketConn) SetWriteBuffer(bytes int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.writeBuf = bytes
+	return nil
+}
+
+// buffers are the buffer sizes last set.
+func (c *fakePacketConn) buffers() (read, write int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.readBuf, c.writeBuf
 }
 
 func (c *fakePacketConn) closedCh() chan struct{} {

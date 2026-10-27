@@ -31,7 +31,7 @@ func TestIsNetChangeErr(t *testing.T) {
 		"connection refused":          {err: sendErr(syscall.ECONNREFUSED)},
 		"socket closed":               {err: net.ErrClosed},
 		// Android's refusal for a network being torn down.
-		"permission denied":   {err: sendErr(syscall.EPERM), want: runtime.GOOS == "linux" || runtime.GOOS == "android"},
+		"permission denied":   {err: sendErr(syscall.EPERM), want: runtime.GOOS == "android"},
 		"error with no errno": {err: errors.New("boom")},
 	}
 	for name, tt := range tests {

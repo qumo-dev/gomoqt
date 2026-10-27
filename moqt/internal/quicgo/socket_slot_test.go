@@ -98,10 +98,12 @@ func TestSocketSlot_ReadFrom_WaitsForNextSocket(t *testing.T) {
 	}
 }
 
-// A socket closed under the slot leaves it empty, not failed.
+// A socket closed under the slot, not by it, is replaced by one bound to no
+// network, so the path keeps sending and receiving instead of going silent.
 func TestSocketSlot_ReadFrom_SocketClosedUnderSlot(t *testing.T) {
 	first := listenLoopback(t)
 	slot := newSocketSlot(first)
+	t.Cleanup(func() { _ = slot.Close() }) // not actionable: cleanup
 	got := make(chan error, 1)
 	go func() {
 		_, _, err := slot.ReadFrom(make([]byte, 16))
@@ -109,15 +111,35 @@ func TestSocketSlot_ReadFrom_SocketClosedUnderSlot(t *testing.T) {
 	}()
 
 	require.NoError(t, first.Close())
-	next := listenLoopback(t)
-	slot.set(next)
-	sendTo(t, next.LocalAddr(), "after")
 
+	require.Eventually(t, func() bool {
+		return slot.LocalAddr().String() != first.LocalAddr().String()
+	}, 3*time.Second, 10*time.Millisecond, "the slot should rebind to a new socket")
+	port := slot.LocalAddr().(*net.UDPAddr).Port
+	sendTo(t, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port}, "after")
 	select {
 	case err := <-got:
 		assert.NoError(t, err)
 	case <-time.After(3 * time.Second):
-		t.Fatal("the read did not survive its socket closing")
+		t.Fatal("the read did not move to the new socket")
+	}
+}
+
+// Buffer sizes quic-go sets reach the socket, and every socket put in the
+// slot after it.
+func TestSocketSlot_SetBuffers(t *testing.T) {
+	first := &fakePacketConn{}
+	slot := newSocketSlot(first)
+
+	require.NoError(t, slot.SetReadBuffer(7<<20))
+	require.NoError(t, slot.SetWriteBuffer(7<<20))
+	next := &fakePacketConn{}
+	slot.set(next)
+
+	for name, conn := range map[string]*fakePacketConn{"first socket": first, "next socket": next} {
+		read, write := conn.buffers()
+		assert.Equal(t, 7<<20, read, name)
+		assert.Equal(t, 7<<20, write, name)
 	}
 }
 
