@@ -1,23 +1,17 @@
-//go:build unix
+//go:build unix && !android
 
 package quicgo
 
-import (
-	"errors"
-	"runtime"
-	"syscall"
-)
+import "syscall"
 
-// isNetChangeErr reports whether a send failed because the OS has no route
-// to the peer for now, as while a phone moves between Wi-Fi and cellular.
-//
-// On Android that includes EPERM: Android refuses a send with it on a socket
-// bound to a network being torn down, and for an app whose network access is
-// blocked for now, as while its screen is off. Elsewhere on Linux EPERM is a
-// firewall's lasting refusal, so it still fails the connection.
-func isNetChangeErr(err error) bool {
-	return errors.Is(err, syscall.ENETUNREACH) ||
-		errors.Is(err, syscall.EHOSTUNREACH) ||
-		errors.Is(err, syscall.ENETDOWN) ||
-		runtime.GOOS == "android" && errors.Is(err, syscall.EPERM)
+// netChangeErrnos are the errors a send fails with while the OS has no route
+// to the peer for now: no route to the network or host, the network down,
+// the interface's address gone (macOS and iOS), or no buffer space while the
+// interface is torn down.
+var netChangeErrnos = []error{
+	syscall.ENETUNREACH,
+	syscall.EHOSTUNREACH,
+	syscall.ENETDOWN,
+	syscall.EADDRNOTAVAIL,
+	syscall.ENOBUFS,
 }

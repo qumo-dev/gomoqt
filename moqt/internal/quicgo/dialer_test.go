@@ -22,22 +22,43 @@ import (
 
 const testALPN = "quicgo-test"
 
-func TestServerName(t *testing.T) {
+func TestResolveUDPAddr(t *testing.T) {
 	tests := map[string]struct {
-		addr string
-		want string
+		addr     string
+		wantHost string
+		wantAddr string
+		wantErr  bool
 	}{
-		"host and port":     {addr: "example.com:443", want: "example.com"},
-		"IPv4 and port":     {addr: "192.0.2.1:4433", want: "192.0.2.1"},
-		"bracketed IPv6":    {addr: "[2001:db8::1]:4433", want: "2001:db8::1"},
-		"host with no port": {addr: "example.com", want: "example.com"},
-		"empty":             {addr: "", want: ""},
+		"IPv4 and port":    {addr: "192.0.2.1:4433", wantHost: "192.0.2.1", wantAddr: "192.0.2.1:4433"},
+		"bracketed IPv6":   {addr: "[2001:db8::1]:4433", wantHost: "2001:db8::1", wantAddr: "[2001:db8::1]:4433"},
+		"named port":       {addr: "192.0.2.1:https", wantHost: "192.0.2.1", wantAddr: "192.0.2.1:443"},
+		"host, IPv4 first": {addr: "localhost:4433", wantHost: "localhost", wantAddr: "127.0.0.1:4433"},
+		"no port":          {addr: "example.com", wantErr: true},
+		"empty":            {addr: "", wantErr: true},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, tt.want, serverName(tt.addr))
+			host, raddr, err := resolveUDPAddr(t.Context(), tt.addr)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantHost, host)
+			assert.Equal(t, tt.wantAddr, raddr.String())
 		})
 	}
+}
+
+// Resolving gives up with the context, however slow the resolver.
+func TestResolveUDPAddr_ContextDone(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, _, err := resolveUDPAddr(ctx, "unresolvable.invalid:4433")
+
+	assert.Error(t, err)
 }
 
 func TestDialEarly_ServerName(t *testing.T) {
@@ -80,6 +101,27 @@ func TestDialEarly_ClosesSocketWithConnection(t *testing.T) {
 		_ = c.Close() // not actionable: the probe socket is only checked for binding
 		return true
 	}, 2*time.Second, 20*time.Millisecond)
+}
+
+// Over a transport the caller gives, the connection uses that transport's
+// socket, and still takes the server name from the host dialed.
+func TestDialTransportConnEarly(t *testing.T) {
+	srv := startEchoServer(t)
+	udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero})
+	require.NoError(t, err)
+	tr := &quic.Transport{Conn: udp}
+	t.Cleanup(func() { _ = tr.Close() }) // not actionable: cleanup
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	conn, err := DialTransportConnEarly(ctx, tr, "localhost:"+strconv.Itoa(srv.port), srv.clientTLS(""),
+		&quic.Config{MaxIdleTimeout: 10 * time.Second})
+
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.CloseWithError(0, "test done") }) // not actionable: cleanup
+	assert.Equal(t, udp.LocalAddr().(*net.UDPAddr).Port, conn.LocalAddr().(*net.UDPAddr).Port)
+	assert.Equal(t, "localhost", conn.ConnectionState().TLS.ServerName)
+	assert.NoError(t, roundTrip(t, conn, "over the caller's transport"))
 }
 
 func TestDialEarly_UnresolvableAddress(t *testing.T) {

@@ -44,9 +44,5 @@ func dialQUIC(ctx context.Context, qtr *quic.Transport, addr string, tlsConfig *
 	if qtr == nil {
 		return quicgo.DialEarly(ctx, addr, tlsConfig, quicConfig)
 	}
-	conn, err := quicgo.DialTransportEarly(ctx, qtr, addr, tlsConfig, quicConfig)
-	if err != nil {
-		return nil, err
-	}
-	return conn.(interface{ QUICConn() *quic.Conn }).QUICConn(), nil
+	return quicgo.DialTransportConnEarly(ctx, qtr, addr, tlsConfig, quicConfig)
 }

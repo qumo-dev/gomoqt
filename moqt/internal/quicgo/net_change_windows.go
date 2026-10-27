@@ -2,16 +2,14 @@
 
 package quicgo
 
-import (
-	"errors"
+import "golang.org/x/sys/windows"
 
-	"golang.org/x/sys/windows"
-)
-
-// isNetChangeErr reports whether a send failed because the OS has no route
+// netChangeErrnos are the errors a send fails with while the OS has no route
 // to the peer for now, as while a laptop moves between networks.
-func isNetChangeErr(err error) bool {
-	return errors.Is(err, windows.WSAENETUNREACH) ||
-		errors.Is(err, windows.WSAEHOSTUNREACH) ||
-		errors.Is(err, windows.WSAENETDOWN)
+var netChangeErrnos = []error{
+	windows.WSAENETUNREACH,
+	windows.WSAEHOSTUNREACH,
+	windows.WSAENETDOWN,
+	windows.WSAEADDRNOTAVAIL,
+	windows.WSAENOBUFS,
 }

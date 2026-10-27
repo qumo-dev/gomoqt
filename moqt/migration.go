@@ -7,8 +7,9 @@ import (
 )
 
 // ErrMigrationUnsupported is returned by [Session.AddPath] for a session
-// with no QUIC connection gomoqt can reach: a WebSocket one, or one over a
-// connection from DialQUICFunc or DialWebTransportFunc.
+// with no QUIC connection gomoqt can reach: a WebSocket one, a server's
+// WebTransport one, or one over a connection from DialQUICFunc or
+// DialWebTransportFunc.
 var ErrMigrationUnsupported = errors.New("moqt: connection migration is not supported by this session")
 
 // quicConn is implemented by a connection with a QUIC connection under it
@@ -33,8 +34,9 @@ type quicConn interface {
 //     (quic-go#5975); close the path with quic.Path.Close instead, and the
 //     transport once the session has ended.
 //   - Every transport of the connection should use zero-length connection
-//     IDs, as one dialed by Dialer does: give each one a
-//     quic.ConnectionIDGenerator whose ConnectionIDLen is 0. A transport
+//     IDs, as a Dialer with no [Dialer.Transport] does: give each one,
+//     Dialer.Transport too, a quic.ConnectionIDGenerator whose
+//     ConnectionIDLen is 0. A transport
 //     with quic-go's default length cannot carry a path for such a
 //     connection (quic-go#5185), and a quic-go server follows a client with
 //     non-zero-length ones only twice (quic-go#5965).
@@ -48,8 +50,9 @@ type quicConn interface {
 // [Dialer.QUICConfig] to bound that for a session that only receives.
 //
 // It returns [ErrMigrationUnsupported] for a session with no QUIC
-// connection gomoqt can reach, and quic-go's error for one that cannot
-// migrate: a server's, or one whose peer disabled migration.
+// connection gomoqt can reach, a server's WebTransport session among them,
+// and quic-go's error for one that cannot migrate: a server's native QUIC
+// session, or one whose peer disabled migration.
 func (s *Session) AddPath(t *quic.Transport) (*quic.Path, error) {
 	qc, ok := s.conn.(quicConn)
 	if !ok || qc.QUICConn() == nil {

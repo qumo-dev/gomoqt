@@ -79,20 +79,30 @@ func (n *fakeNAT) fromClients() {
 		if err != nil {
 			return // the relay is closed
 		}
-		n.mu.Lock()
-		up := n.flows[client.String()]
-		n.mu.Unlock()
-		if up == nil {
-			if up, err = listenUp(); err != nil {
-				continue // drop: QUIC retransmits, and the next datagram tries again
-			}
-			n.mu.Lock()
-			n.flows[client.String()] = up
-			n.mu.Unlock()
-			go n.toClient(up, client)
+		up, err := n.flow(client)
+		if err != nil {
+			continue // drop: QUIC retransmits, and the next datagram tries again
 		}
 		_, _ = up.WriteToUDP(buf[:c], n.target) // not actionable: a lost datagram is QUIC's to recover
 	}
+}
+
+// flow is the upstream socket for client, opened on its first datagram.
+// It looks up and opens under one lock, so that a concurrent remap is not
+// overwritten.
+func (n *fakeNAT) flow(client *net.UDPAddr) (*net.UDPConn, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if up := n.flows[client.String()]; up != nil {
+		return up, nil
+	}
+	up, err := listenUp()
+	if err != nil {
+		return nil, err
+	}
+	n.flows[client.String()] = up
+	go n.toClient(up, client)
+	return up, nil
 }
 
 func (n *fakeNAT) toClient(up *net.UDPConn, client *net.UDPAddr) {

@@ -57,6 +57,8 @@ type Dialer struct {
 	// transport to the session again with [Session.AddPath], to move back
 	// onto it. A connection that will move should use zero-length
 	// connection IDs on every transport it uses (see [Session.AddPath]).
+	// Its socket is used as it is: a send the OS refuses on it, as when its
+	// network goes away, ends the connection, as quic-go does.
 	//
 	// If nil, each dial uses a transport of its own, as quic.DialAddr does,
 	// over a socket that keeps the session through a network change.

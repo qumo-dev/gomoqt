@@ -104,7 +104,7 @@ func TestSession_AddPath_DialTransportAfterRouteChange(t *testing.T) {
 
 			sub.requireGroupsOn(t, sub.dial.link, "after the switch back")
 			t.Logf("groups resumed %s after the switch", time.Since(start).Round(time.Millisecond))
-			assert.Eventually(t, func() bool { return sub.server().RemoteAddr().String() == newAddr.String() },
+			assert.Eventually(t, func() bool { return sub.server(t).RemoteAddr().String() == newAddr.String() },
 				moveTimeout, 10*time.Millisecond, "the server should follow the new address")
 		})
 	}
@@ -120,7 +120,7 @@ func TestSession_PassiveMigration(t *testing.T) {
 	newAddr := sub.nat.remap(t, sub.dial.link.LocalAddr())
 
 	sub.requireGroupsOn(t, sub.dial.link, "after the route change")
-	assert.Eventually(t, func() bool { return sub.server().RemoteAddr().String() == newAddr.String() },
+	assert.Eventually(t, func() bool { return sub.server(t).RemoteAddr().String() == newAddr.String() },
 		moveTimeout, 10*time.Millisecond)
 }
 
@@ -153,7 +153,7 @@ func TestSession_AddPath_ServerSession(t *testing.T) {
 	tr := &quic.Transport{Conn: listenLoopback(t), ConnectionIDGenerator: zeroConnIDs{}}
 	t.Cleanup(func() { _ = tr.Close() }) // not actionable: cleanup
 
-	p, err := sub.serverSession().AddPath(tr)
+	p, err := sub.serverSession(t).AddPath(tr)
 
 	assert.Error(t, err)
 	assert.NotErrorIs(t, err, ErrMigrationUnsupported)
@@ -197,9 +197,8 @@ type migratingSub struct {
 	sess    *Session
 	nat     *fakeNAT
 	dial    network
-	servers chan *Session
-	srv     atomic.Pointer[Session]
-	groups  atomic.Int64 // groups received
+	srv    atomic.Pointer[Session] // the server's side, of the latest session
+	groups atomic.Int64             // groups received
 }
 
 func subscribeMigrating(tb testing.TB, scheme string) *migratingSub {
@@ -207,7 +206,7 @@ func subscribeMigrating(tb testing.TB, scheme string) *migratingSub {
 	addr := freePort(tb)
 	mux := NewTrackMux(0)
 	mux.PublishFunc(tb.Context(), migrationTrackPath, publishEvery20ms)
-	servers := make(chan *Session, 1)
+	sub := &migratingSub{}
 	srv := &Server{
 		Addr: addr,
 		TLSConfig: &tls.Config{
@@ -218,10 +217,9 @@ func subscribeMigrating(tb testing.TB, scheme string) *migratingSub {
 		TrackMux:   mux,
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Handler: HandleFunc(func(sess *Session) {
-			select {
-			case servers <- sess:
-			default:
-			}
+			// A dial retried after the server accepted an earlier one leaves
+			// that one behind: keep the latest.
+			sub.srv.Store(sess)
 			<-sess.Context().Done()
 		}),
 	}
@@ -255,7 +253,7 @@ func subscribeMigrating(tb testing.TB, scheme string) *migratingSub {
 	tb.Cleanup(func() { _ = sess.CloseWithError(NoError, "test done") }) // not actionable: cleanup
 	tr, err := sess.Subscribe(ctx, migrationTrackPath, "audio", nil)
 	require.NoError(tb, err)
-	sub := &migratingSub{sess: sess, nat: nat, dial: dial, servers: servers}
+	sub.sess, sub.nat, sub.dial = sess, nat, dial
 	// The reader ends with the session, closed by the cleanup above.
 	go func() {
 		frame := NewFrame(64)
@@ -273,18 +271,17 @@ func subscribeMigrating(tb testing.TB, scheme string) *migratingSub {
 }
 
 // serverSession is the server's side of the session.
-func (s *migratingSub) serverSession() *Session {
-	if srv := s.srv.Load(); srv != nil {
-		return srv
-	}
-	srv := <-s.servers
-	s.srv.Store(srv)
-	return srv
+func (s *migratingSub) serverSession(tb testing.TB) *Session {
+	tb.Helper()
+	require.Eventually(tb, func() bool { return s.srv.Load() != nil }, moveTimeout, 5*time.Millisecond,
+		"the server should accept the session")
+	return s.srv.Load()
 }
 
 // server is the QUIC connection on the server's side of the session.
-func (s *migratingSub) server() *quic.Conn {
-	return s.serverSession().conn.(quicConn).QUICConn()
+func (s *migratingSub) server(tb testing.TB) *quic.Conn {
+	tb.Helper()
+	return s.serverSession(tb).conn.(quicConn).QUICConn()
 }
 
 func publishEvery20ms(tw *TrackWriter) {
