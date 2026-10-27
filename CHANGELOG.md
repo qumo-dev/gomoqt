@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **A truncated frame no longer reads as the end of a group (`moqt`).** `GroupReader.ReadFrame` returned `io.EOF`, the clean end, for a group cut off inside a frame's varints or before its payload's first byte; it now returns `io.ErrUnexpectedEOF`. A frame whose timestamp delta goes below zero returns `ErrTimestampOutOfRange` instead of wrapping.
+- **A native QUIC or WebTransport session dialed by `Dialer` keeps through a network change (`moqt`).** Once the handshake is done, a send the OS refuses while the network changes (network or host unreachable, network down, address gone, no buffer space: Wi-Fi off, moving to cellular) counts as a lost packet that QUIC retransmits on the next network, instead of closing the connection ([quic-go#5589](https://github.com/quic-go/quic-go/issues/5589)); during the handshake it still fails the dial at once, and a network that does not come back ends the connection by the idle timeout. The dial also resolves within its context and binds the resolved address's family. The client keeps zero-length connection IDs, so a quic-go server follows it through any number of address changes ([quic-go#5965](https://github.com/quic-go/quic-go/issues/5965)).
 
 ## [v0.26.0] - 2026-10-17
 
