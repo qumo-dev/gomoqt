@@ -24,9 +24,9 @@ func TestSocketSlot_WriteTo(t *testing.T) {
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			slot := newSocketSlot(&fakePacketConn{writeErrs: tt.writeErrs})
+			slot := NewSlot(&fakePacketConn{writeErrs: tt.writeErrs})
 			if tt.empty {
-				slot.clear()
+				slot.Clear()
 			}
 
 			n, err := slot.WriteTo([]byte("data"), &net.UDPAddr{})
@@ -42,7 +42,7 @@ func TestSocketSlot_WriteTo(t *testing.T) {
 }
 
 func TestSocketSlot_WriteTo_Closed(t *testing.T) {
-	slot := newSocketSlot(&fakePacketConn{})
+	slot := NewSlot(&fakePacketConn{})
 	require.NoError(t, slot.Close())
 
 	_, err := slot.WriteTo([]byte("data"), &net.UDPAddr{})
@@ -52,28 +52,28 @@ func TestSocketSlot_WriteTo_Closed(t *testing.T) {
 
 func TestSocketSlot_Clear(t *testing.T) {
 	conn := &fakePacketConn{}
-	slot := newSocketSlot(conn)
+	slot := NewSlot(conn)
 
-	slot.clear()
+	slot.Clear()
 
 	assert.True(t, conn.isClosed(), "a cleared slot closes its socket")
 	assert.Equal(t, conn.LocalAddr(), slot.LocalAddr(), "the address is kept while empty")
 }
 
 func TestSocketSlot_Set_Closed(t *testing.T) {
-	slot := newSocketSlot(&fakePacketConn{})
+	slot := NewSlot(&fakePacketConn{})
 	require.NoError(t, slot.Close())
 	conn := &fakePacketConn{}
 
-	slot.set(conn)
+	slot.Set(conn)
 
 	assert.True(t, conn.isClosed(), "a closed slot closes the socket it is given")
 }
 
 // A read on an empty slot waits for the next socket and reads from it.
 func TestSocketSlot_ReadFrom_WaitsForNextSocket(t *testing.T) {
-	slot := newSocketSlot(&fakePacketConn{})
-	slot.clear()
+	slot := NewSlot(&fakePacketConn{})
+	slot.Clear()
 	next := listenLoopback(t)
 	type result struct {
 		data string
@@ -86,7 +86,7 @@ func TestSocketSlot_ReadFrom_WaitsForNextSocket(t *testing.T) {
 		got <- result{string(buf[:n]), err}
 	}()
 
-	slot.set(next)
+	slot.Set(next)
 	sendTo(t, next.LocalAddr(), "hello")
 
 	select {
@@ -102,7 +102,7 @@ func TestSocketSlot_ReadFrom_WaitsForNextSocket(t *testing.T) {
 // network, so the path keeps sending and receiving instead of going silent.
 func TestSocketSlot_ReadFrom_SocketClosedUnderSlot(t *testing.T) {
 	first := listenLoopback(t)
-	slot := newSocketSlot(first)
+	slot := NewSlot(first)
 	t.Cleanup(func() { _ = slot.Close() }) // not actionable: cleanup
 	got := make(chan error, 1)
 	go func() {
@@ -129,12 +129,12 @@ func TestSocketSlot_ReadFrom_SocketClosedUnderSlot(t *testing.T) {
 // slot after it.
 func TestSocketSlot_SetBuffers(t *testing.T) {
 	first := &fakePacketConn{}
-	slot := newSocketSlot(first)
+	slot := NewSlot(first)
 
 	require.NoError(t, slot.SetReadBuffer(7<<20))
 	require.NoError(t, slot.SetWriteBuffer(7<<20))
 	next := &fakePacketConn{}
-	slot.set(next)
+	slot.Set(next)
 
 	for name, conn := range map[string]*fakePacketConn{"first socket": first, "next socket": next} {
 		read, write := conn.buffers()
@@ -144,7 +144,7 @@ func TestSocketSlot_SetBuffers(t *testing.T) {
 }
 
 func TestSocketSlot_ReadFrom_EndsWhenClosed(t *testing.T) {
-	slot := newSocketSlot(&fakePacketConn{})
+	slot := NewSlot(&fakePacketConn{})
 	got := make(chan error, 1)
 	go func() {
 		_, _, err := slot.ReadFrom(make([]byte, 16))

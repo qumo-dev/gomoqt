@@ -104,9 +104,9 @@ func TestSession_AddPath_Unsupported(t *testing.T) {
 	tests := map[string]struct {
 		conn StreamConn
 	}{
-		// A connection from DialQUICFunc, WebSocket, or a server's: none
-		// carries a migrator.
-		"connection without a migrator": {conn: &FakeStreamConn{}},
+		// A WebSocket one, or one from DialQUICFunc: no QUIC connection
+		// under it that gomoqt dialed.
+		"connection without a QUIC connection": {conn: &FakeStreamConn{}},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -121,6 +121,46 @@ func TestSession_AddPath_Unsupported(t *testing.T) {
 			assert.True(t, link.closed.Load(), "a socket no path takes should be closed")
 		})
 	}
+}
+
+// A server session cannot move its client: quic-go refuses a server's path.
+func TestSession_AddPath_ServerSession(t *testing.T) {
+	addr := freePort(t)
+	serverSessions := make(chan *Session, 1)
+	srv := &Server{
+		Addr: addr,
+		TLSConfig: &tls.Config{
+			NextProtos:   []string{NextProtoMOQ},
+			Certificates: []tls.Certificate{generateTestCert(t)},
+		},
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Handler: HandleFunc(func(sess *Session) {
+			serverSessions <- sess
+			<-sess.Context().Done()
+		}),
+	}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, ErrServerClosed) {
+			t.Logf("server: %v", err)
+		}
+	}()
+	t.Cleanup(func() { closeServer(t, srv) })
+	dialer := &Dialer{TLSConfig: &tls.Config{InsecureSkipVerify: true}} //nolint:gosec // test-only self-signed cert
+	var client *Session
+	require.Eventually(t, func() bool {
+		var err error
+		client, err = dialer.Dial(t.Context(), "moqt://"+addr+"/", nil)
+		return err == nil
+	}, 10*time.Second, 50*time.Millisecond)
+	t.Cleanup(func() { _ = client.CloseWithError(NoError, "test done") }) // not actionable: cleanup
+	server := <-serverSessions
+	link := &fakeLink{PacketConn: listenLoopback(t)}
+
+	p, err := server.AddPath(link)
+
+	assert.ErrorIs(t, err, ErrMigrationUnsupported)
+	assert.Nil(t, p)
+	assert.True(t, link.closed.Load(), "a socket no path takes should be closed")
 }
 
 // skipDeadNetworkMove skips a move off a network already gone. The client

@@ -1,7 +1,8 @@
-package quicgo
+package moqt
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"strconv"
 	"sync/atomic"
@@ -9,9 +10,13 @@ import (
 	"time"
 
 	"github.com/quic-go/quic-go"
+	"github.com/qumo-dev/gomoqt/moqt/internal/quicgo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// Path tests run on a bare QUIC connection whose server only sends, so that
+// what moves is the connection itself, not a session's streams.
 
 // A receive-only client moves back and forth between two networks, as a
 // phone between Wi-Fi and cellular, and the server keeps sending to it over
@@ -54,7 +59,7 @@ func TestPath_Switch_RepeatedMoves(t *testing.T) {
 				c.requireDataOn(t, nextLink, "move "+strconv.Itoa(move))
 				cur, curLink, next, nextLink = next, nextLink, cur, curLink
 			}
-			assert.NoError(t, c.m.conn.Context().Err(), "the connection should survive every move")
+			assert.NoError(t, c.conn.Context().Err(), "the connection should survive every move")
 		})
 	}
 }
@@ -62,7 +67,7 @@ func TestPath_Switch_RepeatedMoves(t *testing.T) {
 // Closing the path the connection is on moves it onto a new socket bound to
 // no network, which follows the OS's default network, and gives up the
 // closed path's socket at once.
-func TestPath_Close_Active(t *testing.T) {
+func TestPath_Close_ActiveRebinds(t *testing.T) {
 	tests := map[string]struct {
 		cutBeforeClose bool
 	}{
@@ -83,7 +88,7 @@ func TestPath_Close_Active(t *testing.T) {
 
 			assert.True(t, link.closed.Load(), "the closed path's socket should be given up at once")
 			before := c.received.Load()
-			assert.Eventually(t, func() bool { return c.received.Load() > before+4000 }, 5*time.Second, 10*time.Millisecond,
+			assert.Eventually(t, func() bool { return c.received.Load() > before+4000 }, moveTimeout, 10*time.Millisecond,
 				"data should keep arriving over the new socket")
 		})
 	}
@@ -118,15 +123,6 @@ func TestPath_Close_Unused(t *testing.T) {
 	assert.True(t, link.closed.Load())
 }
 
-func TestPath_Switch_NotValidated(t *testing.T) {
-	c := dialPushed(t)
-	p, _ := c.addLink(t)
-
-	err := p.Switch()
-
-	assert.ErrorIs(t, err, ErrPathNotValidated)
-}
-
 func TestPath_Closed(t *testing.T) {
 	c := dialPushed(t)
 	p, _ := c.addLink(t)
@@ -156,67 +152,61 @@ func TestPath_Switch_BackToBack(t *testing.T) {
 	}
 
 	c.requireDataOn(t, bLink)
-	assert.NoError(t, c.m.conn.Context().Err())
+	assert.NoError(t, c.conn.Context().Err())
 }
 
-func TestMigrator_AddPath_ConnectionGone(t *testing.T) {
+func TestPathSet_Add_ConnectionGone(t *testing.T) {
 	c := dialPushed(t)
-	require.NoError(t, c.m.conn.CloseWithError(0, "done"))
-	conn := &fakePacketConn{}
+	require.NoError(t, c.conn.CloseWithError(0, "done"))
+	link := &fakeLink{PacketConn: listenLoopback(t)}
 
-	p, err := c.m.AddPath(conn)
+	p, err := c.set.add(link)
 
 	assert.Error(t, err)
 	assert.Nil(t, p)
-	assert.True(t, conn.isClosed(), "the socket should be closed when no path takes it")
+	assert.True(t, link.closed.Load(), "the socket should be closed when no path takes it")
 }
 
-func TestMigrator_ClosesPathSocketsWithConnection(t *testing.T) {
+func TestPathSet_ClosesPathSocketsWithConnection(t *testing.T) {
 	c := dialPushed(t)
 	p, link := c.addLink(t)
 	c.moveTo(t, p)
 
-	require.NoError(t, c.m.conn.CloseWithError(0, "done"))
+	require.NoError(t, c.conn.CloseWithError(0, "done"))
 
 	assert.Eventually(t, link.closed.Load, 3*time.Second, 10*time.Millisecond)
 }
 
-// skipDeadNetworkMove skips a move off a network already gone. The client
-// answers the server's PATH_CHALLENGE on the path it is leaving
-// (quic-go#5408), so the move needs a server that challenges the new path
-// again, as quic-go's does from v0.64 (quic-go#5930); a v0.63 server, which
-// these tests run, may never follow the client.
-func skipDeadNetworkMove(tb testing.TB) {
-	tb.Helper()
-	tb.Skip("a move off a network already gone needs a quic-go v0.64+ server")
-}
-
-// moveTimeout bounds a move in these tests.
-const moveTimeout = 5 * time.Second
-
 // pushedClient is a client that only receives: the server sends it a steady
 // stream, and it sends nothing but acknowledgements and keep-alives.
 type pushedClient struct {
-	m        *Migrator
+	conn     *quic.Conn
+	set      *pathSet
 	received atomic.Int64 // bytes read from the server's stream
 }
 
 func dialPushed(tb testing.TB) *pushedClient {
 	tb.Helper()
-	srv := startPushServer(tb)
+	addr := startPushServer(tb)
 	ctx, cancel := context.WithTimeout(tb.Context(), 5*time.Second)
 	defer cancel()
-	m, err := Dial(ctx, srv.addr(), srv.clientTLS("localhost"), &quic.Config{
+	conn, err := quicgo.Dial(ctx, addr, &tls.Config{
+		InsecureSkipVerify: true, //nolint:gosec // test-only self-signed cert
+		NextProtos:         []string{pushALPN},
+		MinVersion:         tls.VersionTLS13,
+	}, &quic.Config{
 		// The keep-alive tells the server of a move when nothing else would:
-		// the first move off the home path, from a network already gone.
+		// the first move off the dialed socket, from a network already gone.
 		KeepAlivePeriod: time.Second,
 		MaxIdleTimeout:  10 * time.Second,
 	})
 	require.NoError(tb, err)
-	tb.Cleanup(func() { _ = m.conn.CloseWithError(0, "test done") }) // not actionable: cleanup
-	str, err := m.conn.AcceptUniStream(ctx)
+	tb.Cleanup(func() { _ = conn.CloseWithError(0, "test done") }) // not actionable: cleanup
+	str, err := conn.AcceptUniStream(ctx)
 	require.NoError(tb, err)
-	c := &pushedClient{m: m}
+	set := &pathSet{conn: conn}
+	context.AfterFunc(conn.Context(), set.close)
+	c := &pushedClient{conn: conn, set: set}
 	// The read ends with the connection, closed by the cleanup above.
 	go func() {
 		buf := make([]byte, 4096)
@@ -235,21 +225,16 @@ func dialPushed(tb testing.TB) *pushedClient {
 func (c *pushedClient) addLink(tb testing.TB) (*Path, *fakeLink) {
 	tb.Helper()
 	link := &fakeLink{PacketConn: listenLoopback(tb)}
-	p, err := c.m.AddPath(link)
+	p, err := c.set.add(link)
 	require.NoError(tb, err)
 	return p, link
 }
 
-func (c *pushedClient) probe(tb testing.TB, p *Path) {
+func (c *pushedClient) moveTo(tb testing.TB, p *Path) {
 	tb.Helper()
 	ctx, cancel := context.WithTimeout(tb.Context(), moveTimeout)
 	defer cancel()
 	require.NoError(tb, p.Probe(ctx))
-}
-
-func (c *pushedClient) moveTo(tb testing.TB, p *Path) {
-	tb.Helper()
-	c.probe(tb, p)
 	require.NoError(tb, p.Switch())
 }
 
@@ -261,12 +246,17 @@ func (c *pushedClient) requireDataOn(tb testing.TB, link *fakeLink, msgAndArgs .
 	require.Eventually(tb, func() bool { return link.reads.Load()-before >= 12 }, moveTimeout, 5*time.Millisecond, msgAndArgs...)
 }
 
-// startPushServer starts a QUIC server that, on each connection, sends a
-// steady stream of 200 bytes every 10 ms on a unidirectional stream.
-func startPushServer(tb testing.TB) *echoServer {
+const pushALPN = "moqt-path-test"
+
+// startPushServer starts a QUIC server that, on each connection, sends 200
+// bytes every 10 ms on a unidirectional stream, and returns its address.
+func startPushServer(tb testing.TB) string {
 	tb.Helper()
-	cert, leaf := localhostCert(tb)
-	ln, err := quic.ListenAddrEarly("127.0.0.1:0", serverTLS(cert), &quic.Config{MaxIdleTimeout: 10 * time.Second})
+	ln, err := quic.ListenAddrEarly("127.0.0.1:0", &tls.Config{
+		Certificates: []tls.Certificate{generateTestCert(tb)},
+		NextProtos:   []string{pushALPN},
+		MinVersion:   tls.VersionTLS13,
+	}, &quic.Config{MaxIdleTimeout: 10 * time.Second})
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = ln.Close() }) // not actionable: cleanup
 	// The server's goroutines end with the test: its context is cancelled
@@ -281,7 +271,7 @@ func startPushServer(tb testing.TB) *echoServer {
 			go push(ctx, conn)
 		}
 	}()
-	return &echoServer{port: ln.Addr().(*net.UDPAddr).Port, cert: leaf}
+	return ln.Addr().(*net.UDPAddr).String()
 }
 
 func push(ctx context.Context, conn *quic.Conn) {

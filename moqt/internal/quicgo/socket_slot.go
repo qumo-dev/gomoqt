@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// socketSlot is the socket under one path's quic.Transport. quic-go
+// Slot is the socket under a quic.Transport, which it lets change. quic-go
 // destroys a connection when any transport it has used is closed
 // (quic-go#5975), so a path gives up its socket, not its transport: the
 // slot swaps sockets under the transport, which never sees the change.
@@ -19,7 +19,7 @@ import (
 // the packet as lost. A socket closed under the slot by anyone but the slot
 // is replaced by one bound to no network, which the OS routes over its
 // default network. Only closing the slot ends its reads.
-type socketSlot struct {
+type Slot struct {
 	state atomic.Pointer[slotState]
 
 	mu       sync.Mutex // serializes changes to state
@@ -36,17 +36,17 @@ type slotState struct {
 	closed  bool
 }
 
-var _ net.PacketConn = (*socketSlot)(nil)
+var _ net.PacketConn = (*Slot)(nil)
 
-func newSocketSlot(conn net.PacketConn) *socketSlot {
-	s := &socketSlot{}
+func NewSlot(conn net.PacketConn) *Slot {
+	s := &Slot{}
 	s.state.Store(&slotState{conn: conn, addr: conn.LocalAddr(), changed: make(chan struct{})})
 	return s
 }
 
-// set puts conn in the slot, closing the socket it replaces. A closed slot
+// Set puts conn in the slot, closing the socket it replaces. A closed slot
 // closes conn instead.
-func (s *socketSlot) set(conn net.PacketConn) {
+func (s *Slot) Set(conn net.PacketConn) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.state.Load().closed {
@@ -57,8 +57,8 @@ func (s *socketSlot) set(conn net.PacketConn) {
 	s.replace(conn, false)
 }
 
-// clear closes the slot's socket and leaves the slot empty.
-func (s *socketSlot) clear() {
+// Clear closes the slot's socket and leaves the slot empty.
+func (s *Slot) Clear() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.state.Load().closed {
@@ -68,7 +68,7 @@ func (s *socketSlot) clear() {
 }
 
 // Close closes the slot and its socket, ending its reads.
-func (s *socketSlot) Close() error {
+func (s *Slot) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.state.Load().closed {
@@ -80,7 +80,7 @@ func (s *socketSlot) Close() error {
 
 // replace swaps conn in, closes the socket it replaces and wakes reads
 // waiting on the old state. s.mu is held.
-func (s *socketSlot) replace(conn net.PacketConn, closed bool) {
+func (s *Slot) replace(conn net.PacketConn, closed bool) {
 	old := s.state.Load()
 	if old.conn != nil {
 		_ = old.conn.Close() // not actionable: the socket is being given up
@@ -95,7 +95,7 @@ func (s *socketSlot) replace(conn net.PacketConn, closed bool) {
 
 // rebind replaces conn, closed under the slot, with a socket bound to no
 // network, unless the slot changed meanwhile.
-func (s *socketSlot) rebind(conn net.PacketConn) {
+func (s *Slot) rebind(conn net.PacketConn) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if st := s.state.Load(); st.closed || st.conn != conn {
@@ -110,7 +110,7 @@ func (s *socketSlot) rebind(conn net.PacketConn) {
 	s.replace(udp, false)
 }
 
-func (s *socketSlot) ReadFrom(p []byte) (int, net.Addr, error) {
+func (s *Slot) ReadFrom(p []byte) (int, net.Addr, error) {
 	for {
 		st := s.state.Load()
 		if st.closed {
@@ -137,7 +137,7 @@ func (s *socketSlot) ReadFrom(p []byte) (int, net.Addr, error) {
 // readRetryDelay spaces the reads of a socket that keeps failing.
 const readRetryDelay = 10 * time.Millisecond
 
-func (s *socketSlot) WriteTo(p []byte, addr net.Addr) (int, error) {
+func (s *Slot) WriteTo(p []byte, addr net.Addr) (int, error) {
 	st := s.state.Load()
 	if st.closed {
 		return 0, net.ErrClosed
@@ -161,7 +161,7 @@ type (
 
 // SetReadBuffer sets the receive buffer of the slot's socket, and of every
 // socket put in it later. quic-go raises it through this method.
-func (s *socketSlot) SetReadBuffer(bytes int) error {
+func (s *Slot) SetReadBuffer(bytes int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.readBuf = bytes
@@ -173,7 +173,7 @@ func (s *socketSlot) SetReadBuffer(bytes int) error {
 
 // SetWriteBuffer sets the send buffer of the slot's socket, and of every
 // socket put in it later.
-func (s *socketSlot) SetWriteBuffer(bytes int) error {
+func (s *Slot) SetWriteBuffer(bytes int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.writeBuf = bytes
@@ -185,7 +185,7 @@ func (s *socketSlot) SetWriteBuffer(bytes int) error {
 
 // applyBuffers gives conn the buffer sizes asked for so far; the OS caps
 // them, as it does for quic-go's own sockets. s.mu is held.
-func (s *socketSlot) applyBuffers(conn net.PacketConn) {
+func (s *Slot) applyBuffers(conn net.PacketConn) {
 	if c, ok := conn.(readBuffered); ok && s.readBuf > 0 {
 		_ = c.SetReadBuffer(s.readBuf) // not actionable: the OS's cap stands
 	}
@@ -194,22 +194,22 @@ func (s *socketSlot) applyBuffers(conn net.PacketConn) {
 	}
 }
 
-func (s *socketSlot) LocalAddr() net.Addr { return s.state.Load().addr }
+func (s *Slot) LocalAddr() net.Addr { return s.state.Load().addr }
 
-func (s *socketSlot) SetDeadline(t time.Time) error {
+func (s *Slot) SetDeadline(t time.Time) error {
 	return s.forward(func(c net.PacketConn) error { return c.SetDeadline(t) })
 }
 
-func (s *socketSlot) SetReadDeadline(t time.Time) error {
+func (s *Slot) SetReadDeadline(t time.Time) error {
 	return s.forward(func(c net.PacketConn) error { return c.SetReadDeadline(t) })
 }
 
-func (s *socketSlot) SetWriteDeadline(t time.Time) error {
+func (s *Slot) SetWriteDeadline(t time.Time) error {
 	return s.forward(func(c net.PacketConn) error { return c.SetWriteDeadline(t) })
 }
 
 // forward applies f to the slot's socket, if it has one.
-func (s *socketSlot) forward(f func(net.PacketConn) error) error {
+func (s *Slot) forward(f func(net.PacketConn) error) error {
 	st := s.state.Load()
 	if st.closed {
 		return net.ErrClosed
