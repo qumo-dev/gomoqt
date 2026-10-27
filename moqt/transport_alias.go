@@ -8,5 +8,9 @@ type (
 	StreamConn   = transport.StreamConn
 	QUICListener = transport.QUICListener
 
+	QUICConfig    = transport.QUICConfig
+	QUICTransport = transport.QUICTransport
+	QUICPath      = transport.QUICPath
+
 	WebTransportSession = transport.WebTransportSession
 )

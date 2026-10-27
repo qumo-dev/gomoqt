@@ -18,7 +18,7 @@ type quicConn interface {
 }
 
 // AddPath adds a network path over t to the session's QUIC connection, as
-// [quic.Conn.AddPath] does: the connection, and the session on it, can then
+// quic-go's Conn.AddPath does: the connection, and the session on it, can then
 // move onto t's socket (RFC 9000 §9) through the returned path's Probe and
 // Switch, and stay the same. The application owns t and its socket, and
 // chooses when to move; gomoqt applies no policy.
@@ -30,11 +30,11 @@ type quicConn interface {
 //     socket the session was dialed from, dial with [Dialer.Transport] and
 //     add that transport.
 //   - Closing a transport the connection has used ends the connection
-//     (quic-go#5975); close the path with quic.Path.Close instead, and the
+//     (quic-go#5975); close the path with QUICPath.Close instead, and the
 //     transport once the session has ended.
 //   - Every transport of the connection should use zero-length connection
 //     IDs, as one dialed by Dialer does: give each one a
-//     quic.ConnectionIDGenerator whose ConnectionIDLen is 0. A transport
+//     ConnectionIDGenerator whose ConnectionIDLen is 0. A transport
 //     with quic-go's default length cannot carry a path for such a
 //     connection (quic-go#5185), and a quic-go server follows a client with
 //     non-zero-length ones only twice (quic-go#5965).
@@ -44,14 +44,13 @@ type quicConn interface {
 //
 // A move from a network still working loses nothing. One from a network
 // already gone takes until the server sees the client on the new path,
-// which the client's next packet shows it: set
-// [quic.Config.KeepAlivePeriod] to bound that for a session that only
-// receives.
+// which the client's next packet shows it: set the KeepAlivePeriod of
+// [Dialer.QUICConfig] to bound that for a session that only receives.
 //
 // It returns [ErrMigrationUnsupported] for a session with no QUIC
 // connection gomoqt can reach, and quic-go's error for one that cannot
 // migrate: a server's, or one whose peer disabled migration.
-func (s *Session) AddPath(t *quic.Transport) (*quic.Path, error) {
+func (s *Session) AddPath(t *QUICTransport) (*QUICPath, error) {
 	qc, ok := s.conn.(quicConn)
 	if !ok || qc.QUICConn() == nil {
 		return nil, ErrMigrationUnsupported
