@@ -65,23 +65,10 @@ jobs:
         working-directory: ./moq-web
         run: deno check src/mod.ts
 
-      - name: Run tests with coverage (Deno)
+      - name: Run tests (Deno)
         if: matrix.runtime.name == 'deno'
         working-directory: ./moq-web
-        run: |
-          deno test --allow-all --coverage=cov
-          deno coverage cov --lcov --output=coverage.lcov
-
-      - name: Upload coverage to Codecov (Deno)
-        if: matrix.runtime.name == 'deno'
-        uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./moq-web/coverage.lcov
-          flags: moq-web-deno
-          name: moq-web-deno-coverage
-          fail_ci_if_error: false
-          verbose: true
+        run: deno test --allow-all
 
       # Node.js-specific steps
       - name: Run tests (Node.js)
