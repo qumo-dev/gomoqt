@@ -3,6 +3,7 @@ package quicgo
 import (
 	"errors"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,8 +18,7 @@ import (
 // would end the connection with it: a write while the slot is empty, or one
 // the OS refuses for a network change, is reported as sent, so QUIC treats
 // the packet as lost. A socket closed under the slot by anyone but the slot
-// is replaced by one bound to no network, which the OS routes over its
-// default network. Only closing the slot ends its reads.
+// leaves it empty until the next Set. Only closing the slot ends its reads.
 type Slot struct {
 	state atomic.Pointer[slotState]
 
@@ -38,7 +38,8 @@ type slotState struct {
 
 var _ net.PacketConn = (*Slot)(nil)
 
-func NewSlot(conn net.PacketConn) *Slot {
+// newSlot returns a slot holding conn.
+func newSlot(conn net.PacketConn) *Slot {
 	s := &Slot{}
 	s.state.Store(&slotState{conn: conn, addr: conn.LocalAddr(), changed: make(chan struct{})})
 	return s
@@ -93,23 +94,19 @@ func (s *Slot) replace(conn net.PacketConn, closed bool) {
 	close(old.changed)
 }
 
-// rebind replaces conn, closed under the slot, with a socket bound to no
-// network, unless the slot changed meanwhile.
-func (s *Slot) rebind(conn net.PacketConn) {
+// empty empties the slot if conn, closed under it, is still its socket.
+func (s *Slot) empty(conn net.PacketConn) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if st := s.state.Load(); st.closed || st.conn != conn {
-		return
+	if st := s.state.Load(); !st.closed && st.conn == conn {
+		s.replace(nil, false)
 	}
-	udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero})
-	if err != nil {
-		s.replace(nil, false) // empty: writes are lost until the next socket
-		return
-	}
-	s.applyBuffers(udp)
-	s.replace(udp, false)
 }
 
+// ReadFrom reads a datagram from the slot's socket, waiting while the slot
+// is empty. It returns net.ErrClosed once the slot is closed, and a deadline
+// set through SetReadDeadline as the socket returns it, which is how
+// quic.Transport.Close stops its reads.
 func (s *Slot) ReadFrom(p []byte) (int, net.Addr, error) {
 	for {
 		st := s.state.Load()
@@ -125,8 +122,11 @@ func (s *Slot) ReadFrom(p []byte) (int, net.Addr, error) {
 			return n, addr, nil
 		}
 		if errors.Is(err, net.ErrClosed) {
-			s.rebind(st.conn)
+			s.empty(st.conn)
 			continue
+		}
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			return 0, nil, err
 		}
 		// A read error the socket survives, such as Windows reporting an
 		// ICMP port unreachable: read again, unhurried.
@@ -137,6 +137,8 @@ func (s *Slot) ReadFrom(p []byte) (int, net.Addr, error) {
 // readRetryDelay spaces the reads of a socket that keeps failing.
 const readRetryDelay = 10 * time.Millisecond
 
+// WriteTo writes a datagram from the slot's socket. A write while the slot
+// is empty, or one refused for a network change, is reported as sent.
 func (s *Slot) WriteTo(p []byte, addr net.Addr) (int, error) {
 	st := s.state.Load()
 	if st.closed {
@@ -194,16 +196,21 @@ func (s *Slot) applyBuffers(conn net.PacketConn) {
 	}
 }
 
+// LocalAddr is the address of the slot's socket, or of the last one while
+// the slot is empty.
 func (s *Slot) LocalAddr() net.Addr { return s.state.Load().addr }
 
+// SetDeadline sets the deadlines of the slot's socket.
 func (s *Slot) SetDeadline(t time.Time) error {
 	return s.forward(func(c net.PacketConn) error { return c.SetDeadline(t) })
 }
 
+// SetReadDeadline sets the read deadline of the slot's socket.
 func (s *Slot) SetReadDeadline(t time.Time) error {
 	return s.forward(func(c net.PacketConn) error { return c.SetReadDeadline(t) })
 }
 
+// SetWriteDeadline sets the write deadline of the slot's socket.
 func (s *Slot) SetWriteDeadline(t time.Time) error {
 	return s.forward(func(c net.PacketConn) error { return c.SetWriteDeadline(t) })
 }

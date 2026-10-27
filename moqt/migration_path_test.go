@@ -64,15 +64,15 @@ func TestPath_Switch_RepeatedMoves(t *testing.T) {
 	}
 }
 
-// Closing the path the connection is on moves it onto a new socket bound to
-// no network, which follows the OS's default network, and gives up the
-// closed path's socket at once.
-func TestPath_Close_ActiveRebinds(t *testing.T) {
+// Rebinding the path the connection is on moves the connection onto the new
+// socket without a probe, whether or not the old one's network still works,
+// and closes the old socket at once.
+func TestPath_Rebind_Active(t *testing.T) {
 	tests := map[string]struct {
-		cutBeforeClose bool
+		cutBeforeRebind bool
 	}{
-		"closed path still up":       {},
-		"closed path's network gone": {cutBeforeClose: true},
+		"old network still up": {},
+		"old network gone":     {cutBeforeRebind: true},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -80,37 +80,113 @@ func TestPath_Close_ActiveRebinds(t *testing.T) {
 			p, link := c.addLink(t)
 			c.moveTo(t, p)
 			c.requireDataOn(t, link)
-			if tt.cutBeforeClose {
+			if tt.cutBeforeRebind {
 				link.down.Store(true)
 			}
+			next := &fakeLink{PacketConn: listenLoopback(t)}
 
-			require.NoError(t, p.Close())
+			require.NoError(t, p.Rebind(next))
 
-			assert.True(t, link.closed.Load(), "the closed path's socket should be given up at once")
-			before := c.received.Load()
-			assert.Eventually(t, func() bool { return c.received.Load() > before+4000 }, moveTimeout, 10*time.Millisecond,
-				"data should keep arriving over the new socket")
+			assert.True(t, link.closed.Load(), "the old socket should be closed at once")
+			c.requireDataOn(t, next, "data should arrive over the new socket")
 		})
 	}
 }
 
-// A path the connection has left, then closed, gives up its socket once it
-// is retired, on the next call, and the connection stays on the new path.
+// Rebinding a path not active drops its validation, which held for its old
+// socket: it must be probed again over the new one.
+func TestPath_Rebind_Inactive(t *testing.T) {
+	c := dialPushed(t)
+	p, _ := c.addLink(t)
+	ctx, cancel := context.WithTimeout(t.Context(), moveTimeout)
+	defer cancel()
+	require.NoError(t, p.Probe(ctx))
+	next := &fakeLink{PacketConn: listenLoopback(t)}
+
+	require.NoError(t, p.Rebind(next))
+
+	assert.ErrorIs(t, p.Switch(), ErrPathNotValidated)
+	c.moveTo(t, p)
+	c.requireDataOn(t, next)
+}
+
+func TestPath_Rebind_Closed(t *testing.T) {
+	c := dialPushed(t)
+	p, _ := c.addLink(t)
+	require.NoError(t, p.Close())
+	next := &fakeLink{PacketConn: listenLoopback(t)}
+
+	err := p.Rebind(next)
+
+	assert.ErrorIs(t, err, ErrPathClosed)
+	assert.True(t, next.closed.Load(), "a socket no path takes should be closed")
+}
+
+// The path the connection is on cannot be closed: the application switches
+// away from it, or rebinds it, first.
+func TestPath_Close_Active(t *testing.T) {
+	c := dialPushed(t)
+	p, link := c.addLink(t)
+	c.moveTo(t, p)
+
+	err := p.Close()
+
+	assert.ErrorIs(t, err, ErrPathActive)
+	assert.False(t, link.closed.Load())
+	c.requireDataOn(t, link)
+}
+
+// A path the connection has left closes, and gives up its socket, at once.
 func TestPath_Close_Left(t *testing.T) {
 	c := dialPushed(t)
 	old, oldLink := c.addLink(t)
 	next, nextLink := c.addLink(t)
 	c.moveTo(t, old)
 	c.moveTo(t, next)
+	// Make before break, as in TestPath_Switch_RepeatedMoves: closed sooner,
+	// the old socket can take the client's answer to the server's
+	// PATH_CHALLENGE with it.
 	c.requireDataOn(t, nextLink)
 
 	require.NoError(t, old.Close())
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	require.NoError(t, next.Probe(ctx)) // any call retires the paths left
 
-	assert.True(t, oldLink.closed.Load(), "the closed path's socket should be given up once retired")
+	assert.True(t, oldLink.closed.Load())
 	c.requireDataOn(t, nextLink)
+}
+
+// Probing a path already validated returns at once, and the path stays
+// ready to switch to.
+func TestPath_Probe_AlreadyValidated(t *testing.T) {
+	c := dialPushed(t)
+	p, link := c.addLink(t)
+	ctx, cancel := context.WithTimeout(t.Context(), moveTimeout)
+	defer cancel()
+	require.NoError(t, p.Probe(ctx))
+
+	start := time.Now()
+	require.NoError(t, p.Probe(ctx))
+
+	assert.Less(t, time.Since(start), 100*time.Millisecond)
+	require.NoError(t, p.Switch())
+	c.requireDataOn(t, link)
+}
+
+// A probe ends with the connection, even with no deadline of its own.
+func TestPath_Probe_EndsWithConnection(t *testing.T) {
+	c := dialPushed(t)
+	p, link := c.addLink(t)
+	link.down.Store(true) // the probe gets no answer
+	got := make(chan error, 1)
+	go func() { got <- p.Probe(context.Background()) }()
+
+	require.NoError(t, c.conn.CloseWithError(0, "done"))
+
+	select {
+	case err := <-got:
+		assert.Error(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("the probe did not end with the connection")
+	}
 }
 
 // A path never used gives up its socket as soon as it is closed.

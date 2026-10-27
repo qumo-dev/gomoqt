@@ -12,7 +12,7 @@ import (
 // it (quic-go#5185), and a server follows a client with non-zero-length
 // ones only twice (quic-go#5965).
 func NewTransport(conn net.PacketConn) (*quic.Transport, *Slot) {
-	slot := NewSlot(conn)
+	slot := newSlot(conn)
 	return &quic.Transport{Conn: slot, ConnectionIDGenerator: zeroConnIDs{}}, slot
 }
 

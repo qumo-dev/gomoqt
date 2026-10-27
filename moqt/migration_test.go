@@ -73,22 +73,21 @@ func TestSession_AddPath_Moves(t *testing.T) {
 	}
 }
 
-// Closing the active path, whose network is gone, moves the session onto a
-// socket the OS routes, and groups keep arriving.
-func TestPath_Close_Active(t *testing.T) {
+// A session whose active network is gone carries on once the application
+// rebinds the path to another socket, and its groups keep arriving.
+func TestSession_Path_Rebind(t *testing.T) {
 	sub := subscribeMigrating(t, "moqt")
 	sub.requireGroups(t)
 	p, link := sub.addLink(t)
 	sub.moveTo(t, p)
 	sub.requireGroupsOn(t, link, "on the added path")
 	link.down.Store(true) // its network is gone
+	next := &fakeLink{PacketConn: listenLoopback(t)}
 
-	require.NoError(t, p.Close())
+	require.NoError(t, p.Rebind(next))
 
-	before := sub.groups.Load()
-	assert.Eventually(t, func() bool { return sub.groups.Load() >= before+20 }, 5*time.Second, 10*time.Millisecond,
-		"groups should keep arriving over the socket the session was dialed from")
-	assert.Eventually(t, link.closed.Load, 5*time.Second, 10*time.Millisecond, "the closed path's socket should be closed")
+	sub.requireGroupsOn(t, next, "after the rebind")
+	assert.True(t, link.closed.Load(), "the replaced socket should be closed")
 }
 
 func TestPath_Switch_NotValidated(t *testing.T) {
