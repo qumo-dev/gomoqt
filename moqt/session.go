@@ -88,11 +88,6 @@ type Session struct {
 
 	connManager *connManager
 
-	// paths are the network paths the connection can move onto, created on
-	// the first AddPath (see migration.go).
-	pathsMu sync.Mutex
-	paths   *pathSet
-
 	// path is the session's request path, resolved by the binding (see
 	// sessionSetup.path). sendPath reports whether it must also be conveyed in
 	// our outgoing SETUP, which only the native-QUIC client does.

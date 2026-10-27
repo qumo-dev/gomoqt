@@ -40,7 +40,7 @@ func TestServerName(t *testing.T) {
 	}
 }
 
-func TestDial_ServerName(t *testing.T) {
+func TestDialEarly_ServerName(t *testing.T) {
 	srv := startEchoServer(t)
 	port := strconv.Itoa(srv.port)
 	tests := map[string]struct {
@@ -64,14 +64,14 @@ func TestDial_ServerName(t *testing.T) {
 	}
 }
 
-func TestDial_ClosesSocketWithConnection(t *testing.T) {
+func TestDialEarly_ClosesSocketWithConnection(t *testing.T) {
 	srv := startEchoServer(t)
 	conn := dialTest(t, srv.addr(), srv.clientTLS("localhost"))
 	port := conn.LocalAddr().(*net.UDPAddr).Port
 
 	require.NoError(t, conn.CloseWithError(0, "done"))
 
-	// The port is free again once Dial closed its socket.
+	// The port is free again once DialEarly closed its socket.
 	assert.Eventually(t, func() bool {
 		c, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: port})
 		if err != nil {
@@ -82,8 +82,8 @@ func TestDial_ClosesSocketWithConnection(t *testing.T) {
 	}, 2*time.Second, 20*time.Millisecond)
 }
 
-func TestDial_UnresolvableAddress(t *testing.T) {
-	conn, _, err := Dial(t.Context(), "no-port", &tls.Config{NextProtos: []string{testALPN}}, nil)
+func TestDialEarly_UnresolvableAddress(t *testing.T) {
+	conn, err := DialEarly(t.Context(), "no-port", &tls.Config{NextProtos: []string{testALPN}}, nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, conn)
@@ -92,8 +92,8 @@ func TestDial_UnresolvableAddress(t *testing.T) {
 // A server follows a client through every change of its address, as a phone
 // moving between Wi-Fi and cellular makes. quic-go's server runs out of
 // connection IDs after two such changes for a client with non-zero-length
-// ones (quic-go#5965); Dial's zero-length ones avoid that.
-func TestDial_FollowsRepeatedAddressChanges(t *testing.T) {
+// ones (quic-go#5965); DialEarly's zero-length ones avoid that.
+func TestDialEarly_FollowsRepeatedAddressChanges(t *testing.T) {
 	srv := startEchoServer(t)
 	rb := startRebinder(t, srv.addr())
 	conn := dialTest(t, rb.frontAddr(), srv.clientTLS("localhost"))
@@ -112,7 +112,7 @@ func dialTest(tb testing.TB, addr string, tlsConf *tls.Config) *quic.Conn {
 	tb.Helper()
 	ctx, cancel := context.WithTimeout(tb.Context(), 5*time.Second)
 	defer cancel()
-	conn, _, err := Dial(ctx, addr, tlsConf, &quic.Config{MaxIdleTimeout: 10 * time.Second})
+	conn, err := DialEarly(ctx, addr, tlsConf, &quic.Config{MaxIdleTimeout: 10 * time.Second})
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = conn.CloseWithError(0, "test done") }) // not actionable: cleanup
 	return conn
@@ -162,7 +162,11 @@ func (s *echoServer) clientTLS(serverName string) *tls.Config {
 func startEchoServer(tb testing.TB) *echoServer {
 	tb.Helper()
 	cert, leaf := localhostCert(tb)
-	ln, err := quic.ListenAddrEarly(":0", serverTLS(cert), &quic.Config{MaxIdleTimeout: 10 * time.Second})
+	ln, err := quic.ListenAddrEarly(":0", &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		NextProtos:   []string{testALPN},
+		MinVersion:   tls.VersionTLS13,
+	}, &quic.Config{MaxIdleTimeout: 10 * time.Second})
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = ln.Close() }) // not actionable: cleanup
 	// The server's goroutines end with the test: its context is cancelled
@@ -189,10 +193,6 @@ func startEchoServer(tb testing.TB) *echoServer {
 		}
 	}()
 	return &echoServer{port: ln.Addr().(*net.UDPAddr).Port, cert: leaf}
-}
-
-func serverTLS(cert tls.Certificate) *tls.Config {
-	return &tls.Config{Certificates: []tls.Certificate{cert}, NextProtos: []string{testALPN}, MinVersion: tls.VersionTLS13}
 }
 
 // localhostCert is a self-signed certificate for localhost alone.

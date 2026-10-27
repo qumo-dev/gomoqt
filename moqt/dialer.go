@@ -50,6 +50,18 @@ type Dialer struct {
 	// Config contains additional configuration options for the Dialer.
 	Config *Config
 
+	// Transport, if not nil, is the quic.Transport the default dials dial
+	// native QUIC and WebTransport sessions over, as quic.Transport.Dial
+	// does: the application owns it and the socket under it, and a session
+	// dialed over it ends if it is closed. It lets the application add the
+	// transport to the session again with [Session.AddPath], to move back
+	// onto it. A connection that will move should use zero-length
+	// connection IDs on every transport it uses (see [Session.AddPath]).
+	//
+	// If nil, each dial uses a transport of its own, as quic.DialAddr does,
+	// over a socket that keeps the session through a network change.
+	Transport *quic.Transport
+
 	// DialQUICFunc performs the QUIC handshake and establishes a connection.
 	// If nil, the default QUIC dialer is used.
 	DialQUICFunc func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (StreamConn, error)
@@ -156,7 +168,7 @@ func (d *Dialer) dialWebTransport(ctx context.Context, target *url.URL, mux *Tra
 			if err := checkKeepAlive(quicConfig); err != nil {
 				return nil, nil, err
 			}
-			return webtransportgo.Dial(ctx, addr, header, tlsConfig, webTransportQUICConfig(quicConfig), []string{NextProtoMOQ})
+			return webtransportgo.Dial(ctx, addr, header, tlsConfig, webTransportQUICConfig(quicConfig), []string{NextProtoMOQ}, d.Transport)
 		}
 	}
 	_, conn, err := dial(dialCtx, target.String(), nil, d.TLSConfig, d.QUICConfig)
@@ -240,6 +252,9 @@ func (d *Dialer) dialQUIC(ctx context.Context, addr, path string, mux *TrackMux)
 		dialFunc = func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (StreamConn, error) {
 			if err := checkKeepAlive(quicConfig); err != nil {
 				return nil, err
+			}
+			if d.Transport != nil {
+				return quicgo.DialTransportEarly(ctx, d.Transport, addr, tlsConfig, quicConfig)
 			}
 			return quicgo.DialAddrEarly(ctx, addr, tlsConfig, quicConfig)
 		}

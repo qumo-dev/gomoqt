@@ -9,9 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **A dialed session moves between networks on request (`moqt`).** `Session.AddPath` takes a UDP socket bound to a network (cellular while on Wi-Fi), and the returned `Path`'s `Probe`, `Switch` and `Close` validate it, move the QUIC connection onto it, and give it up; the connection and session stay the same (RFC 9000 §9). `Session.DefaultPath` is the socket the session was dialed from, which follows the OS's default network; switching to it after a probe is how an app leaves a network that is gone. A path keeps its socket for life, gomoqt applies no migration policy, `Close` returns `ErrPathActive` for the active path and `ErrDefaultPath` for the default one. Native QUIC and WebTransport sessions from `Dialer`'s own dials only; others return `ErrMigrationUnsupported`.
+- **A dialed session moves between networks on request (`moqt`), in quic-go's own model.** `Dialer.Transport` dials native QUIC and WebTransport sessions over an application's `quic.Transport`, as `quic.Transport.Dial` does, and `Session.AddPath` adds a path over another transport, as `quic.Conn.AddPath` does; the returned `*quic.Path`'s `Probe`, `Switch` and `Close` move the connection, and the session on it stays the same (RFC 9000 §9). The application owns its transports and sockets and chooses when to move; sessions gomoqt did not dial over QUIC return `ErrMigrationUnsupported`.
+  - Every transport of a moving connection needs zero-length connection IDs (a `ConnectionIDGenerator` whose `ConnectionIDLen` is 0) and the same kind of socket; closing one the connection used ends it (quic-go#5975).
   - A session that only receives needs `quic.Config.KeepAlivePeriod` set: the server follows a move on the client's next packet.
-  - Dialed connections now send without ECN or GSO: quic-go panics when a connection dialed from a socket it marks ECN on moves to one it cannot.
 
 ### Fixed
 
