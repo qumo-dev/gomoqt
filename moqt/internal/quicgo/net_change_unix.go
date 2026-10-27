@@ -2,15 +2,16 @@
 
 package quicgo
 
-import (
-	"errors"
-	"syscall"
-)
+import "syscall"
 
-// isNetChangeErr reports whether a send failed because the OS has no route
-// to the peer for now, as while a phone moves between Wi-Fi and cellular.
-func isNetChangeErr(err error) bool {
-	return errors.Is(err, syscall.ENETUNREACH) ||
-		errors.Is(err, syscall.EHOSTUNREACH) ||
-		errors.Is(err, syscall.ENETDOWN)
+// netChangeErrnos are the errors a send fails with while the OS has no route
+// to the peer for now: no route to the network or host, the network down,
+// the interface's address gone (macOS and iOS), or no buffer space while the
+// interface is torn down.
+var netChangeErrnos = []error{
+	syscall.ENETUNREACH,
+	syscall.EHOSTUNREACH,
+	syscall.ENETDOWN,
+	syscall.EADDRNOTAVAIL,
+	syscall.ENOBUFS,
 }
