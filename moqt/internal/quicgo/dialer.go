@@ -98,3 +98,30 @@ func resolveUDPAddr(ctx context.Context, addr string) (string, *net.UDPAddr, err
 	}
 	return host, net.UDPAddrFromAddrPort(netip.AddrPortFrom(ip.Unmap(), uint16(portNum))), nil
 }
+
+// DialTransportEarly dials a native QUIC connection to addr through
+// [DialTransportConnEarly].
+func DialTransportEarly(ctx context.Context, tr *quic.Transport, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (transport.StreamConn, error) {
+	conn, err := DialTransportConnEarly(ctx, tr, addr, tlsConfig, quicConfig)
+	if err != nil {
+		return nil, err
+	}
+	return wrapConnection(conn), nil
+}
+
+// DialTransportConnEarly dials a 0-RTT QUIC connection to addr over tr, as
+// [quic.Transport.DialEarly] does, taking the server name from the host
+// dialed when tlsConfig names none. tr, and the socket under it, are the
+// caller's, used as they are: the connection ends if tr is closed, or if the
+// OS refuses a send on its socket.
+func DialTransportConnEarly(ctx context.Context, tr *quic.Transport, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (*quic.Conn, error) {
+	host, raddr, err := resolveUDPAddr(ctx, addr)
+	if err != nil {
+		return nil, err
+	}
+	if tlsConfig != nil && tlsConfig.ServerName == "" {
+		tlsConfig = tlsConfig.Clone()
+		tlsConfig.ServerName = host
+	}
+	return tr.DialEarly(ctx, raddr, tlsConfig, quicConfig)
+}

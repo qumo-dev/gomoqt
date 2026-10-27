@@ -103,6 +103,27 @@ func TestDialEarly_ClosesSocketWithConnection(t *testing.T) {
 	}, 2*time.Second, 20*time.Millisecond)
 }
 
+// Over a transport the caller gives, the connection uses that transport's
+// socket, and still takes the server name from the host dialed.
+func TestDialTransportConnEarly(t *testing.T) {
+	srv := startEchoServer(t)
+	udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero})
+	require.NoError(t, err)
+	tr := &quic.Transport{Conn: udp}
+	t.Cleanup(func() { _ = tr.Close() }) // not actionable: cleanup
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	conn, err := DialTransportConnEarly(ctx, tr, "localhost:"+strconv.Itoa(srv.port), srv.clientTLS(""),
+		&quic.Config{MaxIdleTimeout: 10 * time.Second})
+
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.CloseWithError(0, "test done") }) // not actionable: cleanup
+	assert.Equal(t, udp.LocalAddr().(*net.UDPAddr).Port, conn.LocalAddr().(*net.UDPAddr).Port)
+	assert.Equal(t, "localhost", conn.ConnectionState().TLS.ServerName)
+	assert.NoError(t, roundTrip(t, conn, "over the caller's transport"))
+}
+
 func TestDialEarly_UnresolvableAddress(t *testing.T) {
 	conn, err := DialEarly(t.Context(), "no-port", &tls.Config{NextProtos: []string{testALPN}}, nil)
 

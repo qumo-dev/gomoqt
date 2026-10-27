@@ -7,10 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A dialed session can move to another network: `Session.AddPath`, `Dialer.Transport`, `ErrMigrationUnsupported` (`moqt`).** `AddPath` adds a path over an app-owned `*quic.Transport` to the session's QUIC connection, as `quic.Conn.AddPath` does; the app probes, switches and closes it with quic-go's `*quic.Path`, and the session stays the same. `Dialer.Transport` dials native QUIC and WebTransport over the app's transport, so the session can move back onto it. Use zero-length connection IDs on every transport, and set `KeepAlivePeriod` for a session that only receives. WebSocket, server WebTransport and custom-dial sessions return `ErrMigrationUnsupported`.
+
 ### Fixed
 
 - **A truncated frame no longer reads as the end of a group (`moqt`).** `GroupReader.ReadFrame` returned `io.EOF`, the clean end, for a group cut off inside a frame's varints or before its payload's first byte; it now returns `io.ErrUnexpectedEOF`. A frame whose timestamp delta goes below zero returns `ErrTimestampOutOfRange` instead of wrapping.
-- **A native QUIC or WebTransport session dialed by `Dialer` keeps through a network change (`moqt`).** Once the handshake is done, a send the OS refuses while the network changes (network or host unreachable, network down, address gone, no buffer space: Wi-Fi off, moving to cellular) counts as a lost packet that QUIC retransmits on the next network, instead of closing the connection ([quic-go#5589](https://github.com/quic-go/quic-go/issues/5589)); during the handshake it still fails the dial at once, and a network that does not come back ends the connection by the idle timeout. The dial also resolves within its context and binds the resolved address's family. The client keeps zero-length connection IDs, so a quic-go server follows it through any number of address changes ([quic-go#5965](https://github.com/quic-go/quic-go/issues/5965)).
+- **A native QUIC or WebTransport session dialed by `Dialer` keeps through a network change (`moqt`).** Once the handshake is done, a send the OS refuses while the network changes (network or host unreachable, network down, address gone, no buffer space: Wi-Fi off, moving to cellular; on Android also operation not permitted, its refusal for a network being torn down or an app blocked in the background) counts as a lost packet that QUIC retransmits on the next network, instead of closing the connection ([quic-go#5589](https://github.com/quic-go/quic-go/issues/5589)); during the handshake it still fails the dial at once, and a network that does not come back ends the connection by the idle timeout. The dial also resolves within its context and binds the resolved address's family. The client keeps zero-length connection IDs, so a quic-go server follows it through any number of address changes ([quic-go#5965](https://github.com/quic-go/quic-go/issues/5965)).
 
 ## [v0.26.0] - 2026-10-17
 

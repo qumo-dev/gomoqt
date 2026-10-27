@@ -11,7 +11,14 @@ import (
 )
 
 type sessionWrapper struct {
-	sess *quicgo_webtransportgo.Session
+	sess  *quicgo_webtransportgo.Session
+	qconn *quic.Conn // the QUIC connection under a dialed session, else nil
+}
+
+// QUICConn is the QUIC connection under a dialed session, or nil for a
+// server's.
+func (conn *sessionWrapper) QUICConn() *quic.Conn {
+	return conn.qconn
 }
 
 func wrapSession(wtsess *quicgo_webtransportgo.Session) transport.WebTransportSession {
