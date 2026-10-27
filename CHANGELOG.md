@@ -7,10 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A dialed session moves between networks on request (`moqt`).** `Session.AddPath` takes a UDP socket bound to a network (cellular while on Wi-Fi), and the returned `Path`'s `Probe`, `Switch` and `Close` validate it, move the QUIC connection onto it, and give it up; the connection and session stay the same (RFC 9000 §9). Closing the active path moves the connection onto a socket bound to no network, which follows the OS's default one. Native QUIC and WebTransport sessions from `Dialer`'s own dials only; others return `ErrMigrationUnsupported`.
+  - A session that only receives needs `quic.Config.KeepAlivePeriod` set: the server follows a move on the client's next packet.
+  - Dialed connections now send without ECN or GSO: quic-go panics when a connection dialed from a socket it marks ECN on moves to one it cannot.
+
 ### Fixed
 
 - **A truncated frame no longer reads as the end of a group (`moqt`).** `GroupReader.ReadFrame` returned `io.EOF`, the clean end, for a group cut off inside a frame's varints or before its payload's first byte; it now returns `io.ErrUnexpectedEOF`. A frame whose timestamp delta goes below zero returns `ErrTimestampOutOfRange` instead of wrapping.
-- **A native QUIC or WebTransport session dialed by `Dialer` keeps through a network change (`moqt`).** A send the OS refuses while the network changes (network or host unreachable, network down: Wi-Fi off, moving to cellular) now counts as a lost packet that QUIC retransmits on the next network, instead of closing the connection ([quic-go#5589](https://github.com/quic-go/quic-go/issues/5589)); a network that does not come back still ends it by the idle timeout. The client keeps zero-length connection IDs, so a quic-go server follows it through any number of address changes ([quic-go#5965](https://github.com/quic-go/quic-go/issues/5965)).
+- **A native QUIC or WebTransport session dialed by `Dialer` keeps through a network change (`moqt`).** A send the OS refuses while the network changes (network or host unreachable, network down: Wi-Fi off, moving to cellular; on Linux and Android also operation not permitted, Android's refusal for a network being torn down or an app blocked in the background) now counts as a lost packet that QUIC retransmits on the next network, instead of closing the connection ([quic-go#5589](https://github.com/quic-go/quic-go/issues/5589)); a network that does not come back still ends it by the idle timeout. The client keeps zero-length connection IDs, so a quic-go server follows it through any number of address changes ([quic-go#5965](https://github.com/quic-go/quic-go/issues/5965)).
 
 ## [v0.26.0] - 2026-10-17
 

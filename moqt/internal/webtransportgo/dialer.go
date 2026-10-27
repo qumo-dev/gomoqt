@@ -16,16 +16,28 @@ import (
 // library's defaults, and any other must have datagrams and stream reset with
 // partial delivery on, or the library refuses it.
 //
-// The QUIC connection is dialed through [quicgo.DialEarly], so the session
-// keeps through a network change as a native QUIC one does.
+// The QUIC connection is dialed through [quicgo.Dial], so the session keeps
+// through a network change, and moves between paths, as a native QUIC one
+// does.
 func Dial(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config, quicConfig *quic.Config, appProtocols []string) (*http.Response, transport.WebTransportSession, error) {
+	var migrator *quicgo.Migrator
 	tr := quicgo_webtransportgo.Transport{
 		TLSClientConfig:      tlsConfig,
 		QUICConfig:           quicConfig,
 		ApplicationProtocols: appProtocols,
-		DialAddr:             quicgo.DialEarly,
+		// Called once, before Dial returns.
+		DialAddr: func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (*quic.Conn, error) {
+			m, err := quicgo.Dial(ctx, addr, tlsConfig, quicConfig)
+			if err != nil {
+				return nil, err
+			}
+			migrator = m
+			return m.Conn(), nil
+		},
 	}
 	rsp, wtsess, err := tr.Dial(ctx, addr, header)
-
-	return rsp, wrapSession(wtsess), err
+	if wtsess == nil {
+		return rsp, nil, err
+	}
+	return rsp, &sessionWrapper{sess: wtsess, migrator: migrator}, err
 }

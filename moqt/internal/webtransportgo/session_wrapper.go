@@ -7,11 +7,19 @@ import (
 
 	quicgo_webtransportgo "github.com/okdaichi/webtransport-go"
 	"github.com/quic-go/quic-go"
+	"github.com/qumo-dev/gomoqt/moqt/internal/quicgo"
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
 type sessionWrapper struct {
-	sess *quicgo_webtransportgo.Session
+	sess     *quicgo_webtransportgo.Session
+	migrator *quicgo.Migrator // nil for a session that cannot move: a server's
+}
+
+// Migrator moves the session's QUIC connection between network paths, or is
+// nil if it cannot.
+func (conn *sessionWrapper) Migrator() *quicgo.Migrator {
+	return conn.migrator
 }
 
 func wrapSession(wtsess *quicgo_webtransportgo.Session) transport.WebTransportSession {

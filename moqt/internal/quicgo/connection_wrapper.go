@@ -21,7 +21,14 @@ func wrapConnection(conn *quicgo_quicgo.Conn) transport.StreamConn {
 var _ transport.StreamConn = (*connWrapper)(nil)
 
 type connWrapper struct {
-	conn *quicgo_quicgo.Conn
+	conn     *quicgo_quicgo.Conn
+	migrator *Migrator // nil for a connection that cannot move: a server's
+}
+
+// Migrator moves the connection between network paths, or is nil if the
+// connection cannot.
+func (wrapper *connWrapper) Migrator() *Migrator {
+	return wrapper.migrator
 }
 
 func (wrapper *connWrapper) AcceptStream(ctx context.Context) (transport.Stream, error) {

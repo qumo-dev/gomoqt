@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"runtime"
 	"syscall"
 	"testing"
 
@@ -29,8 +30,9 @@ func TestIsNetChangeErr(t *testing.T) {
 		"message too large":           {err: sendErr(syscall.EMSGSIZE)},
 		"connection refused":          {err: sendErr(syscall.ECONNREFUSED)},
 		"socket closed":               {err: net.ErrClosed},
-		"permission denied":           {err: sendErr(syscall.EPERM)},
-		"error with no errno":         {err: errors.New("boom")},
+		// Android's refusal for a network being torn down.
+		"permission denied":   {err: sendErr(syscall.EPERM), want: runtime.GOOS == "linux" || runtime.GOOS == "android"},
+		"error with no errno": {err: errors.New("boom")},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
