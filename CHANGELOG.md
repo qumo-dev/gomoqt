@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A dialed session can move to another network: `Session.AddPath`, `Dialer.Transport`, `ErrMigrationUnsupported` (`moqt`).** `AddPath` adds a path over an app-owned `*quic.Transport` to the session's QUIC connection, as `quic.Conn.AddPath` does; the app probes, switches and closes it with quic-go's `*quic.Path`, and the session stays the same. `Dialer.Transport` dials native QUIC and WebTransport over the app's transport, so the session can move back onto it. Use zero-length connection IDs on every transport, and set `KeepAlivePeriod` for a session that only receives. WebSocket, server WebTransport and custom-dial sessions return `ErrMigrationUnsupported`.
+
 ### Fixed
 
 - **A truncated frame no longer reads as the end of a group (`moqt`).** `GroupReader.ReadFrame` returned `io.EOF`, the clean end, for a group cut off inside a frame's varints or before its payload's first byte; it now returns `io.ErrUnexpectedEOF`. A frame whose timestamp delta goes below zero returns `ErrTimestampOutOfRange` instead of wrapping.
