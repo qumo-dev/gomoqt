@@ -9,8 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **A dialed session moves between networks on request (`moqt`), in quic-go's own model.** `Dialer.Transport` dials native QUIC and WebTransport sessions over an application's `QUICTransport`, as quic-go's `Transport.Dial` does, and `Session.AddPath` adds a path over another transport, as quic-go's `Conn.AddPath` does; the returned `*QUICPath`'s `Probe`, `Switch` and `Close` move the connection, and the session on it stays the same (RFC 9000 §9). The application owns its transports and sockets and chooses when to move; sessions gomoqt did not dial over QUIC return `ErrMigrationUnsupported`.
-  - `QUICConfig`, `QUICTransport` and `QUICPath` (in `moqt` and `transport`) alias quic-go's `Config`, `Transport` and `Path`; `Dialer.QUICConfig` and the dial funcs now name `QUICConfig`, the same type.
+- **A dialed session moves between networks on request (`moqt`), in quic-go's own model.** `Dialer.Transport` dials native QUIC and WebTransport sessions over an application's `quic.Transport`, as `quic.Transport.Dial` does, and `Session.AddPath` adds a path over another transport, as `quic.Conn.AddPath` does; the returned `*quic.Path`'s `Probe`, `Switch` and `Close` move the connection, and the session on it stays the same (RFC 9000 §9). The application owns its transports and sockets and chooses when to move; sessions gomoqt did not dial over QUIC return `ErrMigrationUnsupported`.
   - Every transport of a moving connection needs zero-length connection IDs (a `ConnectionIDGenerator` whose `ConnectionIDLen` is 0) and the same kind of socket; closing one the connection used ends it (quic-go#5975).
   - A session that only receives needs `quic.Config.KeepAlivePeriod` set: the server follows a move on the client's next packet.
 

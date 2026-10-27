@@ -45,14 +45,14 @@ type Dialer struct {
 	// it as it is, possibly nil: what the default dials do with it, turning
 	// on what WebTransport needs and refusing a negative keep-alive, is
 	// theirs to do or not.
-	QUICConfig *QUICConfig
+	QUICConfig *quic.Config
 
 	// Config contains additional configuration options for the Dialer.
 	Config *Config
 
-	// Transport, if not nil, is the QUIC transport the default dials dial
-	// native QUIC and WebTransport sessions over, as quic-go's
-	// Transport.Dial does: the application owns it and the socket under it, and a session
+	// Transport, if not nil, is the quic.Transport the default dials dial
+	// native QUIC and WebTransport sessions over, as quic.Transport.Dial
+	// does: the application owns it and the socket under it, and a session
 	// dialed over it ends if it is closed. It lets the application add the
 	// transport to the session again with [Session.AddPath], to move back
 	// onto it. A connection that will move should use zero-length
@@ -60,20 +60,20 @@ type Dialer struct {
 	//
 	// If nil, each dial uses a transport of its own, as quic.DialAddr does,
 	// over a socket that keeps the session through a network change.
-	Transport *QUICTransport
+	Transport *quic.Transport
 
 	// DialQUICFunc performs the QUIC handshake and establishes a connection.
 	// If nil, the default QUIC dialer is used.
-	DialQUICFunc func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *QUICConfig) (StreamConn, error)
+	DialQUICFunc func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (StreamConn, error)
 
 	// DialWebTransportFunc performs the WebTransport handshake and establishes a connection.
 	// If nil, the default dialer is used. quicConfig is the Dialer's QUICConfig.
-	DialWebTransportFunc func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config, quicConfig *QUICConfig) (*http.Response, WebTransportSession, error)
+	DialWebTransportFunc func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config, quicConfig *quic.Config) (*http.Response, WebTransportSession, error)
 
 	// DialWebSocketFunc opens the WebSocket and starts the QMux session on
 	// it. If nil, the default dialer is used. quicConfig is the Dialer's
 	// QUICConfig.
-	DialWebSocketFunc func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config, quicConfig *QUICConfig) (*http.Response, WebTransportSession, error)
+	DialWebSocketFunc func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config, quicConfig *quic.Config) (*http.Response, WebTransportSession, error)
 
 	// FetchHandler handles incoming fetch requests on WebTransport and
 	// WebSocket sessions. If nil, they are not handled.
