@@ -6,8 +6,8 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/dunglas/httpsfv v1.1.1
 	github.com/okdaichi/qmux-go v0.3.0
-	github.com/okdaichi/webtransport-go v0.13.0-okdaichi.2
-	github.com/quic-go/quic-go v0.63.0
+	github.com/okdaichi/webtransport-go v0.13.0-okdaichi.3
+	github.com/quic-go/quic-go v0.64.1
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/sys v0.47.0
 )
