@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`Session.AddPath` refuses a path over another kind of socket instead of letting quic-go panic: `ErrSocketKindMismatch` (`moqt`).** quic-go fixes a connection's ECN marking from its first socket, and panics sending over a socket that cannot mark it, such as a wrapped `net.PacketConn` after a `*net.UDPConn`. For a session gomoqt dialed, `AddPath` now returns the error when the transport's socket is a `quic.OOBCapablePacketConn` and the session's is not, or the other way round.
+
 ### Changed
 
 - **A merged release PR now publishes itself (CI).** `tag-release.yml` tags the commit that added the newest `## [vX.Y.Z]` CHANGELOG heading, and the one that set `moq-web/deno.json`'s version as `moq-web-vX.Y.Z`, then runs `release.yml` and `jsr-publish.yml`; an existing tag is left alone, so tagging by hand still works.

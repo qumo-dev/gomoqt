@@ -2,6 +2,7 @@ package moqt
 
 import (
 	"errors"
+	"net"
 
 	"github.com/quic-go/quic-go"
 )
@@ -11,6 +12,31 @@ import (
 // WebTransport one, or one over a connection from DialQUICFunc or
 // DialWebTransportFunc.
 var ErrMigrationUnsupported = errors.New("moqt: connection migration is not supported by this session")
+
+// ErrSocketKindMismatch is returned by [Session.AddPath] for a transport
+// over a socket of another kind than the one the session was dialed over:
+// quic-go would panic on the first packet sent over it (see
+// [Session.AddPath]).
+var ErrSocketKindMismatch = errors.New("moqt: path socket is of another kind than the session's")
+
+// socketKind is the kind of socket a QUIC connection sends over, as quic-go
+// tells them apart: it marks ECN only through a [quic.OOBCapablePacketConn],
+// such as a *net.UDPConn, and decides once, from the socket a connection
+// starts on, whether to.
+type socketKind uint8
+
+const (
+	socketUnknown socketKind = iota // not known to gomoqt
+	socketUDP                       // a quic.OOBCapablePacketConn
+	socketOther                     // any other net.PacketConn
+)
+
+func socketKindOf(c net.PacketConn) socketKind {
+	if _, ok := c.(quic.OOBCapablePacketConn); ok {
+		return socketUDP
+	}
+	return socketOther
+}
 
 // quicConn is implemented by a connection with a QUIC connection under it
 // that gomoqt dialed.
@@ -40,9 +66,12 @@ type quicConn interface {
 //     with quic-go's default length cannot carry a path for such a
 //     connection (quic-go#5185), and a quic-go server follows a client with
 //     non-zero-length ones only twice (quic-go#5965).
-//   - Every transport of the connection should be over the same kind of
-//     socket, all *net.UDPConn or all not: quic-go keeps a connection's ECN
-//     marking across a switch, and panics on a socket it cannot mark ECN on.
+//   - Every transport of the connection must be over the same kind of
+//     socket, all *net.UDPConn (or other quic.OOBCapablePacketConn) or all
+//     not: quic-go keeps a connection's ECN marking across a switch, and
+//     panics on a socket it cannot mark ECN on. AddPath returns
+//     [ErrSocketKindMismatch] for a transport over a socket of another kind
+//     than the session was dialed over, when gomoqt dialed it.
 //
 // A move from a network still working loses nothing. One from a network
 // already gone takes until the server sees the client on the new path,
@@ -57,6 +86,9 @@ func (s *Session) AddPath(t *quic.Transport) (*quic.Path, error) {
 	qc, ok := s.conn.(quicConn)
 	if !ok || qc.QUICConn() == nil {
 		return nil, ErrMigrationUnsupported
+	}
+	if s.socket != socketUnknown && socketKindOf(t.Conn) != s.socket {
+		return nil, ErrSocketKindMismatch
 	}
 	return qc.QUICConn().AddPath(t)
 }

@@ -54,6 +54,11 @@ type sessionSetup struct {
 	// from Server.ConnContext, so an application cancelling that still ends
 	// the session.
 	lifetime context.Context
+	// socket is the kind of socket a client dialed the session over, which
+	// every path Session.AddPath adds must share. Zero when gomoqt does not
+	// know it: a server's session, or one from DialQUICFunc or
+	// DialWebTransportFunc.
+	socket socketKind
 }
 
 // Session represents an active MOQ session over a QUIC connection.
@@ -93,6 +98,10 @@ type Session struct {
 	// our outgoing SETUP, which only the native-QUIC client does.
 	path     string
 	sendPath bool
+
+	// socket is the kind of socket the session was dialed over (see
+	// sessionSetup.socket).
+	socket socketKind
 
 	// localProbeLevel is the Probe capability advertised in our SETUP.
 	localProbeLevel uint64
@@ -174,6 +183,7 @@ func newSession(
 		logger:          logger,
 		path:            setup.path,
 		sendPath:        setup.sendPath,
+		socket:          setup.socket,
 		trackReaders:    make(map[SubscribeID]*TrackReader),
 		trackWriters:    make(map[SubscribeID]*TrackWriter),
 		connManager:     manager,

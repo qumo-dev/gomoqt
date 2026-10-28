@@ -147,6 +147,49 @@ func TestSession_AddPath_Unsupported(t *testing.T) {
 	assert.Nil(t, p)
 }
 
+// A path over a socket of another kind than the session was dialed over is
+// refused, as quic-go would panic sending over it, and the session goes on.
+func TestSession_AddPath_SocketKindMismatch(t *testing.T) {
+	tests := map[string]struct {
+		dialOwnSocket bool // dial with no Dialer.Transport, over gomoqt's *net.UDPConn
+	}{
+		"dialed over a fake link, path over a UDP socket": {},
+		"dialed over a UDP socket, path over a fake link": {dialOwnSocket: true},
+	}
+	for name, tt := range tests {
+		for _, scheme := range []string{"moqt", "https"} {
+			t.Run(name+"/"+scheme, func(t *testing.T) {
+				sub := subscribeMigrating(t, scheme)
+				sess := sub.sess
+				tr := &quic.Transport{Conn: listenLoopback(t), ConnectionIDGenerator: zeroConnIDs{}}
+				if tt.dialOwnSocket {
+					sess = dialOwnSocket(t, scheme, sub.nat.addr())
+					tr = newNetwork(t).tr
+				}
+				t.Cleanup(func() { _ = tr.Close() }) // not actionable: cleanup
+
+				p, err := sess.AddPath(tr)
+
+				assert.ErrorIs(t, err, ErrSocketKindMismatch)
+				assert.Nil(t, p)
+				assert.NoError(t, sess.Context().Err(), "the session should go on")
+			})
+		}
+	}
+}
+
+// dialOwnSocket dials a session to addr with no Dialer.Transport.
+func dialOwnSocket(tb testing.TB, scheme, addr string) *Session {
+	tb.Helper()
+	dialer := &Dialer{TLSConfig: &tls.Config{InsecureSkipVerify: true}} //nolint:gosec // test-only self-signed cert
+	ctx, cancel := context.WithTimeout(tb.Context(), 5*time.Second)
+	defer cancel()
+	sess, err := dialer.Dial(ctx, scheme+"://"+addr+"/", nil)
+	require.NoError(tb, err)
+	tb.Cleanup(func() { _ = sess.CloseWithError(NoError, "test done") }) // not actionable: cleanup
+	return sess
+}
+
 // A server session cannot move its client: quic-go refuses a server's path.
 func TestSession_AddPath_ServerSession(t *testing.T) {
 	sub := subscribeMigrating(t, "moqt")
@@ -194,11 +237,11 @@ func newNetwork(tb testing.TB) network {
 // migratingSub is a session subscribed to a track published every 20 ms,
 // dialed through a fakeNAT over dial.
 type migratingSub struct {
-	sess    *Session
-	nat     *fakeNAT
-	dial    network
+	sess   *Session
+	nat    *fakeNAT
+	dial   network
 	srv    atomic.Pointer[Session] // the server's side, of the latest session
-	groups atomic.Int64             // groups received
+	groups atomic.Int64            // groups received
 }
 
 func subscribeMigrating(tb testing.TB, scheme string) *migratingSub {
