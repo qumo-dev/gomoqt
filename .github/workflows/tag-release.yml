@@ -1,0 +1,92 @@
+# Tags a release when its release PR merges, then publishes it.
+#
+# A release PR adds a `## [vX.Y.Z]` heading to CHANGELOG.md and, for a JSR
+# release, raises the version in moq-web/deno.json. Once it is on main, this
+# workflow tags the commit that added the heading as vX.Y.Z and the one that
+# set the deno.json version as moq-web-vX.Y.Z, then runs release.yml and
+# jsr-publish.yml for those tags. A tag pushed with GITHUB_TOKEN starts no
+# other workflow, so they are called from here instead.
+#
+# A tag that already exists is left alone: a tag pushed by hand still
+# publishes through the workflows' own tag triggers, and a re-run does
+# nothing. Run it by hand (workflow_dispatch) for a release merged while
+# this workflow was not there.
+name: Tag release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - CHANGELOG.md
+      - moq-web/deno.json
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tag-release
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the tags
+    outputs:
+      go: ${{ steps.tag.outputs.go }}
+      jsr: ${{ steps.tag.outputs.jsr }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the history to find each release commit in, and every tag
+
+      - name: Tag new releases
+        id: tag
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # tag_once TAG FILE TEXT OUTPUT tags the commit that added TEXT to
+          # FILE as TAG, unless TAG exists, and sets OUTPUT to TAG.
+          tag_once() {
+            local tag=$1 file=$2 text=$3 output=$4 commit
+            if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+              echo "$tag exists; nothing to release."
+              return
+            fi
+            commit=$(git log -1 --format=%H -S "$text" -- "$file")
+            git tag -a "$tag" "$commit" -m "$tag"
+            git push origin "refs/tags/$tag"
+            echo "Tagged $commit as $tag."
+            echo "$output=$tag" >> "$GITHUB_OUTPUT"
+          }
+
+          # The newest release heading: the first one after [Unreleased].
+          go=$(sed -nE 's/^## \[(v[0-9][^]]*)\].*/\1/p' CHANGELOG.md | head -n 1)
+          if [ -n "$go" ]; then
+            tag_once "$go" CHANGELOG.md "## [$go]" go
+          fi
+
+          jsr=$(jq -r .version moq-web/deno.json)
+          tag_once "moq-web-v$jsr" moq-web/deno.json "\"version\": \"$jsr\"" jsr
+
+  go:
+    needs: tag
+    if: needs.tag.outputs.go != ''
+    permissions:
+      contents: write # create the release
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.tag.outputs.go }}
+
+  jsr:
+    needs: tag
+    if: needs.tag.outputs.jsr != ''
+    permissions:
+      contents: read
+      id-token: write # JSR OIDC publish
+    uses: ./.github/workflows/jsr-publish.yml
+    with:
+      tag: ${{ needs.tag.outputs.jsr }}
