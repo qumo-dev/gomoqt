@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.27.0] - 2026-10-28
+
+> **Go only.** `@qumo/moq` stays at `0.26.0`: nothing on the wire changes. A dialed native QUIC or WebTransport session now keeps through a network change, and an application can move it to another network on request with `Session.AddPath`. quic-go goes to `v0.64.1`.
+
 ### Added
 
 - **A dialed session can move to another network: `Session.AddPath`, `Dialer.Transport`, `ErrMigrationUnsupported` (`moqt`).** `AddPath` adds a path over an app-owned `*quic.Transport` to the session's QUIC connection, as `quic.Conn.AddPath` does; the app probes, switches and closes it with quic-go's `*quic.Path`, and the session stays the same. `Dialer.Transport` dials native QUIC and WebTransport over the app's transport, so the session can move back onto it. Use zero-length connection IDs on every transport, and set `KeepAlivePeriod` for a session that only receives. WebSocket, server WebTransport and custom-dial sessions return `ErrMigrationUnsupported`.
