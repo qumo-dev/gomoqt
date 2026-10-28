@@ -147,47 +147,60 @@ func TestSession_AddPath_Unsupported(t *testing.T) {
 	assert.Nil(t, p)
 }
 
-// A path over a socket of another kind than the session was dialed over is
-// refused, as quic-go would panic sending over it, and the session goes on.
-func TestSession_AddPath_SocketKindMismatch(t *testing.T) {
+// A connection dialed over a UDP socket cannot move onto a socket that
+// cannot mark ECN, where quic-go marks it: AddPath refuses that, rather than
+// let quic-go panic, and the session goes on. Every other move is added.
+func TestSession_AddPath_SocketKind(t *testing.T) {
 	tests := map[string]struct {
-		dialOwnSocket bool // dial with no Dialer.Transport, over gomoqt's *net.UDPConn
+		dialUDP bool // dial with no Dialer.Transport, over gomoqt's *net.UDPConn
+		pathUDP bool // add a path over a *net.UDPConn, not a fakeLink
+		wantErr error
 	}{
-		"dialed over a fake link, path over a UDP socket": {},
-		"dialed over a UDP socket, path over a fake link": {dialOwnSocket: true},
+		"UDP socket onto a fake link":  {dialUDP: true, wantErr: errIfECNOS(ErrSocketKindMismatch)},
+		"fake link onto a UDP socket":  {pathUDP: true},
+		"UDP socket onto a UDP socket": {dialUDP: true, pathUDP: true},
 	}
 	for name, tt := range tests {
 		for _, scheme := range []string{"moqt", "https"} {
 			t.Run(name+"/"+scheme, func(t *testing.T) {
 				sub := subscribeMigrating(t, scheme)
 				sess := sub.sess
-				tr := &quic.Transport{Conn: listenLoopback(t), ConnectionIDGenerator: zeroConnIDs{}}
-				if tt.dialOwnSocket {
-					sess = dialOwnSocket(t, scheme, sub.nat.addr())
-					tr = newNetwork(t).tr
+				if tt.dialUDP {
+					dialer := &Dialer{TLSConfig: &tls.Config{InsecureSkipVerify: true}} //nolint:gosec // test-only self-signed cert
+					ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+					defer cancel()
+					var err error
+					sess, err = dialer.Dial(ctx, scheme+"://"+sub.nat.addr()+"/", nil)
+					require.NoError(t, err)
+					t.Cleanup(func() { _ = sess.CloseWithError(NoError, "test done") }) // not actionable: cleanup
 				}
-				t.Cleanup(func() { _ = tr.Close() }) // not actionable: cleanup
+				tr := newNetwork(t).tr
+				if tt.pathUDP {
+					tr = &quic.Transport{Conn: listenLoopback(t), ConnectionIDGenerator: zeroConnIDs{}}
+					t.Cleanup(func() { _ = tr.Close() }) // not actionable: cleanup
+				}
 
 				p, err := sess.AddPath(tr)
 
-				assert.ErrorIs(t, err, ErrSocketKindMismatch)
-				assert.Nil(t, p)
+				if tt.wantErr != nil {
+					assert.ErrorIs(t, err, tt.wantErr)
+					assert.Nil(t, p)
+				} else {
+					assert.NoError(t, err)
+					assert.NotNil(t, p)
+				}
 				assert.NoError(t, sess.Context().Err(), "the session should go on")
 			})
 		}
 	}
 }
 
-// dialOwnSocket dials a session to addr with no Dialer.Transport.
-func dialOwnSocket(tb testing.TB, scheme, addr string) *Session {
-	tb.Helper()
-	dialer := &Dialer{TLSConfig: &tls.Config{InsecureSkipVerify: true}} //nolint:gosec // test-only self-signed cert
-	ctx, cancel := context.WithTimeout(tb.Context(), 5*time.Second)
-	defer cancel()
-	sess, err := dialer.Dial(ctx, scheme+"://"+addr+"/", nil)
-	require.NoError(tb, err)
-	tb.Cleanup(func() { _ = sess.CloseWithError(NoError, "test done") }) // not actionable: cleanup
-	return sess
+// errIfECNOS returns err where quic-go marks ECN, and nil elsewhere.
+func errIfECNOS(err error) error {
+	if ecnOS {
+		return err
+	}
+	return nil
 }
 
 // A server session cannot move its client: quic-go refuses a server's path.

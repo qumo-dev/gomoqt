@@ -164,10 +164,10 @@ func (d *Dialer) dialWebTransport(ctx context.Context, target *url.URL, mux *Tra
 	dialCtx, cancelDial := context.WithTimeout(ctx, d.Config.setupTimeout())
 	defer cancelDial()
 
-	var socket socketKind
+	var ecn bool
 	dial := d.DialWebTransportFunc
 	if dial == nil {
-		socket = d.socket()
+		ecn = d.mayMarkECN()
 		dial = func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config, quicConfig *quic.Config) (*http.Response, WebTransportSession, error) {
 			if err := checkKeepAlive(quicConfig); err != nil {
 				return nil, nil, err
@@ -191,7 +191,7 @@ func (d *Dialer) dialWebTransport(ctx context.Context, target *url.URL, mux *Tra
 	// learns it from the request URI and this endpoint must not send a SETUP
 	// Path parameter.
 	return newSession(conn, mux, nil, d.Config, d.FetchHandler, nil, d.OnGoaway, d.Logger,
-		sessionSetup{path: target.RequestURI(), socket: socket}, nil), nil
+		sessionSetup{path: target.RequestURI(), mayMarkECN: ecn}, nil), nil
 }
 
 // dialWebSocket establishes a new session over QMux on WebSocket. target is
@@ -251,12 +251,12 @@ func (d *Dialer) dialQUIC(ctx context.Context, addr, path string, mux *TrackMux)
 
 	var (
 		dialFunc func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (StreamConn, error)
-		socket   socketKind
+		ecn      bool
 	)
 	if d.DialQUICFunc != nil {
 		dialFunc = d.DialQUICFunc
 	} else {
-		socket = d.socket()
+		ecn = d.mayMarkECN()
 		dialFunc = func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (StreamConn, error) {
 			if err := checkKeepAlive(quicConfig); err != nil {
 				return nil, err
@@ -275,14 +275,15 @@ func (d *Dialer) dialQUIC(ctx context.Context, addr, path string, mux *TrackMux)
 	// Native QUIC has no handshake-time request URI, so the client is the one
 	// role that conveys the request path in its own SETUP. sendPath drives that.
 	return newSession(conn, mux, nil, d.Config, d.FetchHandler, nil, d.OnGoaway, d.Logger,
-		sessionSetup{path: path, sendPath: true, socket: socket}, nil), nil
+		sessionSetup{path: path, sendPath: true, mayMarkECN: ecn}, nil), nil
 }
 
-// socket returns the kind of socket the default dials dial over: that of
-// Transport, or a *net.UDPConn of their own.
-func (d *Dialer) socket() socketKind {
+// mayMarkECN reports whether quic-go may mark ECN on a connection the
+// default dials dial: over Transport's socket, or a *net.UDPConn of their
+// own.
+func (d *Dialer) mayMarkECN() bool {
 	if d.Transport != nil {
-		return socketKindOf(d.Transport.Conn)
+		return mayMarkECN(d.Transport.Conn)
 	}
-	return socketUDP
+	return ecnOS
 }

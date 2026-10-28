@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`Session.AddPath` refuses a path over another kind of socket instead of letting quic-go panic: `ErrSocketKindMismatch` (`moqt`).** quic-go fixes a connection's ECN marking from its first socket, and panics sending over a socket that cannot mark it, such as a wrapped `net.PacketConn` after a `*net.UDPConn`. For a session gomoqt dialed, `AddPath` now returns the error when the transport's socket is a `quic.OOBCapablePacketConn` and the session's is not, or the other way round.
+- **`Session.AddPath` refuses a move quic-go would panic on: `ErrSocketKindMismatch` (`moqt`).** quic-go fixes a connection's ECN marking from its first socket, and panics sending a marked packet over a socket that cannot mark ECN. For a session gomoqt dialed over a `*net.UDPConn` (or other `quic.OOBCapablePacketConn`) on Linux, Android, macOS, iOS or FreeBSD, `AddPath` now returns the error for a transport over any other `net.PacketConn`; every other move is added as before. On a Linux kernel before 5 or with `QUIC_GO_DISABLE_ECN` set, quic-go never marks, and the move is refused anyway.
 
 ### Changed
 
