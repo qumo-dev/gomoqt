@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"net"
-	"net/netip"
 	"sync/atomic"
 
 	"github.com/quic-go/quic-go"
@@ -31,23 +30,13 @@ func DialAddrEarly(ctx context.Context, addr string, tlsConfig *tls.Config, quic
 // The client uses zero-length connection IDs, as [quic.DialAddrEarly] does,
 // so a server keeps following it however often its address changes.
 func DialEarly(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (*quic.Conn, error) {
-	host, raddr, err := resolveUDPAddr(ctx, addr)
+	raddr, tlsConfig, err := resolve(addr, tlsConfig)
 	if err != nil {
 		return nil, err
 	}
-	// Take the server name from the host dialed, as quic.DialAddrEarly does:
-	// quic.DialEarly would otherwise take it from the resolved IP address.
-	if tlsConfig != nil && tlsConfig.ServerName == "" {
-		tlsConfig = tlsConfig.Clone()
-		tlsConfig.ServerName = host
-	}
-	// Bind the family of the address dialed: a socket bound to IPv4 reaches
-	// an IPv6 address only where the OS maps one into the other.
-	local := &net.UDPAddr{IP: net.IPv4zero}
-	if raddr.IP.To4() == nil {
-		local.IP = net.IPv6unspecified
-	}
-	udp, err := net.ListenUDP("udp", local)
+	// Bind as quic.DialAddrEarly does: Go binds a dual-stack socket where
+	// the OS has one.
+	udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero})
 	if err != nil {
 		return nil, err
 	}
@@ -74,29 +63,29 @@ func DialEarly(ctx context.Context, addr string, tlsConfig *tls.Config, quicConf
 	return conn, nil
 }
 
-// resolveUDPAddr resolves addr, a host and port, within ctx, preferring an
-// IPv4 address as net.ResolveUDPAddr does, and returns its host too.
-func resolveUDPAddr(ctx context.Context, addr string) (string, *net.UDPAddr, error) {
-	host, port, err := net.SplitHostPort(addr)
+// resolve resolves addr as quic.DialAddrEarly does, and returns tlsConfig
+// with the server name taken from the host dialed when it names none:
+// quic.DialEarly would otherwise take it from the resolved IP address.
+// tlsConfig itself is not changed.
+func resolve(addr string, tlsConfig *tls.Config) (*net.UDPAddr, *tls.Config, error) {
+	raddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
-		return "", nil, err
+		return nil, nil, err
 	}
-	portNum, err := net.DefaultResolver.LookupPort(ctx, "udp", port)
+	if tlsConfig != nil && tlsConfig.ServerName == "" {
+		tlsConfig = tlsConfig.Clone()
+		tlsConfig.ServerName = serverName(addr)
+	}
+	return raddr, tlsConfig, nil
+}
+
+// serverName is the host part of addr, or addr itself when it has no port.
+func serverName(addr string) string {
+	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
-		return "", nil, err
+		return addr
 	}
-	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-	if err != nil {
-		return "", nil, err
-	}
-	ip := ips[0]
-	for _, candidate := range ips {
-		if candidate.Unmap().Is4() {
-			ip = candidate
-			break
-		}
-	}
-	return host, net.UDPAddrFromAddrPort(netip.AddrPortFrom(ip.Unmap(), uint16(portNum))), nil
+	return host
 }
 
 // DialTransportEarly dials a native QUIC connection to addr through
@@ -115,13 +104,9 @@ func DialTransportEarly(ctx context.Context, tr *quic.Transport, addr string, tl
 // caller's, used as they are: the connection ends if tr is closed, or if the
 // OS refuses a send on its socket.
 func DialTransportConnEarly(ctx context.Context, tr *quic.Transport, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (*quic.Conn, error) {
-	host, raddr, err := resolveUDPAddr(ctx, addr)
+	raddr, tlsConfig, err := resolve(addr, tlsConfig)
 	if err != nil {
 		return nil, err
-	}
-	if tlsConfig != nil && tlsConfig.ServerName == "" {
-		tlsConfig = tlsConfig.Clone()
-		tlsConfig.ServerName = host
 	}
 	return tr.DialEarly(ctx, raddr, tlsConfig, quicConfig)
 }
