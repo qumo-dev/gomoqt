@@ -10,6 +10,4 @@ var netChangeErrnos = []error{
 	windows.WSAENETUNREACH,
 	windows.WSAEHOSTUNREACH,
 	windows.WSAENETDOWN,
-	windows.WSAEADDRNOTAVAIL,
-	windows.WSAENOBUFS,
 }
