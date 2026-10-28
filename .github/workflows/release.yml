@@ -6,7 +6,8 @@
 # into sections by the label configuration in .github/release.yml.
 #
 # Also runnable via workflow_dispatch (e.g. to re-publish a release or rebuild
-# its notes after fixing .github/release.yml) without re-pushing the tag.
+# its notes after fixing .github/release.yml) without re-pushing the tag, and
+# called by tag-release.yml for the tag it pushes.
 name: Release
 
 on:
@@ -18,6 +19,12 @@ on:
       tag:
         description: 'Tag to publish (must already exist, e.g. v0.16.0)'
         required: true
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag to publish (must already exist)'
+        required: true
+        type: string
 
 permissions:
   contents: write # required to create / edit the release
@@ -34,11 +41,8 @@ jobs:
       - name: Resolve tag
         id: tag
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            tag="${{ inputs.tag }}"
-          else
-            tag="${GITHUB_REF_NAME}"
-          fi
+          # Given when dispatched or called; else the tag pushed.
+          tag="${{ inputs.tag || github.ref_name }}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "Publishing release for $tag"
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A merged release PR now publishes itself (CI).** `tag-release.yml` tags the commit that added the newest `## [vX.Y.Z]` CHANGELOG heading, and the one that set `moq-web/deno.json`'s version as `moq-web-vX.Y.Z`, then runs `release.yml` and `jsr-publish.yml`; an existing tag is left alone, so tagging by hand still works.
+
 ## [v0.27.0] - 2026-10-28
 
 > **Go only.** `@qumo/moq` stays at `0.26.0`: nothing on the wire changes. A dialed native QUIC or WebTransport session now keeps through a network change, and an application can move it to another network on request with `Session.AddPath`. quic-go goes to `v0.64.1`.
