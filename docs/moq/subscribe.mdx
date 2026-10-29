@@ -59,13 +59,17 @@ A publisher may answer a subscription with a redirect instead of serving it. `Se
     }
 ```
 
-On the publishing side, `TrackWriter.Redirect` sends the redirect, before the first group. `moqt.RedirectHandler` redirects every subscription to a path, which makes an alias of a broadcast:
+On the publishing side, a track handler calls `TrackWriter.Redirect` before the first group. An empty `TrackName` keeps the subscriber's, so one call redirects a whole broadcast:
 
 ```go
-    mux.Publish(ctx, "/public/cam", moqt.RedirectHandler(moqt.Redirect{BroadcastPath: "/acme/cam"}))
+    mux.PublishFunc(ctx, "/public/cam", func(tw *moqt.TrackWriter) {
+        if err := tw.Redirect(moqt.Redirect{BroadcastPath: "/acme/cam"}); err != nil {
+            // The subscriber does not follow redirects (moqt.ErrRedirectNotSupported),
+            // such as @qumo/moq for now: serve the track here, or refuse it.
+            tw.CloseWithError(moqt.SubscribeErrorCodeNotFound)
+        }
+    })
 ```
-
-A subscriber that does not follow redirects, such as `@qumo/moq` for now, makes `TrackWriter.Redirect` return `moqt.ErrRedirectNotSupported`, and `RedirectHandler` refuses it with `SubscribeErrorCodeNotFound`.
 
 ## Announced Broadcasts
 

@@ -156,6 +156,15 @@ func TestSession_Subscribe_Redirect(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 
+	// redirectTo serves every subscription with a redirect to to, as an
+	// application's handler on a TrackMux does.
+	redirectTo := func(to Redirect) func(*TrackWriter) {
+		return func(tw *TrackWriter) {
+			if err := tw.Redirect(to); err != nil {
+				tw.CloseWithError(SubscribeErrorCodeNotFound)
+			}
+		}
+	}
 	elsewhere := Redirect{URI: "moqt://relay-b.example/", BroadcastPath: "/real", TrackName: "video"}
 
 	mux := NewTrackMux(0)
@@ -170,11 +179,11 @@ func TestSession_Subscribe_Redirect(t *testing.T) {
 		_ = gw.Close()           // not actionable: as above
 		<-tw.Context().Done()
 	})
-	mux.Publish(ctx, "/alias", RedirectHandler(Redirect{BroadcastPath: "/real"}))
-	mux.Publish(ctx, "/alias-of-alias", RedirectHandler(Redirect{BroadcastPath: "/alias"}))
-	mux.Publish(ctx, "/loop-a", RedirectHandler(Redirect{BroadcastPath: "/loop-b"}))
-	mux.Publish(ctx, "/loop-b", RedirectHandler(Redirect{BroadcastPath: "/loop-a"}))
-	mux.Publish(ctx, "/elsewhere", RedirectHandler(elsewhere))
+	mux.PublishFunc(ctx, "/alias", redirectTo(Redirect{BroadcastPath: "/real"}))
+	mux.PublishFunc(ctx, "/alias-of-alias", redirectTo(Redirect{BroadcastPath: "/alias"}))
+	mux.PublishFunc(ctx, "/loop-a", redirectTo(Redirect{BroadcastPath: "/loop-b"}))
+	mux.PublishFunc(ctx, "/loop-b", redirectTo(Redirect{BroadcastPath: "/loop-a"}))
+	mux.PublishFunc(ctx, "/elsewhere", redirectTo(elsewhere))
 
 	addr := freePort(t)
 	server := &Server{

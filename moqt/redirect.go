@@ -63,18 +63,6 @@ func (err *RedirectError) Error() string {
 	return "moqt: subscription redirected to " + where
 }
 
-// RedirectHandler returns a TrackHandler that redirects every subscription it
-// serves to to, keeping the subscriber's track name when to has none. A
-// subscriber that does not follow redirects is refused with
-// SubscribeErrorCodeNotFound.
-func RedirectHandler(to Redirect) TrackHandler {
-	return TrackHandlerFunc(func(tw *TrackWriter) {
-		if err := tw.Redirect(to); err != nil {
-			tw.CloseWithError(SubscribeErrorCodeNotFound)
-		}
-	})
-}
-
 func (to Redirect) message() message.SubscribeRedirectMessage {
 	return message.SubscribeRedirectMessage{
 		ConnectURI:    to.URI,
