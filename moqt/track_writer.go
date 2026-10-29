@@ -100,6 +100,10 @@ type TrackWriter struct {
 
 	onCloseTrackFunc func()
 
+	// redirectAllowed reports whether a redirect to uri may be sent to this
+	// subscriber; nil means none may.
+	redirectAllowed func(uri string) error
+
 	ctx context.Context
 }
 
@@ -142,6 +146,49 @@ func (w *TrackWriter) Close() error {
 	_ = w.subscribeStream.writeEnd(GroupSequence(w.groupSequence.Load()))
 
 	return w.subscribeStream.close()
+}
+
+// Redirect answers the subscription with SUBSCRIBE_REDIRECT instead of
+// serving it, sending the subscriber to to, and ends the subscription. It
+// must come before the first group: once SUBSCRIBE_OK went out, it fails.
+//
+// It returns ErrRedirectNotSupported, and leaves the subscription as it was,
+// when the subscriber did not advertise that it follows redirects. A client
+// may only redirect within the session: to.URI must be empty. It may wait for
+// the subscriber's SETUP, which says whether it follows redirects.
+func (w *TrackWriter) Redirect(to Redirect) error {
+	if to.TrackName == "" {
+		to.TrackName = w.TrackName
+	}
+	if err := to.validate(); err != nil {
+		return err
+	}
+	if w.redirectAllowed == nil {
+		return ErrRedirectNotSupported
+	}
+	if err := w.redirectAllowed(to.URI); err != nil {
+		return err
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.subscribeStream == nil {
+		return errSubscriptionAnswered
+	}
+	if err := w.subscribeStream.writeRedirect(to.message()); err != nil {
+		return err
+	}
+
+	if w.groupManager != nil {
+		w.groupManager.close()
+		w.groupManager = nil
+	}
+	if w.onCloseTrackFunc != nil {
+		w.onCloseTrackFunc()
+		w.onCloseTrackFunc = nil
+	}
+	return nil
 }
 
 // CloseWithError stops publishing due to an error and cancels active groups.

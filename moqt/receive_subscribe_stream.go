@@ -131,6 +131,31 @@ func (substr *receiveSubscribeStream) writeEnd(group GroupSequence) error {
 	return nil
 }
 
+// writeRedirect sends SUBSCRIBE_REDIRECT as the subscription's only answer
+// and ends the stream. It fails once SUBSCRIBE_OK or SUBSCRIBE_END went out.
+func (substr *receiveSubscribeStream) writeRedirect(m message.SubscribeRedirectMessage) error {
+	substr.mu.Lock()
+	defer substr.mu.Unlock()
+
+	if substr.responseStarted || substr.endSent {
+		return errSubscriptionAnswered
+	}
+
+	if _, err := substr.stream.Write([]byte{byte(message.MessageTypeSubscribeRedirect)}); err != nil {
+		return err
+	}
+	if err := m.Encode(substr.stream); err != nil {
+		return err
+	}
+
+	// Nothing may follow: no SUBSCRIBE_OK from a group opened later, and no
+	// SUBSCRIBE_END when the writer is closed.
+	substr.responseStarted = true
+	substr.endSent = true
+
+	return substr.stream.Close()
+}
+
 func (substr *receiveSubscribeStream) writeDrop(drop SubscribeDrop) error {
 	substr.mu.Lock()
 	defer substr.mu.Unlock()

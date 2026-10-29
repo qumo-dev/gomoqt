@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A publisher can redirect a subscription: `TrackWriter.Redirect`, `RedirectHandler`, `Redirect`, `RedirectError`, `ErrRedirectNotSupported`, `ErrTooManyRedirects` (`moqt`).** Instead of serving or refusing a subscription, a publisher answers it with the new SUBSCRIBE_REDIRECT message, which names the track to subscribe to instead (a broadcast path and track name), optionally on another session (a URI, which only a server may send), and how long the redirect may be reused (`MaxAge`). It replaces SUBSCRIBE_OK, so it must come before the first group. `Session.Subscribe` follows a redirect within the session by itself, up to two in a row, and returns the reader of the track it ended at; a redirect to another session returns a `*RedirectError` for the caller to dial, and a third redirect returns `ErrTooManyRedirects` joined with one. `RedirectHandler` redirects every subscription to a path, keeping the track name, so an alias of a broadcast is one `TrackMux.Publish`. SUBSCRIBE_REDIRECT is a gomoqt extension of moq-lite-05, modelled on moq-transport's REDIRECT: every session advertises that it follows one with a new Setup Parameter (`0x7d01`), and `TrackWriter.Redirect` returns `ErrRedirectNotSupported` for a peer that did not, such as `@qumo/moq` for now, leaving the subscription to be served or refused. See SPECIFICATION.md.
+
 ### Changed
 
 - **A merged release PR now publishes itself (CI).** `tag-release.yml` tags the commit that added the newest `## [vX.Y.Z]` CHANGELOG heading, and the one that set `moq-web/deno.json`'s version as `moq-web-vX.Y.Z`, then runs `release.yml` and `jsr-publish.yml`; an existing tag is left alone, so tagging by hand still works.

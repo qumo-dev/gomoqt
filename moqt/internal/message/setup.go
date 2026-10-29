@@ -11,6 +11,11 @@ const (
 	SetupParamPath  uint64 = 0x2
 )
 
+// SetupParamRedirect advertises that the sender follows SUBSCRIBE_REDIRECT.
+// It is a gomoqt extension, not assigned by moq-lite, so its ID sits far from
+// the draft's own; the value is empty.
+const SetupParamRedirect uint64 = 0x7d01
+
 // Probe capability levels carried by the Probe Setup Parameter.
 // Each level includes the ones below it.
 const (
@@ -71,6 +76,21 @@ func (sm SetupMessage) ProbeLevel() uint64 {
 		return level
 	}
 	return ProbeLevelNone
+}
+
+// AddRedirect appends the Redirect parameter.
+func (sm *SetupMessage) AddRedirect() {
+	sm.Parameters = append(sm.Parameters, SetupParameter{ID: SetupParamRedirect})
+}
+
+// FollowsRedirect reports whether the Redirect parameter is present.
+func (sm SetupMessage) FollowsRedirect() bool {
+	for _, p := range sm.Parameters {
+		if p.ID == SetupParamRedirect {
+			return true
+		}
+	}
+	return false
 }
 
 // Path returns the Path parameter value and whether it was present.

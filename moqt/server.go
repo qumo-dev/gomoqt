@@ -546,7 +546,7 @@ func (u *WebTransportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		lifetime = context.Background()
 	}
 	sess := newSession(conn, u.TrackMux, manager, u.Config, u.FetchHandler, u.AuthHandler, nil, u.Logger,
-		sessionSetup{path: requestPath(r), ctx: r.Context(), lifetime: lifetime}, nil)
+		sessionSetup{path: requestPath(r), server: true, ctx: r.Context(), lifetime: lifetime}, nil)
 	// Ensure the session is cleaned up (conn removed from the manager) when
 	// the Handler returns, even if it did not call CloseWithError itself (e.g.
 	// the peer closed the connection). Idempotent.
@@ -604,7 +604,7 @@ func (s *Server) handleNativeQUIC(conn StreamConn) error {
 	// WebTransport's r.URL.RequestURI()) along with the decoded SETUP, so it seeds
 	// peer-probe state without re-reading the consumed stream.
 	sess := newSession(conn, s.TrackMux, s.currentConnManager(), s.Config, s.FetchHandler, s.AuthHandler, nil, s.Logger,
-		sessionSetup{path: path, peerSetup: &sm, ctx: s.connContext(conn.Context(), conn)}, s.Counters)
+		sessionSetup{path: path, server: true, peerSetup: &sm, ctx: s.connContext(conn.Context(), conn)}, s.Counters)
 	if s.Counters != nil {
 		s.Counters.NativeSessions.Add(1)
 	}
