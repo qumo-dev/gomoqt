@@ -19,21 +19,22 @@ func TestDecode_RejectsOversizedLength(t *testing.T) {
 	lengthPrefix, _ := message.WriteMessageLength(nil, 1<<62-1)
 
 	decoders := map[string]interface{ Decode(io.Reader) error }{
-		"AnnounceBroadcastMessage":         &message.AnnounceBroadcastMessage{},
-		"AnnounceRequestMessage": &message.AnnounceRequestMessage{},
-		"AnnounceOkMessage":      &message.AnnounceOkMessage{},
-		"FetchMessage":            &message.FetchMessage{},
-		"GoawayMessage":           &message.GoawayMessage{},
-		"GroupMessage":            &message.GroupMessage{},
-		"ProbeMessage":            &message.ProbeMessage{},
-		"SetupMessage":            &message.SetupMessage{},
-		"SubscribeMessage":        &message.SubscribeMessage{},
-		"SubscribeDropMessage":    &message.SubscribeDropMessage{},
-		"SubscribeEndMessage":     &message.SubscribeEndMessage{},
-		"SubscribeOkMessage":      &message.SubscribeOkMessage{},
-		"SubscribeUpdateMessage":  &message.SubscribeUpdateMessage{},
-		"TrackInfoMessage":        &message.TrackInfoMessage{},
-		"TrackMessage":            &message.TrackMessage{},
+		"AnnounceBroadcastMessage": &message.AnnounceBroadcastMessage{},
+		"AnnounceRequestMessage":   &message.AnnounceRequestMessage{},
+		"AnnounceOkMessage":        &message.AnnounceOkMessage{},
+		"FetchMessage":             &message.FetchMessage{},
+		"GoawayMessage":            &message.GoawayMessage{},
+		"GroupMessage":             &message.GroupMessage{},
+		"ProbeMessage":             &message.ProbeMessage{},
+		"SetupMessage":             &message.SetupMessage{},
+		"SubscribeMessage":         &message.SubscribeMessage{},
+		"SubscribeDropMessage":     &message.SubscribeDropMessage{},
+		"SubscribeEndMessage":      &message.SubscribeEndMessage{},
+		"SubscribeOkMessage":       &message.SubscribeOkMessage{},
+		"SubscribeRedirectMessage": &message.SubscribeRedirectMessage{},
+		"SubscribeUpdateMessage":   &message.SubscribeUpdateMessage{},
+		"TrackInfoMessage":         &message.TrackInfoMessage{},
+		"TrackMessage":             &message.TrackMessage{},
 	}
 
 	// One byte over the control-message cap is refused as well: the cap, not

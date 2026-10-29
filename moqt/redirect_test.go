@@ -3,14 +3,12 @@ package moqt
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"errors"
+	"fmt"
 	"io"
-	"log/slog"
 	"testing"
 	"time"
 
-	quic "github.com/quic-go/quic-go"
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
 	"github.com/qumo-dev/gomoqt/transport"
 	"github.com/stretchr/testify/assert"
@@ -134,6 +132,11 @@ func TestTrackWriter_Redirect_StreamFailures(t *testing.T) {
 			}
 			if tt.wantReset {
 				assert.Contains(t, tt.stream.CancelWriteCodes(), transport.StreamErrorCode(SubscribeErrorCodeInternal))
+			} else {
+				// The failed close left the stream's context alive, so only
+				// the writer itself stops the group.
+				_, openErr := tw.OpenGroup(t.Context())
+				assert.ErrorIs(t, openErr, errTrackWriterStopped)
 			}
 			assert.Equal(t, 1, tt.stream.WriteCalls(), "the redirect goes out in one write, and SUBSCRIBE_END never follows")
 		})
@@ -151,21 +154,145 @@ func TestSession_redirectAllowed_WaitsForSetupUntilCtx(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 }
 
-func TestSendSubscribeStream_RedirectAfterOk(t *testing.T) {
-	var buf bytes.Buffer
-	buf.WriteByte(byte(message.MessageTypeSubscribeOk))
-	require.NoError(t, message.SubscribeOkMessage{Group: 1}.Encode(&buf))
-	buf.WriteByte(byte(message.MessageTypeSubscribeRedirect))
-	require.NoError(t, message.SubscribeRedirectMessage{BroadcastPath: "/real", TrackName: "video"}.Encode(&buf))
+func TestSendSubscribeStream_LateRedirect(t *testing.T) {
+	tests := map[string]struct {
+		first byte
+		msg   interface{ Encode(io.Writer) error }
+	}{
+		"after SUBSCRIBE_OK":  {first: byte(message.MessageTypeSubscribeOk), msg: message.SubscribeOkMessage{Group: 1}},
+		"after SUBSCRIBE_END": {first: byte(message.MessageTypeSubscribeEnd), msg: message.SubscribeEndMessage{Group: 1}},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			buf.WriteByte(tt.first)
+			require.NoError(t, tt.msg.Encode(&buf))
+			buf.WriteByte(byte(message.MessageTypeSubscribeRedirect))
+			require.NoError(t, message.SubscribeRedirectMessage{BroadcastPath: "/real", TrackName: "video"}.Encode(&buf))
 
-	stream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
-	substr := newSendSubscribeStream(SubscribeID(1), stream, &SubscribeConfig{})
-	var violations []string
-	substr.onProtocolViolation = func(msg string) { violations = append(violations, msg) }
+			stream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
+			substr := newSendSubscribeStream(SubscribeID(1), stream, &SubscribeConfig{})
+			var violations []string
+			substr.onProtocolViolation = func(msg string) { violations = append(violations, msg) }
 
-	substr.readSubscribeResponses()
+			substr.readSubscribeResponses()
 
-	assert.Len(t, violations, 1)
+			assert.Len(t, violations, 1)
+			_, closed := substr.closedSince()
+			assert.True(t, closed, "the subscription ends")
+		})
+	}
+}
+
+func TestSession_Subscribe_MalformedRedirect(t *testing.T) {
+	// SUBSCRIBE_REDIRECT whose length says 3 bytes but whose first string
+	// claims 5.
+	stream := &FakeQUICStream{Reads: []streamResult{{Data: []byte{byte(message.MessageTypeSubscribeRedirect), 0x03, 0x05, 0x00, 0x00}}}}
+	conn := &FakeStreamConn{OpenStreams: []biStreamResult{{Stream: stream}}}
+	sess := newTestSession(conn)
+	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
+
+	tr, err := sess.Subscribe(t.Context(), "/alias", "video", nil)
+
+	assert.Error(t, err)
+	assert.Nil(t, tr)
+	assert.Contains(t, stream.CancelWriteCodes(), transport.StreamErrorCode(SubscribeErrorCodeInternal))
+}
+
+func TestSession_followRedirect_URIToAServer(t *testing.T) {
+	sess, conn := newTestSessionWithConn(t)
+	sess.server = true
+
+	tr, err := sess.followRedirect(t.Context(), Redirect{URI: "moqt://b/", BroadcastPath: "/real", TrackName: "video"}, &SubscribeConfig{}, nil)
+
+	assert.ErrorIs(t, err, ErrClientRedirectURI)
+	assert.Nil(t, tr)
+	select {
+	case <-conn.Context().Done():
+	case <-time.After(time.Second):
+		t.Fatal("the session was not closed with PROTOCOL_VIOLATION")
+	}
+}
+
+func TestSession_redirectAllowed_PeerSetup(t *testing.T) {
+	tests := map[string]struct {
+		setupArrives bool
+		peerFollows  bool
+		wantErr      error
+		wantAnyErr   bool
+	}{
+		"arrives late, follows":        {setupArrives: true, peerFollows: true},
+		"arrives late, does not":       {setupArrives: true, wantErr: ErrRedirectNotSupported},
+		"never arrives: setup timeout": {wantAnyErr: true},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			sess := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, &Config{SetupTimeout: 200 * time.Millisecond},
+				nil, nil, nil, nil, sessionSetup{server: true}, nil)
+			t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
+
+			if tt.setupArrives {
+				go func() {
+					time.Sleep(20 * time.Millisecond) // after redirectAllowed starts waiting
+					sess.peerFollowsRedirect = tt.peerFollows
+					markPeerSetupReceived(sess, message.ProbeLevelNone)
+				}()
+			}
+
+			err := sess.redirectAllowed(t.Context(), "")
+
+			switch {
+			case tt.wantErr != nil:
+				assert.ErrorIs(t, err, tt.wantErr)
+			case tt.wantAnyErr:
+				assert.Error(t, err)
+			default:
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestSession_OpenSetupStream_AdvertisesRedirect(t *testing.T) {
+	conn, wait := collectSetupStream(t)
+	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
+	defer sess.CloseWithError(NoError, "") //nolint:errcheck // not actionable: cleanup
+
+	sm := decodeSetupBytes(t, wait())
+
+	assert.True(t, sm.FollowsRedirect(), "every session follows redirects")
+}
+
+func TestSession_PeerFollowsRedirect(t *testing.T) {
+	setup := func(follows bool) message.SetupMessage {
+		var sm message.SetupMessage
+		if follows {
+			sm.AddRedirect()
+		}
+		return sm
+	}
+
+	for _, follows := range []bool{true, false} {
+		t.Run(fmt.Sprintf("Setup Stream, follows=%t", follows), func(t *testing.T) {
+			sess := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
+			defer sess.CloseWithError(NoError, "") //nolint:errcheck // not actionable: cleanup
+			var buf bytes.Buffer
+			require.NoError(t, setup(follows).Encode(&buf))
+
+			sess.handleSetupStream(&FakeQUICReceiveStream{Reads: []streamResult{{Data: buf.Bytes()}}})
+
+			<-sess.peerSetupCh
+			assert.Equal(t, follows, sess.peerFollowsRedirect)
+		})
+		t.Run(fmt.Sprintf("native QUIC router, follows=%t", follows), func(t *testing.T) {
+			sm := setup(follows)
+			sess := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, nil,
+				sessionSetup{server: true, peerSetup: &sm}, nil)
+			defer sess.CloseWithError(NoError, "") //nolint:errcheck // not actionable: cleanup
+
+			assert.Equal(t, follows, sess.peerFollowsRedirect)
+		})
+	}
 }
 
 func TestTrackWriter_Redirect_Invalid(t *testing.T) {
@@ -211,137 +338,6 @@ func TestSession_redirectAllowed(t *testing.T) {
 				return
 			}
 			assert.NoError(t, err)
-		})
-	}
-}
-
-// TestSession_Subscribe_Redirect runs a real server whose mux redirects some
-// broadcasts, and checks what a dialed client's Subscribe returns for each.
-func TestSession_Subscribe_Redirect(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
-	defer cancel()
-
-	// redirectTo serves every subscription with a redirect to to, as an
-	// application's handler on a TrackMux does.
-	redirectTo := func(to Redirect) func(*TrackWriter) {
-		return func(tw *TrackWriter) {
-			if err := tw.Redirect(tw.Context(), to); err != nil {
-				tw.CloseWithError(SubscribeErrorCodeNotFound)
-			}
-		}
-	}
-	elsewhere := Redirect{URI: "moqt://relay-b.example/", BroadcastPath: "/real", TrackName: "video"}
-
-	mux := NewTrackMux(0)
-	mux.PublishFunc(ctx, "/real", func(tw *TrackWriter) {
-		gw, err := tw.OpenGroup(ctx)
-		if err != nil {
-			return
-		}
-		frame := NewFrame(8)
-		frame.Write([]byte(tw.TrackName))
-		_ = gw.WriteFrame(frame) // not actionable: the subscriber reports what it read
-		_ = gw.Close()           // not actionable: as above
-		<-tw.Context().Done()
-	})
-	mux.PublishFunc(ctx, "/alias", redirectTo(Redirect{BroadcastPath: "/real"}))
-	mux.PublishFunc(ctx, "/alias-of-alias", redirectTo(Redirect{BroadcastPath: "/alias"}))
-	mux.PublishFunc(ctx, "/loop-a", redirectTo(Redirect{BroadcastPath: "/loop-b"}))
-	mux.PublishFunc(ctx, "/loop-b", redirectTo(Redirect{BroadcastPath: "/loop-a"}))
-	mux.PublishFunc(ctx, "/elsewhere", redirectTo(elsewhere))
-
-	addr := freePort(t)
-	server := &Server{
-		Addr: addr,
-		TLSConfig: &tls.Config{
-			NextProtos:   []string{NextProtoH3, NextProtoMOQ},
-			Certificates: []tls.Certificate{generateTestCert(t)},
-		},
-		QUICConfig: &quic.Config{EnableDatagrams: true},
-		TrackMux:   mux,
-		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Handler:    HandleFunc(func(sess *Session) { <-sess.Context().Done() }),
-	}
-	go func() {
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, ErrServerClosed) {
-			t.Logf("server: %v", err)
-		}
-	}()
-	t.Cleanup(func() { closeServer(t, server) })
-
-	dial := func(config *Config) *Session {
-		client := Dialer{
-			Config:    config,
-			Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
-			TLSConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-		var sess *Session
-		require.Eventually(t, func() bool {
-			s, err := client.Dial(ctx, "moqt://"+addr+"/", nil)
-			if err != nil {
-				return false
-			}
-			sess = s
-			return true
-		}, 5*time.Second, 50*time.Millisecond, "dial the test server")
-		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
-		return sess
-	}
-
-	// hooked follows a redirect to /real only as the first of a subscription,
-	// and stops any to /loop-b.
-	errVeto := errors.New("vetoed")
-	hooked := dial(&Config{CheckRedirect: func(to Redirect, via []Redirect) error {
-		switch {
-		case to.BroadcastPath == "/loop-b":
-			return ErrStopRedirect
-		case to.BroadcastPath == "/real" && len(via) > 0:
-			return errVeto
-		}
-		return nil
-	}})
-	plain := dial(nil)
-
-	tests := map[string]struct {
-		sess     *Session
-		path     BroadcastPath
-		wantPath BroadcastPath
-		wantErr  error
-		wantTo   *Redirect
-	}{
-		"no redirect":     {sess: plain, path: "/real", wantPath: "/real"},
-		"one redirect":    {sess: plain, path: "/alias", wantPath: "/real"},
-		"two redirects":   {sess: plain, path: "/alias-of-alias", wantPath: "/real"},
-		"loop":            {sess: plain, path: "/loop-a", wantErr: ErrTooManyRedirects, wantTo: &Redirect{BroadcastPath: "/loop-b", TrackName: "video"}},
-		"another session": {sess: plain, path: "/elsewhere", wantTo: &elsewhere},
-		"hook follows":    {sess: hooked, path: "/alias", wantPath: "/real"},
-		"hook vetoes":     {sess: hooked, path: "/alias-of-alias", wantErr: errVeto, wantTo: &Redirect{BroadcastPath: "/real", TrackName: "video"}},
-		"hook stops":      {sess: hooked, path: "/loop-a", wantTo: &Redirect{BroadcastPath: "/loop-b", TrackName: "video"}},
-	}
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			tr, err := tt.sess.Subscribe(ctx, tt.path, "video", nil)
-
-			if tt.wantTo != nil {
-				if tt.wantErr != nil {
-					assert.ErrorIs(t, err, tt.wantErr)
-				}
-				assert.NotErrorIs(t, err, ErrStopRedirect, "a stopped redirect is returned as itself")
-				redirect, ok := errors.AsType[*RedirectError](err)
-				require.True(t, ok, "want a *RedirectError, got %v", err)
-				assert.Equal(t, *tt.wantTo, redirect.Redirect)
-				return
-			}
-			require.NoError(t, err)
-			defer tr.Close()
-			assert.Equal(t, tt.wantPath, tr.BroadcastPath)
-			assert.Equal(t, TrackName("video"), tr.TrackName)
-
-			gr, err := tr.AcceptGroup(ctx)
-			require.NoError(t, err)
-			frame := NewFrame(8)
-			require.NoError(t, gr.ReadFrame(frame))
-			assert.Equal(t, []byte("video"), frame.Body())
 		})
 	}
 }

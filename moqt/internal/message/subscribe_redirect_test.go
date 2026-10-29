@@ -2,6 +2,7 @@ package message_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
@@ -26,13 +27,20 @@ func TestSubscribeRedirectMessage_EncodeDecode(t *testing.T) {
 		"all fields empty": {
 			input: message.SubscribeRedirectMessage{},
 		},
+		"long path and non-ASCII name": {
+			input: message.SubscribeRedirectMessage{
+				BroadcastPath: "/" + strings.Repeat("segment/", 200) + "cam",
+				TrackName:     "映像",
+			},
+		},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			var buf bytes.Buffer
 			require.NoError(t, tt.input.Encode(&buf))
-			assert.Equal(t, tt.input.Len()+1, buf.Len(), "a one-byte length prefix and the body")
+			prefix, _ := message.WriteMessageLength(nil, uint64(tt.input.Len()))
+			assert.Equal(t, len(prefix)+tt.input.Len(), buf.Len(), "the length prefix and the body")
 
 			var decoded message.SubscribeRedirectMessage
 			require.NoError(t, decoded.Decode(&buf))
@@ -90,4 +98,31 @@ func TestSetupMessage_FollowsRedirect_Version(t *testing.T) {
 			assert.Equal(t, tt.want, sm.FollowsRedirect())
 		})
 	}
+}
+
+// FuzzSubscribeRedirectMessage_Decode checks that no input panics the decoder,
+// and that whatever it accepts encodes back to the same message.
+func FuzzSubscribeRedirectMessage_Decode(f *testing.F) {
+	for _, seed := range []message.SubscribeRedirectMessage{
+		{},
+		{BroadcastPath: "/real", TrackName: "video"},
+		{ConnectURI: "moqt://relay-b.example/", BroadcastPath: "/acme/cam", TrackName: "catalog"},
+	} {
+		var buf bytes.Buffer
+		require.NoError(f, seed.Encode(&buf))
+		f.Add(buf.Bytes())
+	}
+	f.Add([]byte{0x03, 0x05, 0x00, 0x00})
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		var decoded message.SubscribeRedirectMessage
+		if err := decoded.Decode(bytes.NewReader(data)); err != nil {
+			return
+		}
+		var buf bytes.Buffer
+		require.NoError(t, decoded.Encode(&buf))
+		var again message.SubscribeRedirectMessage
+		require.NoError(t, again.Decode(&buf))
+		assert.Equal(t, decoded, again)
+	})
 }
