@@ -28,7 +28,6 @@ SUBSCRIBE_REDIRECT Message {
   Connect URI (s)
   Broadcast Path (s)
   Track Name (s)
-  Max Age (i)
 }
 ```
 
@@ -37,14 +36,15 @@ SUBSCRIBE_REDIRECT Message {
   session with PROTOCOL_VIOLATION: only a server may send a subscriber to
   another host.
 - **Broadcast Path** and **Track Name**: the track to subscribe to instead.
-- **Max Age**: how long, in milliseconds, the subscriber may reuse the redirect
-  for later subscriptions to the same track without asking. 0 means not at all.
 
 Rules:
 
 - A publisher MUST NOT send SUBSCRIBE_REDIRECT unless the subscriber's SETUP
-  carried the Redirect Setup Parameter (ID `0x7d01`, empty value), which
-  advertises that it follows one. The ID is not assigned by moq-lite.
+  carried the Redirect Setup Parameter (ID `0x7d01`), which advertises that it
+  follows one. The ID is not assigned by moq-lite. The parameter's value is
+  the version of SUBSCRIBE_REDIRECT the sender understands, a varint; empty
+  means version 0, the format above. A later version, for example one that
+  adds a field, is sent only to a peer that advertised it.
 - SUBSCRIBE_REDIRECT is the only message the publisher sends on the stream; it
   then closes the stream (FIN). It MUST NOT follow SUBSCRIBE_OK or
   SUBSCRIBE_END.

@@ -13,7 +13,9 @@ const (
 
 // SetupParamRedirect advertises that the sender follows SUBSCRIBE_REDIRECT.
 // It is a gomoqt extension, not assigned by moq-lite, so its ID sits far from
-// the draft's own; the value is empty.
+// the draft's own. Its value is the version of SUBSCRIBE_REDIRECT the sender
+// understands; empty is version 0, the only one so far, and a later version
+// is sent only to a peer that advertised it.
 const SetupParamRedirect uint64 = 0x7d01
 
 // Probe capability levels carried by the Probe Setup Parameter.

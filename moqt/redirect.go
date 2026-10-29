@@ -3,8 +3,6 @@ package moqt
 import (
 	"errors"
 	"fmt"
-	"math"
-	"time"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
 )
@@ -45,11 +43,6 @@ type Redirect struct {
 	// a whole broadcast can be redirected with one rule.
 	BroadcastPath BroadcastPath
 	TrackName     TrackName
-
-	// MaxAge is how long the subscriber may reuse the redirect for later
-	// subscriptions to the same track without asking again. Zero means not at
-	// all. It travels in milliseconds.
-	MaxAge time.Duration
 }
 
 // RedirectError is returned by Session.Subscribe when the publisher redirected
@@ -73,29 +66,20 @@ func (to Redirect) message() message.SubscribeRedirectMessage {
 		ConnectURI:    to.URI,
 		BroadcastPath: string(to.BroadcastPath),
 		TrackName:     string(to.TrackName),
-		MaxAge:        uint64(to.MaxAge / time.Millisecond),
 	}
 }
 
 func redirectFromMessage(m *message.SubscribeRedirectMessage) Redirect {
-	maxAge := time.Duration(math.MaxInt64)
-	if m.MaxAge < uint64(math.MaxInt64/int64(time.Millisecond)) {
-		maxAge = time.Duration(m.MaxAge) * time.Millisecond
-	}
 	return Redirect{
 		URI:           m.ConnectURI,
 		BroadcastPath: BroadcastPath(m.BroadcastPath),
 		TrackName:     TrackName(m.TrackName),
-		MaxAge:        maxAge,
 	}
 }
 
 func (to Redirect) validate() error {
 	if !isValidPath(to.BroadcastPath) {
 		return fmt.Errorf("moqt: invalid redirect path: %q", to.BroadcastPath)
-	}
-	if to.MaxAge < 0 {
-		return fmt.Errorf("moqt: negative redirect max age: %v", to.MaxAge)
 	}
 	return nil
 }

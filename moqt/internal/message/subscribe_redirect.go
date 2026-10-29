@@ -17,7 +17,6 @@ import (
 //	  Connect URI (s)
 //	  Broadcast Path (s)
 //	  Track Name (s)
-//	  Max Age (i)
 //	}
 type SubscribeRedirectMessage struct {
 	// ConnectURI is the session to subscribe on; empty means the current one.
@@ -25,16 +24,12 @@ type SubscribeRedirectMessage struct {
 	// BroadcastPath and TrackName name the track to subscribe to instead.
 	BroadcastPath string
 	TrackName     string
-	// MaxAge is how long, in milliseconds, the subscriber may reuse the
-	// redirect for later subscriptions to the same track. 0 means not at all.
-	MaxAge uint64
 }
 
 func (m SubscribeRedirectMessage) Len() int {
 	return StringLen(m.ConnectURI) +
 		StringLen(m.BroadcastPath) +
-		StringLen(m.TrackName) +
-		VarintLen(m.MaxAge)
+		StringLen(m.TrackName)
 }
 
 func (m SubscribeRedirectMessage) Encode(w io.Writer) error {
@@ -45,7 +40,6 @@ func (m SubscribeRedirectMessage) Encode(w io.Writer) error {
 	b, _ = WriteString(b, m.ConnectURI)
 	b, _ = WriteString(b, m.BroadcastPath)
 	b, _ = WriteString(b, m.TrackName)
-	b, _ = WriteVarint(b, m.MaxAge)
 
 	_, err := w.Write(b)
 	return err
@@ -75,12 +69,6 @@ func (m *SubscribeRedirectMessage) Decode(src io.Reader) error {
 	}
 	b = b[n:]
 
-	maxAge, n, err := ReadVarint(b)
-	if err != nil {
-		return err
-	}
-	b = b[n:]
-
 	if len(b) != 0 {
 		return ErrMessageTooShort
 	}
@@ -88,6 +76,5 @@ func (m *SubscribeRedirectMessage) Decode(src io.Reader) error {
 	m.ConnectURI = uri
 	m.BroadcastPath = path
 	m.TrackName = name
-	m.MaxAge = maxAge
 	return nil
 }

@@ -29,8 +29,8 @@ func TestTrackWriter_Redirect(t *testing.T) {
 	}{
 		"keeps the subscriber's track name": {
 			allowed: follows,
-			to:      Redirect{BroadcastPath: "/real", MaxAge: 1500 * time.Millisecond},
-			want:    &message.SubscribeRedirectMessage{BroadcastPath: "/real", TrackName: "trackname", MaxAge: 1500},
+			to:      Redirect{BroadcastPath: "/real"},
+			want:    &message.SubscribeRedirectMessage{BroadcastPath: "/real", TrackName: "trackname"},
 		},
 		"names another track and session": {
 			allowed: follows,
@@ -87,9 +87,8 @@ func TestTrackWriter_Redirect(t *testing.T) {
 
 func TestTrackWriter_Redirect_Invalid(t *testing.T) {
 	tests := map[string]Redirect{
-		"empty path":       {},
-		"relative path":    {BroadcastPath: "real"},
-		"negative max age": {BroadcastPath: "/real", MaxAge: -time.Second},
+		"empty path":    {},
+		"relative path": {BroadcastPath: "real"},
 	}
 	for name, to := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -129,23 +128,6 @@ func TestSession_redirectAllowed(t *testing.T) {
 				return
 			}
 			assert.NoError(t, err)
-		})
-	}
-}
-
-func TestRedirectFromMessage_MaxAge(t *testing.T) {
-	tests := map[string]struct {
-		ms   uint64
-		want time.Duration
-	}{
-		"zero":            {ms: 0, want: 0},
-		"seconds":         {ms: 2500, want: 2500 * time.Millisecond},
-		"beyond Duration": {ms: 1 << 62, want: time.Duration(1<<63 - 1)},
-	}
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			got := redirectFromMessage(&message.SubscribeRedirectMessage{BroadcastPath: "/x", MaxAge: tt.ms})
-			assert.Equal(t, tt.want, got.MaxAge)
 		})
 	}
 }
