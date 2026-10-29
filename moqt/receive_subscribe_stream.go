@@ -1,6 +1,7 @@
 package moqt
 
 import (
+	"bytes"
 	"sync"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
@@ -141,19 +142,25 @@ func (substr *receiveSubscribeStream) writeRedirect(m message.SubscribeRedirectM
 		return errSubscriptionAnswered
 	}
 
-	if _, err := substr.stream.Write([]byte{byte(message.MessageTypeSubscribeRedirect)}); err != nil {
-		return err
-	}
-	if err := m.Encode(substr.stream); err != nil {
+	// One write, so the type is never sent without the body.
+	var buf bytes.Buffer
+	buf.WriteByte(byte(message.MessageTypeSubscribeRedirect))
+	if err := m.Encode(&buf); err != nil {
 		return err
 	}
 
-	// Nothing may follow: no SUBSCRIBE_OK from a group opened later, and no
-	// SUBSCRIBE_END when the writer is closed.
+	// Nothing may follow, even when the write fails partway: no SUBSCRIBE_OK
+	// from a group opened later, and no SUBSCRIBE_END when the writer closes.
 	substr.responseStarted = true
 	substr.endSent = true
 
-	return substr.stream.Close()
+	if _, err := substr.stream.Write(buf.Bytes()); err != nil {
+		// Part of it may be out; reset the stream rather than leave it torn.
+		cancelStreamWithError(substr.stream, transport.StreamErrorCode(SubscribeErrorCodeInternal))
+		return err
+	}
+	_ = substr.stream.Close() // not actionable: the redirect is out, and the stream ends either way
+	return nil
 }
 
 func (substr *receiveSubscribeStream) writeDrop(drop SubscribeDrop) error {

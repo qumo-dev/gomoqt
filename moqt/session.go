@@ -359,6 +359,11 @@ func (sess *Session) terminateProtocolViolation(msg string) {
 // waitPeerSetup blocks until the peer's SETUP has been received, the
 // session terminates, or the setup timeout elapses.
 func (sess *Session) waitPeerSetup() error {
+	return sess.waitPeerSetupContext(sess.ctx)
+}
+
+// waitPeerSetupContext is waitPeerSetup that also returns when ctx ends.
+func (sess *Session) waitPeerSetupContext(ctx context.Context) error {
 	select {
 	case <-sess.peerSetupCh:
 		return nil
@@ -375,6 +380,8 @@ func (sess *Session) waitPeerSetup() error {
 		return errors.New("timed out waiting for peer SETUP")
 	case <-sess.ctx.Done():
 		return Cause(sess.ctx)
+	case <-ctx.Done():
+		return context.Cause(ctx)
 	}
 }
 
@@ -551,6 +558,7 @@ func (sess *Session) subscribe(ctx context.Context, path BroadcastPath, name Tra
 	}
 
 	substr := newSendSubscribeStream(id, stream, config)
+	substr.onProtocolViolation = sess.terminateProtocolViolation
 
 	track := newTrackReader(path, name, substr, func() { sess.removeTrackReader(id) })
 	// A missing group is waited for a few round trips beyond the minimum
@@ -615,12 +623,12 @@ func (sess *Session) followRedirect(ctx context.Context, to Redirect, config *Su
 	if to.URI != "" {
 		if sess.server {
 			sess.terminateProtocolViolation("SUBSCRIBE_REDIRECT to another URI sent to a server")
-			return nil, errClientRedirectURI
+			return nil, ErrClientRedirectURI
 		}
 		return nil, &RedirectError{Redirect: to}
 	}
-	// Clipped, so a CheckRedirect that appends to via cannot write into ours.
-	if err := sess.config.checkRedirect(to, slices.Clip(via)); err != nil {
+	// A copy, so CheckRedirect cannot change the history it is judged by.
+	if err := sess.config.checkRedirect(to, slices.Clone(via)); err != nil {
 		if errors.Is(err, ErrStopRedirect) {
 			return nil, &RedirectError{Redirect: to}
 		}
@@ -632,11 +640,11 @@ func (sess *Session) followRedirect(ctx context.Context, to Redirect, config *Su
 // redirectAllowed reports whether a subscriber on this session may be
 // redirected to uri: the peer advertised that it follows redirects, and only
 // a server sends one to another URI.
-func (sess *Session) redirectAllowed(uri string) error {
+func (sess *Session) redirectAllowed(ctx context.Context, uri string) error {
 	if uri != "" && !sess.server {
-		return errClientRedirectURI
+		return ErrClientRedirectURI
 	}
-	if err := sess.waitPeerSetup(); err != nil {
+	if err := sess.waitPeerSetupContext(ctx); err != nil {
 		return err
 	}
 	if !sess.peerFollowsRedirect {

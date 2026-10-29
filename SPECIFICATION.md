@@ -42,12 +42,15 @@ Rules:
 - A publisher MUST NOT send SUBSCRIBE_REDIRECT unless the subscriber's SETUP
   carried the Redirect Setup Parameter (ID `0x7d01`), which advertises that it
   follows one. The ID is not assigned by moq-lite. The parameter's value is
-  the version of SUBSCRIBE_REDIRECT the sender understands, a varint; empty
-  means version 0, the format above. A later version, for example one that
-  adds a field, is sent only to a peer that advertised it.
+  the newest version of SUBSCRIBE_REDIRECT the sender understands, a varint,
+  and it understands every earlier one; empty means version 0, the format
+  above. A malformed value means the sender does not follow redirects. A
+  later version, for example one that adds a field, is sent only to a peer
+  that advertised it.
 - SUBSCRIBE_REDIRECT is the only message the publisher sends on the stream; it
   then closes the stream (FIN). It MUST NOT follow SUBSCRIBE_OK or
-  SUBSCRIBE_END.
+  SUBSCRIBE_END; a subscriber that receives one there closes the session with
+  PROTOCOL_VIOLATION.
 - The subscriber re-subscribes on a new Subscribe Stream, with the same
   subscription parameters. A Subscribe Stream is bound to one track, so it is
   never re-targeted.

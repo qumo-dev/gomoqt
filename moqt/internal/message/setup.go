@@ -13,9 +13,10 @@ const (
 
 // SetupParamRedirect advertises that the sender follows SUBSCRIBE_REDIRECT.
 // It is a gomoqt extension, not assigned by moq-lite, so its ID sits far from
-// the draft's own. Its value is the version of SUBSCRIBE_REDIRECT the sender
-// understands; empty is version 0, the only one so far, and a later version
-// is sent only to a peer that advertised it.
+// the draft's own. Its value is the newest version of SUBSCRIBE_REDIRECT the
+// sender understands, as a varint, and it understands every earlier one;
+// empty is version 0, the only one so far. A later version is sent only to a
+// peer that advertised it.
 const SetupParamRedirect uint64 = 0x7d01
 
 // Probe capability levels carried by the Probe Setup Parameter.
@@ -85,12 +86,20 @@ func (sm *SetupMessage) AddRedirect() {
 	sm.Parameters = append(sm.Parameters, SetupParameter{ID: SetupParamRedirect})
 }
 
-// FollowsRedirect reports whether the Redirect parameter is present.
+// FollowsRedirect reports whether the Redirect parameter is present and
+// well formed: empty, or a varint version and nothing else. A peer that
+// understands a version understands every earlier one, so any well-formed
+// value means it follows version 0.
 func (sm SetupMessage) FollowsRedirect() bool {
 	for _, p := range sm.Parameters {
-		if p.ID == SetupParamRedirect {
+		if p.ID != SetupParamRedirect {
+			continue
+		}
+		if len(p.Value) == 0 {
 			return true
 		}
+		_, n, err := ReadVarint(p.Value)
+		return err == nil && n == len(p.Value)
 	}
 	return false
 }

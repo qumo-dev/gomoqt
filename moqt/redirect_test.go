@@ -12,16 +12,17 @@ import (
 
 	quic "github.com/quic-go/quic-go"
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
+	"github.com/qumo-dev/gomoqt/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestTrackWriter_Redirect(t *testing.T) {
-	follows := func(string) error { return nil }
-	refuses := func(string) error { return ErrRedirectNotSupported }
+	follows := func(context.Context, string) error { return nil }
+	refuses := func(context.Context, string) error { return ErrRedirectNotSupported }
 
 	tests := map[string]struct {
-		allowed func(string) error
+		allowed func(context.Context, string) error
 		okSent  bool
 		to      Redirect
 		want    *message.SubscribeRedirectMessage
@@ -63,7 +64,7 @@ func TestTrackWriter_Redirect(t *testing.T) {
 			}
 			before := buf.Len()
 
-			err := tw.Redirect(tt.to)
+			err := tw.Redirect(t.Context(), tt.to)
 
 			if tt.wantErr != nil {
 				assert.ErrorIs(t, err, tt.wantErr)
@@ -85,6 +86,88 @@ func TestTrackWriter_Redirect(t *testing.T) {
 	}
 }
 
+func TestTrackWriter_Redirect_StopsTheWriter(t *testing.T) {
+	tw, buf := newTrackWriterDropTestSender(t)
+	tw.redirectAllowed = func(context.Context, string) error { return nil }
+	require.NoError(t, tw.Redirect(t.Context(), Redirect{BroadcastPath: "/real"}))
+	sent := buf.Len()
+
+	_, err := tw.OpenGroup(t.Context())
+	assert.Error(t, err, "no group opens after a redirect")
+	assert.NoError(t, tw.Close())
+	tw.CloseWithError(SubscribeErrorCodeInternal)
+	assert.Equal(t, sent, buf.Len(), "nothing is sent after a redirect")
+	assert.ErrorIs(t, tw.Redirect(t.Context(), Redirect{BroadcastPath: "/real"}), errSubscriptionAnswered)
+}
+
+func TestTrackWriter_Redirect_StreamFailures(t *testing.T) {
+	errWrite := errors.New("write failed")
+	errClose := errors.New("close failed")
+
+	tests := map[string]struct {
+		stream    *FakeQUICStream
+		wantErr   error
+		wantReset bool
+	}{
+		"write fails: reset, and nothing follows": {
+			stream:    &FakeQUICStream{Writes: []streamResult{{Err: errWrite}}},
+			wantErr:   errWrite,
+			wantReset: true,
+		},
+		"close fails after the redirect is out: still sent": {
+			stream: &FakeQUICStream{CloseErr: errClose},
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			substr := newReceiveSubscribeStream(SubscribeID(1), tt.stream, &SubscribeConfig{})
+			tw := newTrackWriter("/alias", "video", substr, nil, func() {})
+			tw.redirectAllowed = func(context.Context, string) error { return nil }
+
+			err := tw.Redirect(t.Context(), Redirect{BroadcastPath: "/real"})
+			_ = tw.Close() // not actionable: what Close sends is asserted below
+
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+			} else {
+				assert.NoError(t, err)
+			}
+			if tt.wantReset {
+				assert.Contains(t, tt.stream.CancelWriteCodes(), transport.StreamErrorCode(SubscribeErrorCodeInternal))
+			}
+			assert.Equal(t, 1, tt.stream.WriteCalls(), "the redirect goes out in one write, and SUBSCRIBE_END never follows")
+		})
+	}
+}
+
+func TestSession_redirectAllowed_WaitsForSetupUntilCtx(t *testing.T) {
+	sess := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{server: true}, nil)
+	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := sess.redirectAllowed(ctx, "")
+
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestSendSubscribeStream_RedirectAfterOk(t *testing.T) {
+	var buf bytes.Buffer
+	buf.WriteByte(byte(message.MessageTypeSubscribeOk))
+	require.NoError(t, message.SubscribeOkMessage{Group: 1}.Encode(&buf))
+	buf.WriteByte(byte(message.MessageTypeSubscribeRedirect))
+	require.NoError(t, message.SubscribeRedirectMessage{BroadcastPath: "/real", TrackName: "video"}.Encode(&buf))
+
+	stream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
+	substr := newSendSubscribeStream(SubscribeID(1), stream, &SubscribeConfig{})
+	var violations []string
+	substr.onProtocolViolation = func(msg string) { violations = append(violations, msg) }
+
+	substr.readSubscribeResponses()
+
+	assert.Len(t, violations, 1)
+}
+
 func TestTrackWriter_Redirect_Invalid(t *testing.T) {
 	tests := map[string]Redirect{
 		"empty path":    {},
@@ -93,9 +176,9 @@ func TestTrackWriter_Redirect_Invalid(t *testing.T) {
 	for name, to := range tests {
 		t.Run(name, func(t *testing.T) {
 			tw, buf := newTrackWriterDropTestSender(t)
-			tw.redirectAllowed = func(string) error { return nil }
+			tw.redirectAllowed = func(context.Context, string) error { return nil }
 
-			assert.Error(t, tw.Redirect(to))
+			assert.Error(t, tw.Redirect(t.Context(), to))
 			assert.Zero(t, buf.Len())
 		})
 	}
@@ -111,9 +194,9 @@ func TestSession_redirectAllowed(t *testing.T) {
 		"server, same session":           {server: true, peerFollows: true},
 		"server, another session":        {server: true, peerFollows: true, uri: "moqt://b/"},
 		"client, same session":           {peerFollows: true},
-		"client, another session":        {peerFollows: true, uri: "moqt://b/", wantErr: errClientRedirectURI},
+		"client, another session":        {peerFollows: true, uri: "moqt://b/", wantErr: ErrClientRedirectURI},
 		"peer does not follow":           {server: true, wantErr: ErrRedirectNotSupported},
-		"client URI checked before peer": {uri: "moqt://b/", wantErr: errClientRedirectURI},
+		"client URI checked before peer": {uri: "moqt://b/", wantErr: ErrClientRedirectURI},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -121,7 +204,7 @@ func TestSession_redirectAllowed(t *testing.T) {
 			sess.server = tt.server
 			sess.peerFollowsRedirect = tt.peerFollows
 
-			err := sess.redirectAllowed(tt.uri)
+			err := sess.redirectAllowed(t.Context(), tt.uri)
 
 			if tt.wantErr != nil {
 				assert.ErrorIs(t, err, tt.wantErr)
@@ -142,7 +225,7 @@ func TestSession_Subscribe_Redirect(t *testing.T) {
 	// application's handler on a TrackMux does.
 	redirectTo := func(to Redirect) func(*TrackWriter) {
 		return func(tw *TrackWriter) {
-			if err := tw.Redirect(to); err != nil {
+			if err := tw.Redirect(tw.Context(), to); err != nil {
 				tw.CloseWithError(SubscribeErrorCodeNotFound)
 			}
 		}

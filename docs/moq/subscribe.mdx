@@ -76,7 +76,7 @@ On the publishing side, a track handler calls `TrackWriter.Redirect` before the 
 
 ```go
     mux.PublishFunc(ctx, "/public/cam", func(tw *moqt.TrackWriter) {
-        if err := tw.Redirect(moqt.Redirect{BroadcastPath: "/acme/cam"}); err != nil {
+        if err := tw.Redirect(tw.Context(), moqt.Redirect{BroadcastPath: "/acme/cam"}); err != nil {
             // The subscriber does not follow redirects (moqt.ErrRedirectNotSupported),
             // such as @qumo/moq for now: serve the track here, or refuse it.
             tw.CloseWithError(moqt.SubscribeErrorCodeNotFound)

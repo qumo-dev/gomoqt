@@ -45,6 +45,10 @@ type sendSubscribeStream struct {
 	// onDrop, when set, is told of each SUBSCRIBE_DROP, outside mu. It is set
 	// before readSubscribeResponses starts.
 	onDrop func(SubscribeDrop)
+	// onProtocolViolation, when set, is told of a message the publisher must
+	// not send, such as SUBSCRIBE_REDIRECT after SUBSCRIBE_OK. It is set
+	// before readSubscribeResponses starts.
+	onProtocolViolation func(msg string)
 
 	mu sync.Mutex
 
@@ -82,8 +86,10 @@ func (substr *sendSubscribeStream) readSubscribeResponses() {
 				ErrorCode:  SubscribeErrorCode(resp.drop.ErrorCode),
 			})
 		case resp.redirect != nil:
-			// SUBSCRIBE_REDIRECT may only replace SUBSCRIBE_OK. After it, the
-			// subscription ends as if the publisher had closed the stream.
+			// SUBSCRIBE_REDIRECT may only replace SUBSCRIBE_OK.
+			if substr.onProtocolViolation != nil {
+				substr.onProtocolViolation("SUBSCRIBE_REDIRECT after SUBSCRIBE_OK or SUBSCRIBE_END")
+			}
 			return
 		}
 	}

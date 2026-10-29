@@ -27,8 +27,13 @@ var (
 	// following it.
 	ErrStopRedirect = errors.New("moqt: redirect not followed")
 
+	// ErrClientRedirectURI is returned by TrackWriter.Redirect on a client for
+	// a redirect to another session, which only a server may send, and by a
+	// server's Session.Subscribe that received one.
+	ErrClientRedirectURI = errors.New("moqt: only a server may redirect to another URI")
+
 	errSubscriptionAnswered = errors.New("moqt: subscription already answered")
-	errClientRedirectURI    = errors.New("moqt: only a server may redirect to another URI")
+	errTrackWriterStopped   = errors.New("moqt: track writer closed or redirected")
 )
 
 // Redirect is where a publisher sends a subscriber instead of serving it: to

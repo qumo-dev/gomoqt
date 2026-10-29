@@ -72,3 +72,22 @@ func TestSetupMessage_FollowsRedirect(t *testing.T) {
 	assert.True(t, decoded.FollowsRedirect())
 	assert.False(t, message.SetupMessage{}.FollowsRedirect())
 }
+
+func TestSetupMessage_FollowsRedirect_Version(t *testing.T) {
+	tests := map[string]struct {
+		value []byte
+		want  bool
+	}{
+		"empty is version 0": {value: nil, want: true},
+		"version 0":          {value: []byte{0x00}, want: true},
+		"a later version":    {value: []byte{0x02}, want: true},
+		"truncated varint":   {value: []byte{0x40}, want: false},
+		"trailing bytes":     {value: []byte{0x01, 0x01}, want: false},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			sm := message.SetupMessage{Parameters: []message.SetupParameter{{ID: message.SetupParamRedirect, Value: tt.value}}}
+			assert.Equal(t, tt.want, sm.FollowsRedirect())
+		})
+	}
+}
