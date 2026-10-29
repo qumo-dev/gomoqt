@@ -10,8 +10,8 @@ import (
 )
 
 // maxSubscribeRedirects is how many redirects Session.Subscribe follows for
-// one subscription before it gives up, so that two publishers redirecting to
-// each other cannot loop.
+// one subscription, without Config.CheckRedirect, before it gives up, so that
+// two publishers redirecting to each other cannot loop.
 const maxSubscribeRedirects = 2
 
 var (
@@ -23,6 +23,11 @@ var (
 	// ErrTooManyRedirects is returned by Session.Subscribe, joined with a
 	// *RedirectError, when a subscription was redirected more than it follows.
 	ErrTooManyRedirects = errors.New("moqt: too many redirects")
+
+	// ErrStopRedirect, returned by Config.CheckRedirect, makes
+	// Session.Subscribe return the redirect as a *RedirectError instead of
+	// following it.
+	ErrStopRedirect = errors.New("moqt: redirect not followed")
 
 	errSubscriptionAnswered = errors.New("moqt: subscription already answered")
 	errClientRedirectURI    = errors.New("moqt: only a server may redirect to another URI")

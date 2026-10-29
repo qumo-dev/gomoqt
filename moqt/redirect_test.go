@@ -204,41 +204,64 @@ func TestSession_Subscribe_Redirect(t *testing.T) {
 	}()
 	t.Cleanup(func() { closeServer(t, server) })
 
-	client := Dialer{
-		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
-		TLSConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-	var sess *Session
-	require.Eventually(t, func() bool {
-		s, err := client.Dial(ctx, "moqt://"+addr+"/", nil)
-		if err != nil {
-			return false
+	dial := func(config *Config) *Session {
+		client := Dialer{
+			Config:    config,
+			Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+			TLSConfig: &tls.Config{InsecureSkipVerify: true},
 		}
-		sess = s
-		return true
-	}, 5*time.Second, 50*time.Millisecond, "dial the test server")
-	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
+		var sess *Session
+		require.Eventually(t, func() bool {
+			s, err := client.Dial(ctx, "moqt://"+addr+"/", nil)
+			if err != nil {
+				return false
+			}
+			sess = s
+			return true
+		}, 5*time.Second, 50*time.Millisecond, "dial the test server")
+		t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
+		return sess
+	}
+
+	// hooked follows a redirect to /real only as the first of a subscription,
+	// and stops any to /loop-b.
+	errVeto := errors.New("vetoed")
+	hooked := dial(&Config{CheckRedirect: func(to Redirect, via []Redirect) error {
+		switch {
+		case to.BroadcastPath == "/loop-b":
+			return ErrStopRedirect
+		case to.BroadcastPath == "/real" && len(via) > 0:
+			return errVeto
+		}
+		return nil
+	}})
+	plain := dial(nil)
 
 	tests := map[string]struct {
+		sess     *Session
 		path     BroadcastPath
 		wantPath BroadcastPath
 		wantErr  error
 		wantTo   *Redirect
 	}{
-		"no redirect":     {path: "/real", wantPath: "/real"},
-		"one redirect":    {path: "/alias", wantPath: "/real"},
-		"two redirects":   {path: "/alias-of-alias", wantPath: "/real"},
-		"loop":            {path: "/loop-a", wantErr: ErrTooManyRedirects, wantTo: &Redirect{BroadcastPath: "/loop-b", TrackName: "video"}},
-		"another session": {path: "/elsewhere", wantTo: &elsewhere},
+		"no redirect":     {sess: plain, path: "/real", wantPath: "/real"},
+		"one redirect":    {sess: plain, path: "/alias", wantPath: "/real"},
+		"two redirects":   {sess: plain, path: "/alias-of-alias", wantPath: "/real"},
+		"loop":            {sess: plain, path: "/loop-a", wantErr: ErrTooManyRedirects, wantTo: &Redirect{BroadcastPath: "/loop-b", TrackName: "video"}},
+		"another session": {sess: plain, path: "/elsewhere", wantTo: &elsewhere},
+		"hook follows":    {sess: hooked, path: "/alias", wantPath: "/real"},
+		"hook vetoes":     {sess: hooked, path: "/alias-of-alias", wantErr: errVeto, wantTo: &Redirect{BroadcastPath: "/real", TrackName: "video"}},
+		"hook stops":      {sess: hooked, path: "/loop-a", wantTo: &Redirect{BroadcastPath: "/loop-b", TrackName: "video"}},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			tr, err := sess.Subscribe(ctx, tt.path, "video", nil)
+			tr, err := tt.sess.Subscribe(ctx, tt.path, "video", nil)
 
 			if tt.wantTo != nil {
 				if tt.wantErr != nil {
 					assert.ErrorIs(t, err, tt.wantErr)
 				}
+				assert.NotErrorIs(t, err, ErrStopRedirect, "a stopped redirect is returned as itself")
 				redirect, ok := errors.AsType[*RedirectError](err)
 				require.True(t, ok, "want a *RedirectError, got %v", err)
 				assert.Equal(t, *tt.wantTo, redirect.Redirect)
@@ -256,4 +279,41 @@ func TestSession_Subscribe_Redirect(t *testing.T) {
 			assert.Equal(t, []byte("video"), frame.Body())
 		})
 	}
+}
+
+func TestConfig_checkRedirect(t *testing.T) {
+	to := Redirect{BroadcastPath: "/real", TrackName: "video"}
+	errVeto := errors.New("vetoed")
+
+	tests := map[string]struct {
+		config  *Config
+		via     int
+		wantErr error
+	}{
+		"nil config, first":      {config: nil, via: 0},
+		"default, second":        {config: &Config{}, via: 1},
+		"default, third":         {config: &Config{}, via: 2, wantErr: ErrTooManyRedirects},
+		"hook allows past limit": {config: &Config{CheckRedirect: func(Redirect, []Redirect) error { return nil }}, via: 5},
+		"hook vetoes first":      {config: &Config{CheckRedirect: func(Redirect, []Redirect) error { return errVeto }}, via: 0, wantErr: errVeto},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := tt.config.checkRedirect(to, make([]Redirect, tt.via))
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestConfig_Clone_CheckRedirect(t *testing.T) {
+	errVeto := errors.New("vetoed")
+	original := &Config{CheckRedirect: func(Redirect, []Redirect) error { return errVeto }}
+
+	cloned := original.Clone()
+
+	require.NotNil(t, cloned.CheckRedirect)
+	assert.ErrorIs(t, cloned.CheckRedirect(Redirect{}, nil), errVeto)
 }

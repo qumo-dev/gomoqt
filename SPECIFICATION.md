@@ -51,8 +51,9 @@ Rules:
 - The subscriber re-subscribes on a new Subscribe Stream, with the same
   subscription parameters. A Subscribe Stream is bound to one track, so it is
   never re-targeted.
-- A subscriber follows at most two redirects in a row for one subscription,
-  so publishers that redirect to each other cannot loop.
+- A subscriber MUST bound how many redirects it follows in a row for one
+  subscription, so publishers that redirect to each other cannot loop.
+  gomoqt follows two by default.
 
 ## Reference
 

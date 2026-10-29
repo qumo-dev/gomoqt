@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -479,17 +480,18 @@ func (sess *Session) CloseWithError(code SessionErrorCode, msg string) error {
 // If config is nil, a zero-value SubscribeConfig is used.
 //
 // A publisher may answer with a redirect instead. Subscribe follows one to
-// another track on this session by itself, up to two in a row, and returns
-// the reader of the track it ended at, whose BroadcastPath and TrackName say
-// which. A redirect to another session, which the caller must dial, returns a
-// *RedirectError; one past the limit returns ErrTooManyRedirects joined with
-// a *RedirectError.
+// another track on this session by itself, as Config.CheckRedirect allows
+// (by default up to two in a row), and returns the reader of the track it
+// ended at, whose BroadcastPath and TrackName say which. A redirect to
+// another session, which the caller must dial, or one CheckRedirect stopped
+// with ErrStopRedirect, returns a *RedirectError; any other refusal returns
+// CheckRedirect's error, or ErrTooManyRedirects, joined with one.
 func (sess *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackName, config *SubscribeConfig) (*TrackReader, error) {
-	return sess.subscribe(ctx, path, name, config, 0)
+	return sess.subscribe(ctx, path, name, config, nil)
 }
 
-// subscribe is Subscribe after redirects redirects.
-func (sess *Session) subscribe(ctx context.Context, path BroadcastPath, name TrackName, config *SubscribeConfig, redirects int) (*TrackReader, error) {
+// subscribe is Subscribe after following the redirects in via.
+func (sess *Session) subscribe(ctx context.Context, path BroadcastPath, name TrackName, config *SubscribeConfig, via []Redirect) (*TrackReader, error) {
 	if ctx == nil {
 		return nil, errors.New("nil context")
 	}
@@ -596,7 +598,7 @@ func (sess *Session) subscribe(ctx context.Context, path BroadcastPath, name Tra
 		// without an error.
 		subscribed = true
 		_ = track.Close() // not actionable: the stream is already over
-		return sess.followRedirect(ctx, redirectFromMessage(resp.redirect), config, redirects)
+		return sess.followRedirect(ctx, redirectFromMessage(resp.redirect), config, via)
 	default:
 		cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeInternal))
 		return nil, fmt.Errorf("moqt: unexpected SUBSCRIBE_DROP message before SUBSCRIBE_OK")
@@ -608,8 +610,8 @@ func (sess *Session) subscribe(ctx context.Context, path BroadcastPath, name Tra
 }
 
 // followRedirect subscribes where a publisher redirected a subscription,
-// when it is on this session and within maxSubscribeRedirects.
-func (sess *Session) followRedirect(ctx context.Context, to Redirect, config *SubscribeConfig, redirects int) (*TrackReader, error) {
+// when it is on this session and Config.CheckRedirect allows it.
+func (sess *Session) followRedirect(ctx context.Context, to Redirect, config *SubscribeConfig, via []Redirect) (*TrackReader, error) {
 	if to.URI != "" {
 		if sess.server {
 			sess.terminateProtocolViolation("SUBSCRIBE_REDIRECT to another URI sent to a server")
@@ -617,10 +619,14 @@ func (sess *Session) followRedirect(ctx context.Context, to Redirect, config *Su
 		}
 		return nil, &RedirectError{Redirect: to}
 	}
-	if redirects >= maxSubscribeRedirects {
-		return nil, fmt.Errorf("%w: %w", ErrTooManyRedirects, &RedirectError{Redirect: to})
+	// Clipped, so a CheckRedirect that appends to via cannot write into ours.
+	if err := sess.config.checkRedirect(to, slices.Clip(via)); err != nil {
+		if errors.Is(err, ErrStopRedirect) {
+			return nil, &RedirectError{Redirect: to}
+		}
+		return nil, fmt.Errorf("%w: %w", err, &RedirectError{Redirect: to})
 	}
-	return sess.subscribe(ctx, to.BroadcastPath, to.TrackName, config, redirects+1)
+	return sess.subscribe(ctx, to.BroadcastPath, to.TrackName, config, append(slices.Clip(via), to))
 }
 
 // redirectAllowed reports whether a subscriber on this session may be
