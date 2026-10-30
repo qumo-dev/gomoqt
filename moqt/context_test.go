@@ -120,6 +120,28 @@ func TestCause(t *testing.T) {
 				ApplicationError: &transport.ApplicationError{Remote: true, ErrorCode: 2, ErrorMessage: "expired"},
 			},
 		},
+		"with a WebTransport stream reset and subscribe stream type": {
+			setupCtx: func() context.Context {
+				ctx, cancel := context.WithCancelCause(context.Background())
+				ctx = context.WithValue(ctx, biStreamTypeCtxKey, message.StreamTypeSubscribe)
+				cancel(&webtransport.StreamError{ErrorCode: 5, Remote: true})
+				return ctx
+			},
+			expected: &SubscribeError{
+				StreamError: &transport.StreamError{ErrorCode: 5, Remote: true},
+			},
+		},
+		"with a WebTransport stream reset and group stream type": {
+			setupCtx: func() context.Context {
+				ctx, cancel := context.WithCancelCause(context.Background())
+				ctx = context.WithValue(ctx, uniStreamTypeCtxKey, message.StreamTypeGroup)
+				cancel(&webtransport.StreamError{ErrorCode: 4})
+				return ctx
+			},
+			expected: &GroupError{
+				StreamError: &transport.StreamError{ErrorCode: 4},
+			},
+		},
 	}
 
 	for name, tt := range tests {

@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A merged release PR now publishes itself (CI).** `tag-release.yml` tags the commit that added the newest `## [vX.Y.Z]` CHANGELOG heading, and the one that set `moq-web/deno.json`'s version as `moq-web-vX.Y.Z`, then runs `release.yml` and `jsr-publish.yml`; an existing tag is left alone, so tagging by hand still works.
 
+### Fixed
+
+- **A stream reset or session close over WebTransport keeps its error code, as over native QUIC (`moqt`).** webtransport-go reports them as its own error types, which `moqt` did not recognize. `Session.Subscribe` to a missing broadcast returned a plain error rather than a `*SubscribeError` with `SubscribeErrorCodeNotFound`, and the same went for announce, fetch, probe and group streams. `Cause` gave the publisher the subscriber's reason with the code as WebTransport puts it on the wire, mapped into the HTTP/3 code space. A stream opened or accepted on a session the peer had closed returned a plain error rather than a `*SessionError`. All three now come out as native QUIC gives them. webtransport-go goes to `v0.13.0-okdaichi.4`, whose stream context carries the WebTransport code as `Write` does ([okdaichi/webtransport-go#13](https://github.com/okdaichi/webtransport-go/pull/13)).
+
 ## [v0.27.0] - 2026-10-28
 
 > **Go only.** `@qumo/moq` stays at `0.26.0`: nothing on the wire changes. A dialed native QUIC or WebTransport session now keeps through a network change, and an application can move it to another network on request with `Session.AddPath`. quic-go goes to `v0.64.1`.

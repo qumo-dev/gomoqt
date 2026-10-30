@@ -18,11 +18,21 @@ var uniStreamTypeCtxKey uniStreamTypeCtxKeyType = uniStreamTypeCtxKeyType{}
 // Cause translates a Go context cancellation reason into a package-specific error type.
 // When the provided context was canceled because of a QUIC stream error or application error,
 // Cause converts that into the corresponding moqt error (e.g., SessionError, AnnounceError,
-// SubscribeError, GroupError). A WebTransport session's close error becomes a SessionError
-// too, with the same code, message and Remote flag as over native QUIC.
+// SubscribeError, GroupError). A WebTransport stream reset or session close error is
+// translated the same way, with the same code and Remote flag as over native QUIC; a stream
+// error from WebTransport carries no stream ID.
 // If no specific translation is available, the original context cause is returned unchanged.
 func Cause(ctx context.Context) error {
 	reason := context.Cause(ctx)
+
+	// A WebTransport stream's context ends with webtransport-go's reset error,
+	// which carries the application's code: read it as native QUIC's.
+	if wtErr, ok := errors.AsType[*webtransport.StreamError](reason); ok {
+		reason = &transport.StreamError{
+			ErrorCode: transport.StreamErrorCode(wtErr.ErrorCode),
+			Remote:    wtErr.Remote,
+		}
+	}
 
 	if strErr, ok := errors.AsType[*transport.StreamError](reason); ok {
 		st, ok := ctx.Value(biStreamTypeCtxKey).(message.StreamType)
