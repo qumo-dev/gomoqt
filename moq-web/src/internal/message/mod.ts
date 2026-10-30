@@ -11,6 +11,7 @@ export * from "./subscribe.ts";
 export * from "./subscribe_ok.ts";
 export * from "./subscribe_update.ts";
 export * from "./subscribe_drop.ts";
+export * from "./subscribe_redirect.ts";
 export * from "./fetch.ts";
 export * from "./group.ts";
 export * from "./goaway.ts";

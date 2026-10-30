@@ -126,3 +126,23 @@ func FuzzSubscribeRedirectMessage_Decode(f *testing.F) {
 		assert.Equal(t, decoded, again)
 	})
 }
+
+// TestSubscribeRedirectMessage_GoldenBytes pins the wire bytes moq-web's
+// redirect_test.ts decodes and encodes too (GOLDEN_REDIRECT), so the Go and
+// TypeScript implementations stay interoperable.
+func TestSubscribeRedirectMessage_GoldenBytes(t *testing.T) {
+	golden := append([]byte{0x16, 0x09}, "moqt://b/"...)
+	golden = append(golden, 0x05)
+	golden = append(golden, "/real"...)
+	golden = append(golden, 0x05)
+	golden = append(golden, "video"...)
+	msg := message.SubscribeRedirectMessage{ConnectURI: "moqt://b/", BroadcastPath: "/real", TrackName: "video"}
+
+	var buf bytes.Buffer
+	require.NoError(t, msg.Encode(&buf))
+	assert.Equal(t, golden, buf.Bytes())
+
+	var decoded message.SubscribeRedirectMessage
+	require.NoError(t, decoded.Decode(bytes.NewReader(golden)))
+	assert.Equal(t, msg, decoded)
+}

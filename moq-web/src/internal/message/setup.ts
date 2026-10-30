@@ -8,6 +8,12 @@ export const SetupParamIDs = {
 	Probe: 0x1,
 	/** Request path for bindings without a request URI. */
 	Path: 0x2,
+	/**
+	 * Advertises that the sender follows SUBSCRIBE_REDIRECT, a gomoqt
+	 * extension. Its value is the newest version the sender understands, as a
+	 * varint, every earlier one included; empty is version 0.
+	 */
+	Redirect: 0x7d01,
 } as const;
 
 /**
@@ -82,6 +88,34 @@ export class SetupMessage {
 			return d.varint();
 		}
 		return ProbeLevels.None;
+	}
+
+	/** Appends the Redirect parameter, at version 0 (an empty value). */
+	addRedirect(): void {
+		this.parameters.push({ id: SetupParamIDs.Redirect, value: new Uint8Array(0) });
+	}
+
+	/**
+	 * Reports whether the Redirect parameter is present and well formed: empty,
+	 * or one varint and nothing else.
+	 */
+	followsRedirect(): boolean {
+		for (const p of this.parameters) {
+			if (p.id !== SetupParamIDs.Redirect) {
+				continue;
+			}
+			if (p.value.length === 0) {
+				return true;
+			}
+			try {
+				const d = new MessageDecoder(p.value);
+				d.varint();
+				return d.remaining() === 0;
+			} catch {
+				return false;
+			}
+		}
+		return false;
 	}
 
 	/** Returns the Path parameter value, or undefined if absent. */
