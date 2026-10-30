@@ -10,15 +10,9 @@ import (
 )
 
 // moqt reads stream and session errors as transport errors, which are
-// quic-go's. webtransport-go reports them as its own types, and a reset's code
-// on the wire is the WebTransport code mapped into the HTTP/3 code space. The
-// functions here turn both back into what native QUIC would report.
-
-// The range of HTTP/3 error codes WebTransport maps its stream error codes to.
-const (
-	firstHTTPCode quic.StreamErrorCode = 0x52e4a40fa8db
-	lastHTTPCode  quic.StreamErrorCode = 0x52e5ac983162
-)
+// quic-go's. webtransport-go reports them as its own types, with the
+// application's error code already mapped back from the HTTP/3 code space.
+// The functions here turn them into what native QUIC would report.
 
 // streamError returns err as a *transport.StreamError with the application's
 // code if it is a webtransport-go stream reset, and err itself otherwise.
@@ -46,37 +40,23 @@ func sessionError(err error) error {
 	return err
 }
 
-// streamCause returns cause, a stream context's, with a stream reset's code
-// mapped back from the HTTP/3 code space to the application's. Any other cause,
-// a reset with a code outside the WebTransport range included, is returned
-// unchanged.
-func streamCause(cause error) error {
-	strErr, ok := errors.AsType[*quic.StreamError](cause)
-	if !ok {
-		return cause
-	}
-	code, ok := webTransportCode(strErr.ErrorCode)
-	if !ok {
-		return cause
-	}
-	return &transport.StreamError{StreamID: strErr.StreamID, ErrorCode: code, Remote: strErr.Remote}
-}
-
-// webTransportCode maps an HTTP/3 error code back to the WebTransport stream
-// error code it carries, as webtransport-go does for Read and Write. It
-// reports false for a code outside the range or on a reserved code point.
-func webTransportCode(h quic.StreamErrorCode) (transport.StreamErrorCode, bool) {
-	if h < firstHTTPCode || h > lastHTTPCode || (h-0x21)%0x1f == 0 {
-		return 0, false
-	}
-	shifted := h - firstHTTPCode
-	return shifted - shifted/0x1f, true
+// streamCause returns cause, the context cause of stream id, as native QUIC
+// would report it: a stream reset as a *transport.StreamError, and the end of
+// the session as a *transport.ApplicationError. Any other cause, such as a
+// local close, is returned unchanged.
+func streamCause(id quic.StreamID, cause error) error {
+	return sessionError(streamError(id, cause))
 }
 
 // streamContext returns a context with parent's values that ends when parent
-// does, with parent's cause passed through streamCause.
-func streamContext(parent context.Context) context.Context {
+// does, with parent's cause passed through streamCause. If parent has already
+// ended, so has the context returned.
+func streamContext(parent context.Context, id quic.StreamID) context.Context {
 	ctx, cancel := context.WithCancelCause(context.WithoutCancel(parent))
-	context.AfterFunc(parent, func() { cancel(streamCause(context.Cause(parent))) })
+	if parent.Err() != nil {
+		cancel(streamCause(id, context.Cause(parent)))
+		return ctx
+	}
+	context.AfterFunc(parent, func() { cancel(streamCause(id, context.Cause(parent))) })
 	return ctx
 }

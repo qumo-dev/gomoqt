@@ -55,7 +55,7 @@ func (wrapper *streamWrapper) Close() error {
 }
 
 func (wrapper *streamWrapper) Context() context.Context {
-	wrapper.ctxOnce.Do(func() { wrapper.ctx = streamContext(wrapper.stream.Context()) })
+	wrapper.ctxOnce.Do(func() { wrapper.ctx = streamContext(wrapper.stream.Context(), wrapper.stream.StreamID()) })
 	return wrapper.ctx
 }
 
@@ -109,7 +109,7 @@ func (wrapper *sendStreamWrapper) Close() error {
 }
 
 func (wrapper *sendStreamWrapper) Context() context.Context {
-	wrapper.ctxOnce.Do(func() { wrapper.ctx = streamContext(wrapper.stream.Context()) })
+	wrapper.ctxOnce.Do(func() { wrapper.ctx = streamContext(wrapper.stream.Context(), wrapper.stream.StreamID()) })
 	return wrapper.ctx
 }
 
