@@ -15,11 +15,13 @@ type streamWrapper struct {
 }
 
 func (wrapper streamWrapper) Read(b []byte) (int, error) {
-	return wrapper.stream.Read(b)
+	n, err := wrapper.stream.Read(b)
+	return n, streamError(wrapper.stream.StreamID(), err)
 }
 
 func (wrapper streamWrapper) Write(b []byte) (int, error) {
-	return wrapper.stream.Write(b)
+	n, err := wrapper.stream.Write(b)
+	return n, streamError(wrapper.stream.StreamID(), err)
 }
 
 func (wrapper streamWrapper) CancelRead(code transport.StreamErrorCode) {
@@ -43,7 +45,7 @@ func (wrapper streamWrapper) SetWriteDeadline(time time.Time) error {
 }
 
 func (wrapper streamWrapper) Close() error {
-	return wrapper.stream.Close()
+	return streamError(wrapper.stream.StreamID(), wrapper.stream.Close())
 }
 
 func (wrapper streamWrapper) Context() context.Context {
@@ -61,7 +63,8 @@ type receiveStreamWrapper struct {
 }
 
 func (wrapper receiveStreamWrapper) Read(b []byte) (int, error) {
-	return wrapper.stream.Read(b)
+	n, err := wrapper.stream.Read(b)
+	return n, streamError(wrapper.stream.StreamID(), err)
 }
 
 func (wrapper receiveStreamWrapper) CancelRead(code transport.StreamErrorCode) {
@@ -79,7 +82,8 @@ type sendStreamWrapper struct {
 }
 
 func (wrapper sendStreamWrapper) Write(b []byte) (int, error) {
-	return wrapper.stream.Write(b)
+	n, err := wrapper.stream.Write(b)
+	return n, streamError(wrapper.stream.StreamID(), err)
 }
 
 func (wrapper sendStreamWrapper) CancelWrite(code transport.StreamErrorCode) {
@@ -91,7 +95,7 @@ func (wrapper sendStreamWrapper) SetWriteDeadline(time time.Time) error {
 }
 
 func (wrapper sendStreamWrapper) Close() error {
-	return wrapper.stream.Close()
+	return streamError(wrapper.stream.StreamID(), wrapper.stream.Close())
 }
 
 func (wrapper sendStreamWrapper) Context() context.Context {
