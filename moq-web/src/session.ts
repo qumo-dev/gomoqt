@@ -966,7 +966,7 @@ export class Session {
 			req.trackName,
 			subscribeStream,
 			this.#webtransport.openUniStream.bind(this.#webtransport),
-			() => this.#followsRedirect(),
+			(signal) => this.#followsRedirect(signal),
 		);
 
 		await this.mux.serveTrack(trackWriter);
@@ -974,8 +974,11 @@ export class Session {
 
 	// #followsRedirect reports whether the peer advertised that it follows
 	// SUBSCRIBE_REDIRECT, waiting for its SETUP for up to peerSetupWaitMs. A
-	// peer that sent none has not said so.
-	async #followsRedirect(): Promise<boolean> {
+	// peer that sent none in that time has not said so. The session ending, or
+	// signal aborting, ends the wait with an error instead.
+	async #followsRedirect(
+		signal: AbortSignal,
+	): Promise<readonly [boolean, undefined] | readonly [undefined, Error]> {
 		// #peerSetup resolves once the SETUP is processed, not when it starts
 		// arriving, so wait on it rather than on #peerSetupReceived.
 		let processed = false;
@@ -986,9 +989,31 @@ export class Session {
 		const timeout = new Promise<void>((resolve) => {
 			timer = setTimeout(resolve, peerSetupWaitMs);
 		});
-		await Promise.race([setup, this.#ctx.done(), timeout]);
+		let onAbort: (() => void) | undefined;
+		const aborted = new Promise<void>((resolve) => {
+			onAbort = () => resolve();
+			if (signal.aborted) resolve();
+			else signal.addEventListener("abort", onAbort, { once: true });
+		});
+		await Promise.race([setup, this.#ctx.done(), timeout, aborted]);
 		clearTimeout(timer);
-		return processed && this.#peerFollowsRedirect;
+		if (onAbort) signal.removeEventListener("abort", onAbort);
+
+		if (processed) {
+			return [this.#peerFollowsRedirect, undefined];
+		}
+		const sessionErr = this.#ctx.err();
+		if (sessionErr !== undefined) {
+			return [undefined, sessionErr];
+		}
+		if (signal.aborted) {
+			const reason: unknown = signal.reason;
+			return [
+				undefined,
+				reason instanceof Error ? reason : new Error("moq: redirect aborted"),
+			];
+		}
+		return [false, undefined];
 	}
 
 	async #handleAnnounceStream(stream: Stream): Promise<void> {
