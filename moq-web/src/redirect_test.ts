@@ -13,15 +13,18 @@ import {
 } from "./internal/message/mod.ts";
 import { MESSAGE_TYPE_SUBSCRIBE_OK, MESSAGE_TYPE_SUBSCRIBE_REDIRECT } from "./subscribe_stream.ts";
 import { BiStreamTypes, UniStreamTypes } from "./stream_type.ts";
-import type { TrackMux } from "./track_mux.ts";
+import { TrackMux } from "./track_mux.ts";
+import type { BroadcastPath } from "./broadcast_path.ts";
 import type { TrackWriter } from "./track_writer.ts";
 import type { SendStream } from "./internal/webtransport/mod.ts";
 import {
+	InvalidBroadcastPathError,
 	type Redirect,
 	RedirectError,
 	RedirectNotSupportedError,
 	SessionErrorCode,
 	StopRedirect,
+	SubscriptionAnsweredError,
 	TooManyRedirectsError,
 } from "./error.ts";
 
@@ -376,59 +379,114 @@ async function incomingSubscribe(
 	return { type: BiStreamTypes.SubscribeStreamType, data };
 }
 
-// servedBy runs one incoming subscription through handler on a session whose
-// peer SETUP says follows, and returns what the session wrote back on the
-// subscribe stream.
-async function servedBy(
-	follows: boolean,
+// HandlerMux is a TrackMux that serves every subscription with handler and
+// resolves served once handler returns.
+class HandlerMux extends TrackMux {
+	readonly served: Promise<void>;
+	#done: () => void = () => {};
+	#handler: (tw: TrackWriter) => Promise<void>;
+
+	constructor(handler: (tw: TrackWriter) => Promise<void>) {
+		super();
+		this.#handler = handler;
+		this.served = new Promise((resolve) => (this.#done = resolve));
+	}
+
+	override async serveTrack(tw: TrackWriter): Promise<void> {
+		try {
+			await this.#handler(tw);
+		} finally {
+			this.#done();
+		}
+	}
+}
+
+// serve runs one incoming subscription to /.hls/acme/cam video through handler
+// on a session whose subscriber's SETUP says follows (or that sends none, for
+// undefined), and returns what the session wrote back on the subscribe stream.
+async function serve(
+	follows: boolean | undefined,
 	handler: (tw: TrackWriter) => Promise<void>,
 ): Promise<Uint8Array> {
-	let done!: () => void;
-	const served = new Promise<void>((resolve) => (done = resolve));
-	const mux = {
-		serveTrack: async (tw: TrackWriter) => {
-			try {
-				await handler(tw);
-			} finally {
-				done();
-			}
-		},
-	} as unknown as TrackMux;
+	const mux = new HandlerMux(handler);
 	const mock = new MockWebTransportSession({
-		acceptUniStreamData: [await subscriberSetup(follows)],
+		acceptUniStreamData: follows === undefined ? [] : [await subscriberSetup(follows)],
 		acceptStreamData: [await incomingSubscribe("/.hls/acme/cam", "video")],
 	});
 	const session = new Session({ transport: mock, mux });
 	await session.ready;
-	await served;
+	await mux.served;
 	await session.close();
 	return concat(mock.acceptStreamWrittenData[0] ?? []);
 }
 
-Deno.test("TrackWriter.redirect sends SUBSCRIBE_REDIRECT to a subscriber that follows", async () => {
+// sentRedirect decodes the SUBSCRIBE_REDIRECT that starts written and returns
+// it, with how many bytes of written follow it.
+async function sentRedirect(
+	written: Uint8Array,
+): Promise<{ msg: SubscribeRedirectMessage; rest: number }> {
+	const r = await readerOf(written);
+	const [type, typeLen] = await readVarint(r);
+	assertEquals(type, MESSAGE_TYPE_SUBSCRIBE_REDIRECT);
+	const msg = new SubscribeRedirectMessage({});
+	assertEquals(await msg.decode(r), undefined);
+	const encoded = await bytesOf((b) => msg.encode(b));
+	return { msg, rest: written.length - typeLen - encoded.length };
+}
+
+Deno.test("TrackWriter.redirect sends one SUBSCRIBE_REDIRECT to the target", async () => {
 	let err: Error | undefined;
-	let openErr: Error | undefined;
-	const written = await servedBy(true, async (tw) => {
-		err = await tw.redirect({ broadcastPath: "/acme/cam" });
-		[, openErr] = await tw.openGroup();
-		await tw.close(); // sends nothing more
+
+	const written = await serve(true, async (tw) => {
+		err = await tw.redirect({ broadcastPath: "/acme/cam", trackName: "video-hd" });
 	});
 
 	assertEquals(err, undefined);
-	assertExists(openErr, "no group opens after a redirect");
-	const r = await readerOf(written);
-	const [type] = await readVarint(r);
-	assertEquals(type, MESSAGE_TYPE_SUBSCRIBE_REDIRECT);
-	const msg = new SubscribeRedirectMessage({});
-	assertEquals(await msg.decode(r), undefined, "exactly one redirect, nothing after it");
-	assertEquals(msg.connectUri, "");
-	assertEquals(msg.broadcastPath, "/acme/cam");
-	assertEquals(msg.trackName, "video", "the subscriber's track name is kept");
+	const { msg, rest } = await sentRedirect(written);
+	assertEquals([msg.connectUri, msg.broadcastPath, msg.trackName], ["", "/acme/cam", "video-hd"]);
+	assertEquals(rest, 0);
 });
 
-Deno.test("TrackWriter.redirect refuses a subscriber that does not follow, and sends nothing", async () => {
+Deno.test("TrackWriter.redirect keeps the subscriber's track name when none or an empty one is given", async (t) => {
+	const cases: Record<string, { broadcastPath: BroadcastPath; trackName?: string }> = {
+		"omitted": { broadcastPath: "/acme/cam" },
+		"empty": { broadcastPath: "/acme/cam", trackName: "" },
+	};
+	for (const [name, to] of Object.entries(cases)) {
+		await t.step(name, async () => {
+			const written = await serve(true, async (tw) => {
+				await tw.redirect(to);
+			});
+
+			assertEquals((await sentRedirect(written)).msg.trackName, "video");
+		});
+	}
+});
+
+Deno.test("TrackWriter.openGroup fails after a redirect", async () => {
+	let openErr: Error | undefined;
+
+	await serve(true, async (tw) => {
+		await tw.redirect({ broadcastPath: "/acme/cam" });
+		[, openErr] = await tw.openGroup();
+	});
+
+	assertExists(openErr);
+});
+
+Deno.test("TrackWriter.close sends nothing after a redirect", async () => {
+	const written = await serve(true, async (tw) => {
+		await tw.redirect({ broadcastPath: "/acme/cam" });
+		await tw.close();
+	});
+
+	assertEquals((await sentRedirect(written)).rest, 0, "no SUBSCRIBE_END after the redirect");
+});
+
+Deno.test("TrackWriter.redirect refuses a subscriber that does not follow redirects", async () => {
 	let err: Error | undefined;
-	const written = await servedBy(false, async (tw) => {
+
+	const written = await serve(false, async (tw) => {
 		err = await tw.redirect({ broadcastPath: "/acme/cam" });
 	});
 
@@ -436,23 +494,83 @@ Deno.test("TrackWriter.redirect refuses a subscriber that does not follow, and s
 	assertEquals(written.length, 0);
 });
 
-Deno.test("TrackWriter.redirect fails once the subscription was answered", async () => {
+Deno.test("TrackWriter.redirect fails once SUBSCRIBE_OK went out", async () => {
 	let err: Error | undefined;
-	await servedBy(true, async (tw) => {
-		const [group] = await tw.openGroup(); // sends SUBSCRIBE_OK
+
+	await serve(true, async (tw) => {
+		const [group] = await tw.openGroup();
 		await group?.close();
 		err = await tw.redirect({ broadcastPath: "/acme/cam" });
 	});
 
-	assertExists(err);
+	assertInstanceOf(err, SubscriptionAnsweredError);
+});
+
+Deno.test("TrackWriter.redirect started alongside openGroup leaves one answer on the stream", async () => {
+	let openErr: Error | undefined;
+	let redirectErr: Error | undefined;
+
+	const written = await serve(true, async (tw) => {
+		// The redirect first waits for the SETUP, so SUBSCRIBE_OK claims the
+		// answer; the redirect must then write nothing.
+		const redirected = tw.redirect({ broadcastPath: "/acme/cam" });
+		const opened = tw.openGroup();
+		redirectErr = await redirected;
+		[, openErr] = await opened;
+	});
+
+	assertEquals(openErr, undefined);
+	assertInstanceOf(redirectErr, SubscriptionAnsweredError);
+	const r = await readerOf(written);
+	const [type, typeLen] = await readVarint(r);
+	assertEquals(type, MESSAGE_TYPE_SUBSCRIBE_OK);
+	const ok = new SubscribeOkMessage({});
+	assertEquals(await ok.decode(r), undefined);
+	const okLen = (await bytesOf((b) => ok.encode(b))).length;
+	assertEquals(written.length, typeLen + okLen, "nothing but SUBSCRIBE_OK");
 });
 
 Deno.test("TrackWriter.redirect rejects a path that is not one", async () => {
 	let err: Error | undefined;
-	const written = await servedBy(true, async (tw) => {
-		err = await tw.redirect({ broadcastPath: "acme/cam" as `/${string}` });
+
+	const written = await serve(true, async (tw) => {
+		err = await tw.redirect({ broadcastPath: "acme/cam" as BroadcastPath });
 	});
 
-	assertExists(err);
+	assertInstanceOf(err, InvalidBroadcastPathError);
+	assertEquals(err.path, "acme/cam");
 	assertEquals(written.length, 0);
+});
+
+Deno.test("TrackWriter.redirect stops waiting for SETUP when its signal aborts", async () => {
+	const reason = new Error("gave up");
+	let err: Error | undefined;
+
+	await serve(undefined, async (tw) => {
+		err = await tw.redirect({ broadcastPath: "/acme/cam" }, {
+			signal: AbortSignal.abort(reason),
+		});
+	});
+
+	assertEquals(err, reason);
+});
+
+Deno.test("SetupMessage.followsRedirect reads one varint version", async (t) => {
+	const cases: Record<string, { value: number[]; want: boolean }> = {
+		"empty is version 0": { value: [], want: true },
+		"version 0": { value: [0x00], want: true },
+		"a later version": { value: [0x02], want: true },
+		"a two-byte version": { value: [0x40, 0x01], want: true },
+		"truncated varint": { value: [0x40], want: false },
+		"trailing bytes": { value: [0x01, 0x01], want: false },
+	};
+	for (const [name, tt] of Object.entries(cases)) {
+		await t.step(name, () => {
+			const sm = new SetupMessage({
+				parameters: [{ id: SetupParamIDs.Redirect, value: new Uint8Array(tt.value) }],
+			});
+
+			assertEquals(sm.followsRedirect(), tt.want);
+		});
+	}
 });

@@ -15,7 +15,7 @@ import type { CancelCauseFunc, Context } from "@okdaichi/golikejs/context";
 import { withCancelCause } from "@okdaichi/golikejs/context";
 import { WebTransportStreamError } from "./internal/webtransport/mod.ts";
 import type { SubscribeID, TrackPriority } from "./alias.ts";
-import { SubscribeErrorCode } from "./error.ts";
+import { SubscribeErrorCode, SubscriptionAnsweredError } from "./error.ts";
 
 /** Subscriber-side configuration sent in a SUBSCRIBE message. */
 export interface TrackConfig {
@@ -240,6 +240,10 @@ export class ReceiveSubscribeStream {
 	#responseStarted: boolean = false;
 	#endSent: boolean = false;
 	#ensureOkOnce: Once = new Once();
+	// The answer this subscription got, claimed before its first write: one
+	// is sent at most, and the claim cannot interleave because it is a single
+	// synchronous step.
+	#answer: "none" | "ok" | "redirect" = "none";
 	readonly context: Context;
 	#cancelFunc: CancelCauseFunc;
 
@@ -312,6 +316,10 @@ export class ReceiveSubscribeStream {
 		if (err !== undefined) {
 			return err;
 		}
+		if (this.#answer === "redirect") {
+			return new SubscriptionAnsweredError();
+		}
+		this.#answer = "ok";
 
 		// Write type byte for SUBSCRIBE_OK
 		const [, writeErr] = await writeVarint(this.#stream.writable, MESSAGE_TYPE_SUBSCRIBE_OK);
@@ -342,10 +350,11 @@ export class ReceiveSubscribeStream {
 		if (ctxErr !== undefined) {
 			return ctxErr;
 		}
-		if (this.#responseStarted || this.#endSent) {
-			return new Error("moq: subscription already answered");
+		if (this.#answer !== "none" || this.#endSent) {
+			return new SubscriptionAnsweredError();
 		}
 		// Nothing may follow, even when the write fails partway.
+		this.#answer = "redirect";
 		this.#responseStarted = true;
 		this.#endSent = true;
 

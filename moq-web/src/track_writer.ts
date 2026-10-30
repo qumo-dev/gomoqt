@@ -4,10 +4,29 @@ import type { ReceiveSubscribeStream, SubscribeDrop, TrackConfig } from "./subsc
 import type { SendStream } from "./internal/webtransport/mod.ts";
 import { UniStreamTypes } from "./stream_type.ts";
 import { GroupMessage, writeVarint } from "./internal/message/mod.ts";
-import type { BroadcastPath } from "./broadcast_path.ts";
+import { type BroadcastPath, isValidBroadcastPath } from "./broadcast_path.ts";
 import type { SubscribeErrorCode } from "./error.ts";
-import { GroupErrorCode, RedirectNotSupportedError } from "./error.ts";
+import { GroupErrorCode, InvalidBroadcastPathError, RedirectNotSupportedError } from "./error.ts";
 import { SubscribeRedirectMessage } from "./internal/message/mod.ts";
+
+/** Where {@link TrackWriter.redirect} sends a subscriber. */
+export interface RedirectTarget {
+	/** The broadcast to subscribe to instead. */
+	readonly broadcastPath: BroadcastPath;
+	/** The track to subscribe to instead; omitted or empty keeps the subscriber's. */
+	readonly trackName?: string;
+}
+
+/**
+ * Reports whether the subscriber advertised that it follows redirects, waiting
+ * for its SETUP until signal aborts; an error when the session or signal ends
+ * the wait first.
+ */
+type PeerFollowsRedirect = (
+	signal: AbortSignal,
+) => Promise<
+	readonly [follows: boolean, error: undefined] | readonly [follows: undefined, error: Error]
+>;
 
 /**
  * Publisher-side handle for writing groups to a subscribed track.
@@ -26,7 +45,7 @@ export class TrackWriter {
 	>;
 	#groups: GroupWriter[] = [];
 	#groupCount: number = 0;
-	#peerFollowsRedirect?: () => Promise<boolean>;
+	#peerFollowsRedirect?: PeerFollowsRedirect;
 
 	constructor(
 		broadcastPath: BroadcastPath,
@@ -35,7 +54,7 @@ export class TrackWriter {
 		openUniStreamFunc: (options?: { signal?: AbortSignal }) => Promise<
 			[SendStream, undefined] | [undefined, Error]
 		>,
-		peerFollowsRedirect?: () => Promise<boolean>,
+		peerFollowsRedirect?: PeerFollowsRedirect,
 	) {
 		this.broadcastPath = broadcastPath;
 		this.trackName = trackName;
@@ -52,24 +71,42 @@ export class TrackWriter {
 	 * must come before the first group, and ends the subscription: after it, no
 	 * group opens and close sends nothing.
 	 *
-	 * It returns a {@link RedirectNotSupportedError}, leaving the subscription
-	 * as it was, when the subscriber did not advertise that it follows
-	 * redirects; serve or refuse it instead.
+	 * It waits for the subscriber's SETUP, up to 5 s, until the subscription
+	 * ends, or until `options.signal` aborts. It returns a
+	 * {@link RedirectNotSupportedError}, leaving the subscription as it was,
+	 * when the subscriber did not advertise that it follows redirects (serve or
+	 * refuse it instead); a {@link SubscriptionAnsweredError} once the
+	 * subscription was answered; an {@link InvalidBroadcastPathError} for a
+	 * path that is not one; and the session's or the signal's error when either
+	 * ends the wait.
 	 */
 	async redirect(
-		to: { broadcastPath: BroadcastPath; trackName?: string },
+		to: RedirectTarget,
+		options?: { signal?: AbortSignal },
 	): Promise<Error | undefined> {
-		if (!to.broadcastPath.startsWith("/")) {
-			return new Error(`moq: invalid redirect path: ${to.broadcastPath}`);
+		if (!isValidBroadcastPath(to.broadcastPath)) {
+			return new InvalidBroadcastPathError(to.broadcastPath);
 		}
-		if (!this.#peerFollowsRedirect || !await this.#peerFollowsRedirect()) {
+		if (!this.#peerFollowsRedirect) {
 			return new RedirectNotSupportedError();
 		}
+		const trackSignal = toAbortSignal(this.context);
+		const signal = options?.signal
+			? AbortSignal.any([trackSignal, options.signal])
+			: trackSignal;
+		const [follows, err] = await this.#peerFollowsRedirect(signal);
+		if (err !== undefined) {
+			return err;
+		}
+		if (!follows) {
+			return new RedirectNotSupportedError();
+		}
+		// An empty name, as an omitted one, keeps the subscriber's (as Go does).
+		const trackName = to.trackName === undefined || to.trackName === ""
+			? this.trackName
+			: to.trackName;
 		return await this.#subscribeStream.writeRedirect(
-			new SubscribeRedirectMessage({
-				broadcastPath: to.broadcastPath,
-				trackName: to.trackName ?? this.trackName,
-			}),
+			new SubscribeRedirectMessage({ broadcastPath: to.broadcastPath, trackName }),
 		);
 	}
 
