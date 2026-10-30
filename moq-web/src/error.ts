@@ -432,3 +432,28 @@ export class RedirectNotSupportedError extends Error {
 		Object.setPrototypeOf(this, RedirectNotSupportedError.prototype);
 	}
 }
+
+/**
+ * Returned by {@link TrackWriter.redirect} when the subscription was already
+ * answered: SUBSCRIBE_OK, SUBSCRIBE_END or a redirect went out first.
+ */
+export class SubscriptionAnsweredError extends Error {
+	constructor() {
+		super("moq: subscription already answered");
+		this.name = "SubscriptionAnsweredError";
+		Object.setPrototypeOf(this, SubscriptionAnsweredError.prototype);
+	}
+}
+
+/** Returned for a broadcast path that does not start with "/". */
+export class InvalidBroadcastPathError extends Error {
+	/** The path that was refused. */
+	readonly path: string;
+
+	constructor(path: string) {
+		super(`moq: invalid broadcast path: ${JSON.stringify(path)}`);
+		this.path = path;
+		this.name = "InvalidBroadcastPathError";
+		Object.setPrototypeOf(this, InvalidBroadcastPathError.prototype);
+	}
+}

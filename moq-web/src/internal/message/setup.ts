@@ -1,5 +1,12 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { MessageDecoder, MessageEncoder, putVarint, readFull, readVarint } from "./message.ts";
+import {
+	MessageDecoder,
+	MessageEncoder,
+	parseVarint,
+	putVarint,
+	readFull,
+	readVarint,
+} from "./message.ts";
 import { varintLen } from "../webtransport/len.ts";
 
 /** Setup Parameter IDs defined by moq-lite-05. */
@@ -109,13 +116,10 @@ export class SetupMessage {
 			if (p.value.length === 0) {
 				return true;
 			}
-			try {
-				const d = new MessageDecoder(p.value);
-				d.varint();
-				return d.remaining() === 0;
-			} catch {
-				return false;
-			}
+			// One varint and nothing else: its encoded length, read from the
+			// first byte, is the whole value.
+			const [, length] = parseVarint(p.value, 0);
+			return length === p.value.length;
 		}
 		return false;
 	}
