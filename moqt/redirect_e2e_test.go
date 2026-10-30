@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"maps"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -138,27 +137,20 @@ func TestSession_Subscribe_Redirect(t *testing.T) {
 		notFound bool
 	}
 	tests := map[string]subscribeCase{
-		"no redirect":     {path: "/real", wantPath: "/real", wantName: "video"},
-		"one redirect":    {path: "/alias", wantPath: "/real", wantName: "video"},
-		"two redirects":   {path: "/alias-of-alias", wantPath: "/real", wantName: "video"},
-		"another track":   {path: "/renamed", wantPath: "/real", wantName: "audio"},
-		"loop":            {path: "/loop-a", wantErr: ErrTooManyRedirects, wantTo: &Redirect{BroadcastPath: "/loop-b", TrackName: "video"}},
-		"another session": {path: "/elsewhere", wantTo: &elsewhereRedirect},
+		"no redirect":       {path: "/real", wantPath: "/real", wantName: "video"},
+		"one redirect":      {path: "/alias", wantPath: "/real", wantName: "video"},
+		"two redirects":     {path: "/alias-of-alias", wantPath: "/real", wantName: "video"},
+		"another track":     {path: "/renamed", wantPath: "/real", wantName: "audio"},
+		"loop":              {path: "/loop-a", wantErr: ErrTooManyRedirects, wantTo: &Redirect{BroadcastPath: "/loop-b", TrackName: "video"}},
+		"another session":   {path: "/elsewhere", wantTo: &elsewhereRedirect},
+		"no such broadcast": {path: "/missing", notFound: true},
 	}
-	// A refusal arrives as a *SubscribeError over native QUIC; over
-	// WebTransport the reset is not recognized as one yet, which is not the
-	// redirect's concern.
-	notFoundCase := map[string]bool{"moqt": true}
 
 	for _, scheme := range []string{"moqt", "https"} {
 		t.Run(scheme, func(t *testing.T) {
 			sess := dialRedirectServer(t, ctx, scheme, addr, nil, nil)
-			cases := maps.Clone(tests)
-			if notFoundCase[scheme] {
-				cases["no such broadcast"] = subscribeCase{path: "/missing", notFound: true}
-			}
 
-			for name, tt := range cases {
+			for name, tt := range tests {
 				t.Run(name, func(t *testing.T) {
 					tr, err := sess.Subscribe(ctx, tt.path, "video", &SubscribeConfig{Priority: 3})
 
