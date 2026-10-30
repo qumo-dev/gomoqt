@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.28.1] - 2026-10-31
+
+> **`@qumo/moq` only.** The Go module is unchanged from `v0.28.0`; `@qumo/moq` goes to `0.28.1`, so both stay on the same version. A publisher in `@qumo/moq` can now redirect a subscription, as Go's could in `v0.28.0`.
+
 ### Added
 
 - **moq-web: a publisher can redirect a subscription: `TrackWriter.redirect`, `RedirectTarget`, `RedirectNotSupportedError`, `SubscriptionAnsweredError`, `InvalidBroadcastPathError`.** As Go's `TrackWriter.Redirect` does, a track handler answers a subscription with SUBSCRIBE_REDIRECT, sending the subscriber to another track on the same session; an omitted or empty `trackName` keeps the subscriber's, so one call redirects a whole broadcast. It must come before the first group: it and SUBSCRIBE_OK claim the one answer a subscription gets, so they never interleave, and after a redirect no group opens. It waits for the subscriber's SETUP, up to 5 s, until the subscription ends, or until `options.signal` aborts, and returns a `RedirectNotSupportedError`, leaving the subscription to be served or refused, when the subscriber did not advertise that it follows redirects; a `SubscriptionAnsweredError` once the subscription was answered; and the session's or signal's error when either ends the wait.
