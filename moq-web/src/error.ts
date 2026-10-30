@@ -415,3 +415,20 @@ export class TooManyRedirectsError extends Error {
  * return the redirect as a {@link RedirectError} without following it.
  */
 export const StopRedirect: Error = new Error("moq: redirect not followed");
+
+/**
+ * Returned by {@link TrackWriter.redirect} when the subscriber did not
+ * advertise that it follows redirects. The subscription is left as it was, so
+ * the publisher may serve it or refuse it instead.
+ */
+export class RedirectNotSupportedError extends Error {
+	constructor(detail?: string) {
+		super(
+			detail
+				? `moq: peer does not follow redirects: ${detail}`
+				: "moq: peer does not follow redirects",
+		);
+		this.name = "RedirectNotSupportedError";
+		Object.setPrototypeOf(this, RedirectNotSupportedError.prototype);
+	}
+}
