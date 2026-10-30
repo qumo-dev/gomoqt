@@ -32,12 +32,12 @@ func wrapSession(wtsess *quicgo_webtransportgo.Session) transport.WebTransportSe
 
 func (conn *sessionWrapper) AcceptStream(ctx context.Context) (transport.Stream, error) {
 	stream, err := conn.sess.AcceptStream(ctx)
-	return &streamWrapper{stream: stream}, err
+	return &streamWrapper{stream: stream}, sessionError(err)
 }
 
 func (conn *sessionWrapper) AcceptUniStream(ctx context.Context) (transport.ReceiveStream, error) {
 	stream, err := conn.sess.AcceptUniStream(ctx)
-	return &receiveStreamWrapper{stream: stream}, err
+	return &receiveStreamWrapper{stream: stream}, sessionError(err)
 }
 
 func (conn *sessionWrapper) CloseWithError(code transport.ConnErrorCode, msg string) error {
@@ -61,22 +61,22 @@ func (conn *sessionWrapper) LocalAddr() net.Addr {
 
 func (conn *sessionWrapper) OpenStream() (transport.Stream, error) {
 	stream, err := conn.sess.OpenStream()
-	return &streamWrapper{stream: stream}, err
+	return &streamWrapper{stream: stream}, sessionError(err)
 }
 
 func (conn *sessionWrapper) OpenStreamSync(ctx context.Context) (transport.Stream, error) {
 	stream, err := conn.sess.OpenStreamSync(ctx)
-	return &streamWrapper{stream: stream}, err
+	return &streamWrapper{stream: stream}, sessionError(err)
 }
 
 func (conn *sessionWrapper) OpenUniStream() (transport.SendStream, error) {
 	stream, err := conn.sess.OpenUniStream()
-	return &sendStreamWrapper{stream: stream}, err
+	return &sendStreamWrapper{stream: stream}, sessionError(err)
 }
 
 func (conn *sessionWrapper) OpenUniStreamSync(ctx context.Context) (transport.SendStream, error) {
 	stream, err := conn.sess.OpenUniStreamSync(ctx)
-	return &sendStreamWrapper{stream: stream}, err
+	return &sendStreamWrapper{stream: stream}, sessionError(err)
 }
 
 func (conn *sessionWrapper) RemoteAddr() net.Addr {
