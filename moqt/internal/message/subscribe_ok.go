@@ -13,6 +13,9 @@ const (
 	MessageTypeSubscribeOk   uint64 = 0x0
 	MessageTypeSubscribeEnd  uint64 = 0x1
 	MessageTypeSubscribeDrop uint64 = 0x2
+	// MessageTypeSubscribeRedirect is a gomoqt extension, sent only to a peer
+	// that advertised SetupParamRedirect.
+	MessageTypeSubscribeRedirect uint64 = 0x3
 )
 
 // SubscribeOkMessage confirms a subscription and resolves its absolute

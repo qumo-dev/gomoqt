@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,6 +36,10 @@ type sessionSetup struct {
 	// no handshake-time request URI; every other role is prohibited from
 	// sending the parameter, so path is carried but not transmitted.
 	sendPath bool
+	// server reports whether the session was accepted rather than dialed.
+	server bool
+	// checkRedirect is the Dialer's or Server's CheckRedirect.
+	checkRedirect CheckRedirectFunc
 	// peerSetup is the peer's SETUP message, pre-decoded by the native-QUIC
 	// router on the server side. The router consumes the client's Setup Stream
 	// to learn the request path (above Session), then hands the decoded message
@@ -94,6 +99,14 @@ type Session struct {
 	path     string
 	sendPath bool
 
+	// server reports whether this endpoint accepted the session. Only a
+	// server may redirect a subscriber to another URI.
+	server bool
+
+	// checkRedirect decides which redirects Subscribe follows; nil follows
+	// defaultMaxRedirects.
+	checkRedirect CheckRedirectFunc
+
 	// localProbeLevel is the Probe capability advertised in our SETUP.
 	localProbeLevel uint64
 
@@ -103,6 +116,9 @@ type Session struct {
 	// peerProbeLevel is written before the close and must only be read after it.
 	peerSetupCh    chan struct{}
 	peerProbeLevel uint64
+	// peerFollowsRedirect is whether the peer advertised the Redirect
+	// parameter. Written and read like peerProbeLevel.
+	peerFollowsRedirect bool
 
 	// probe stream state (subscriber side, lazily initialized)
 	outgoingProbeMu     sync.Mutex
@@ -174,6 +190,8 @@ func newSession(
 		logger:          logger,
 		path:            setup.path,
 		sendPath:        setup.sendPath,
+		server:          setup.server,
+		checkRedirect:   setup.checkRedirect,
 		trackReaders:    make(map[SubscribeID]*TrackReader),
 		trackWriters:    make(map[SubscribeID]*TrackWriter),
 		connManager:     manager,
@@ -192,6 +210,7 @@ func newSession(
 	// not block on waitPeerSetup.
 	if setup.peerSetup != nil {
 		sess.peerProbeLevel = setup.peerSetup.ProbeLevel()
+		sess.peerFollowsRedirect = setup.peerSetup.FollowsRedirect()
 		sess.peerSetupReceived.Store(true)
 		close(sess.peerSetupCh)
 	}
@@ -279,6 +298,8 @@ func (sess *Session) openSetupStream() {
 	if sess.localProbeLevel != message.ProbeLevelNone {
 		sm.AddProbe(sess.localProbeLevel)
 	}
+	// Session.Subscribe follows SUBSCRIBE_REDIRECT on every binding.
+	sm.AddRedirect()
 	// Only the native-QUIC client conveys a request path via SETUP; its
 	// binding has no handshake-time request URI. Every other role (WebTransport
 	// both directions; native-QUIC server) knows its path but must not send it.
@@ -329,6 +350,7 @@ func (sess *Session) handleSetupStream(stream transport.ReceiveStream) {
 	}
 
 	sess.peerProbeLevel = sm.ProbeLevel()
+	sess.peerFollowsRedirect = sm.FollowsRedirect()
 	close(sess.peerSetupCh)
 }
 
@@ -341,9 +363,18 @@ func (sess *Session) terminateProtocolViolation(msg string) {
 	}()
 }
 
+// errPeerSetupTimeout is returned when the peer's SETUP does not arrive within
+// the setup timeout.
+var errPeerSetupTimeout = errors.New("timed out waiting for peer SETUP")
+
 // waitPeerSetup blocks until the peer's SETUP has been received, the
 // session terminates, or the setup timeout elapses.
 func (sess *Session) waitPeerSetup() error {
+	return sess.waitPeerSetupContext(sess.ctx)
+}
+
+// waitPeerSetupContext is waitPeerSetup that also returns when ctx ends.
+func (sess *Session) waitPeerSetupContext(ctx context.Context) error {
 	select {
 	case <-sess.peerSetupCh:
 		return nil
@@ -357,9 +388,11 @@ func (sess *Session) waitPeerSetup() error {
 	case <-sess.peerSetupCh:
 		return nil
 	case <-timer.C:
-		return errors.New("timed out waiting for peer SETUP")
+		return errPeerSetupTimeout
 	case <-sess.ctx.Done():
 		return Cause(sess.ctx)
+	case <-ctx.Done():
+		return context.Cause(ctx)
 	}
 }
 
@@ -463,7 +496,20 @@ func (sess *Session) CloseWithError(code SessionErrorCode, msg string) error {
 // Subscribe sends SUBSCRIBE and waits for SUBSCRIBE_OK.
 // ctx is used while opening the stream, sending SUBSCRIBE, and waiting for the response.
 // If config is nil, a zero-value SubscribeConfig is used.
+//
+// A publisher may answer with a redirect instead. Subscribe follows one to
+// another track on this session by itself, as the Dialer's or Server's CheckRedirect allows
+// (by default up to two in a row), and returns the reader of the track it
+// ended at, whose BroadcastPath and TrackName say which. A redirect to
+// another session, which the caller must dial, or one CheckRedirect stopped
+// with ErrStopRedirect, returns a *RedirectError; any other refusal returns
+// CheckRedirect's error, or ErrTooManyRedirects, joined with one.
 func (sess *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackName, config *SubscribeConfig) (*TrackReader, error) {
+	return sess.subscribe(ctx, path, name, config, nil)
+}
+
+// subscribe is Subscribe after following the redirects in via.
+func (sess *Session) subscribe(ctx context.Context, path BroadcastPath, name TrackName, config *SubscribeConfig, via []Redirect) (*TrackReader, error) {
 	if ctx == nil {
 		return nil, errors.New("nil context")
 	}
@@ -523,6 +569,7 @@ func (sess *Session) Subscribe(ctx context.Context, path BroadcastPath, name Tra
 	}
 
 	substr := newSendSubscribeStream(id, stream, config)
+	substr.onProtocolViolation = sess.terminateProtocolViolation
 
 	track := newTrackReader(path, name, substr, func() { sess.removeTrackReader(id) })
 	// A missing group is waited for a few round trips beyond the minimum
@@ -565,6 +612,14 @@ func (sess *Session) Subscribe(ctx context.Context, path BroadcastPath, name Tra
 		// SUBSCRIBE_END without a preceding SUBSCRIBE_OK: the track has
 		// already ended with no matching groups.
 		substr.setEnd(GroupSequence(resp.end.Group))
+	case resp.redirect != nil:
+		// The publisher answered and ended the stream; the reader is closed
+		// without an error.
+		subscribed = true
+		// Nothing follows the redirect: stop reading, so the stream completes.
+		stream.CancelRead(transport.StreamErrorCode(SubscribeErrorCodeInternal))
+		_ = track.Close() // not actionable: the stream is already over
+		return sess.followRedirect(ctx, redirectFromMessage(resp.redirect), config, via)
 	default:
 		cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeInternal))
 		return nil, fmt.Errorf("moqt: unexpected SUBSCRIBE_DROP message before SUBSCRIBE_OK")
@@ -573,6 +628,64 @@ func (sess *Session) Subscribe(ctx context.Context, path BroadcastPath, name Tra
 
 	subscribed = true
 	return track, nil
+}
+
+// followRedirect subscribes where a publisher redirected a subscription,
+// when it is on this session and allowRedirect allows it.
+func (sess *Session) followRedirect(ctx context.Context, to Redirect, config *SubscribeConfig, via []Redirect) (*TrackReader, error) {
+	if to.URI != "" {
+		if sess.server {
+			sess.terminateProtocolViolation("SUBSCRIBE_REDIRECT to another URI sent to a server")
+			return nil, ErrClientRedirectURI
+		}
+		return nil, &RedirectError{Redirect: to}
+	}
+	if err := sess.allowRedirect(to, via); err != nil {
+		if errors.Is(err, ErrStopRedirect) {
+			return nil, &RedirectError{Redirect: to}
+		}
+		return nil, fmt.Errorf("%w: %w", err, &RedirectError{Redirect: to})
+	}
+	if err := to.validate(); err != nil {
+		return nil, fmt.Errorf("%w: %w", err, &RedirectError{Redirect: to})
+	}
+	return sess.subscribe(ctx, to.BroadcastPath, to.TrackName, config, append(slices.Clip(via), to))
+}
+
+// allowRedirect reports whether Subscribe follows to after via: up to
+// maxRedirects, as checkRedirect decides, or defaultMaxRedirects without it.
+func (sess *Session) allowRedirect(to Redirect, via []Redirect) error {
+	if len(via) >= maxRedirects {
+		return ErrTooManyRedirects
+	}
+	if sess.checkRedirect != nil {
+		// A copy, so checkRedirect cannot change the history it is judged by.
+		return sess.checkRedirect(to, slices.Clone(via))
+	}
+	if len(via) >= defaultMaxRedirects {
+		return ErrTooManyRedirects
+	}
+	return nil
+}
+
+// redirectAllowed reports whether a subscriber on this session may be
+// redirected to uri: the peer advertised that it follows redirects, and only
+// a server sends one to another URI.
+func (sess *Session) redirectAllowed(ctx context.Context, uri string) error {
+	if uri != "" && !sess.server {
+		return ErrClientRedirectURI
+	}
+	if err := sess.waitPeerSetupContext(ctx); err != nil {
+		if errors.Is(err, errPeerSetupTimeout) {
+			// A peer that sent no SETUP has not said it follows redirects.
+			return fmt.Errorf("%w: %w", ErrRedirectNotSupported, err)
+		}
+		return err
+	}
+	if !sess.peerFollowsRedirect {
+		return ErrRedirectNotSupported
+	}
+	return nil
 }
 
 // nextSubscribeID atomically increments and returns the next SubscribeID for new subscriptions.
@@ -988,6 +1101,7 @@ func (sess *Session) handleSubscribeStream(stream transport.Stream) {
 		sess.conn.OpenUniStreamSync,
 		func() { sess.removeTrackWriter(SubscribeID(sm.SubscribeID)) },
 	)
+	track.redirectAllowed = sess.redirectAllowed
 	trackCtx, cancelTrack := sess.streamContext(stream)
 	track.ctx = context.WithValue(trackCtx, biStreamTypeCtxKey, message.StreamTypeSubscribe)
 	sess.addTrackWriter(SubscribeID(sm.SubscribeID), track)

@@ -47,6 +47,43 @@ You can adjust the subscription parameters at any time by calling the `TrackRead
     // Handle the TrackReader
 ```
 
+### Redirects
+
+A publisher may answer a subscription with a redirect instead of serving it. `Session.Subscribe` follows a redirect to another track on the same session by itself and returns the reader of the track it ended at: check `tr.BroadcastPath` and `tr.TrackName` to see which. A redirect to another session returns a `*moqt.RedirectError`; dial its `Redirect.URI` and subscribe there.
+
+`CheckRedirect` on the `Dialer` (or the `Server`, for a server that subscribes to its clients) decides whether a redirect within the session is followed, from its target and the redirects already followed for the subscription, as `http.Client.CheckRedirect` does for HTTP. Return `moqt.ErrStopRedirect` to get it back as a `*moqt.RedirectError` instead. Without it, `Subscribe` follows two in a row and returns `moqt.ErrTooManyRedirects` on the third; with it, `Subscribe` still stops after ten.
+
+```go
+    dialer := moqt.Dialer{
+        CheckRedirect: func(to moqt.Redirect, via []moqt.Redirect) error {
+            if !strings.HasPrefix(string(to.BroadcastPath), "/acme/") {
+                return moqt.ErrStopRedirect // the caller decides
+            }
+            return nil
+        },
+    }
+```
+
+```go
+    tr, err := session.Subscribe(ctx, "/public/cam", "video", nil)
+    if redirect, ok := errors.AsType[*moqt.RedirectError](err); ok {
+        // Dial redirect.Redirect.URI, then subscribe to
+        // redirect.Redirect.BroadcastPath and redirect.Redirect.TrackName.
+    }
+```
+
+On the publishing side, a track handler calls `TrackWriter.Redirect` before the first group. An empty `TrackName` keeps the subscriber's, so one call redirects a whole broadcast:
+
+```go
+    mux.PublishFunc(ctx, "/public/cam", func(tw *moqt.TrackWriter) {
+        if err := tw.Redirect(tw.Context(), moqt.Redirect{BroadcastPath: "/acme/cam"}); err != nil {
+            // The subscriber does not follow redirects (moqt.ErrRedirectNotSupported),
+            // such as an older @qumo/moq: serve the track here, or refuse it.
+            tw.CloseWithError(moqt.SubscribeErrorCodeNotFound)
+        }
+    })
+```
+
 ## Announced Broadcasts
 
 Before subscribing to a track, you may want to discover available broadcasts.

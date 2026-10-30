@@ -100,6 +100,10 @@ type TrackWriter struct {
 
 	onCloseTrackFunc func()
 
+	// redirectAllowed reports whether a redirect to uri may be sent to this
+	// subscriber, waiting for its SETUP until ctx ends; nil means none may.
+	redirectAllowed func(ctx context.Context, uri string) error
+
 	ctx context.Context
 }
 
@@ -114,23 +118,9 @@ func (w *TrackWriter) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if w.groupManager != nil {
-		groupManager := w.groupManager
-		w.groupManager = nil
-
-		activeGroups := groupManager.activeGroups
-
-		groupManager.close()
-
-		for g := range activeGroups {
-			_ = g.Close()
-		}
-	}
-
-	if w.onCloseTrackFunc != nil {
-		w.onCloseTrackFunc()
-		w.onCloseTrackFunc = nil
-	}
+	w.stopLocked(func(g *GroupWriter) {
+		_ = g.Close() // not actionable: the track is ending; the peer sees the group end either way
+	})
 
 	if w.subscribeStream == nil {
 		return nil
@@ -144,12 +134,10 @@ func (w *TrackWriter) Close() error {
 	return w.subscribeStream.close()
 }
 
-// CloseWithError stops publishing due to an error and cancels active groups.
-func (w *TrackWriter) CloseWithError(code SubscribeErrorCode) {
-	// Ensure CloseWithError is exclusive with OpenGroup.
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
+// stopLocked ends the writer's open groups with endGroup and unregisters the
+// track, so no group opens after it. Close, CloseWithError and Redirect share
+// it. The caller holds w.mu.
+func (w *TrackWriter) stopLocked(endGroup func(*GroupWriter)) {
 	if w.groupManager != nil {
 		groupManager := w.groupManager
 		w.groupManager = nil
@@ -159,7 +147,7 @@ func (w *TrackWriter) CloseWithError(code SubscribeErrorCode) {
 		groupManager.close()
 
 		for g := range activeGroups {
-			g.CancelWrite(PublishAbortedErrorCode)
+			endGroup(g)
 		}
 	}
 
@@ -167,6 +155,62 @@ func (w *TrackWriter) CloseWithError(code SubscribeErrorCode) {
 		w.onCloseTrackFunc()
 		w.onCloseTrackFunc = nil
 	}
+}
+
+// Redirect answers the subscription with SUBSCRIBE_REDIRECT instead of
+// serving it, sending the subscriber to to, and ends the subscription. It
+// must come before the first group: once SUBSCRIBE_OK went out, it fails.
+// After it, OpenGroup fails and Close sends nothing.
+//
+// It returns ErrRedirectNotSupported, and leaves the subscription as it was,
+// when the subscriber did not advertise that it follows redirects, and
+// ErrClientRedirectURI when a client sets to.URI. It may wait for the
+// subscriber's SETUP, which says whether it follows redirects, until ctx ends.
+func (w *TrackWriter) Redirect(ctx context.Context, to Redirect) error {
+	if ctx == nil {
+		return errors.New("nil context")
+	}
+	if to.TrackName == "" {
+		to.TrackName = w.TrackName
+	}
+	if err := to.validate(); err != nil {
+		return err
+	}
+	if w.redirectAllowed == nil {
+		return ErrRedirectNotSupported
+	}
+	if err := w.redirectAllowed(ctx, to.URI); err != nil {
+		return err
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.subscribeStream == nil {
+		return errSubscriptionAnswered
+	}
+	err := w.subscribeStream.writeRedirect(to.message())
+	if errors.Is(err, errSubscriptionAnswered) {
+		// Nothing was sent: the subscription is as it was.
+		return err
+	}
+	// Sent, or reset by a failed write: either way the subscription is over.
+	// No group is open, as one would have sent SUBSCRIBE_OK and the redirect
+	// would have been refused above. A later Close or CloseWithError sends
+	// nothing, as the stream knows it was redirected.
+	w.stopLocked(func(*GroupWriter) {})
+	return err
+}
+
+// CloseWithError stops publishing due to an error and cancels active groups.
+func (w *TrackWriter) CloseWithError(code SubscribeErrorCode) {
+	// Ensure CloseWithError is exclusive with OpenGroup.
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.stopLocked(func(g *GroupWriter) {
+		g.CancelWrite(PublishAbortedErrorCode)
+	})
 
 	if w.subscribeStream != nil {
 		w.subscribeStream.closeWithError(code)
@@ -319,6 +363,9 @@ func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequen
 	// to avoid nil deref if the embedded field has been cleared by Close().
 	if w.Context().Err() != nil {
 		return nil, Cause(w.Context())
+	}
+	if w.groupManager == nil {
+		return nil, errTrackWriterStopped
 	}
 
 	// Ensure the first SUBSCRIBE_OK has been sent before opening a group.

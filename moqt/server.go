@@ -214,6 +214,11 @@ type Server struct {
 	// If nil, FETCH requests are rejected with an internal stream error.
 	FetchHandler FetchHandler
 
+	// CheckRedirect decides which redirects Session.Subscribe follows on the
+	// sessions this server accepts; see CheckRedirectFunc. If nil, it follows
+	// two in a row.
+	CheckRedirect CheckRedirectFunc
+
 	// AuthHandler, when set, verifies the tokens peers present on Auth
 	// Streams and the credential their connections carry, and makes each
 	// session enforce the union of what they grant. If nil, sessions refuse
@@ -284,9 +289,10 @@ func (s *Server) defaultWebTransportHandler() http.Handler {
 		Config:       s.Config,
 		TrackMux:     s.TrackMux,
 		Handler:      s.Handler,
-		FetchHandler: s.FetchHandler,
-		AuthHandler:  s.AuthHandler,
-		Logger:       s.Logger,
+		FetchHandler:  s.FetchHandler,
+		AuthHandler:   s.AuthHandler,
+		CheckRedirect: s.CheckRedirect,
+		Logger:        s.Logger,
 	}
 }
 
@@ -466,6 +472,10 @@ type WebTransportHandler struct {
 	// FetchHandler handles incoming fetch requests on WebTransport sessions. Optional; when nil, fetch requests are not handled.
 	FetchHandler FetchHandler
 
+	// CheckRedirect decides which redirects Session.Subscribe follows on the
+	// sessions this handler accepts (see Server.CheckRedirect). Optional.
+	CheckRedirect CheckRedirectFunc
+
 	// AuthHandler verifies the tokens of WebTransport sessions (see
 	// Server.AuthHandler). Optional.
 	AuthHandler AuthHandler
@@ -546,7 +556,7 @@ func (u *WebTransportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		lifetime = context.Background()
 	}
 	sess := newSession(conn, u.TrackMux, manager, u.Config, u.FetchHandler, u.AuthHandler, nil, u.Logger,
-		sessionSetup{path: requestPath(r), ctx: r.Context(), lifetime: lifetime}, nil)
+		sessionSetup{path: requestPath(r), server: true, checkRedirect: u.CheckRedirect, ctx: r.Context(), lifetime: lifetime}, nil)
 	// Ensure the session is cleaned up (conn removed from the manager) when
 	// the Handler returns, even if it did not call CloseWithError itself (e.g.
 	// the peer closed the connection). Idempotent.
@@ -604,7 +614,7 @@ func (s *Server) handleNativeQUIC(conn StreamConn) error {
 	// WebTransport's r.URL.RequestURI()) along with the decoded SETUP, so it seeds
 	// peer-probe state without re-reading the consumed stream.
 	sess := newSession(conn, s.TrackMux, s.currentConnManager(), s.Config, s.FetchHandler, s.AuthHandler, nil, s.Logger,
-		sessionSetup{path: path, peerSetup: &sm, ctx: s.connContext(conn.Context(), conn)}, s.Counters)
+		sessionSetup{path: path, server: true, checkRedirect: s.CheckRedirect, peerSetup: &sm, ctx: s.connContext(conn.Context(), conn)}, s.Counters)
 	if s.Counters != nil {
 		s.Counters.NativeSessions.Add(1)
 	}

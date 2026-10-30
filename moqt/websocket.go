@@ -50,6 +50,10 @@ type WebSocketHandler struct {
 	// fetch requests are not handled.
 	FetchHandler FetchHandler
 
+	// CheckRedirect decides which redirects Session.Subscribe follows on the
+	// sessions this handler accepts (see Server.CheckRedirect). Optional.
+	CheckRedirect CheckRedirectFunc
+
 	// AuthHandler verifies the tokens of the sessions (see
 	// Server.AuthHandler). Optional.
 	AuthHandler AuthHandler
@@ -138,7 +142,7 @@ func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// As on WebTransport, the session takes its values from the upgrade
 	// request and ends with the transport, which carries the close reason.
-	setup := sessionSetup{path: requestPath(r), ctx: r.Context(), lifetime: context.Background()}
+	setup := sessionSetup{path: requestPath(r), server: true, checkRedirect: h.CheckRedirect, ctx: r.Context(), lifetime: context.Background()}
 	var manager *connManager
 	if s != nil {
 		// The upgrade took time: the Server may have shut down meanwhile,

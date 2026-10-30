@@ -4,6 +4,7 @@ import {
 	SubscribeDropMessage,
 	SubscribeEndMessage,
 	SubscribeOkMessage,
+	SubscribeRedirectMessage,
 	SubscribeUpdateMessage,
 	writeVarint,
 } from "./internal/message/mod.ts";
@@ -43,6 +44,8 @@ export interface SubscribeDrop {
 export const MESSAGE_TYPE_SUBSCRIBE_OK = 0x0;
 export const MESSAGE_TYPE_SUBSCRIBE_END = 0x1;
 export const MESSAGE_TYPE_SUBSCRIBE_DROP = 0x2;
+/** A gomoqt extension, sent only to a peer that advertised the Redirect Setup Parameter. */
+export const MESSAGE_TYPE_SUBSCRIBE_REDIRECT = 0x3;
 
 function groupSequenceFromWire(v: number): number {
 	if (v === 0) return 0;
@@ -73,6 +76,12 @@ export class SendSubscribeStream {
 	#okReceived: boolean = false;
 	#endGroup: number = 0;
 	#ended: boolean = false;
+	/**
+	 * Told of a message the publisher must not send, such as
+	 * SUBSCRIBE_REDIRECT after SUBSCRIBE_OK. Set before
+	 * {@link readSubscribeResponses} starts.
+	 */
+	onProtocolViolation?: (reason: string) => void;
 
 	constructor(
 		sessCtx: Context,
@@ -170,6 +179,15 @@ export class SendSubscribeStream {
 					endGroup: resp.drop.groupEnd,
 					errorCode: resp.drop.errorCode,
 				});
+				continue;
+			}
+
+			if (resp.redirect) {
+				// SUBSCRIBE_REDIRECT may only replace SUBSCRIBE_OK.
+				this.onProtocolViolation?.(
+					"SUBSCRIBE_REDIRECT after SUBSCRIBE_OK or SUBSCRIBE_END",
+				);
+				return;
 			}
 		}
 	}
@@ -406,12 +424,14 @@ export interface SubscribeResponse {
 	ok?: SubscribeOkMessage;
 	end?: SubscribeEndMessage;
 	drop?: SubscribeDropMessage;
+	redirect?: SubscribeRedirectMessage;
 }
 
 export async function readSubscribeResponse(
 	r: Reader,
 ): Promise<[SubscribeResponse, undefined] | [SubscribeResponse, Error]> {
-	// Read the type byte: 0x0 = SUBSCRIBE_OK, 0x1 = SUBSCRIBE_END, 0x2 = SUBSCRIBE_DROP
+	// Read the type byte: 0x0 = SUBSCRIBE_OK, 0x1 = SUBSCRIBE_END, 0x2 = SUBSCRIBE_DROP,
+	// 0x3 = SUBSCRIBE_REDIRECT
 	const [msgType, , err] = await readVarint(r);
 	if (err) {
 		return [{}, err];
@@ -441,6 +461,14 @@ export async function readSubscribeResponse(
 				return [{}, decErr];
 			}
 			return [{ drop: msg }, undefined];
+		}
+		case MESSAGE_TYPE_SUBSCRIBE_REDIRECT: {
+			const msg = new SubscribeRedirectMessage({});
+			const decErr = await msg.decode(r);
+			if (decErr) {
+				return [{}, decErr];
+			}
+			return [{ redirect: msg }, undefined];
 		}
 		default:
 			return [{}, new Error(`unexpected SUBSCRIBE response type: ${msgType}`)];

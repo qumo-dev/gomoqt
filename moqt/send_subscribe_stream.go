@@ -45,6 +45,10 @@ type sendSubscribeStream struct {
 	// onDrop, when set, is told of each SUBSCRIBE_DROP, outside mu. It is set
 	// before readSubscribeResponses starts.
 	onDrop func(SubscribeDrop)
+	// onProtocolViolation, when set, is told of a message the publisher must
+	// not send, such as SUBSCRIBE_REDIRECT after SUBSCRIBE_OK. It is set
+	// before readSubscribeResponses starts.
+	onProtocolViolation func(msg string)
 
 	mu sync.Mutex
 
@@ -81,6 +85,12 @@ func (substr *sendSubscribeStream) readSubscribeResponses() {
 				EndGroup:   GroupSequence(resp.drop.GroupEnd),
 				ErrorCode:  SubscribeErrorCode(resp.drop.ErrorCode),
 			})
+		case resp.redirect != nil:
+			// SUBSCRIBE_REDIRECT may only replace SUBSCRIBE_OK.
+			if substr.onProtocolViolation != nil {
+				substr.onProtocolViolation("SUBSCRIBE_REDIRECT after SUBSCRIBE_OK or SUBSCRIBE_END")
+			}
+			return
 		}
 	}
 }
@@ -88,9 +98,10 @@ func (substr *sendSubscribeStream) readSubscribeResponses() {
 // subscribeResponse holds one decoded publisher message from the Subscribe
 // Stream; exactly one field is non-nil.
 type subscribeResponse struct {
-	ok   *message.SubscribeOkMessage
-	end  *message.SubscribeEndMessage
-	drop *message.SubscribeDropMessage
+	ok       *message.SubscribeOkMessage
+	end      *message.SubscribeEndMessage
+	drop     *message.SubscribeDropMessage
+	redirect *message.SubscribeRedirectMessage
 }
 
 func readSubscribeResponse(stream io.Reader) (subscribeResponse, error) {
@@ -123,6 +134,12 @@ func readSubscribeResponse(stream io.Reader) (subscribeResponse, error) {
 			return subscribeResponse{}, err
 		}
 		return subscribeResponse{drop: &msg}, nil
+	case message.MessageTypeSubscribeRedirect:
+		var msg message.SubscribeRedirectMessage
+		if err := msg.Decode(stream); err != nil {
+			return subscribeResponse{}, err
+		}
+		return subscribeResponse{redirect: &msg}, nil
 	default:
 		return subscribeResponse{}, fmt.Errorf("unexpected SUBSCRIBE response type: %d", msgType)
 	}

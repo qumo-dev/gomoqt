@@ -51,9 +51,13 @@ import {
 	AuthNotSupportedError,
 	GroupErrorCode,
 	ProbeErrorCode,
+	RedirectError,
 	SessionErrorCode,
+	StopRedirect,
 	SubscribeErrorCode,
+	TooManyRedirectsError,
 } from "./error.ts";
+import type { Redirect } from "./error.ts";
 import type { MoqOptions } from "./options.ts";
 import { defaultProbeIntervalMs, defaultProbeMaxAgeMs, defaultProbeMaxDelta } from "./options.ts";
 import { ProbeResult } from "./probe.ts";
@@ -105,6 +109,19 @@ export interface MOQCloseInfo {
 	reason: string;
 }
 
+/**
+ * How many redirects in a row {@link Session.subscribe} follows for one
+ * subscription when no `checkRedirect` is set.
+ */
+const defaultMaxRedirects = 2;
+
+/**
+ * The most redirects {@link Session.subscribe} follows for one subscription,
+ * whatever `checkRedirect` says, so that publishers redirecting to each other
+ * cannot loop.
+ */
+const maxRedirects = 10;
+
 /** Options for constructing a {@link Session}. */
 export interface SessionInit {
 	/** The underlying WebTransport (or compatible) stream connection. */
@@ -118,6 +135,22 @@ export interface SessionInit {
 
 	/** Called when the server requests session migration via GOAWAY. */
 	onGoaway?: (newSessionURI: string) => void;
+
+	/**
+	 * Decides whether {@link Session.subscribe} follows a redirect to another
+	 * track on the same session, as Go's `Dialer.CheckRedirect` and
+	 * `http.Client.CheckRedirect` do. `via` holds the redirects already
+	 * followed for this subscription, oldest first, as a copy. Return
+	 * `undefined` to follow, {@link StopRedirect} to get the redirect back as a
+	 * {@link RedirectError}, or any other error to get it back as that error's
+	 * {@link RedirectError} cause. A redirect to another session is never
+	 * followed and does not reach it.
+	 *
+	 * If unset, `subscribe` follows two redirects in a row and returns a
+	 * {@link RedirectError} caused by {@link TooManyRedirectsError} on the
+	 * third. Whatever it returns, `subscribe` stops after ten.
+	 */
+	checkRedirect?: (to: Redirect, via: Redirect[]) => Error | undefined;
 
 	/** MOQ tuning options (probe intervals, thresholds, etc.). */
 	options?: MoqOptions;
@@ -185,12 +218,16 @@ export class Session {
 	#peerSetupReceived: boolean = false;
 	#peerProbeLevel: number = ProbeLevels.None;
 
+	// Decides which redirects subscribe follows; see SessionInit.checkRedirect.
+	#checkRedirect?: (to: Redirect, via: Redirect[]) => Error | undefined;
+
 	constructor(options: SessionInit) {
 		this.#webtransport = options.transport;
 		this.protocol = this.#webtransport.protocol;
 		this.mux = options.mux ?? DefaultTrackMux;
 		this.#fetchHandler = options.fetchHandler;
 		this.#onGoaway = options.onGoaway;
+		this.#checkRedirect = options.checkRedirect;
 
 		this.#bitrateTracker = new BitrateTracker({
 			intervalMs: options.options?.probeIntervalMs ?? defaultProbeIntervalMs,
@@ -281,6 +318,8 @@ export class Session {
 		if (this.#localProbeLevel !== ProbeLevels.None) {
 			sm.addProbe(this.#localProbeLevel);
 		}
+		// subscribe follows SUBSCRIBE_REDIRECT.
+		sm.addRedirect();
 		const err = await sm.encode(stream);
 		if (err) {
 			console.error("moq: failed to send SETUP message:", err);
@@ -473,11 +512,29 @@ export class Session {
 	 * @param name - Track name within the broadcast.
 	 * @param config - Optional subscriber-side configuration.
 	 * @returns A {@link TrackReader} for consuming groups.
+	 *
+	 * A publisher may answer with a redirect instead. `subscribe` follows one
+	 * to another track on this session by itself, as the `checkRedirect`
+	 * option allows (by default up to two in a row), and returns the reader of
+	 * the track it ended at: its `broadcastPath` and `trackName` say which. A
+	 * redirect to another session, which the caller connects to, returns a
+	 * {@link RedirectError}; so does one `checkRedirect` refused, with its
+	 * error, or a {@link TooManyRedirectsError}, as the cause.
 	 */
-	async subscribe(
+	subscribe(
 		path: BroadcastPath,
 		name: TrackName,
 		config?: TrackConfig,
+	): Promise<[TrackReader, undefined] | [undefined, Error]> {
+		return this.#subscribe(path, name, config, []);
+	}
+
+	// #subscribe is subscribe after following the redirects in via.
+	async #subscribe(
+		path: BroadcastPath,
+		name: TrackName,
+		config: TrackConfig | undefined,
+		via: Redirect[],
 	): Promise<[TrackReader, undefined] | [undefined, Error]> {
 		const subscribeId = this.#subscribeIDCounter++;
 		// Check for subscribe ID collision
@@ -533,6 +590,30 @@ export class Session {
 			console.error("moq: failed to read SUBSCRIBE response:", respErr);
 			return [undefined, respErr];
 		}
+		if (resp.redirect) {
+			// The publisher answered and ended the stream. Close our side, stop
+			// reading, and cancel any group a publisher sent anyway, so the
+			// streams complete.
+			this.#queues.delete(subscribeId);
+			queue.close();
+			const early = await queue.drain();
+			await Promise.all([
+				stream.writable.close().catch(() => {}),
+				stream.readable.cancel(SubscribeErrorCode.InternalError).catch(() => {}),
+				...early.map(([group]) =>
+					group.cancel(GroupErrorCode.SubscribeCanceled).catch(() => {})
+				),
+			]);
+			return this.#followRedirect(
+				{
+					uri: resp.redirect.connectUri,
+					broadcastPath: resp.redirect.broadcastPath,
+					trackName: resp.redirect.trackName,
+				},
+				config,
+				via,
+			);
+		}
 		if (!resp.ok && !resp.end) {
 			const dropErr = new Error("moq: unexpected SUBSCRIBE_DROP message before SUBSCRIBE_OK");
 			console.error(dropErr.message);
@@ -547,6 +628,9 @@ export class Session {
 			resp.end,
 		);
 
+		subscribeStream.onProtocolViolation = (reason) => {
+			this.closeWithError(SessionErrorCode.ProtocolViolation, reason).catch(() => {});
+		};
 		// Start background reading of subscribe responses (Ok updates, Drops)
 		subscribeStream.readSubscribeResponses();
 
@@ -562,6 +646,43 @@ export class Session {
 		);
 
 		return [track, undefined];
+	}
+
+	// #followRedirect subscribes where a publisher redirected a subscription,
+	// when it is on this session and checkRedirect allows it.
+	#followRedirect(
+		to: Redirect,
+		config: TrackConfig | undefined,
+		via: Redirect[],
+	): Promise<[TrackReader, undefined] | [undefined, Error]> {
+		if (to.uri !== "") {
+			return Promise.resolve([undefined, new RedirectError(to)]);
+		}
+		let refusal: Error | undefined;
+		if (via.length >= maxRedirects) {
+			refusal = new TooManyRedirectsError();
+		} else if (this.#checkRedirect) {
+			// A copy, so checkRedirect cannot change the history it is judged by.
+			refusal = this.#checkRedirect({ ...to }, via.map((v) => ({ ...v })));
+		} else if (via.length >= defaultMaxRedirects) {
+			refusal = new TooManyRedirectsError();
+		}
+		if (refusal === StopRedirect) {
+			return Promise.resolve([undefined, new RedirectError(to)]);
+		}
+		if (refusal) {
+			return Promise.resolve([undefined, new RedirectError(to, refusal)]);
+		}
+		if (!to.broadcastPath.startsWith("/")) {
+			return Promise.resolve([
+				undefined,
+				new RedirectError(to, new Error(`moq: invalid redirect path: ${to.broadcastPath}`)),
+			]);
+		}
+		return this.#subscribe(to.broadcastPath as BroadcastPath, to.trackName, config, [
+			...via,
+			to,
+		]);
 	}
 
 	async fetch(

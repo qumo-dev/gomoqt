@@ -361,3 +361,57 @@ export class AuthNotSupportedError extends Error {
 		Object.setPrototypeOf(this, AuthNotSupportedError.prototype);
 	}
 }
+
+// =============================================================================
+// Redirects (SUBSCRIBE_REDIRECT, a gomoqt extension)
+// =============================================================================
+
+/** Where a publisher sent a subscription instead of serving it. */
+export interface Redirect {
+	/** The session to subscribe on, such as `"moqt://relay-b.example/"`. Empty means the current one. */
+	uri: string;
+	/** The broadcast to subscribe to instead. */
+	broadcastPath: string;
+	/** The track to subscribe to instead. */
+	trackName: string;
+}
+
+/**
+ * Returned by {@link Session.subscribe} when the publisher redirected the
+ * subscription somewhere the session does not go by itself: to another
+ * session, which the caller connects to, or past the redirects it follows.
+ * `cause` says why it was not followed, when a reason other than another
+ * session applies: a {@link TooManyRedirectsError}, or the error
+ * `checkRedirect` returned.
+ */
+export class RedirectError extends Error {
+	/** Where the subscription was redirected. */
+	readonly redirect: Redirect;
+
+	constructor(redirect: Redirect, cause?: Error) {
+		let where = `${redirect.broadcastPath} ${redirect.trackName}`;
+		if (redirect.uri !== "") {
+			where = `${redirect.uri} ${where}`;
+		}
+		const text = `moq: subscription redirected to ${where}`;
+		super(cause ? `${text}: ${cause.message}` : text, cause ? { cause } : undefined);
+		this.redirect = redirect;
+		this.name = "RedirectError";
+		Object.setPrototypeOf(this, RedirectError.prototype);
+	}
+}
+
+/** The cause of a {@link RedirectError} when a subscription was redirected more than the session follows. */
+export class TooManyRedirectsError extends Error {
+	constructor() {
+		super("moq: too many redirects");
+		this.name = "TooManyRedirectsError";
+		Object.setPrototypeOf(this, TooManyRedirectsError.prototype);
+	}
+}
+
+/**
+ * Returned by a `checkRedirect` option to make {@link Session.subscribe}
+ * return the redirect as a {@link RedirectError} without following it.
+ */
+export const StopRedirect: Error = new Error("moq: redirect not followed");
