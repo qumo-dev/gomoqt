@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **moq-web: a publisher can redirect a subscription: `TrackWriter.redirect`, `RedirectNotSupportedError`.** As Go's `TrackWriter.Redirect` does, a track handler answers a subscription with SUBSCRIBE_REDIRECT, sending the subscriber to another track on the same session; an omitted `trackName` keeps the subscriber's, so one call redirects a whole broadcast. It must come before the first group, and after it no group opens. It waits for the subscriber's SETUP and returns a `RedirectNotSupportedError`, leaving the subscription to be served or refused, when the subscriber did not advertise that it follows redirects.
+
 ## [v0.28.0] - 2026-10-30
 
 > **Dual release.** `v0.28.0` ships the Go module and `@qumo/moq` on JSR at the same version: `@qumo/moq` goes from `0.26.0` to `0.28.0`. A publisher can now redirect a subscription to another track or relay with SUBSCRIBE_REDIRECT, a gomoqt extension that both implementations follow, and a stream reset over WebTransport keeps its error code.

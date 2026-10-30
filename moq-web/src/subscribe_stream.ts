@@ -331,6 +331,43 @@ export class ReceiveSubscribeStream {
 		return undefined;
 	}
 
+	/**
+	 * Send SUBSCRIBE_REDIRECT as the subscription's only answer and end the
+	 * stream: close our side and stop reading theirs. It fails, sending
+	 * nothing, once SUBSCRIBE_OK or SUBSCRIBE_END went out. After it, the
+	 * stream's context is done, so no group opens and close sends nothing.
+	 */
+	async writeRedirect(msg: SubscribeRedirectMessage): Promise<Error | undefined> {
+		const ctxErr = this.context.err();
+		if (ctxErr !== undefined) {
+			return ctxErr;
+		}
+		if (this.#responseStarted || this.#endSent) {
+			return new Error("moq: subscription already answered");
+		}
+		// Nothing may follow, even when the write fails partway.
+		this.#responseStarted = true;
+		this.#endSent = true;
+
+		const [, typeErr] = await writeVarint(
+			this.#stream.writable,
+			MESSAGE_TYPE_SUBSCRIBE_REDIRECT,
+		);
+		const encErr = typeErr ?? await msg.encode(this.#stream.writable);
+		if (encErr) {
+			// Part of it may be out: reset rather than leave it torn.
+			this.#cancelFunc(new Error("moq: SUBSCRIBE_REDIRECT write failed"));
+			await this.#stream.writable.cancel(SubscribeErrorCode.InternalError).catch(() => {});
+			await this.#stream.readable.cancel(SubscribeErrorCode.InternalError).catch(() => {});
+			return new Error(`moq: failed to write SUBSCRIBE_REDIRECT: ${encErr}`);
+		}
+		// An explicit cause: golikejs ignores a cancel without one.
+		this.#cancelFunc(new Error("moq: subscription redirected"));
+		await this.#stream.writable.close().catch(() => {});
+		await this.#stream.readable.cancel(SubscribeErrorCode.InternalError).catch(() => {});
+		return undefined;
+	}
+
 	/** Send SUBSCRIBE_OK exactly once; subsequent calls are no-ops. */
 	async ensureOk(group: number): Promise<Error | undefined> {
 		return await this.#ensureOkOnce.do(() => this.writeOk(group));

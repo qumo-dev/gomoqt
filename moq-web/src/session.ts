@@ -122,6 +122,9 @@ const defaultMaxRedirects = 2;
  */
 const maxRedirects = 10;
 
+/** How long a publisher waits for the subscriber's SETUP before a redirect, as Go's default setup timeout. */
+const peerSetupWaitMs = 5_000;
+
 /** Options for constructing a {@link Session}. */
 export interface SessionInit {
 	/** The underlying WebTransport (or compatible) stream connection. */
@@ -216,6 +219,8 @@ export class Session {
 	#peerSetup: Promise<void>;
 	#resolvePeerSetup!: () => void;
 	#peerSetupReceived: boolean = false;
+	// Whether the peer's SETUP said it follows SUBSCRIBE_REDIRECT.
+	#peerFollowsRedirect: boolean = false;
 	#peerProbeLevel: number = ProbeLevels.None;
 
 	// Decides which redirects subscribe follows; see SessionInit.checkRedirect.
@@ -360,6 +365,7 @@ export class Session {
 		}
 
 		this.#peerProbeLevel = sm.probeLevel();
+		this.#peerFollowsRedirect = sm.followsRedirect();
 		this.#resolvePeerSetup();
 	}
 
@@ -960,9 +966,29 @@ export class Session {
 			req.trackName,
 			subscribeStream,
 			this.#webtransport.openUniStream.bind(this.#webtransport),
+			() => this.#followsRedirect(),
 		);
 
 		await this.mux.serveTrack(trackWriter);
+	}
+
+	// #followsRedirect reports whether the peer advertised that it follows
+	// SUBSCRIBE_REDIRECT, waiting for its SETUP for up to peerSetupWaitMs. A
+	// peer that sent none has not said so.
+	async #followsRedirect(): Promise<boolean> {
+		// #peerSetup resolves once the SETUP is processed, not when it starts
+		// arriving, so wait on it rather than on #peerSetupReceived.
+		let processed = false;
+		const setup = this.#peerSetup.then(() => {
+			processed = true;
+		});
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const timeout = new Promise<void>((resolve) => {
+			timer = setTimeout(resolve, peerSetupWaitMs);
+		});
+		await Promise.race([setup, this.#ctx.done(), timeout]);
+		clearTimeout(timer);
+		return processed && this.#peerFollowsRedirect;
 	}
 
 	async #handleAnnounceStream(stream: Stream): Promise<void> {

@@ -6,7 +6,8 @@ import { UniStreamTypes } from "./stream_type.ts";
 import { GroupMessage, writeVarint } from "./internal/message/mod.ts";
 import type { BroadcastPath } from "./broadcast_path.ts";
 import type { SubscribeErrorCode } from "./error.ts";
-import { GroupErrorCode } from "./error.ts";
+import { GroupErrorCode, RedirectNotSupportedError } from "./error.ts";
+import { SubscribeRedirectMessage } from "./internal/message/mod.ts";
 
 /**
  * Publisher-side handle for writing groups to a subscribed track.
@@ -25,6 +26,7 @@ export class TrackWriter {
 	>;
 	#groups: GroupWriter[] = [];
 	#groupCount: number = 0;
+	#peerFollowsRedirect?: () => Promise<boolean>;
 
 	constructor(
 		broadcastPath: BroadcastPath,
@@ -33,11 +35,42 @@ export class TrackWriter {
 		openUniStreamFunc: (options?: { signal?: AbortSignal }) => Promise<
 			[SendStream, undefined] | [undefined, Error]
 		>,
+		peerFollowsRedirect?: () => Promise<boolean>,
 	) {
 		this.broadcastPath = broadcastPath;
 		this.trackName = trackName;
 		this.#subscribeStream = subscribeStream;
 		this.#openUniStreamFunc = openUniStreamFunc;
+		this.#peerFollowsRedirect = peerFollowsRedirect;
+	}
+
+	/**
+	 * Answers the subscription with SUBSCRIBE_REDIRECT instead of serving it,
+	 * sending the subscriber to another track on the same session, as Go's
+	 * `TrackWriter.Redirect` does. An omitted `trackName` keeps the
+	 * subscriber's, so a whole broadcast can be redirected with one rule. It
+	 * must come before the first group, and ends the subscription: after it, no
+	 * group opens and close sends nothing.
+	 *
+	 * It returns a {@link RedirectNotSupportedError}, leaving the subscription
+	 * as it was, when the subscriber did not advertise that it follows
+	 * redirects; serve or refuse it instead.
+	 */
+	async redirect(
+		to: { broadcastPath: BroadcastPath; trackName?: string },
+	): Promise<Error | undefined> {
+		if (!to.broadcastPath.startsWith("/")) {
+			return new Error(`moq: invalid redirect path: ${to.broadcastPath}`);
+		}
+		if (!this.#peerFollowsRedirect || !await this.#peerFollowsRedirect()) {
+			return new RedirectNotSupportedError();
+		}
+		return await this.#subscribeStream.writeRedirect(
+			new SubscribeRedirectMessage({
+				broadcastPath: to.broadcastPath,
+				trackName: to.trackName ?? this.trackName,
+			}),
+		);
 	}
 
 	get context(): Context {
