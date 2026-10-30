@@ -9,7 +9,7 @@ require (
 	github.com/okdaichi/webtransport-go v0.13.0-okdaichi.3
 	github.com/quic-go/quic-go v0.64.1
 	github.com/stretchr/testify v1.12.1
-	golang.org/x/sys v0.47.0
+	golang.org/x/sys v0.49.0
 )
 
 require (
