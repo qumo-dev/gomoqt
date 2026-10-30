@@ -189,16 +189,17 @@ func (w *TrackWriter) Redirect(ctx context.Context, to Redirect) error {
 	if w.subscribeStream == nil {
 		return errSubscriptionAnswered
 	}
-	if err := w.subscribeStream.writeRedirect(to.message()); err != nil {
+	err := w.subscribeStream.writeRedirect(to.message())
+	if errors.Is(err, errSubscriptionAnswered) {
+		// Nothing was sent: the subscription is as it was.
 		return err
 	}
-
-	// No group is open: one would have sent SUBSCRIBE_OK, and the redirect
-	// would have failed.
+	// Sent, or reset by a failed write: either way the subscription is over.
+	// No group is open, as one would have sent SUBSCRIBE_OK and the redirect
+	// would have been refused above. A later Close or CloseWithError sends
+	// nothing, as the stream knows it was redirected.
 	w.stopLocked(func(*GroupWriter) {})
-	// The stream is over, so a later Close or CloseWithError sends nothing.
-	w.subscribeStream = nil
-	return nil
+	return err
 }
 
 // CloseWithError stops publishing due to an error and cancels active groups.

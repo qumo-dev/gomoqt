@@ -91,12 +91,12 @@ func startRedirectServer(tb testing.TB, mux *TrackMux, onSession func(*Session))
 
 // dialRedirectServer dials addr over scheme, retrying until the listener is
 // up, with config and a mux the client publishes from.
-func dialRedirectServer(tb testing.TB, ctx context.Context, scheme, addr string, config *Config, mux *TrackMux) *Session {
+func dialRedirectServer(tb testing.TB, ctx context.Context, scheme, addr string, checkRedirect CheckRedirectFunc, mux *TrackMux) *Session {
 	tb.Helper()
 	dialer := Dialer{
-		Config:    config,
-		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
-		TLSConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // test-only self-signed cert
+		CheckRedirect: checkRedirect,
+		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		TLSConfig:     &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // test-only self-signed cert
 	}
 	var sess *Session
 	require.Eventually(tb, func() bool {
@@ -190,7 +190,7 @@ func TestSession_Subscribe_Redirect(t *testing.T) {
 	}
 }
 
-// TestSession_Subscribe_Redirect_CheckRedirect checks that Config.CheckRedirect
+// TestSession_Subscribe_Redirect_CheckRedirect checks that Dialer.CheckRedirect
 // sees each redirect with the ones followed before it, and what its answers do.
 func TestSession_Subscribe_Redirect_CheckRedirect(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
@@ -203,7 +203,7 @@ func TestSession_Subscribe_Redirect_CheckRedirect(t *testing.T) {
 	}
 	var calls []call
 	errVeto := errors.New("vetoed")
-	sess := dialRedirectServer(t, ctx, "moqt", addr, &Config{CheckRedirect: func(to Redirect, via []Redirect) error {
+	sess := dialRedirectServer(t, ctx, "moqt", addr, func(to Redirect, via []Redirect) error {
 		c := call{to: to.BroadcastPath}
 		for _, v := range via {
 			c.via = append(c.via, v.BroadcastPath)
@@ -220,7 +220,7 @@ func TestSession_Subscribe_Redirect_CheckRedirect(t *testing.T) {
 			return errVeto
 		}
 		return nil
-	}}, nil)
+	}, nil)
 
 	tests := map[string]struct {
 		path      BroadcastPath

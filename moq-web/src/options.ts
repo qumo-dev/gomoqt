@@ -24,19 +24,6 @@ export interface MoqOptions {
 	probeMaxAgeMs?: number;
 	/** Minimum relative bitrate change required to trigger an early re-send. Defaults to {@link defaultProbeMaxDelta}. */
 	probeMaxDelta?: number;
-	/**
-	 * Decides whether {@link Session.subscribe} follows a redirect to another
-	 * track on the same session, as Go's `Config.CheckRedirect` does. `via`
-	 * holds the redirects already followed for this subscription, oldest
-	 * first, as a copy. Return `undefined` to follow, {@link StopRedirect} to
-	 * get the redirect back as a {@link RedirectError}, or any other error to
-	 * get it back as that error's {@link RedirectError} cause. A redirect to
-	 * another session is never followed and does not reach it.
-	 *
-	 * If unset, `subscribe` follows two redirects in a row and returns a
-	 * {@link RedirectError} caused by {@link TooManyRedirectsError} on the third.
-	 */
-	checkRedirect?: (to: Redirect, via: Redirect[]) => Error | undefined;
 }
 
 /**
@@ -64,6 +51,21 @@ export interface ConnectInit {
 	fetchHandler?: FetchHandler;
 	/** Called when the server requests session migration via GOAWAY. */
 	onGoaway?: (newSessionURI: string) => void;
+	/**
+	 * Decides whether {@link Session.subscribe} follows a redirect to another
+	 * track on the same session, as Go's `Dialer.CheckRedirect` and
+	 * `http.Client.CheckRedirect` do. `via` holds the redirects already
+	 * followed for this subscription, oldest first, as a copy. Return
+	 * `undefined` to follow, {@link StopRedirect} to get the redirect back as a
+	 * {@link RedirectError}, or any other error to get it back as that error's
+	 * {@link RedirectError} cause. A redirect to another session is never
+	 * followed and does not reach it.
+	 *
+	 * If unset, `subscribe` follows two redirects in a row and returns a
+	 * {@link RedirectError} caused by {@link TooManyRedirectsError} on the
+	 * third. Whatever it returns, `subscribe` stops after ten.
+	 */
+	checkRedirect?: (to: Redirect, via: Redirect[]) => Error | undefined;
 	/** Low-level MOQ tuning options (probe intervals, thresholds, etc.). */
 	options?: MoqOptions;
 	/**

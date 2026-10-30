@@ -92,6 +92,7 @@ func TestTrackWriter_Redirect_StopsTheWriter(t *testing.T) {
 
 	_, err := tw.OpenGroup(t.Context())
 	assert.Error(t, err, "no group opens after a redirect")
+	assert.NotNil(t, tw.TrackConfig(), "still readable after a redirect")
 	assert.NoError(t, tw.Close())
 	tw.CloseWithError(SubscribeErrorCodeInternal)
 	assert.Equal(t, sent, buf.Len(), "nothing is sent after a redirect")
@@ -132,12 +133,11 @@ func TestTrackWriter_Redirect_StreamFailures(t *testing.T) {
 			}
 			if tt.wantReset {
 				assert.Contains(t, tt.stream.CancelWriteCodes(), transport.StreamErrorCode(SubscribeErrorCodeInternal))
-			} else {
-				// The failed close left the stream's context alive, so only
-				// the writer itself stops the group.
-				_, openErr := tw.OpenGroup(t.Context())
-				assert.ErrorIs(t, openErr, errTrackWriterStopped)
 			}
+			// The writer is stopped either way: no group opens after the
+			// subscription was redirected or reset.
+			_, openErr := tw.OpenGroup(t.Context())
+			assert.Error(t, openErr)
 			assert.Equal(t, 1, tt.stream.WriteCalls(), "the redirect goes out in one write, and SUBSCRIBE_END never follows")
 		})
 	}
@@ -219,11 +219,10 @@ func TestSession_redirectAllowed_PeerSetup(t *testing.T) {
 		setupArrives bool
 		peerFollows  bool
 		wantErr      error
-		wantAnyErr   bool
 	}{
 		"arrives late, follows":        {setupArrives: true, peerFollows: true},
 		"arrives late, does not":       {setupArrives: true, wantErr: ErrRedirectNotSupported},
-		"never arrives: setup timeout": {wantAnyErr: true},
+		"never arrives: setup timeout": {wantErr: ErrRedirectNotSupported},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -244,8 +243,6 @@ func TestSession_redirectAllowed_PeerSetup(t *testing.T) {
 			switch {
 			case tt.wantErr != nil:
 				assert.ErrorIs(t, err, tt.wantErr)
-			case tt.wantAnyErr:
-				assert.Error(t, err)
 			default:
 				assert.NoError(t, err)
 			}
@@ -342,24 +339,30 @@ func TestSession_redirectAllowed(t *testing.T) {
 	}
 }
 
-func TestConfig_checkRedirect(t *testing.T) {
+func TestSession_allowRedirect(t *testing.T) {
 	to := Redirect{BroadcastPath: "/real", TrackName: "video"}
 	errVeto := errors.New("vetoed")
+	allowAll := func(Redirect, []Redirect) error { return nil }
 
 	tests := map[string]struct {
-		config  *Config
+		check   CheckRedirectFunc
 		via     int
 		wantErr error
 	}{
-		"nil config, first":      {config: nil, via: 0},
-		"default, second":        {config: &Config{}, via: 1},
-		"default, third":         {config: &Config{}, via: 2, wantErr: ErrTooManyRedirects},
-		"hook allows past limit": {config: &Config{CheckRedirect: func(Redirect, []Redirect) error { return nil }}, via: 5},
-		"hook vetoes first":      {config: &Config{CheckRedirect: func(Redirect, []Redirect) error { return errVeto }}, via: 0, wantErr: errVeto},
+		"default, first":           {via: 0},
+		"default, second":          {via: 1},
+		"default, third":           {via: 2, wantErr: ErrTooManyRedirects},
+		"hook allows past default": {check: allowAll, via: 5},
+		"hook allows, hard limit":  {check: allowAll, via: maxRedirects, wantErr: ErrTooManyRedirects},
+		"hook vetoes first":        {check: func(Redirect, []Redirect) error { return errVeto }, wantErr: errVeto},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			err := tt.config.checkRedirect(to, make([]Redirect, tt.via))
+			sess, _ := newTestSessionWithConn(t)
+			sess.checkRedirect = tt.check
+
+			err := sess.allowRedirect(to, make([]Redirect, tt.via))
+
 			if tt.wantErr != nil {
 				assert.ErrorIs(t, err, tt.wantErr)
 				return
@@ -369,12 +372,13 @@ func TestConfig_checkRedirect(t *testing.T) {
 	}
 }
 
-func TestConfig_Clone_CheckRedirect(t *testing.T) {
-	errVeto := errors.New("vetoed")
-	original := &Config{CheckRedirect: func(Redirect, []Redirect) error { return errVeto }}
+func TestSession_followRedirect_InvalidPath(t *testing.T) {
+	sess, _ := newTestSessionWithConn(t)
 
-	cloned := original.Clone()
+	tr, err := sess.followRedirect(t.Context(), Redirect{BroadcastPath: "live/x", TrackName: "video"}, &SubscribeConfig{}, nil)
 
-	require.NotNil(t, cloned.CheckRedirect)
-	assert.ErrorIs(t, cloned.CheckRedirect(Redirect{}, nil), errVeto)
+	assert.Nil(t, tr)
+	redirect, ok := errors.AsType[*RedirectError](err)
+	require.True(t, ok, "want a *RedirectError, got %v", err)
+	assert.Equal(t, BroadcastPath("live/x"), redirect.Redirect.BroadcastPath)
 }

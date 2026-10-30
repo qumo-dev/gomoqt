@@ -56,7 +56,7 @@ Rules:
   never re-targeted.
 - A subscriber MUST bound how many redirects it follows in a row for one
   subscription, so publishers that redirect to each other cannot loop.
-  gomoqt follows two by default.
+  gomoqt follows two by default and at most ten.
 
 ## Reference
 

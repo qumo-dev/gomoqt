@@ -119,27 +119,6 @@ Deno.test("SubscribeRedirectMessage rejects a body that does not match its lengt
 	}
 });
 
-Deno.test("SetupMessage.followsRedirect reads the version", async (t) => {
-	const cases: Record<string, { value: number[] | undefined; want: boolean }> = {
-		"absent": { value: undefined, want: false },
-		"empty is version 0": { value: [], want: true },
-		"version 0": { value: [0x00], want: true },
-		"a later version": { value: [0x02], want: true },
-		"truncated varint": { value: [0x40], want: false },
-		"trailing bytes": { value: [0x01, 0x01], want: false },
-	};
-	for (const [name, tt] of Object.entries(cases)) {
-		await t.step(name, () => {
-			const sm = new SetupMessage({
-				parameters: tt.value === undefined
-					? []
-					: [{ id: SetupParamIDs.Redirect, value: new Uint8Array(tt.value) }],
-			});
-			assertEquals(sm.followsRedirect(), tt.want);
-		});
-	}
-});
-
 // ─── Session ─────────────────────────────────────────────────────────────────
 
 // SetupCapture records what the session writes on the streams it opens one
@@ -172,7 +151,10 @@ Deno.test("Session SETUP advertises that it follows redirects", async () => {
 	assertEquals(type, UniStreamTypes.SetupStreamType);
 	const sm = new SetupMessage({});
 	assertEquals(await sm.decode(buf), undefined);
-	assertEquals(sm.followsRedirect(), true);
+	assert(
+		sm.parameters.some((p) => p.id === SetupParamIDs.Redirect && p.value.length === 0),
+		"Redirect, version 0",
+	);
 
 	await session.close();
 });
@@ -304,7 +286,7 @@ Deno.test("Session.subscribe asks checkRedirect", async (t) => {
 		);
 		if (last) responses.push(last);
 		const mock = new MockWebTransportSession({ openStreamResponses: responses });
-		const session = new Session({ transport: mock, options: { checkRedirect } });
+		const session = new Session({ transport: mock, checkRedirect });
 		await session.ready;
 		const result = await session.subscribe("/start", "video");
 		await session.close();
@@ -327,6 +309,15 @@ Deno.test("Session.subscribe asks checkRedirect", async (t) => {
 		assertInstanceOf(err, RedirectError);
 		assertEquals(err.redirect.broadcastPath, "/real");
 		assertEquals(err.cause, veto);
+	});
+
+	await t.step("stops after ten, whatever it says", async () => {
+		const paths = Array.from({ length: 11 }, (_, i) => `/hop-${i}`);
+		const [, err] = await run(paths);
+		assertInstanceOf(err, RedirectError);
+		assertInstanceOf(err.cause, TooManyRedirectsError);
+		assertEquals(err.redirect.broadcastPath, "/hop-10");
+		assertEquals(calls.length, 10, "asked about the first ten only");
 	});
 
 	await t.step("stops: returned as itself", async () => {

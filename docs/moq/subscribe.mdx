@@ -51,17 +51,17 @@ You can adjust the subscription parameters at any time by calling the `TrackRead
 
 A publisher may answer a subscription with a redirect instead of serving it. `Session.Subscribe` follows a redirect to another track on the same session by itself and returns the reader of the track it ended at: check `tr.BroadcastPath` and `tr.TrackName` to see which. A redirect to another session returns a `*moqt.RedirectError`; dial its `Redirect.URI` and subscribe there.
 
-`Config.CheckRedirect` decides whether a redirect within the session is followed, from its target and the redirects already followed for the subscription. Return `moqt.ErrStopRedirect` to get it back as a `*moqt.RedirectError` instead. Without it, `Subscribe` follows two in a row and returns `moqt.ErrTooManyRedirects` on the third.
+`CheckRedirect` on the `Dialer` (or the `Server`, for a server that subscribes to its clients) decides whether a redirect within the session is followed, from its target and the redirects already followed for the subscription, as `http.Client.CheckRedirect` does for HTTP. Return `moqt.ErrStopRedirect` to get it back as a `*moqt.RedirectError` instead. Without it, `Subscribe` follows two in a row and returns `moqt.ErrTooManyRedirects` on the third; with it, `Subscribe` still stops after ten.
 
 ```go
-    dialer := moqt.Dialer{Config: &moqt.Config{
+    dialer := moqt.Dialer{
         CheckRedirect: func(to moqt.Redirect, via []moqt.Redirect) error {
             if !strings.HasPrefix(string(to.BroadcastPath), "/acme/") {
                 return moqt.ErrStopRedirect // the caller decides
             }
             return nil
         },
-    }}
+    }
 ```
 
 ```go

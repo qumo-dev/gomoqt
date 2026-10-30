@@ -110,11 +110,17 @@ export interface MOQCloseInfo {
 }
 
 /**
- * How many redirects {@link Session.subscribe} follows for one subscription,
- * without a `checkRedirect` option, so that publishers redirecting to each
- * other cannot loop.
+ * How many redirects in a row {@link Session.subscribe} follows for one
+ * subscription when no `checkRedirect` is set.
  */
-const maxSubscribeRedirects = 2;
+const defaultMaxRedirects = 2;
+
+/**
+ * The most redirects {@link Session.subscribe} follows for one subscription,
+ * whatever `checkRedirect` says, so that publishers redirecting to each other
+ * cannot loop.
+ */
+const maxRedirects = 10;
 
 /** Options for constructing a {@link Session}. */
 export interface SessionInit {
@@ -129,6 +135,22 @@ export interface SessionInit {
 
 	/** Called when the server requests session migration via GOAWAY. */
 	onGoaway?: (newSessionURI: string) => void;
+
+	/**
+	 * Decides whether {@link Session.subscribe} follows a redirect to another
+	 * track on the same session, as Go's `Dialer.CheckRedirect` and
+	 * `http.Client.CheckRedirect` do. `via` holds the redirects already
+	 * followed for this subscription, oldest first, as a copy. Return
+	 * `undefined` to follow, {@link StopRedirect} to get the redirect back as a
+	 * {@link RedirectError}, or any other error to get it back as that error's
+	 * {@link RedirectError} cause. A redirect to another session is never
+	 * followed and does not reach it.
+	 *
+	 * If unset, `subscribe` follows two redirects in a row and returns a
+	 * {@link RedirectError} caused by {@link TooManyRedirectsError} on the
+	 * third. Whatever it returns, `subscribe` stops after ten.
+	 */
+	checkRedirect?: (to: Redirect, via: Redirect[]) => Error | undefined;
 
 	/** MOQ tuning options (probe intervals, thresholds, etc.). */
 	options?: MoqOptions;
@@ -196,7 +218,7 @@ export class Session {
 	#peerSetupReceived: boolean = false;
 	#peerProbeLevel: number = ProbeLevels.None;
 
-	// Decides which redirects subscribe follows; see MoqOptions.checkRedirect.
+	// Decides which redirects subscribe follows; see SessionInit.checkRedirect.
 	#checkRedirect?: (to: Redirect, via: Redirect[]) => Error | undefined;
 
 	constructor(options: SessionInit) {
@@ -205,7 +227,7 @@ export class Session {
 		this.mux = options.mux ?? DefaultTrackMux;
 		this.#fetchHandler = options.fetchHandler;
 		this.#onGoaway = options.onGoaway;
-		this.#checkRedirect = options.options?.checkRedirect;
+		this.#checkRedirect = options.checkRedirect;
 
 		this.#bitrateTracker = new BitrateTracker({
 			intervalMs: options.options?.probeIntervalMs ?? defaultProbeIntervalMs,
@@ -569,10 +591,19 @@ export class Session {
 			return [undefined, respErr];
 		}
 		if (resp.redirect) {
-			// The publisher answered and ended the stream.
+			// The publisher answered and ended the stream. Close our side, stop
+			// reading, and cancel any group a publisher sent anyway, so the
+			// streams complete.
 			this.#queues.delete(subscribeId);
 			queue.close();
-			await stream.writable.close().catch(() => {});
+			const early = await queue.drain();
+			await Promise.all([
+				stream.writable.close().catch(() => {}),
+				stream.readable.cancel(SubscribeErrorCode.InternalError).catch(() => {}),
+				...early.map(([group]) =>
+					group.cancel(GroupErrorCode.SubscribeCanceled).catch(() => {})
+				),
+			]);
 			return this.#followRedirect(
 				{
 					uri: resp.redirect.connectUri,
@@ -628,10 +659,12 @@ export class Session {
 			return Promise.resolve([undefined, new RedirectError(to)]);
 		}
 		let refusal: Error | undefined;
-		if (this.#checkRedirect) {
+		if (via.length >= maxRedirects) {
+			refusal = new TooManyRedirectsError();
+		} else if (this.#checkRedirect) {
 			// A copy, so checkRedirect cannot change the history it is judged by.
 			refusal = this.#checkRedirect({ ...to }, via.map((v) => ({ ...v })));
-		} else if (via.length >= maxSubscribeRedirects) {
+		} else if (via.length >= defaultMaxRedirects) {
 			refusal = new TooManyRedirectsError();
 		}
 		if (refusal === StopRedirect) {

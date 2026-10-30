@@ -7,10 +7,28 @@ import (
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
 )
 
-// maxSubscribeRedirects is how many redirects Session.Subscribe follows for
-// one subscription, without Config.CheckRedirect, before it gives up, so that
-// two publishers redirecting to each other cannot loop.
-const maxSubscribeRedirects = 2
+const (
+	// defaultMaxRedirects is how many redirects in a row Session.Subscribe
+	// follows for one subscription when no CheckRedirect is set.
+	defaultMaxRedirects = 2
+	// maxRedirects bounds the redirects followed for one subscription even
+	// when CheckRedirect allows more, so that publishers redirecting to each
+	// other cannot loop.
+	maxRedirects = 10
+)
+
+// CheckRedirectFunc decides whether Session.Subscribe follows a redirect to
+// another track on the same session, as http.Client.CheckRedirect does for
+// HTTP. to is the next redirect; via holds the redirects already followed for
+// this subscription, oldest first, as a copy. Returning nil follows it.
+// Returning ErrStopRedirect makes Subscribe return a *RedirectError for to
+// without following it; any other error is returned joined with one. A
+// redirect to another session is never followed and does not reach it.
+//
+// Set it on Dialer, Server, WebTransportHandler or WebSocketHandler. If nil,
+// Subscribe follows two redirects in a row and returns ErrTooManyRedirects on
+// the third. Whatever it returns, Subscribe stops after ten.
+type CheckRedirectFunc func(to Redirect, via []Redirect) error
 
 var (
 	// ErrRedirectNotSupported is returned by TrackWriter.Redirect when the
@@ -22,7 +40,7 @@ var (
 	// *RedirectError, when a subscription was redirected more than it follows.
 	ErrTooManyRedirects = errors.New("moqt: too many redirects")
 
-	// ErrStopRedirect, returned by Config.CheckRedirect, makes
+	// ErrStopRedirect, returned by a CheckRedirectFunc, makes
 	// Session.Subscribe return the redirect as a *RedirectError instead of
 	// following it.
 	ErrStopRedirect = errors.New("moqt: redirect not followed")

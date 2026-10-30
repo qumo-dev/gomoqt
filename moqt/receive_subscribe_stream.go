@@ -27,6 +27,9 @@ type receiveSubscribeStream struct {
 	config          *SubscribeConfig
 	responseStarted bool
 	endSent         bool
+	// redirected is set by writeRedirect: the stream is over, and close and
+	// closeWithError have nothing left to do.
+	redirected bool
 }
 
 // readUpdate blocks until the peer sends the next SUBSCRIBE_UPDATE, applies it
@@ -153,6 +156,7 @@ func (substr *receiveSubscribeStream) writeRedirect(m message.SubscribeRedirectM
 	// from a group opened later, and no SUBSCRIBE_END when the writer closes.
 	substr.responseStarted = true
 	substr.endSent = true
+	substr.redirected = true
 
 	if _, err := substr.stream.Write(buf.Bytes()); err != nil {
 		// Part of it may be out; reset the stream rather than leave it torn.
@@ -160,7 +164,17 @@ func (substr *receiveSubscribeStream) writeRedirect(m message.SubscribeRedirectM
 		return err
 	}
 	_ = substr.stream.Close() // not actionable: the redirect is out, and the stream ends either way
+	// The subscriber has nothing more to say: stop reading, so the stream
+	// completes and its stream credit returns.
+	substr.stream.CancelRead(transport.StreamErrorCode(SubscribeErrorCodeInternal))
 	return nil
+}
+
+// isRedirected reports whether writeRedirect has ended the stream.
+func (substr *receiveSubscribeStream) isRedirected() bool {
+	substr.mu.Lock()
+	defer substr.mu.Unlock()
+	return substr.redirected
 }
 
 func (substr *receiveSubscribeStream) writeDrop(drop SubscribeDrop) error {
@@ -205,10 +219,16 @@ func (substr *receiveSubscribeStream) TrackConfig() *SubscribeConfig {
 }
 
 func (substr *receiveSubscribeStream) close() error {
+	if substr.isRedirected() {
+		return nil
+	}
 	return substr.stream.Close()
 }
 
 func (substr *receiveSubscribeStream) closeWithError(code SubscribeErrorCode) error {
+	if substr.isRedirected() {
+		return nil
+	}
 	cancelStreamWithError(substr.stream, transport.StreamErrorCode(code))
 	return nil
 }

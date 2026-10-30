@@ -95,29 +95,6 @@ export class SetupMessage {
 		this.parameters.push({ id: SetupParamIDs.Redirect, value: new Uint8Array(0) });
 	}
 
-	/**
-	 * Reports whether the Redirect parameter is present and well formed: empty,
-	 * or one varint and nothing else.
-	 */
-	followsRedirect(): boolean {
-		for (const p of this.parameters) {
-			if (p.id !== SetupParamIDs.Redirect) {
-				continue;
-			}
-			if (p.value.length === 0) {
-				return true;
-			}
-			try {
-				const d = new MessageDecoder(p.value);
-				d.varint();
-				return d.remaining() === 0;
-			} catch {
-				return false;
-			}
-		}
-		return false;
-	}
-
 	/** Returns the Path parameter value, or undefined if absent. */
 	path(): string | undefined {
 		for (const p of this.parameters) {

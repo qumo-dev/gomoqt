@@ -22,17 +22,6 @@ type Config struct {
 	// an early probe send before ProbeMaxAge elapses.
 	// If zero, defaults to 0.10 (10%).
 	ProbeMaxDelta float64
-
-	// CheckRedirect decides whether Session.Subscribe follows a redirect to
-	// another track on the same session. via holds the redirects already
-	// followed for this subscription, oldest first; to is the next one.
-	// Returning ErrStopRedirect makes Subscribe return a *RedirectError for to
-	// without following it; any other error is returned joined with one. A
-	// redirect to another session is never followed and does not reach it.
-	//
-	// If nil, Subscribe follows up to two redirects in a row and returns
-	// ErrTooManyRedirects on the third.
-	CheckRedirect func(to Redirect, via []Redirect) error
 }
 
 // setupTimeout returns the configured setup timeout or a default value.
@@ -67,17 +56,6 @@ func (c *Config) probeMaxDelta() float64 {
 	return 0.10
 }
 
-// checkRedirect applies CheckRedirect, or the default limit.
-func (c *Config) checkRedirect(to Redirect, via []Redirect) error {
-	if c != nil && c.CheckRedirect != nil {
-		return c.CheckRedirect(to, via)
-	}
-	if len(via) >= maxSubscribeRedirects {
-		return ErrTooManyRedirects
-	}
-	return nil
-}
-
 // Clone creates a copy of the Config.
 func (c *Config) Clone() *Config {
 	if c == nil {
@@ -88,6 +66,5 @@ func (c *Config) Clone() *Config {
 		ProbeInterval: c.ProbeInterval,
 		ProbeMaxAge:   c.ProbeMaxAge,
 		ProbeMaxDelta: c.ProbeMaxDelta,
-		CheckRedirect: c.CheckRedirect,
 	}
 }

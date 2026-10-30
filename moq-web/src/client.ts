@@ -85,6 +85,7 @@ export async function connect(
 			mux: init?.mux,
 			fetchHandler: init?.fetchHandler,
 			onGoaway: init?.onGoaway,
+			checkRedirect: init?.checkRedirect,
 			options: init?.options,
 		});
 		await session.ready;
