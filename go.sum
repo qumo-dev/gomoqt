@@ -6,8 +6,8 @@ github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aN
 github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/okdaichi/qmux-go v0.3.0 h1:uiG3XRiabglaTklBUDmX+dnlBkEXre0EEaxTAmEVm8U=
 github.com/okdaichi/qmux-go v0.3.0/go.mod h1:sOt2VCexJZ+midUNi3SR0K/0QQwDtJxwRI87YaF3wR4=
-github.com/okdaichi/webtransport-go v0.13.0-okdaichi.3 h1:XeEAZ2mPt+j7AW1LwXc9Jz954SbN4Rh5RHrvJWTxOno=
-github.com/okdaichi/webtransport-go v0.13.0-okdaichi.3/go.mod h1:Fa2NeCFWoyB+z+lZAM+6lFMwZq8ODpMu/3RqEJp4tHs=
+github.com/okdaichi/webtransport-go v0.13.0-okdaichi.4 h1:PFGQkqo5MBfKiItF9rTLUGF+o/9E1ZuYlTGSKhuNWlI=
+github.com/okdaichi/webtransport-go v0.13.0-okdaichi.4/go.mod h1:Fa2NeCFWoyB+z+lZAM+6lFMwZq8ODpMu/3RqEJp4tHs=
 github.com/quic-go/go-ossfuzz-seeds v0.1.0 h1:APacT+iIaNF6fd8AGEiN3bT/Jtkd2jz4v4TzM7MFjy0=
 github.com/quic-go/go-ossfuzz-seeds v0.1.0/go.mod h1:3IOHRbJIc+L6YKMwfDtJAM9Vj9k0YY4muhuyUYk5tbk=
 github.com/quic-go/qpack v0.6.0 h1:g7W+BMYynC1LbYLSqRt8PBg5Tgwxn214ZZR34VIOjz8=
