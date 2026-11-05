@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Over WebTransport, a group stream the peer ended reports its MoQ error code (`moqt`).** `github.com/okdaichi/webtransport-go` goes to `v0.13.0-okdaichi.4`, whose send-stream context now ends with the cause `Write` would return: the peer's WebTransport error code when it cancelled the stream, or the session's close error when the session ended, instead of the raw QUIC stream error. A `GroupWriter`'s `Context` and the error from `Close` therefore carry the same `GroupError` code over WebTransport as over native QUIC.
+
 ## [v0.28.1] - 2026-10-31
 
 > **`@qumo/moq` only.** The Go module is unchanged from `v0.28.0`; `@qumo/moq` goes to `0.28.1`, so both stay on the same version. A publisher in `@qumo/moq` can now redirect a subscription, as Go's could in `v0.28.0`.
