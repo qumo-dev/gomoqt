@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.28.3] - 2026-11-12
+
+> **Go module only.** `@qumo/moq` is unchanged from `0.28.2` and goes to `0.28.3`, so both stay on the same version. gomoqt now builds with quic-go `v0.65.0`.
+
+### Changed
+
+- **quic-go `v0.65.0`, with `github.com/okdaichi/webtransport-go` `v0.13.0-okdaichi.5` (`moqt`).** quic-go v0.65.0 changed `http3.HTTPStreamer.HTTPStream` to return `(*Stream, error)` and stopped sending an implicit 200 response, so the previous fork no longer compiled against it. The new fork release writes the 200 before taking over the stream, and a second WebTransport session on a connection without flow control is still refused with `H3_REQUEST_REJECTED` and no response. An application that requires quic-go itself must move to v0.65.0 with this release. quic-go v0.65.0 also fixes connection migration across repeated NAT rebindings and stops DATAGRAM frames from starving ACKs and retransmissions.
+
 ## [v0.28.2] - 2026-11-06
 
 > **Go module only.** `@qumo/moq` is unchanged from `0.28.1` and goes to `0.28.2`, so both stay on the same version. Over WebTransport, a group stream the peer ended now reports its MoQ error code.
