@@ -7,7 +7,7 @@ require (
 	github.com/dunglas/httpsfv v1.1.2
 	github.com/okdaichi/qmux-go v0.3.0
 	github.com/okdaichi/webtransport-go v0.13.0-okdaichi.4
-	github.com/quic-go/quic-go v0.64.1
+	github.com/quic-go/quic-go v0.65.0
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/sys v0.49.0
 )
