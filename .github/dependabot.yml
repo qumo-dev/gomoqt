@@ -9,3 +9,15 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "weekly"
+
+  # magefiles is a separate module so build tooling never becomes a library
+  # dependency; it needs its own update schedule.
+  - package-ecosystem: "gomod"
+    directory: "/magefiles"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

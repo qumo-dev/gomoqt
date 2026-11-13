@@ -50,13 +50,13 @@ jobs:
       BENCH_FLAGS: "-benchtime=50ms -count=10"
     steps:
       - name: Checkout PR head (full history for base diff + worktree)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.HEAD_SHA }}
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod # resolves from the PR-head checkout above, so base+PR bench under one toolchain
           cache: true # reuse the Go build cache -> faster cold compile of base + PR test binaries
@@ -144,7 +144,7 @@ jobs:
 
       - name: Upload benchmark output
         if: always() && steps.changed.outputs.any == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-perfcheck-pr-${{ github.event.pull_request.number || 'manual' }}
           path: |

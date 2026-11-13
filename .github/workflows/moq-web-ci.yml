@@ -22,19 +22,19 @@ jobs:
       fail-fast: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Setup Deno
       - name: Setup Deno
         if: matrix.runtime.name == 'deno'
-        uses: denoland/setup-deno@v1
+        uses: denoland/setup-deno@v2
         with:
           deno-version: ${{ matrix.runtime.version }}
 
       # Setup Node.js
       - name: Setup Node.js
         if: matrix.runtime.name == 'node'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.runtime.version }}
 
