@@ -7,9 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.28.4] - 2026-11-13
+
+> **Dependency updates only.** No gomoqt or `@qumo/moq` code changes. `@qumo/moq` moves to newer `@moq/qmux` and `zod`, and the Go module to `golang.org/x/sys` `v0.50.0`.
+
 ### Changed
 
 - **`@moq/qmux` `0.3.4` and `zod` `4.6.7` (`moq-web`).** `@qumo/moq` now requires these releases or later.
+- **`golang.org/x/sys` `v0.50.0` (`moqt`).**
 
 ## [v0.28.3] - 2026-11-12
 
