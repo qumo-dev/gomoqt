@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`@moq/qmux` `0.3.4` and `zod` `4.6.7` (`moq-web`).** `@qumo/moq` now requires these releases or later.
+
 ## [v0.28.3] - 2026-11-12
 
 > **Go module only.** `@qumo/moq` is unchanged from `0.28.2` and goes to `0.28.3`, so both stay on the same version. gomoqt now builds with quic-go `v0.65.0`.
