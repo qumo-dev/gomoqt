@@ -38,13 +38,13 @@ jobs:
       HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout PR head (full history for base diff + worktree)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.HEAD_SHA }}
           fetch-depth: 0
 
       - name: Setup Deno
-        uses: denoland/setup-deno@v1
+        uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
 
@@ -125,7 +125,7 @@ jobs:
 
       - name: Upload benchmark output
         if: always() && steps.changed.outputs.any == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ts-bench-perfcheck-pr-${{ github.event.pull_request.number || 'manual' }}
           path: |
