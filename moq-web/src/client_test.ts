@@ -261,7 +261,11 @@ Deno.test("connectAny refuses an empty list", async () => {
 
 Deno.test("connectAny refuses an unknown transport", async () => {
 	await assertRejects(
-		() => connectAny(["https://a.example"], { transport: "carrier-pigeon" as never }),
+		() =>
+			connectAny(
+				["https://a.example"],
+				{ transport: "carrier-pigeon" } as unknown as Parameters<typeof connectAny>[1],
+			),
 		TypeError,
 	);
 });
@@ -351,3 +355,38 @@ for (const transport of invalidTransports) {
 		);
 	});
 }
+
+Deno.test({
+	name: "connectAny dials each URL's WebSocket where webSocketURL says for it",
+	// reason: the QMux transport keeps timers of its own past a refused dial.
+	sanitizeOps: false,
+	sanitizeResources: false,
+	fn: async () => {
+		const server = startRefusingServer();
+		const base = `http://127.0.0.1:${server.port}`;
+
+		try {
+			await assertRejects(
+				() =>
+					connectAny([`${base}/a`, `${base}/b`], {
+						transport: "websocket",
+						webSocketURL: (u) => `${u}/ws`,
+					}),
+				AggregateError,
+			);
+		} finally {
+			await server.stop();
+		}
+
+		assertEquals(server.requests.map((r) => r.path), ["/a/ws", "/b/ws"]);
+	},
+});
+
+Deno.test("connectAny refuses a webSocketURL that is not a function", async () => {
+	// reason: a value that the type forbids, as JavaScript can pass.
+	const init = { webSocketURL: "wss://one.example" } as unknown as Parameters<
+		typeof connectAny
+	>[1];
+
+	await assertRejects(() => connectAny(["https://a.example"], init), TypeError);
+});

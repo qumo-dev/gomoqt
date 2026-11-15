@@ -131,6 +131,13 @@ export interface ConnectAnyInit extends Omit<ConnectInit, "webSocketURL"> {
 	 * means no limit.
 	 */
 	attemptTimeout?: number;
+	/**
+	 * Where to dial the WebSocket transport for each URL, for servers that
+	 * take WebSocket at another host, port or path than WebTransport. Called
+	 * with the URL being tried. Defaults to that URL, with `wss:` for
+	 * `https:`.
+	 */
+	webSocketURL?: (url: string | URL) => string | URL;
 	/** Stops trying: the attempt in progress is closed and nothing more is tried. */
 	signal?: AbortSignal;
 }
@@ -159,9 +166,9 @@ export interface ConnectedSession {
  * WebTransport or WebSocket connection was refused, so every failure moves
  * on, whatever its cause.
  *
- * With `transport: "websocket"`, each URL's WebSocket is dialed at that URL's
- * host and port; {@link ConnectInit.webSocketURL} names a single server and
- * is not taken here.
+ * With `transport: "websocket"`, each URL's WebSocket is dialed where
+ * {@link ConnectAnyInit.webSocketURL} says for that URL, or at that URL's
+ * host and port.
  *
  * @example
  * ```ts
@@ -171,7 +178,8 @@ export interface ConnectedSession {
  * @param urls - MOQ server endpoint URLs, most preferred first.
  * @param init - Options for each attempt, plus the per-attempt timeout and an abort signal.
  * @returns The ready session and the URL it was opened to.
- * @throws TypeError when `urls` is empty or `init.transport` is unknown.
+ * @throws TypeError when `urls` is empty, `init.transport` is unknown, or
+ * `init.webSocketURL` is not a function.
  * @throws AggregateError of every attempt's error, in order, when no URL took the session.
  * @throws `init.signal`'s reason when it aborts first.
  */
@@ -183,13 +191,17 @@ export async function connectAny(
 	if (kind !== "webtransport" && kind !== "websocket") {
 		throw new TypeError(`transport must be "webtransport" or "websocket", not ${String(kind)}`);
 	}
-	const { attemptTimeout, signal, ...rest } = init ?? {};
-	// A JavaScript caller can pass webSocketURL anyway; it would send every
-	// attempt to one server.
-	const connectInit: ConnectInit = { ...rest, webSocketURL: undefined };
+	const { attemptTimeout, signal, webSocketURL, ...connectInit } = init ?? {};
+	const ws: unknown = webSocketURL;
+	if (ws !== undefined && typeof ws !== "function") {
+		// connect's single URL, passed from JavaScript, would send every
+		// attempt to one server.
+		throw new TypeError("webSocketURL must be a function of the URL being tried");
+	}
 	const tried = await tryInOrder(
 		urls,
-		(url, attemptSignal) => open(url, connectInit, attemptSignal),
+		(url, attemptSignal) =>
+			open(url, { ...connectInit, webSocketURL: webSocketURL?.(url) }, attemptSignal),
 		{ attemptTimeout: attemptTimeout ?? DEFAULT_ATTEMPT_TIMEOUT, signal },
 	);
 	return { session: tried.value, url: tried.candidate, index: tried.index };
