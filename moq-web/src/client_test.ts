@@ -82,7 +82,7 @@ const OriginalWebTransport = (globalThis as any).WebTransport;
 (globalThis as any).WebTransport = MockWebTransport;
 
 // Import after setting up mocks
-import { ALPN, Client, connect } from "./client.ts";
+import { ALPN, Client, connect, connectAny } from "./client.ts";
 import { TrackMux } from "./track_mux.ts";
 import type { ConnectInit } from "./options.ts";
 
@@ -184,6 +184,86 @@ Deno.test("Client shim - dial() delegates to connect()", () => {
 
 Deno.test("Client - ALPN constant is moq-lite-05", () => {
 	assertEquals(ALPN, "moq-lite-05");
+});
+
+// A transport whose handshake fails, as a full relay's refused upgrade does.
+class RefusedTransport extends MockWebTransport {
+	constructor(url: string | URL, options?: WebTransportOptions) {
+		super(url, options);
+		this.ready = Promise.reject(new Error(`refused: ${url}`));
+		this.ready.catch(() => {});
+	}
+}
+
+// A transport whose handshake never completes; it records being closed.
+class HangingTransport extends MockWebTransport {
+	closedByClient = false;
+	constructor(url: string | URL, options?: WebTransportOptions) {
+		super(url, options);
+		this.ready = new Promise(() => {});
+	}
+	override close() {
+		this.closedByClient = true;
+		super.close();
+	}
+}
+
+Deno.test("connectAny opens the next URL when the first refuses", async () => {
+	const factory = (u: string | URL, o?: WebTransportOptions) =>
+		String(u) === "https://full.example"
+			? new RefusedTransport(u, o)
+			: new MockWebTransport(u, o);
+
+	const got = await connectAny(["https://full.example", "https://next.example"], {
+		transportFactory: factory,
+	});
+	await got.session.close();
+
+	assertEquals({ url: got.url, index: got.index }, { url: "https://next.example", index: 1 });
+});
+
+Deno.test("connectAny closes a URL that does not answer in time and opens the next", async () => {
+	const hanging: HangingTransport[] = [];
+	const factory = (u: string | URL, o?: WebTransportOptions) => {
+		if (String(u) !== "https://slow.example") return new MockWebTransport(u, o);
+		const t = new HangingTransport(u, o);
+		hanging.push(t);
+		return t;
+	};
+
+	const got = await connectAny(["https://slow.example", "https://next.example"], {
+		transportFactory: factory,
+		attemptTimeout: 10,
+	});
+	await got.session.close();
+
+	assertEquals({ url: got.url, closed: hanging.map((t) => t.closedByClient) }, {
+		url: "https://next.example",
+		closed: [true],
+	});
+});
+
+Deno.test("connectAny rejects with each URL's error when none takes the session", async () => {
+	const err = await assertRejects(
+		() =>
+			connectAny(["https://a.example", "https://b.example"], {
+				transportFactory: (u, o) => new RefusedTransport(u, o),
+			}),
+		AggregateError,
+	);
+
+	assertEquals(err.errors.length, 2);
+});
+
+Deno.test("connectAny refuses an empty list", async () => {
+	await assertRejects(() => connectAny([]), TypeError);
+});
+
+Deno.test("connectAny refuses an unknown transport", async () => {
+	await assertRejects(
+		() => connectAny(["https://a.example"], { transport: "carrier-pigeon" as never }),
+		TypeError,
+	);
 });
 
 // Restore original WebTransport after all tests

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **moq-web: `connectAny` opens a session to the first of several URLs that takes it, with `ConnectAnyInit`, `ConnectedSession` and `DEFAULT_ATTEMPT_TIMEOUT`.** For a list of relays in preference order, such as a placement service's answer: a relay that is full refuses new sessions, and the client goes on to the next instead of failing. The URLs are tried one at a time, in order, each as `connect` would with the same init; one that fails, or is not ready within `attemptTimeout` (5 s by default), has its transport closed and the next is tried. A browser does not say why a WebTransport or WebSocket connection was refused, so every failure moves on. It returns the session with the URL and index it was opened to, rejects with an `AggregateError` of each URL's error when none takes the session, and with `signal`'s reason when it aborts. `webSocketURL` names one server and is not taken: each URL's WebSocket is dialed at that URL. `connect` is unchanged, except that its error now carries the transport's error as `cause`.
+
 ## [v0.28.4] - 2026-11-13
 
 > **Dependency updates only.** No gomoqt or `@qumo/moq` code changes. `@qumo/moq` moves to newer `@moq/qmux` and `zod`, and the Go module to `golang.org/x/sys` `v0.50.0`.

@@ -37,11 +37,23 @@ npx jsr add @qumo/moq
 ## Usage (minimal)
 
 ```ts
-import { Session } from "@qumo/moq";
+import { connect } from "@qumo/moq";
 
-const session = new Session({ url: "https://example.com/interop" });
-// TODO: add track subscription/publish based on your app
-await session.connect();
+const session = await connect("https://example.com/interop");
+const [reader] = await session.subscribe("/broadcast", "video");
+```
+
+With several relays, most preferred first, `connectAny` opens the first one that
+takes the session: a relay that refuses it (because it is full, say) or does not
+answer in time is skipped.
+
+```ts
+import { connectAny } from "@qumo/moq";
+
+const { session, url } = await connectAny([
+	"https://relay-1.example.com/moq",
+	"https://relay-2.example.com/moq",
+]);
 ```
 
 ## Development
