@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.29.0] - 2026-11-15
+
+> **`@qumo/moq` only.** The Go module is unchanged from `v0.28.4` and goes to `v0.29.0`, so both stay on the same version. `connectAny` opens a session to the first of several relays that takes it, so a client goes on to the next relay when one is full.
+
 ### Added
 
 - **moq-web: `connectAny` opens a session to the first of several URLs that takes it, with `ConnectAnyInit`, `ConnectedSession` and `DEFAULT_ATTEMPT_TIMEOUT`.** For a list of relays in preference order, such as a placement service's answer: a relay that is full refuses new sessions, and the client goes on to the next instead of failing. The URLs are tried one at a time, in order, each as `connect` would with the same init; one that fails, or is not ready within `attemptTimeout` (5 s by default), has its transport closed and the next is tried. A browser does not say why a WebTransport or WebSocket connection was refused, so every failure moves on. It returns the session with the URL and index it was opened to, rejects with an `AggregateError` of each URL's error when none takes the session, and with `signal`'s reason when it aborts. `webSocketURL` is a function of the URL being tried, so each relay's WebSocket can be dialed at its own address; unset, each is dialed at its URL. A `webSocketURL` that throws, or an unknown `transport`, rejects with its own error before any URL is dialed.
