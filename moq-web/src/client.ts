@@ -1,5 +1,5 @@
 import { Session } from "./session.ts";
-import type { ConnectInit } from "./options.ts";
+import type { ConnectInit, TransportFactory } from "./options.ts";
 import { WebTransportSession } from "./internal/webtransport/mod.ts";
 import { ALPN, openWebSocketTransport } from "./transport.ts";
 import { tryInOrder } from "./internal/try_in_order.ts";
@@ -59,21 +59,42 @@ const DefaultWebTransportOptions: WebTransportOptions = {
  * @returns A ready-to-use {@link Session}.
  * @throws TypeError if `init.transport` is neither `"webtransport"` nor `"websocket"`.
  */
-export function connect(
+export async function connect(
 	url: string | URL,
 	init?: ConnectInit,
 ): Promise<Session> {
-	return open(url, init);
+	return await open(url, init, transportFactoryFor(init));
 }
 
 /**
- * Opens a session to `url` as {@link connect} does. When `signal` aborts
- * before the session is ready, the transport is closed and the open fails;
- * a session that becomes ready after the abort is closed again.
+ * The transport factory `init` asks for: its own, or WebTransport, or
+ * WebSocket at {@link ConnectInit.webSocketURL} or the URL dialed.
+ *
+ * @throws TypeError if `init.transport` is neither `"webtransport"` nor `"websocket"`.
+ */
+function transportFactoryFor(init?: ConnectInit): TransportFactory {
+	const kind: unknown = init?.transport ?? "webtransport";
+	if (kind !== "webtransport" && kind !== "websocket") {
+		// A value from JavaScript or from configuration: opening WebTransport
+		// for a misspelt "websocket" would be the wrong transport, silently.
+		throw new TypeError(`transport must be "webtransport" or "websocket", not ${String(kind)}`);
+	}
+	return init?.transportFactory ??
+		(kind === "websocket"
+			? (u: string | URL) => openWebSocketTransport(init?.webSocketURL ?? u)
+			: (u: string | URL, o?: WebTransportOptions) => new WebTransport(u, o));
+}
+
+/**
+ * Opens a session to `url` with `factory`'s transport, as {@link connect}
+ * does. It fails as soon as `signal` aborts, without waiting for the
+ * transport. A session that fails or is abandoned is closed, with its
+ * transport, so a failed open leaves nothing open.
  */
 async function open(
 	url: string | URL,
-	init?: ConnectInit,
+	init: ConnectInit | undefined,
+	factory: TransportFactory,
 	signal?: AbortSignal,
 ): Promise<Session> {
 	const transportOptions: WebTransportOptions = {
@@ -81,43 +102,39 @@ async function open(
 		...(init?.transportOptions ?? {}),
 	};
 
-	const kind: unknown = init?.transport ?? "webtransport";
-	if (kind !== "webtransport" && kind !== "websocket") {
-		// A value from JavaScript or from configuration: opening WebTransport
-		// for a misspelt "websocket" would be the wrong transport, silently.
-		throw new TypeError(`transport must be "webtransport" or "websocket", not ${String(kind)}`);
-	}
-	const factory = init?.transportFactory ??
-		(kind === "websocket"
-			? () => openWebSocketTransport(init?.webSocketURL ?? url)
-			: (u: string | URL, o?: WebTransportOptions) => new WebTransport(u, o));
-
-	let raw: WebTransport | undefined;
-	const onAbort = () => raw?.close({ closeCode: 0, reason: "connect aborted" });
-	signal?.addEventListener("abort", onAbort, { once: true });
+	let session: Session | undefined;
 	try {
 		signal?.throwIfAborted();
-		raw = factory(url, transportOptions);
-		const transport = new WebTransportSession(raw);
-		const session = new Session({
-			transport,
+		session = new Session({
+			transport: new WebTransportSession(factory(url, transportOptions)),
 			mux: init?.mux,
 			fetchHandler: init?.fetchHandler,
 			onGoaway: init?.onGoaway,
 			checkRedirect: init?.checkRedirect,
 			options: init?.options,
 		});
-		await session.ready;
-		if (signal?.aborted) {
-			await session.close();
-			throw signal.reason;
-		}
+		await (signal === undefined
+			? session.ready
+			: Promise.race([session.ready, aborted(signal)]));
+		signal?.throwIfAborted();
 		return session;
 	} catch (err) {
+		// Not awaited: a transport that is stuck would hold up the failure
+		// it is being closed for. close() settles its own errors.
+		session?.close().catch(() => {});
 		throw new Error(`failed to connect: ${err}`, { cause: err });
-	} finally {
-		signal?.removeEventListener("abort", onAbort);
 	}
+}
+
+/** A promise that rejects with `signal`'s reason once it aborts. */
+function aborted(signal: AbortSignal): Promise<never> {
+	return new Promise((_, reject) => {
+		if (signal.aborted) {
+			reject(signal.reason);
+			return;
+		}
+		signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+	});
 }
 
 /** How long {@link connectAny} gives one URL by default, in milliseconds. */
@@ -187,10 +204,6 @@ export async function connectAny(
 	urls: readonly (string | URL)[],
 	init?: ConnectAnyInit,
 ): Promise<ConnectedSession> {
-	const kind: unknown = init?.transport ?? "webtransport";
-	if (kind !== "webtransport" && kind !== "websocket") {
-		throw new TypeError(`transport must be "webtransport" or "websocket", not ${String(kind)}`);
-	}
 	const { attemptTimeout, signal, webSocketURL, ...connectInit } = init ?? {};
 	const ws: unknown = webSocketURL;
 	if (ws !== undefined && typeof ws !== "function") {
@@ -198,13 +211,19 @@ export async function connectAny(
 		// attempt to one server.
 		throw new TypeError("webSocketURL must be a function of the URL being tried");
 	}
+	// Every URL's init and factory are worked out before any is dialed, so a
+	// mistake in them, such as an unknown transport or a webSocketURL that
+	// throws, comes back as itself and not as one failed relay after another.
+	const candidates = urls.map((url) => {
+		const attemptInit: ConnectInit = { ...connectInit, webSocketURL: webSocketURL?.(url) };
+		return { url, init: attemptInit, factory: transportFactoryFor(attemptInit) };
+	});
 	const tried = await tryInOrder(
-		urls,
-		(url, attemptSignal) =>
-			open(url, { ...connectInit, webSocketURL: webSocketURL?.(url) }, attemptSignal),
+		candidates,
+		(c, attemptSignal) => open(c.url, c.init, c.factory, attemptSignal),
 		{ attemptTimeout: attemptTimeout ?? DEFAULT_ATTEMPT_TIMEOUT, signal },
 	);
-	return { session: tried.value, url: tried.candidate, index: tried.index };
+	return { session: tried.value, url: tried.candidate.url, index: tried.index };
 }
 
 // Back-compat shim — kept so existing code compiled against the old Client

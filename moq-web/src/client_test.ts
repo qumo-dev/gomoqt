@@ -1,4 +1,5 @@
 import { assertEquals, assertExists, assertRejects } from "@std/assert";
+import { FakeTime } from "@std/testing/time";
 
 // Note: This test file uses simplified unit testing approach.
 // Full integration tests with Session would require complex mock data encoding.
@@ -195,17 +196,33 @@ class RefusedTransport extends MockWebTransport {
 	}
 }
 
-// A transport whose handshake never completes; it records being closed.
+// A transport whose handshake completes only when the test calls
+// completeHandshake, if ever. It records being closed.
 class HangingTransport extends MockWebTransport {
 	closedByClient = false;
+	completeHandshake: () => void = () => {};
 	constructor(url: string | URL, options?: WebTransportOptions) {
 		super(url, options);
-		this.ready = new Promise(() => {});
+		this.ready = new Promise((resolve) => {
+			this.completeHandshake = () => resolve(undefined);
+		});
 	}
 	override close() {
 		this.closedByClient = true;
 		super.close();
 	}
+}
+
+// A factory giving a HangingTransport for "https://slow.example" and a
+// working one for any other URL; it keeps the hanging ones it made.
+class SlowFirstFactory {
+	readonly hanging: HangingTransport[] = [];
+	make = (u: string | URL, o?: WebTransportOptions): WebTransport => {
+		if (String(u) !== "https://slow.example") return new MockWebTransport(u, o);
+		const t = new HangingTransport(u, o);
+		this.hanging.push(t);
+		return t;
+	};
 }
 
 Deno.test("connectAny opens the next URL when the first refuses", async () => {
@@ -222,28 +239,71 @@ Deno.test("connectAny opens the next URL when the first refuses", async () => {
 	assertEquals({ url: got.url, index: got.index }, { url: "https://next.example", index: 1 });
 });
 
-Deno.test("connectAny closes a URL that does not answer in time and opens the next", async () => {
-	const hanging: HangingTransport[] = [];
-	const factory = (u: string | URL, o?: WebTransportOptions) => {
-		if (String(u) !== "https://slow.example") return new MockWebTransport(u, o);
-		const t = new HangingTransport(u, o);
-		hanging.push(t);
-		return t;
-	};
+Deno.test("connectAny closes a URL that does not answer in time", async () => {
+	using time = new FakeTime();
+	const factory = new SlowFirstFactory();
 
-	const got = await connectAny(["https://slow.example", "https://next.example"], {
-		transportFactory: factory,
+	const opening = connectAny(["https://slow.example", "https://next.example"], {
+		transportFactory: factory.make,
 		attemptTimeout: 10,
 	});
+	await time.tickAsync(10);
+	await (await opening).session.close();
+
+	assertEquals(factory.hanging.map((t) => t.closedByClient), [true]);
+});
+
+Deno.test("connectAny opens the next URL after one does not answer in time", async () => {
+	using time = new FakeTime();
+	const factory = new SlowFirstFactory();
+
+	const opening = connectAny(["https://slow.example", "https://next.example"], {
+		transportFactory: factory.make,
+		attemptTimeout: 10,
+	});
+	await time.tickAsync(10);
+	const got = await opening;
 	await got.session.close();
 
-	assertEquals({ url: got.url, closed: hanging.map((t) => t.closedByClient) }, {
-		url: "https://next.example",
+	assertEquals(got.url, "https://next.example");
+});
+
+Deno.test("connectAny leaves closed a session whose handshake completes after its timeout", async () => {
+	using time = new FakeTime();
+	const factory = new SlowFirstFactory();
+
+	const opening = connectAny(["https://slow.example", "https://next.example"], {
+		transportFactory: factory.make,
+		attemptTimeout: 10,
+	});
+	await time.tickAsync(10);
+	await (await opening).session.close();
+	factory.hanging[0]?.completeHandshake();
+	await time.runMicrotasks();
+
+	assertEquals(factory.hanging.map((t) => t.closedByClient), [true]);
+});
+
+Deno.test("connectAny closes the attempt in progress when its signal aborts", async () => {
+	const factory = new SlowFirstFactory();
+	const controller = new AbortController();
+	const reason = new Error("unmounted");
+
+	const opening = connectAny(["https://slow.example", "https://next.example"], {
+		transportFactory: factory.make,
+		attemptTimeout: 0,
+		signal: controller.signal,
+	});
+	controller.abort(reason);
+	const err = await assertRejects(() => opening);
+
+	assertEquals({ err, closed: factory.hanging.map((t) => t.closedByClient) }, {
+		err: reason,
 		closed: [true],
 	});
 });
 
-Deno.test("connectAny rejects with each URL's error when none takes the session", async () => {
+Deno.test("connectAny rejects with each URL's error, in order, when none takes the session", async () => {
 	const err = await assertRejects(
 		() =>
 			connectAny(["https://a.example", "https://b.example"], {
@@ -252,7 +312,30 @@ Deno.test("connectAny rejects with each URL's error when none takes the session"
 		AggregateError,
 	);
 
-	assertEquals(err.errors.length, 2);
+	assertEquals(
+		err.errors.map((e: Error) => e.cause instanceof Error ? e.cause.message : undefined),
+		["refused: https://a.example", "refused: https://b.example"],
+	);
+});
+
+Deno.test("connectAny reports a timed-out URL's error as connect reports a refused one", async () => {
+	using time = new FakeTime();
+
+	const opening = connectAny(["https://slow.example"], {
+		transportFactory: new SlowFirstFactory().make,
+		attemptTimeout: 10,
+	});
+	opening.catch(() => {});
+	await time.tickAsync(10);
+	const err = await assertRejects(() => opening, AggregateError);
+
+	assertEquals(
+		err.errors.map((e: Error) => [
+			e.message.startsWith("failed to connect:"),
+			e.cause instanceof DOMException ? e.cause.name : undefined,
+		]),
+		[[true, "TimeoutError"]],
+	);
 });
 
 Deno.test("connectAny refuses an empty list", async () => {
@@ -260,14 +343,24 @@ Deno.test("connectAny refuses an empty list", async () => {
 });
 
 Deno.test("connectAny refuses an unknown transport", async () => {
-	await assertRejects(
-		() =>
-			connectAny(
-				["https://a.example"],
-				{ transport: "carrier-pigeon" } as unknown as Parameters<typeof connectAny>[1],
-			),
-		TypeError,
+	// reason: a value that the type forbids, as JavaScript or configuration can pass.
+	const init = { transport: "carrier-pigeon" } as unknown as Parameters<typeof connectAny>[1];
+
+	await assertRejects(() => connectAny(["https://a.example"], init), TypeError);
+});
+
+Deno.test("connectAny lets a webSocketURL that throws reject with its own error", async () => {
+	const err = new RangeError("no WebSocket address for this relay");
+
+	const got = await assertRejects(() =>
+		connectAny(["https://a.example"], {
+			webSocketURL: () => {
+				throw err;
+			},
+		})
 	);
+
+	assertEquals(got, err);
 });
 
 // Restore original WebTransport after all tests
@@ -313,9 +406,6 @@ const webSocketDialCases = [
 for (const c of webSocketDialCases) {
 	Deno.test({
 		name: `connect dials the WebSocket ${c.name}`,
-		// reason: the QMux transport keeps timers of its own past a refused dial.
-		sanitizeOps: false,
-		sanitizeResources: false,
 		fn: async () => {
 			const server = startRefusingServer();
 			const base = `http://127.0.0.1:${server.port}`;
@@ -358,9 +448,6 @@ for (const transport of invalidTransports) {
 
 Deno.test({
 	name: "connectAny dials each URL's WebSocket where webSocketURL says for it",
-	// reason: the QMux transport keeps timers of its own past a refused dial.
-	sanitizeOps: false,
-	sanitizeResources: false,
 	fn: async () => {
 		const server = startRefusingServer();
 		const base = `http://127.0.0.1:${server.port}`;

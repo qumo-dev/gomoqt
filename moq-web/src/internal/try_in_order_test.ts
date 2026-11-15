@@ -1,12 +1,13 @@
 import { assertEquals, assertInstanceOf, assertRejects } from "@std/assert";
+import { FakeTime } from "@std/testing/time";
 import { tryInOrder } from "./try_in_order.ts";
 
 type Outcome = "ok" | "fail" | "hang";
 
 // fakeDialer answers each candidate with its outcome: "ok" resolves with
 // "<candidate>-value", "fail" rejects with Error(candidate), and "hang"
-// settles only when its signal aborts. It records what was tried and which
-// attempts saw their signal abort.
+// rejects with its signal's reason once that aborts, as an attempt must. It
+// records what was tried and which attempts saw their signal abort.
 class FakeDialer {
 	readonly tried: string[] = [];
 	readonly aborted: string[] = [];
@@ -45,11 +46,12 @@ Deno.test("tryInOrder tries nothing after a success", async () => {
 	assertEquals(dialer.tried, ["a"]);
 });
 
-Deno.test("tryInOrder leaves a successful attempt's signal unaborted", async () => {
+Deno.test("tryInOrder leaves a successful attempt's signal unaborted past its timeout", async () => {
+	using time = new FakeTime();
 	const dialer = new FakeDialer({ a: "ok" });
 
 	await tryInOrder(["a"], dialer.attempt, { attemptTimeout: 20 });
-	await new Promise((resolve) => setTimeout(resolve, 40));
+	await time.tickAsync(40);
 
 	assertEquals(dialer.aborted, []);
 });
@@ -71,24 +73,35 @@ Deno.test("tryInOrder refuses an empty list", async () => {
 	await assertRejects(() => tryInOrder([], dialer.attempt, { attemptTimeout: 0 }), TypeError);
 });
 
-Deno.test("tryInOrder aborts an attempt that times out and tries the next", async () => {
+Deno.test("tryInOrder aborts an attempt that times out", async () => {
+	using time = new FakeTime();
 	const dialer = new FakeDialer({ a: "hang", b: "ok" });
 
-	const got = await tryInOrder(["a", "b"], dialer.attempt, { attemptTimeout: 10 });
+	const tried = tryInOrder(["a", "b"], dialer.attempt, { attemptTimeout: 10 });
+	await time.tickAsync(10);
+	await tried;
 
-	assertEquals({ candidate: got.candidate, aborted: dialer.aborted }, {
-		candidate: "b",
-		aborted: ["a"],
-	});
+	assertEquals(dialer.aborted, ["a"]);
+});
+
+Deno.test("tryInOrder tries the next candidate after a timeout", async () => {
+	using time = new FakeTime();
+	const dialer = new FakeDialer({ a: "hang", b: "ok" });
+
+	const tried = tryInOrder(["a", "b"], dialer.attempt, { attemptTimeout: 10 });
+	await time.tickAsync(10);
+
+	assertEquals((await tried).candidate, "b");
 });
 
 Deno.test("tryInOrder records a timeout as a TimeoutError", async () => {
+	using time = new FakeTime();
 	const dialer = new FakeDialer({ a: "hang" });
 
-	const err = await assertRejects(
-		() => tryInOrder(["a"], dialer.attempt, { attemptTimeout: 10 }),
-		AggregateError,
-	);
+	const tried = tryInOrder(["a"], dialer.attempt, { attemptTimeout: 10 });
+	tried.catch(() => {});
+	await time.tickAsync(10);
+	const err = await assertRejects(() => tried, AggregateError);
 
 	assertInstanceOf(err.errors[0], DOMException);
 	assertEquals(err.errors[0].name, "TimeoutError");
@@ -98,14 +111,13 @@ Deno.test("tryInOrder stops with the signal's reason when it aborts", async () =
 	const dialer = new FakeDialer({ a: "hang", b: "ok" });
 	const controller = new AbortController();
 	const reason = new Error("unmounted");
-	setTimeout(() => controller.abort(reason), 10);
 
-	const err = await assertRejects(() =>
-		tryInOrder(["a", "b"], dialer.attempt, {
-			attemptTimeout: 0,
-			signal: controller.signal,
-		})
-	);
+	const tried = tryInOrder(["a", "b"], dialer.attempt, {
+		attemptTimeout: 0,
+		signal: controller.signal,
+	});
+	controller.abort(reason);
+	const err = await assertRejects(() => tried);
 
 	assertEquals({ err, tried: dialer.tried, aborted: dialer.aborted }, {
 		err: reason,
