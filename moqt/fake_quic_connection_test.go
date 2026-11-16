@@ -11,7 +11,10 @@ import (
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
-var _ StreamConn = (*fakeStreamConn)(nil)
+var (
+	_ StreamConn                    = (*fakeStreamConn)(nil)
+	_ transport.WebTransportSession = (*fakeWebTransportSession)(nil)
+)
 
 // biStreamResult is one queued outcome for a bidirectional stream open/accept.
 // Block parks the call until the connection context is done, modelling a peer

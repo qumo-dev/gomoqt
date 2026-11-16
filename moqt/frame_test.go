@@ -432,15 +432,17 @@ func TestFrame_decode_Truncated(t *testing.T) {
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			readers := []io.Reader{
-				bytes.NewReader(tt.wire),
-				iotest.OneByteReader(bytes.NewReader(tt.wire)),
-				iotest.DataErrReader(bytes.NewReader(tt.wire)),
+			readers := map[string]io.Reader{
+				"byte reader":       bytes.NewReader(tt.wire),
+				"one byte per read": iotest.OneByteReader(bytes.NewReader(tt.wire)),
+				"data with io.EOF":  iotest.DataErrReader(bytes.NewReader(tt.wire)),
 			}
-			for _, r := range readers {
-				err := NewFrame(0).decode(r, 0)
+			for readerName, r := range readers {
+				t.Run(readerName, func(t *testing.T) {
+					err := NewFrame(0).decode(r, 0)
 
-				assert.ErrorIs(t, err, tt.want)
+					assert.ErrorIs(t, err, tt.want)
+				})
 			}
 		})
 	}

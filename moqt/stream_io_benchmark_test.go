@@ -144,7 +144,7 @@ func BenchmarkStreamIo_RealQUIC(b *testing.B) {
 // ---------------------------------------------------------------------------
 
 // BenchmarkWriteThroughput_Memcpy measures GroupWriter.WriteFrame throughput
-// against a REAL-memcpy sink (growing BytesWriterSink) instead of io.Discard.
+// against a REAL-memcpy sink (growing bytesWriterSink) instead of io.Discard.
 // This is the documented FALLBACK path: it exercises the real encode + a real
 // byte copy, but not QUIC framing/transport. It is far better than io.Discard
 // (Write does real work) but is NOT real-QUIC throughput.
@@ -167,8 +167,8 @@ func BenchmarkWriteThroughput_Memcpy(b *testing.B) {
 				payload[i] = byte(i % 256)
 			}
 
-			sink := NewBytesWriterSink(size + 16)
-			counting := NewCountingSendStream(&sinkWriterSendStream{w: sink})
+			sink := newBytesWriterSink(size + 16)
+			counting := newCountingSendStream(&sinkWriterSendStream{w: sink})
 
 			// NOTE: a new GroupWriter is created per iteration to mirror the
 			// one-stream-per-group production behavior. Each OpenGroup would
@@ -183,7 +183,7 @@ func BenchmarkWriteThroughput_Memcpy(b *testing.B) {
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				sink.Reset()
+				sink.reset()
 				if err := gw.WriteFrame(frame); err != nil {
 					b.Fatalf("WriteFrame: %v", err)
 				}
@@ -191,13 +191,13 @@ func BenchmarkWriteThroughput_Memcpy(b *testing.B) {
 
 			b.StopTimer()
 
-			snap := counting.Snapshot()
+			snap := counting.snapshot()
 			// WriteFrame issues exactly one stream Write per frame (varint
 			// length prefix + payload are concatenated in encode and written
 			// in a single Write call). Report it as a custom metric.
 			if b.N > 0 {
-				b.ReportMetric(float64(snap.WriteCalls)/float64(b.N), "writes/frame")
-				b.ReportMetric(float64(snap.BytesWritten)/float64(b.N), "bytes/write")
+				b.ReportMetric(float64(snap.writeCalls)/float64(b.N), "writes/frame")
+				b.ReportMetric(float64(snap.bytesWritten)/float64(b.N), "bytes/write")
 			}
 		})
 	}
@@ -231,7 +231,7 @@ func BenchmarkWriteCount_GroupHeader(b *testing.B) {
 
 			// Discard-backed fake so we isolate WRITE-COUNT, not throughput.
 			fake := &fakeQUICSendStream{writeTo: io.Discard}
-			counting := NewCountingSendStream(fake)
+			counting := newCountingSendStream(fake)
 
 			// Pre-build the frame once; payload is fixed across iterations.
 			frame := NewFrame(size)
@@ -242,7 +242,7 @@ func BenchmarkWriteCount_GroupHeader(b *testing.B) {
 
 			var headerWrites, frameWrites int64
 			for i := 0; i < b.N; i++ {
-				counting.Reset()
+				counting.reset()
 
 				// Step 1 + 2: the two group-header writes that OpenGroup
 				// performs on the freshly-opened uni stream.
@@ -255,7 +255,7 @@ func BenchmarkWriteCount_GroupHeader(b *testing.B) {
 				}).Encode(counting); err != nil {
 					b.Fatalf("encode group message: %v", err)
 				}
-				hw := counting.Snapshot().WriteCalls
+				hw := counting.snapshot().writeCalls
 
 				// Step 3 + 4: construct the group writer (no writes) and
 				// write exactly one frame through it.
@@ -263,7 +263,7 @@ func BenchmarkWriteCount_GroupHeader(b *testing.B) {
 				if err := gw.WriteFrame(frame); err != nil {
 					b.Fatalf("WriteFrame: %v", err)
 				}
-				fw := counting.Snapshot().WriteCalls - hw
+				fw := counting.snapshot().writeCalls - hw
 
 				headerWrites += hw
 				frameWrites += fw
@@ -274,8 +274,8 @@ func BenchmarkWriteCount_GroupHeader(b *testing.B) {
 			if b.N > 0 {
 				b.ReportMetric(float64(headerWrites)/float64(b.N), "writes/group-header")
 				b.ReportMetric(float64(frameWrites)/float64(b.N), "writes/frame")
-				snap := counting.Snapshot()
-				b.ReportMetric(float64(snap.BytesWritten)/float64(b.N), "bytes/op")
+				snap := counting.snapshot()
+				b.ReportMetric(float64(snap.bytesWritten)/float64(b.N), "bytes/op")
 			}
 		})
 	}
@@ -285,7 +285,7 @@ func BenchmarkWriteCount_GroupHeader(b *testing.B) {
 // helpers
 // ---------------------------------------------------------------------------
 
-// sinkWriterSendStream adapts an io.Writer (the BytesWriterSink) to the
+// sinkWriterSendStream adapts an io.Writer (the bytesWriterSink) to the
 // transport.SendStream interface for the counting-wrapper benchmark. Only
 // Write needs to do real work; the rest are inert stubs.
 type sinkWriterSendStream struct {

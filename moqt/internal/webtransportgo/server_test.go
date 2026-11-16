@@ -162,17 +162,6 @@ func TestServer_Init_ConnContext_WithoutStoredContext(t *testing.T) {
 	assert.Equal(t, fallbackCtx, result)
 }
 
-// fakeQUICConnProvider implements both transport.StreamConn and quicConnProvider
-// to test the ServeQUICConn happy path.
-type fakeQUICConnProvider struct {
-	fakeStreamConn
-	qc *quicgo_quicgo.Conn
-}
-
-func (f *fakeQUICConnProvider) QUICConn() *quicgo_quicgo.Conn {
-	return f.qc
-}
-
 func TestServer_ServeQUICConn_QUICConnProviderBranch(t *testing.T) {
 	// We cannot create a valid *quic.Conn without a real QUIC connection,
 	// so we verify the quicConnProvider dispatch indirectly:

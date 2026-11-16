@@ -19,6 +19,9 @@ const (
 	StreamTypeSetup StreamType = 0x1
 )
 
+// StreamType is the one-byte header that opens every stream and names what the
+// stream carries. Bidirectional and unidirectional streams number their types
+// separately, so the same value means different things on each.
 type StreamType byte
 
 // Encode writes a one-byte stream type header.
