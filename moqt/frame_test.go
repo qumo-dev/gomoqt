@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"testing"
+	"testing/iotest"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
 	"github.com/stretchr/testify/assert"
@@ -376,10 +377,47 @@ func TestFrame_decode_LargePayload(t *testing.T) {
 	}
 }
 
+// TestFrame_decode_ShortReads ensures a payload larger than one read chunk
+// decodes intact when the transport delivers it in pieces that do not line up
+// with the chunks, or delivers the last bytes together with io.EOF.
+func TestFrame_decode_ShortReads(t *testing.T) {
+	payload := bytes.Repeat([]byte("0123456789abcdef"), (3*frameReadChunk+7)/16)
+	wire, _ := message.WriteVarint(nil, 0)
+	wire, _ = message.WriteMessageLength(wire, uint64(len(payload)))
+	wire = append(wire, payload...)
+
+	tests := map[string]io.Reader{
+		"half reads":       iotest.HalfReader(bytes.NewReader(wire)),
+		"data with io.EOF": iotest.DataErrReader(bytes.NewReader(wire)),
+	}
+	for name, src := range tests {
+		t.Run(name, func(t *testing.T) {
+			f := NewFrame(0)
+			require.NoError(t, f.decode(src, 0))
+			assert.Equal(t, payload, f.Body())
+		})
+	}
+}
+
+// TestFrame_decode_ReadErrorMidFrame ensures a transport error after part of a
+// frame has arrived is passed on as is, not reported as a truncated frame or
+// as the clean end of the group.
+func TestFrame_decode_ReadErrorMidFrame(t *testing.T) {
+	wire := []byte{0x00, 0x02, 'a', 'b'}
+	// One byte per read, so the timeout lands on the second read: after the
+	// timestamp delta, before the length.
+	src := iotest.TimeoutReader(iotest.OneByteReader(bytes.NewReader(wire)))
+
+	err := NewFrame(0).decode(src, 0)
+
+	assert.ErrorIs(t, err, iotest.ErrTimeout)
+}
+
 // TestFrame_decode_Truncated ensures a stream that ends anywhere inside a
 // frame, even before its payload's first byte, is a truncated frame, while one
 // that ends before the frame is the clean end of the group, through a reader
-// that is an io.ByteReader and through one that is not.
+// that is an io.ByteReader and through readers that are not: one that delivers
+// a byte per Read and one that returns the last bytes together with io.EOF.
 func TestFrame_decode_Truncated(t *testing.T) {
 	tests := map[string]struct {
 		wire []byte
@@ -394,7 +432,12 @@ func TestFrame_decode_Truncated(t *testing.T) {
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			for _, r := range []io.Reader{bytes.NewReader(tt.wire), struct{ io.Reader }{bytes.NewReader(tt.wire)}} {
+			readers := []io.Reader{
+				bytes.NewReader(tt.wire),
+				iotest.OneByteReader(bytes.NewReader(tt.wire)),
+				iotest.DataErrReader(bytes.NewReader(tt.wire)),
+			}
+			for _, r := range readers {
 				err := NewFrame(0).decode(r, 0)
 
 				assert.ErrorIs(t, err, tt.want)

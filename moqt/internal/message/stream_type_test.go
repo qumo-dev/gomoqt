@@ -2,7 +2,9 @@ package message_test
 
 import (
 	"bytes"
+	"io"
 	"testing"
+	"testing/iotest"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
 	"github.com/stretchr/testify/assert"
@@ -83,10 +85,37 @@ func TestStreamType_Constants(t *testing.T) {
 }
 
 func TestStreamType_DecodeErrors(t *testing.T) {
-	t.Run("read error", func(t *testing.T) {
-		var stm message.StreamType
-		src := bytes.NewReader([]byte{})
-		err := stm.Decode(src)
-		assert.Error(t, err)
-	})
+	tests := map[string]struct {
+		src  io.Reader
+		want error
+	}{
+		"empty stream": {src: bytes.NewReader(nil), want: io.EOF},
+		"read error":   {src: iotest.ErrReader(iotest.ErrTimeout), want: iotest.ErrTimeout},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			var stm message.StreamType
+			err := stm.Decode(tt.src)
+			assert.ErrorIs(t, err, tt.want)
+		})
+	}
+}
+
+// TestStreamType_Decode_ReaderBehaviors ensures the type byte is decoded however
+// the transport delivers it, including in the same Read that reports io.EOF,
+// which the io.Reader contract allows and a stream carrying only its type byte
+// produces.
+func TestStreamType_Decode_ReaderBehaviors(t *testing.T) {
+	tests := map[string]io.Reader{
+		"whole read":        bytes.NewReader([]byte{byte(message.StreamTypeSubscribe)}),
+		"data with io.EOF":  iotest.DataErrReader(bytes.NewReader([]byte{byte(message.StreamTypeSubscribe)})),
+		"one byte per read": iotest.OneByteReader(bytes.NewReader([]byte{byte(message.StreamTypeSubscribe)})),
+	}
+	for name, src := range tests {
+		t.Run(name, func(t *testing.T) {
+			var stm message.StreamType
+			require.NoError(t, stm.Decode(src))
+			assert.Equal(t, message.StreamTypeSubscribe, stm)
+		})
+	}
 }

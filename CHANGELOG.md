@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A stream's type byte is read however the transport delivers it (`moqt`).** Decoding the type at the start of a stream used a single `Read`, so a stream whose type byte arrived in the same read as its end (`n == 1` with `io.EOF`, which the `io.Reader` contract allows) was dropped as empty, and a read that returned no bytes and no error was decoded as type `0`. It now reads with `io.ReadFull`.
+
 ## [v0.29.0] - 2026-11-15
 
 > **`@qumo/moq` only.** The Go module is unchanged from `v0.28.4` and goes to `v0.29.0`, so both stay on the same version. `connectAny` opens a session to the first of several relays that takes it, so a client goes on to the next relay when one is full.
