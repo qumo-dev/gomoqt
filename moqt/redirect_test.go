@@ -104,17 +104,17 @@ func TestTrackWriter_Redirect_StreamFailures(t *testing.T) {
 	errClose := errors.New("close failed")
 
 	tests := map[string]struct {
-		stream    *FakeQUICStream
+		stream    *fakeQUICStream
 		wantErr   error
 		wantReset bool
 	}{
 		"write fails: reset, and nothing follows": {
-			stream:    &FakeQUICStream{Writes: []streamResult{{Err: errWrite}}},
+			stream:    &fakeQUICStream{writes: []streamResult{{Err: errWrite}}},
 			wantErr:   errWrite,
 			wantReset: true,
 		},
 		"close fails after the redirect is out: still sent": {
-			stream: &FakeQUICStream{CloseErr: errClose},
+			stream: &fakeQUICStream{closeErr: errClose},
 		},
 	}
 	for name, tt := range tests {
@@ -144,7 +144,7 @@ func TestTrackWriter_Redirect_StreamFailures(t *testing.T) {
 }
 
 func TestSession_redirectAllowed_WaitsForSetupUntilCtx(t *testing.T) {
-	sess := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{server: true}, nil)
+	sess := newSession(&fakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{server: true}, nil)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -170,7 +170,7 @@ func TestSendSubscribeStream_LateRedirect(t *testing.T) {
 			buf.WriteByte(byte(message.MessageTypeSubscribeRedirect))
 			require.NoError(t, message.SubscribeRedirectMessage{BroadcastPath: "/real", TrackName: "video"}.Encode(&buf))
 
-			stream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
+			stream := &fakeQUICStream{reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
 			substr := newSendSubscribeStream(SubscribeID(1), stream, &SubscribeConfig{})
 			var violations []string
 			substr.onProtocolViolation = func(msg string) { violations = append(violations, msg) }
@@ -187,8 +187,8 @@ func TestSendSubscribeStream_LateRedirect(t *testing.T) {
 func TestSession_Subscribe_MalformedRedirect(t *testing.T) {
 	// SUBSCRIBE_REDIRECT whose length says 3 bytes but whose first string
 	// claims 5.
-	stream := &FakeQUICStream{Reads: []streamResult{{Data: []byte{byte(message.MessageTypeSubscribeRedirect), 0x03, 0x05, 0x00, 0x00}}}}
-	conn := &FakeStreamConn{OpenStreams: []biStreamResult{{Stream: stream}}}
+	stream := &fakeQUICStream{reads: []streamResult{{Data: []byte{byte(message.MessageTypeSubscribeRedirect), 0x03, 0x05, 0x00, 0x00}}}}
+	conn := &fakeStreamConn{openStreams: []biStreamResult{{Stream: stream}}}
 	sess := newTestSession(conn)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
@@ -226,7 +226,7 @@ func TestSession_redirectAllowed_PeerSetup(t *testing.T) {
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			sess := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, &Config{SetupTimeout: 200 * time.Millisecond},
+			sess := newSession(&fakeStreamConn{}, NewTrackMux(0), nil, &Config{SetupTimeout: 200 * time.Millisecond},
 				nil, nil, nil, nil, sessionSetup{server: true}, nil)
 			t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
 
@@ -271,19 +271,19 @@ func TestSession_PeerFollowsRedirect(t *testing.T) {
 
 	for _, follows := range []bool{true, false} {
 		t.Run(fmt.Sprintf("Setup Stream, follows=%t", follows), func(t *testing.T) {
-			sess := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
+			sess := newSession(&fakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
 			defer sess.CloseWithError(NoError, "") //nolint:errcheck // not actionable: cleanup
 			var buf bytes.Buffer
 			require.NoError(t, setup(follows).Encode(&buf))
 
-			sess.handleSetupStream(&FakeQUICReceiveStream{Reads: []streamResult{{Data: buf.Bytes()}}})
+			sess.handleSetupStream(&fakeQUICReceiveStream{reads: []streamResult{{Data: buf.Bytes()}}})
 
 			<-sess.peerSetupCh
 			assert.Equal(t, follows, sess.peerFollowsRedirect)
 		})
 		t.Run(fmt.Sprintf("native QUIC router, follows=%t", follows), func(t *testing.T) {
 			sm := setup(follows)
-			sess := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, nil,
+			sess := newSession(&fakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, nil,
 				sessionSetup{server: true, peerSetup: &sm}, nil)
 			defer sess.CloseWithError(NoError, "") //nolint:errcheck // not actionable: cleanup
 

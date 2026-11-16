@@ -33,7 +33,7 @@ func TestServer_Init_DoesNotPanic(t *testing.T) {
 
 func TestServer_ServeQUICConn_InvalidConnType(t *testing.T) {
 	srv := &Server{}
-	err := srv.ServeQUICConn(&FakeStreamConn{})
+	err := srv.ServeQUICConn(&fakeStreamConn{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid connection type")
 }
@@ -162,25 +162,14 @@ func TestServer_Init_ConnContext_WithoutStoredContext(t *testing.T) {
 	assert.Equal(t, fallbackCtx, result)
 }
 
-// FakeQUICConnProvider implements both transport.StreamConn and quicConnProvider
-// to test the ServeQUICConn happy path.
-type FakeQUICConnProvider struct {
-	FakeStreamConn
-	qc *quicgo_quicgo.Conn
-}
-
-func (f *FakeQUICConnProvider) QUICConn() *quicgo_quicgo.Conn {
-	return f.qc
-}
-
 func TestServer_ServeQUICConn_QUICConnProviderBranch(t *testing.T) {
 	// We cannot create a valid *quic.Conn without a real QUIC connection,
 	// so we verify the quicConnProvider dispatch indirectly:
-	// FakeQUICConnProvider satisfies the interface and we confirm the
+	// fakeQUICConnProvider satisfies the interface and we confirm the
 	// error message differs from the "invalid connection type" path.
 	srv := &Server{}
 
-	provider := &FakeQUICConnProvider{
+	provider := &fakeQUICConnProvider{
 		qc: nil, // nil QUICConn — will panic in upstream, caught below
 	}
 

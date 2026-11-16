@@ -41,11 +41,11 @@ func TestSession_TrackInfo(t *testing.T) {
 			var response bytes.Buffer
 			require.NoError(t, tt.response.Encode(&response))
 
-			stream := &FakeQUICStream{
-				Reads: []streamResult{{Data: response.Bytes()}},
+			stream := &fakeQUICStream{
+				reads: []streamResult{{Data: response.Bytes()}},
 			}
-			conn := &FakeStreamConn{
-				OpenStreams: []biStreamResult{{Stream: stream}},
+			conn := &fakeStreamConn{
+				openStreams: []biStreamResult{{Stream: stream}},
 			}
 			sess := newTestSession(conn)
 			defer sess.CloseWithError(NoError, "")
@@ -139,11 +139,11 @@ func TestSession_HandleTrackStream(t *testing.T) {
 				TrackName:     tt.track,
 			}.Encode(&request))
 
-			stream := &FakeQUICStream{
-				Reads: []streamResult{{Data: request.Bytes()}},
+			stream := &fakeQUICStream{
+				reads: []streamResult{{Data: request.Bytes()}},
 			}
 
-			conn := &FakeStreamConn{}
+			conn := &fakeStreamConn{}
 			sess := newSession(conn, mux, nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
 			defer sess.CloseWithError(NoError, "")
 

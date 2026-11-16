@@ -14,7 +14,7 @@ import (
 func newBufReceiveStream(t *testing.T) (*receiveSubscribeStream, *bytes.Buffer) {
 	t.Helper()
 	var buf bytes.Buffer
-	mockStream := &FakeQUICStream{WriteTo: &buf}
+	mockStream := &fakeQUICStream{writeTo: &buf}
 	return newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{}), &buf
 }
 

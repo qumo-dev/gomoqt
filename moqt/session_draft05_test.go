@@ -33,9 +33,9 @@ func TestReadClientSetup_ExtractsPathAndProbe(t *testing.T) {
 		sm.AddPath("/live/alice")
 		sm.AddProbe(message.ProbeLevelReport)
 
-		conn := &FakeStreamConn{
-			AcceptUniStreams: []recvStreamResult{
-				{Stream: &FakeQUICReceiveStream{Reads: []streamResult{{Data: encodeSetup(sm)}}}},
+		conn := &fakeStreamConn{
+			acceptUniStreams: []recvStreamResult{
+				{Stream: &fakeQUICReceiveStream{reads: []streamResult{{Data: encodeSetup(sm)}}}},
 			},
 		}
 		got, err := readClientSetup(conn, time.Second)
@@ -47,9 +47,9 @@ func TestReadClientSetup_ExtractsPathAndProbe(t *testing.T) {
 	})
 
 	t.Run("rejects missing path", func(t *testing.T) {
-		conn := &FakeStreamConn{
-			AcceptUniStreams: []recvStreamResult{
-				{Stream: &FakeQUICReceiveStream{Reads: []streamResult{{Data: encodeSetup(message.SetupMessage{})}}}},
+		conn := &fakeStreamConn{
+			acceptUniStreams: []recvStreamResult{
+				{Stream: &fakeQUICReceiveStream{reads: []streamResult{{Data: encodeSetup(message.SetupMessage{})}}}},
 			},
 		}
 		sm, err := readClientSetup(conn, time.Second)
@@ -61,9 +61,9 @@ func TestReadClientSetup_ExtractsPathAndProbe(t *testing.T) {
 	t.Run("rejects non-setup stream type", func(t *testing.T) {
 		var buf bytes.Buffer
 		require.NoError(t, message.StreamTypeTrack.Encode(&buf)) // wrong type
-		conn := &FakeStreamConn{
-			AcceptUniStreams: []recvStreamResult{
-				{Stream: &FakeQUICReceiveStream{Reads: []streamResult{{Data: buf.Bytes()}}}},
+		conn := &fakeStreamConn{
+			acceptUniStreams: []recvStreamResult{
+				{Stream: &fakeQUICReceiveStream{reads: []streamResult{{Data: buf.Bytes()}}}},
 			},
 		}
 		_, err := readClientSetup(conn, time.Second)
@@ -71,8 +71,8 @@ func TestReadClientSetup_ExtractsPathAndProbe(t *testing.T) {
 	})
 
 	t.Run("accept error surfaces", func(t *testing.T) {
-		conn := &FakeStreamConn{
-			AcceptUniStreams: []recvStreamResult{
+		conn := &fakeStreamConn{
+			acceptUniStreams: []recvStreamResult{
 				{Err: context.Canceled},
 			},
 		}
@@ -84,13 +84,13 @@ func TestReadClientSetup_ExtractsPathAndProbe(t *testing.T) {
 // TestSession_RequestURI verifies Session.RequestURI reports the path the binding resolved,
 // and that a session whose binding supplied none reports "".
 func TestSession_RequestURI(t *testing.T) {
-	sess := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, nil,
+	sess := newSession(&fakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, nil,
 		sessionSetup{path: "/live/alice"}, nil)
 	defer sess.CloseWithError(NoError, "")
 
 	assert.Equal(t, "/live/alice", sess.RequestURI())
 
-	bare := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, nil,
+	bare := newSession(&fakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, nil,
 		sessionSetup{}, nil)
 	defer bare.CloseWithError(NoError, "")
 
@@ -102,7 +102,7 @@ func TestSession_RequestURI(t *testing.T) {
 // peerSetupCh is already closed — so Probe()/waitPeerSetup do not block and a
 // later peer Setup Stream is treated as a duplicate.
 func TestNewSession_InjectedPeerSetup(t *testing.T) {
-	conn := &FakeStreamConn{}
+	conn := &fakeStreamConn{}
 	var sm message.SetupMessage
 	sm.AddProbe(message.ProbeLevelReport)
 	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{peerSetup: &sm}, nil)
@@ -127,7 +127,7 @@ func TestSession_ProcessBiStream_TrackStream(t *testing.T) {
 		TrackHandlerFunc(func(*TrackWriter) {})))
 	mux.Publish(context.Background(), "/live", b)
 
-	conn := &FakeStreamConn{}
+	conn := &fakeStreamConn{}
 	sess := newSession(conn, mux, nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
 	defer sess.CloseWithError(NoError, "")
 
@@ -135,8 +135,8 @@ func TestSession_ProcessBiStream_TrackStream(t *testing.T) {
 	require.NoError(t, message.StreamTypeTrack.Encode(&req))
 	require.NoError(t, message.TrackMessage{BroadcastPath: "/live", TrackName: "video"}.Encode(&req))
 
-	stream := &FakeQUICStream{
-		Reads: []streamResult{{Data: req.Bytes()}},
+	stream := &fakeQUICStream{
+		reads: []streamResult{{Data: req.Bytes()}},
 	}
 	done := make(chan struct{})
 	go func() { sess.processBiStream(stream); close(done) }()
@@ -166,8 +166,8 @@ func TestSession_ProcessBiStream_ProbeResetsWhenUnadvertised(t *testing.T) {
 	var req bytes.Buffer
 	require.NoError(t, message.StreamTypeProbe.Encode(&req))
 
-	stream := &FakeQUICStream{
-		Reads: []streamResult{{Data: req.Bytes()}},
+	stream := &fakeQUICStream{
+		reads: []streamResult{{Data: req.Bytes()}},
 	}
 	done := make(chan struct{})
 	go func() { sess.processBiStream(stream); close(done) }()
@@ -181,8 +181,8 @@ func TestSession_ProcessBiStream_ProbeResetsWhenUnadvertised(t *testing.T) {
 
 // TestSession_TrackInfo_OpenStreamError exercises the open-stream error path.
 func TestSession_TrackInfo_OpenStreamError(t *testing.T) {
-	conn := &FakeStreamConn{
-		OpenStreams: []biStreamResult{{Err: errors.New("boom")}},
+	conn := &fakeStreamConn{
+		openStreams: []biStreamResult{{Err: errors.New("boom")}},
 	}
 	sess := newTestSession(conn)
 	defer sess.CloseWithError(NoError, "")
@@ -194,11 +194,11 @@ func TestSession_TrackInfo_OpenStreamError(t *testing.T) {
 // TestSession_TrackInfo_DecodeError verifies a malformed TRACK_INFO (here:
 // stream reset / EOF before a full message) surfaces as an error.
 func TestSession_TrackInfo_DecodeError(t *testing.T) {
-	requestStream := &FakeQUICStream{
-		Reads: []streamResult{{Err: io.EOF}},
+	requestStream := &fakeQUICStream{
+		reads: []streamResult{{Err: io.EOF}},
 	}
-	conn := &FakeStreamConn{
-		OpenStreams: []biStreamResult{{Stream: requestStream}},
+	conn := &fakeStreamConn{
+		openStreams: []biStreamResult{{Stream: requestStream}},
 	}
 	sess := newTestSession(conn)
 	defer sess.CloseWithError(NoError, "")
@@ -210,12 +210,12 @@ func TestSession_TrackInfo_DecodeError(t *testing.T) {
 // TestSession_HandleTrackStream_DecodeError verifies a malformed TRACK resets
 // the stream rather than panicking.
 func TestSession_HandleTrackStream_DecodeError(t *testing.T) {
-	conn := &FakeStreamConn{}
+	conn := &fakeStreamConn{}
 	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
 	defer sess.CloseWithError(NoError, "")
 
-	stream := &FakeQUICStream{
-		Reads: []streamResult{{Data: []byte{0x05, 0x00}}}, // bogus length, no body
+	stream := &fakeQUICStream{
+		reads: []streamResult{{Data: []byte{0x05, 0x00}}}, // bogus length, no body
 	}
 	sess.handleTrackStream(stream)
 	assert.Contains(t, stream.CancelReadCodes(), transport.StreamErrorCode(SubscribeErrorCodeInternal))
@@ -237,16 +237,16 @@ func TestSession_HandleTrackStream_EncodeError(t *testing.T) {
 	require.NoError(t, message.StreamTypeTrack.Encode(&req))
 	require.NoError(t, message.TrackMessage{BroadcastPath: "/live", TrackName: "video"}.Encode(&req))
 
-	stream := &FakeQUICStream{
-		Reads:  []streamResult{{Data: req.Bytes()}},
-		Writes: []streamResult{{Err: errors.New("write closed")}},
+	stream := &fakeQUICStream{
+		reads:  []streamResult{{Data: req.Bytes()}},
+		writes: []streamResult{{Err: errors.New("write closed")}},
 	}
 	sess.handleTrackStream(stream)
 	assert.Contains(t, stream.CancelReadCodes(), transport.StreamErrorCode(SubscribeErrorCodeInternal))
 }
 
 func TestSession_TrackInfo_Guards(t *testing.T) {
-	conn := &FakeStreamConn{}
+	conn := &fakeStreamConn{}
 	sess := newTestSession(conn)
 	defer sess.CloseWithError(NoError, "")
 
@@ -256,7 +256,7 @@ func TestSession_TrackInfo_Guards(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("terminating session", func(t *testing.T) {
-		sess2 := newTestSession(&FakeStreamConn{})
+		sess2 := newTestSession(&fakeStreamConn{})
 		require.NoError(t, sess2.CloseWithError(NoError, ""))
 		_, err := sess2.TrackInfo(context.Background(), "/p", "t")
 		assert.ErrorIs(t, err, ErrClosedSession)
@@ -270,11 +270,11 @@ func TestSession_TrackInfo_Guards(t *testing.T) {
 // TestSession_TrackInfo_StreamTypeEncodeError covers the encode-error branch:
 // OpenStreamSync returns a stream whose first write fails.
 func TestSession_TrackInfo_StreamTypeEncodeError(t *testing.T) {
-	requestStream := &FakeQUICStream{
-		Writes: []streamResult{{Err: errors.New("closed")}},
+	requestStream := &fakeQUICStream{
+		writes: []streamResult{{Err: errors.New("closed")}},
 	}
-	conn := &FakeStreamConn{
-		OpenStreams: []biStreamResult{{Stream: requestStream}},
+	conn := &fakeStreamConn{
+		openStreams: []biStreamResult{{Stream: requestStream}},
 	}
 	sess := newTestSession(conn)
 	defer sess.CloseWithError(NoError, "")
@@ -290,8 +290,8 @@ func TestSession_TrackInfo_OpenStreamApplicationError(t *testing.T) {
 		ErrorCode:    transport.ApplicationErrorCode(InternalSessionErrorCode),
 		ErrorMessage: "application error",
 	}
-	conn := &FakeStreamConn{
-		OpenStreams: []biStreamResult{{Err: appErr}},
+	conn := &fakeStreamConn{
+		openStreams: []biStreamResult{{Err: appErr}},
 	}
 	sess := newTestSession(conn)
 	defer sess.CloseWithError(NoError, "")
@@ -305,9 +305,9 @@ func TestSession_TrackInfo_OpenStreamApplicationError(t *testing.T) {
 func TestSession_TrackInfo_WithDeadline(t *testing.T) {
 	var response bytes.Buffer
 	require.NoError(t, (&message.TrackInfoMessage{Timescale: 1000}).Encode(&response))
-	stream := &FakeQUICStream{Reads: []streamResult{{Data: response.Bytes()}}}
-	conn := &FakeStreamConn{
-		OpenStreams: []biStreamResult{{Stream: stream}},
+	stream := &fakeQUICStream{reads: []streamResult{{Data: response.Bytes()}}}
+	conn := &fakeStreamConn{
+		openStreams: []biStreamResult{{Stream: stream}},
 	}
 	sess := newTestSession(conn)
 	defer sess.CloseWithError(NoError, "")
@@ -322,13 +322,13 @@ func TestSession_TrackInfo_WithDeadline(t *testing.T) {
 // TestSession_HandleSetupStream_MalformedSetup covers the decode-error →
 // protocol-violation branch.
 func TestSession_HandleSetupStream_MalformedSetup(t *testing.T) {
-	conn := &FakeStreamConn{}
+	conn := &fakeStreamConn{}
 	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
 	// one mark: the setup goroutine closes the session; defer keeps it tidy.
 	defer sess.CloseWithError(NoError, "")
 
 	// Garbage that cannot parse as a SETUP message body.
-	stream := &FakeQUICReceiveStream{Reads: []streamResult{{Data: []byte{0x05, 0x00}}}}
+	stream := &fakeQUICReceiveStream{reads: []streamResult{{Data: []byte{0x05, 0x00}}}}
 	sess.handleSetupStream(stream)
 
 	select {
@@ -345,10 +345,10 @@ func TestSession_HandleSetupStream_MalformedSetup(t *testing.T) {
 // deterministic (no ad-hoc sleep).
 func TestSession_Probe_WaitPeerSetup_SessionCanceled(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		// FakeStreamConn.Context() is cancellable (via CloseWithError), so
+		// fakeStreamConn.Context() is cancellable (via CloseWithError), so
 		// sess.ctx cancels on close and waitPeerSetup unblocks. Peer SETUP is
 		// never delivered, so waitPeerSetup blocks until that cancellation.
-		conn := &FakeStreamConn{}
+		conn := &fakeStreamConn{}
 		sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
 
 		probeErr := make(chan error, 1)

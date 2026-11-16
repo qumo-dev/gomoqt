@@ -10,7 +10,7 @@ import (
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
-// CountingSendStream wraps a transport.SendStream to instrument Write calls
+// countingSendStream wraps a transport.SendStream to instrument Write calls
 // without changing write/buffering behavior. It counts the number of Write
 // calls and buckets them by payload size, and tracks total bytes written.
 //
@@ -27,11 +27,11 @@ import (
 //
 // Usage from tests:
 //
-//	cs := NewCountingSendStream(realStream)
+//	cs := newCountingSendStream(realStream)
 //	gw := newGroupWriter(cs, GroupSequence(0), nil)
-//	_ = gw.WriteFrame(frame)
-//	cs.Snapshot() // -> {WriteCalls, BytesWritten, Buckets}
-type CountingSendStream struct {
+//	err := gw.WriteFrame(frame)
+//	cs.snapshot() // -> {writeCalls, bytesWritten, buckets}
+type countingSendStream struct {
 	inner transport.SendStream
 
 	writeCalls  atomic.Int64
@@ -42,11 +42,11 @@ type CountingSendStream struct {
 }
 
 // compile-time interface check
-var _ transport.SendStream = (*CountingSendStream)(nil)
+var _ transport.SendStream = (*countingSendStream)(nil)
 
-// NewCountingSendStream wraps the given SendStream with write instrumentation.
-func NewCountingSendStream(inner transport.SendStream) *CountingSendStream {
-	return &CountingSendStream{inner: inner}
+// newCountingSendStream wraps the given SendStream with write instrumentation.
+func newCountingSendStream(inner transport.SendStream) *countingSendStream {
+	return &countingSendStream{inner: inner}
 }
 
 // bucketIndex returns the histogram bucket index for a write of n bytes.
@@ -65,7 +65,7 @@ func bucketIndex(n int) int {
 	return k
 }
 
-func (c *CountingSendStream) growBucketsLocked(idx int) {
+func (c *countingSendStream) growBucketsLocked(idx int) {
 	for len(c.buckets) <= idx {
 		c.buckets = append(c.buckets, 0)
 	}
@@ -73,7 +73,7 @@ func (c *CountingSendStream) growBucketsLocked(idx int) {
 
 // Write counts the call and delegates to the wrapped stream. It does not
 // alter the byte slice or split the write.
-func (c *CountingSendStream) Write(p []byte) (int, error) {
+func (c *countingSendStream) Write(p []byte) (int, error) {
 	n, err := c.inner.Write(p)
 	c.writeCalls.Add(1)
 	c.bytesWitten.Add(int64(n))
@@ -88,57 +88,54 @@ func (c *CountingSendStream) Write(p []byte) (int, error) {
 }
 
 // CancelWrite delegates to the wrapped stream.
-func (c *CountingSendStream) CancelWrite(code transport.StreamErrorCode) {
+func (c *countingSendStream) CancelWrite(code transport.StreamErrorCode) {
 	c.inner.CancelWrite(code)
 }
 
 // SetWriteDeadline delegates to the wrapped stream.
-func (c *CountingSendStream) SetWriteDeadline(t time.Time) error {
+func (c *countingSendStream) SetWriteDeadline(t time.Time) error {
 	return c.inner.SetWriteDeadline(t)
 }
 
 // Close delegates to the wrapped stream.
-func (c *CountingSendStream) Close() error {
+func (c *countingSendStream) Close() error {
 	return c.inner.Close()
 }
 
 // Context returns the wrapped stream's context.
-func (c *CountingSendStream) Context() context.Context {
+func (c *countingSendStream) Context() context.Context {
 	return c.inner.Context()
 }
 
 // SetPriority delegates to the wrapped stream.
-func (c *CountingSendStream) SetPriority(urgency int8, incremental bool) {
+func (c *countingSendStream) SetPriority(urgency int8, incremental bool) {
 	c.inner.SetPriority(urgency, incremental)
 }
 
-// Inner returns the wrapped SendStream.
-func (c *CountingSendStream) Inner() transport.SendStream { return c.inner }
-
-// WriteCounters is an immutable snapshot of the counting stream's state.
-type WriteCounters struct {
-	WriteCalls   int64   // total number of Write calls observed
-	BytesWritten int64   // total bytes successfully written
-	Buckets      []int64 // write-size histogram (index = floor(log2(size)), size 0 -> 0)
+// writeCounters is an immutable snapshot of the counting stream's state.
+type writeCounters struct {
+	writeCalls   int64   // total number of Write calls observed
+	bytesWritten int64   // total bytes successfully written
+	buckets      []int64 // write-size histogram (index = floor(log2(size)), size 0 -> 0)
 }
 
-// Snapshot returns a consistent point-in-time view of the counters.
+// snapshot returns a consistent point-in-time view of the counters.
 // The returned Buckets slice is a copy and may be freely mutated.
-func (c *CountingSendStream) Snapshot() WriteCounters {
+func (c *countingSendStream) snapshot() writeCounters {
 	c.mu.Lock()
 	buckets := make([]int64, len(c.buckets))
 	copy(buckets, c.buckets)
 	c.mu.Unlock()
 
-	return WriteCounters{
-		WriteCalls:   c.writeCalls.Load(),
-		BytesWritten: c.bytesWitten.Load(),
-		Buckets:      buckets,
+	return writeCounters{
+		writeCalls:   c.writeCalls.Load(),
+		bytesWritten: c.bytesWitten.Load(),
+		buckets:      buckets,
 	}
 }
 
-// Reset zeroes all counters. Useful between benchmark iterations.
-func (c *CountingSendStream) Reset() {
+// reset zeroes all counters. Useful between benchmark iterations.
+func (c *countingSendStream) reset() {
 	c.writeCalls.Store(0)
 	c.bytesWitten.Store(0)
 	c.mu.Lock()
@@ -148,94 +145,38 @@ func (c *CountingSendStream) Reset() {
 	c.mu.Unlock()
 }
 
-// BucketLabel returns a human-readable label for the given bucket index
-// (e.g. "64", "1K", "64K"), matching the power-of-two boundaries used by
-// bucketIndex.
-func BucketLabel(idx int) string {
-	if idx <= 0 {
-		return "0"
-	}
-	v := 1 << idx
-	switch {
-	case v >= 1<<20:
-		return formatBytesLabel(v, 1<<20, "M")
-	case v >= 1<<10:
-		return formatBytesLabel(v, 1<<10, "K")
-	default:
-		return itoa(v)
-	}
-}
-
-func formatBytesLabel(v, unit int, suffix string) string {
-	if v%unit == 0 {
-		return itoa(v/unit) + suffix
-	}
-	return itoa(v) // fall back to raw bytes for non-round sizes
-}
-
-// itoa is a small, allocation-free int->string helper to avoid pulling in fmt
-// in hot reporting paths.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if neg {
-		i--
-		buf[i] = '-'
-	}
-	return string(buf[i:])
-}
-
-// BytesWriterSink is an io.Writer backed by a growable *bytes.Buffer-compatible
+// bytesWriterSink is an io.Writer backed by a growable *bytes.Buffer-compatible
 // sink that performs a REAL memcpy on every Write (unlike io.Discard, which is
 // a no-op). It is used as the destination for measurement when standing up a
 // real QUIC server/client pair is impractical.
 //
 // The buffer grows without bound by design; benchmarks reset it per iteration
 // or use it for short, bounded runs.
-type BytesWriterSink struct {
+type bytesWriterSink struct {
 	mu  sync.Mutex
 	buf []byte
 }
 
-// NewBytesWriterSink returns a sink with the given initial capacity.
-func NewBytesWriterSink(cap int) *BytesWriterSink {
-	return &BytesWriterSink{buf: make([]byte, 0, cap)}
+// newBytesWriterSink returns a sink with the given initial capacity.
+func newBytesWriterSink(cap int) *bytesWriterSink {
+	return &bytesWriterSink{buf: make([]byte, 0, cap)}
 }
 
 // Write performs an actual copy of p into the growable buffer and returns
 // len(p), nil. The copy is the measured work.
-func (s *BytesWriterSink) Write(p []byte) (int, error) {
+func (s *bytesWriterSink) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	s.buf = append(s.buf, p...)
 	s.mu.Unlock()
 	return len(p), nil
 }
 
-// Len returns the current number of buffered bytes.
-func (s *BytesWriterSink) Len() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.buf)
-}
-
-// Reset clears the buffer while retaining its capacity.
-func (s *BytesWriterSink) Reset() {
+// reset clears the buffer while retaining its capacity.
+func (s *bytesWriterSink) reset() {
 	s.mu.Lock()
 	s.buf = s.buf[:0]
 	s.mu.Unlock()
 }
 
-// Compile-time check that BytesWriterSink is an io.Writer.
-var _ io.Writer = (*BytesWriterSink)(nil)
+// Compile-time check that bytesWriterSink is an io.Writer.
+var _ io.Writer = (*bytesWriterSink)(nil)

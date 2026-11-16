@@ -208,7 +208,7 @@ func TestAnnouncementWriter_rescope(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			scope := newAuthScope(func() {})
 			require.NoError(t, (&AuthWriter{scope: scope}).Grant(Grant{Root: "/room/1/"}))
-			stream := &FakeQUICStream{}
+			stream := &fakeQUICStream{}
 			aw := newAnnouncementWriter(stream, tt.prefix, 0, 0, nil, scope)
 			if tt.closedFirst {
 				require.NoError(t, aw.Close())
@@ -223,7 +223,7 @@ func TestAnnouncementWriter_rescope(t *testing.T) {
 
 func TestNewAnnouncementWriter_UnwatchesWhenTheStreamEnds(t *testing.T) {
 	scope := newAuthScope(func() {})
-	aw := newAnnouncementWriter(&FakeQUICStream{}, "/room/1/", 0, 0, nil, scope)
+	aw := newAnnouncementWriter(&fakeQUICStream{}, "/room/1/", 0, 0, nil, scope)
 	require.Len(t, scope.watching(), 1)
 
 	require.NoError(t, aw.Close())

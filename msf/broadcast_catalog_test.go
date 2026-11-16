@@ -27,10 +27,10 @@ func TestBroadcast_ServeCatalogTrack_SendsEachChange(t *testing.T) {
 
 	assert.Empty(t, readTestCatalog(t, ctx, catalog).Tracks, "first group is the catalog at subscribe time")
 
-	require.NoError(t, broadcast.RegisterTrack(Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}, &FakeTrackHandler{}))
+	require.NoError(t, broadcast.RegisterTrack(Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}, &fakeTrackHandler{}))
 	assert.Equal(t, []string{"video"}, testTrackNames(readTestCatalog(t, ctx, catalog)))
 
-	require.NoError(t, broadcast.RegisterTrack(Track{Name: "audio", Packaging: PackagingLOC, IsLive: new(true)}, &FakeTrackHandler{}))
+	require.NoError(t, broadcast.RegisterTrack(Track{Name: "audio", Packaging: PackagingLOC, IsLive: new(true)}, &fakeTrackHandler{}))
 	assert.Equal(t, []string{"video", "audio"}, testTrackNames(readTestCatalog(t, ctx, catalog)))
 
 	assert.True(t, broadcast.RemoveTrack("video"))
@@ -48,7 +48,7 @@ func TestBroadcast_ServeCatalogTrack_SkipsUnchangedCatalog(t *testing.T) {
 	// Setting the same catalog sends nothing, so the next group is the
 	// change that follows it.
 	require.NoError(t, broadcast.SetCatalog(Catalog{Version: 1}))
-	require.NoError(t, broadcast.RegisterTrack(Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}, &FakeTrackHandler{}))
+	require.NoError(t, broadcast.RegisterTrack(Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}, &fakeTrackHandler{}))
 
 	assert.Equal(t, []string{"video"}, testTrackNames(readTestCatalog(t, ctx, catalog)))
 }
@@ -74,7 +74,7 @@ func TestBroadcast_Close_LaterSubscriptionGetsOneGroup(t *testing.T) {
 	defer cancel()
 	broadcast, err := NewBroadcast(Catalog{Version: 1})
 	require.NoError(t, err)
-	require.NoError(t, broadcast.RegisterTrack(Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}, &FakeTrackHandler{}))
+	require.NoError(t, broadcast.RegisterTrack(Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}, &fakeTrackHandler{}))
 	broadcast.Close()
 	catalog, _ := subscribeTestCatalog(t, ctx, broadcast)
 

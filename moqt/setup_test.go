@@ -10,15 +10,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// collectSetupStream returns a FakeStreamConn whose OpenUniStreamSync hands
+// collectSetupStream returns a fakeStreamConn whose OpenUniStreamSync hands
 // out a send stream that records everything written, plus a wait function
 // that blocks until the stream has been closed (FIN) and returns the bytes.
-func collectSetupStream(tb testing.TB) (*FakeStreamConn, func() []byte) {
+func collectSetupStream(tb testing.TB) (*fakeStreamConn, func() []byte) {
 	tb.Helper()
 
-	stream := &FakeQUICSendStream{}
-	conn := &FakeStreamConn{
-		OpenUniStreams: []sendStreamResult{
+	stream := &fakeQUICSendStream{}
+	conn := &fakeStreamConn{
+		openUniStreams: []sendStreamResult{
 			{Stream: stream},
 		},
 	}
@@ -120,13 +120,13 @@ func TestSession_HandleSetupStream(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			conn := &FakeStreamConn{}
+			conn := &fakeStreamConn{}
 			sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
 			defer sess.CloseWithError(NoError, "")
 
 			var buf bytes.Buffer
 			require.NoError(t, tt.setup().Encode(&buf))
-			stream := &FakeQUICReceiveStream{Reads: []streamResult{{Data: buf.Bytes()}}}
+			stream := &fakeQUICReceiveStream{reads: []streamResult{{Data: buf.Bytes()}}}
 
 			sess.handleSetupStream(stream)
 
@@ -152,14 +152,14 @@ func TestSession_HandleSetupStream(t *testing.T) {
 }
 
 func TestSession_HandleSetupStream_Duplicate(t *testing.T) {
-	conn := &FakeStreamConn{}
+	conn := &fakeStreamConn{}
 	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
 	defer sess.CloseWithError(NoError, "")
 
-	encode := func() *FakeQUICReceiveStream {
+	encode := func() *fakeQUICReceiveStream {
 		var buf bytes.Buffer
 		require.NoError(t, message.SetupMessage{}.Encode(&buf))
-		return &FakeQUICReceiveStream{Reads: []streamResult{{Data: buf.Bytes()}}}
+		return &fakeQUICReceiveStream{reads: []streamResult{{Data: buf.Bytes()}}}
 	}
 
 	sess.handleSetupStream(encode())
@@ -179,7 +179,7 @@ func TestSession_HandleSetupStream_Duplicate(t *testing.T) {
 }
 
 func TestSession_Probe_PeerWithoutProbeCapability(t *testing.T) {
-	conn := &FakeStreamConn{}
+	conn := &fakeStreamConn{}
 	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
 	defer sess.CloseWithError(NoError, "")
 

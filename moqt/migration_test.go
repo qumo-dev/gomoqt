@@ -138,7 +138,7 @@ func TestDialer_Transport(t *testing.T) {
 func TestSession_AddPath_Unsupported(t *testing.T) {
 	// A WebSocket one, or one from DialQUICFunc: no QUIC connection gomoqt
 	// can reach.
-	sess := newSession(&FakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
+	sess := newSession(&fakeStreamConn{}, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "test done") }) // not actionable: cleanup
 
 	p, err := sess.AddPath(&quic.Transport{Conn: listenLoopback(t)})
@@ -194,11 +194,11 @@ func newNetwork(tb testing.TB) network {
 // migratingSub is a session subscribed to a track published every 20 ms,
 // dialed through a fakeNAT over dial.
 type migratingSub struct {
-	sess    *Session
-	nat     *fakeNAT
-	dial    network
+	sess   *Session
+	nat    *fakeNAT
+	dial   network
 	srv    atomic.Pointer[Session] // the server's side, of the latest session
-	groups atomic.Int64             // groups received
+	groups atomic.Int64            // groups received
 }
 
 func subscribeMigrating(tb testing.TB, scheme string) *migratingSub {

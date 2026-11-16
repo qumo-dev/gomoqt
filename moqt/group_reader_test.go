@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newMockReceiveStreamWithCleanup(tb testing.TB) *FakeQUICReceiveStream {
+func newMockReceiveStreamWithCleanup(tb testing.TB) *fakeQUICReceiveStream {
 	tb.Helper()
-	return &FakeQUICReceiveStream{}
+	return &fakeQUICReceiveStream{}
 }
 
 func TestNewReceiveGroupStream(t *testing.T) {
@@ -83,7 +83,7 @@ func TestReceiveGroupStream_GroupSequence(t *testing.T) {
 }
 
 func TestReceiveGroupStream_ReadFrame_EOF(t *testing.T) {
-	mockStream := &FakeQUICReceiveStream{} // empty Reads queue returns EOF
+	mockStream := &fakeQUICReceiveStream{} // empty Reads queue returns EOF
 
 	rgs := newGroupReader(GroupSequence(123), mockStream, nil)
 	frame := NewFrame(0)
@@ -119,7 +119,7 @@ func TestReceiveGroupStream_CancelRead(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			mockStream := &FakeQUICReceiveStream{}
+			mockStream := &fakeQUICReceiveStream{}
 
 			var mgr *groupReaderManager
 			if tt.withManager {
@@ -147,7 +147,7 @@ func TestReceiveGroupStream_CancelRead(t *testing.T) {
 }
 
 func TestReceiveGroupStream_CancelRead_MultipleCalls(t *testing.T) {
-	mockStream := &FakeQUICReceiveStream{}
+	mockStream := &fakeQUICReceiveStream{}
 
 	rgs := newGroupReader(GroupSequence(123), mockStream, nil)
 
@@ -165,36 +165,36 @@ func TestReceiveGroupStream_CancelRead_MultipleCalls(t *testing.T) {
 
 func TestReceiveGroupStream_SetReadDeadline(t *testing.T) {
 	tests := map[string]struct {
-		setupMock func() *FakeQUICReceiveStream
+		setupMock func() *fakeQUICReceiveStream
 		deadline  time.Time
 		wantErr   bool
 	}{
 		"successful set deadline": {
-			setupMock: func() *FakeQUICReceiveStream {
-				return &FakeQUICReceiveStream{}
+			setupMock: func() *fakeQUICReceiveStream {
+				return &fakeQUICReceiveStream{}
 			},
 			deadline: time.Now().Add(time.Hour),
 			wantErr:  false,
 		},
 		"set deadline with error": {
-			setupMock: func() *FakeQUICReceiveStream {
-				return &FakeQUICReceiveStream{
-					SetReadDeadlineErr: assert.AnError,
+			setupMock: func() *fakeQUICReceiveStream {
+				return &fakeQUICReceiveStream{
+					setReadDeadlineErr: assert.AnError,
 				}
 			},
 			deadline: time.Now().Add(time.Hour),
 			wantErr:  true,
 		},
 		"zero time deadline": {
-			setupMock: func() *FakeQUICReceiveStream {
-				return &FakeQUICReceiveStream{}
+			setupMock: func() *fakeQUICReceiveStream {
+				return &fakeQUICReceiveStream{}
 			},
 			deadline: time.Time{},
 			wantErr:  false,
 		},
 		"deadline in the past": {
-			setupMock: func() *FakeQUICReceiveStream {
-				return &FakeQUICReceiveStream{}
+			setupMock: func() *fakeQUICReceiveStream {
+				return &fakeQUICReceiveStream{}
 			},
 			deadline: time.Now().Add(-time.Hour),
 			wantErr:  false,
@@ -218,8 +218,8 @@ func TestReceiveGroupStream_SetReadDeadline(t *testing.T) {
 }
 
 func TestReceiveGroupStream_ReadFrame_StreamError(t *testing.T) {
-	mockStream := &FakeQUICReceiveStream{
-		Reads: []streamResult{{Err: &transport.StreamError{
+	mockStream := &fakeQUICReceiveStream{
+		reads: []streamResult{{Err: &transport.StreamError{
 			StreamID:  transport.StreamID(123),
 			ErrorCode: transport.StreamErrorCode(1),
 		}}},
@@ -239,12 +239,12 @@ func TestReceiveGroupStream_ReadFrame_StreamError(t *testing.T) {
 
 func TestGroupReader_ReadFrame(t *testing.T) {
 	tests := map[string]struct {
-		setupStream func() *FakeQUICReceiveStream
+		setupStream func() *fakeQUICReceiveStream
 		expectError bool
 		expectFrame bool
 	}{
 		"successful read": {
-			setupStream: func() *FakeQUICReceiveStream {
+			setupStream: func() *fakeQUICReceiveStream {
 				// Create a frame with some data
 				frame := NewFrame(10)
 				_, _ = frame.Write([]byte("test data"))
@@ -255,8 +255,8 @@ func TestGroupReader_ReadFrame(t *testing.T) {
 				}
 				data := buf.Bytes()
 
-				mockStream := &FakeQUICReceiveStream{
-					Reads: []streamResult{{Data: data}},
+				mockStream := &fakeQUICReceiveStream{
+					reads: []streamResult{{Data: data}},
 				}
 				return mockStream
 			},
@@ -264,17 +264,17 @@ func TestGroupReader_ReadFrame(t *testing.T) {
 			expectFrame: true,
 		},
 		"EOF": {
-			setupStream: func() *FakeQUICReceiveStream {
-				mockStream := &FakeQUICReceiveStream{}
+			setupStream: func() *fakeQUICReceiveStream {
+				mockStream := &fakeQUICReceiveStream{}
 				return mockStream
 			},
 			expectError: true,
 			expectFrame: true, // ReadFrame doesn't modify frame on error
 		},
 		"generic error": {
-			setupStream: func() *FakeQUICReceiveStream {
-				mockStream := &FakeQUICReceiveStream{
-					Reads: []streamResult{{Err: errors.New("generic decode error")}},
+			setupStream: func() *fakeQUICReceiveStream {
+				mockStream := &fakeQUICReceiveStream{
+					reads: []streamResult{{Err: errors.New("generic decode error")}},
 				}
 				return mockStream
 			},
@@ -305,7 +305,7 @@ func TestGroupReader_ReadFrame(t *testing.T) {
 	}
 
 	t.Run("nil frame panics", func(t *testing.T) {
-		mockStream := &FakeQUICReceiveStream{}
+		mockStream := &fakeQUICReceiveStream{}
 		rgs := newGroupReader(123, mockStream, nil)
 		assert.PanicsWithValue(t, "nil frame", func() {
 			rgs.ReadFrame(nil)
@@ -315,7 +315,7 @@ func TestGroupReader_ReadFrame(t *testing.T) {
 
 func TestGroupReader_Frames(t *testing.T) {
 	t.Run("returns iterator function", func(t *testing.T) {
-		mockStream := &FakeQUICReceiveStream{}
+		mockStream := &fakeQUICReceiveStream{}
 
 		rgs := newGroupReader(123, mockStream, nil)
 		iterator := rgs.Frames(nil)
@@ -335,8 +335,8 @@ func TestGroupReader_Frames(t *testing.T) {
 
 		encodedData := buf.Bytes()
 
-		mockStream := &FakeQUICReceiveStream{
-			Reads: []streamResult{{Data: encodedData}},
+		mockStream := &fakeQUICReceiveStream{
+			reads: []streamResult{{Data: encodedData}},
 		}
 
 		rgs := newGroupReader(123, mockStream, nil)
@@ -360,7 +360,7 @@ func TestGroupReader_Frames(t *testing.T) {
 	})
 
 	t.Run("stops immediately on EOF", func(t *testing.T) {
-		mockStream := &FakeQUICReceiveStream{}
+		mockStream := &fakeQUICReceiveStream{}
 
 		rgs := newGroupReader(123, mockStream, nil)
 

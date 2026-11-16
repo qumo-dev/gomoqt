@@ -19,13 +19,13 @@ func TestConnManager_AddSession(t *testing.T) {
 		},
 		"duplicate session is counted once": {
 			sessions: func() []StreamConn {
-				session := &FakeStreamConn{}
+				session := &fakeStreamConn{}
 				return []StreamConn{session, session}
 			}(),
 			wantCount: 1,
 		},
 		"multiple distinct sessions are counted": {
-			sessions:  []StreamConn{&FakeStreamConn{}, &FakeStreamConn{}},
+			sessions:  []StreamConn{&fakeStreamConn{}, &fakeStreamConn{}},
 			wantCount: 2,
 		},
 	}
@@ -44,8 +44,8 @@ func TestConnManager_AddSession(t *testing.T) {
 
 func TestConnManager_RemoveSession(t *testing.T) {
 	manager := newConnManager()
-	first := &FakeStreamConn{}
-	second := &FakeStreamConn{}
+	first := &fakeStreamConn{}
+	second := &fakeStreamConn{}
 	manager.addConn(first)
 	manager.addConn(second)
 	done := manager.Done()
@@ -88,7 +88,7 @@ func TestConnManager_Done(t *testing.T) {
 		t.Fatal("done channel should be closed when there are no tracked sessions")
 	}
 
-	session := &FakeStreamConn{}
+	session := &fakeStreamConn{}
 	manager.addConn(session)
 	second := manager.Done()
 	assert.NotEqual(t, first, second)
@@ -122,7 +122,7 @@ func TestConnManager_Close(t *testing.T) {
 		"active sessions prevent close": {
 			setup: func() *connManager {
 				manager := newConnManager()
-				manager.addConn(&FakeStreamConn{})
+				manager.addConn(&fakeStreamConn{})
 				return manager
 			},
 			wantErr: "cannot close session manager with active sessions",
@@ -152,7 +152,7 @@ func TestConnManager_Close(t *testing.T) {
 		manager := newConnManager()
 		require.NoError(t, manager.Close())
 
-		manager.addConn(&FakeStreamConn{})
+		manager.addConn(&fakeStreamConn{})
 		assert.Zero(t, manager.countSessions())
 	})
 }
@@ -161,7 +161,7 @@ func TestConnManager_Close(t *testing.T) {
 // the manager takes none after: no connection is left that the shutdown
 // neither ends nor is told to wait for.
 func TestConnManager_drain(t *testing.T) {
-	before, after := &FakeStreamConn{}, &FakeStreamConn{}
+	before, after := &fakeStreamConn{}, &fakeStreamConn{}
 	manager := newConnManager()
 	manager.addConn(before)
 
@@ -186,5 +186,5 @@ func TestConnManager_drain_Empty(t *testing.T) {
 	manager := newConnManager()
 
 	assert.Empty(t, manager.drain())
-	assert.False(t, manager.tracks(&FakeStreamConn{}))
+	assert.False(t, manager.tracks(&fakeStreamConn{}))
 }

@@ -8,70 +8,70 @@ import (
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
-var _ transport.StreamConn = (*FakeStreamConn)(nil)
+var _ transport.StreamConn = (*fakeStreamConn)(nil)
 
-// FakeStreamConn is a zero-configuration stub connection: every stream
+// fakeStreamConn is a zero-configuration stub connection: every stream
 // operation reports no stream and no error. Set ParentCtx to control the
 // connection context; set the value fields to override an address or the TLS
 // state.
-type FakeStreamConn struct {
-	ParentCtx context.Context
+type fakeStreamConn struct {
+	parentCtx context.Context
 
-	LocalAddrValue  net.Addr
-	RemoteAddrValue net.Addr
-	TLSState        *tls.ConnectionState
-	CloseErr        error
+	localAddrValue  net.Addr
+	remoteAddrValue net.Addr
+	tlsState        *tls.ConnectionState
+	closeErr        error
 }
 
-func (m *FakeStreamConn) AcceptStream(ctx context.Context) (transport.Stream, error) {
+func (m *fakeStreamConn) AcceptStream(ctx context.Context) (transport.Stream, error) {
 	return nil, nil
 }
 
-func (m *FakeStreamConn) AcceptUniStream(ctx context.Context) (transport.ReceiveStream, error) {
+func (m *fakeStreamConn) AcceptUniStream(ctx context.Context) (transport.ReceiveStream, error) {
 	return nil, nil
 }
 
-func (m *FakeStreamConn) CloseWithError(code transport.ConnErrorCode, msg string) error {
-	return m.CloseErr
+func (m *fakeStreamConn) CloseWithError(code transport.ConnErrorCode, msg string) error {
+	return m.closeErr
 }
 
-func (m *FakeStreamConn) Context() context.Context {
-	if m.ParentCtx != nil {
-		return m.ParentCtx
+func (m *fakeStreamConn) Context() context.Context {
+	if m.parentCtx != nil {
+		return m.parentCtx
 	}
 	return context.Background()
 }
 
-func (m *FakeStreamConn) LocalAddr() net.Addr {
-	if m.LocalAddrValue != nil {
-		return m.LocalAddrValue
+func (m *fakeStreamConn) LocalAddr() net.Addr {
+	if m.localAddrValue != nil {
+		return m.localAddrValue
 	}
 	return &net.TCPAddr{}
 }
 
-func (m *FakeStreamConn) OpenStream() (transport.Stream, error) {
+func (m *fakeStreamConn) OpenStream() (transport.Stream, error) {
 	return nil, nil
 }
 
-func (m *FakeStreamConn) OpenStreamSync(ctx context.Context) (transport.Stream, error) {
+func (m *fakeStreamConn) OpenStreamSync(ctx context.Context) (transport.Stream, error) {
 	return nil, nil
 }
 
-func (m *FakeStreamConn) OpenUniStream() (transport.SendStream, error) {
+func (m *fakeStreamConn) OpenUniStream() (transport.SendStream, error) {
 	return nil, nil
 }
 
-func (m *FakeStreamConn) OpenUniStreamSync(ctx context.Context) (transport.SendStream, error) {
+func (m *fakeStreamConn) OpenUniStreamSync(ctx context.Context) (transport.SendStream, error) {
 	return nil, nil
 }
 
-func (m *FakeStreamConn) RemoteAddr() net.Addr {
-	if m.RemoteAddrValue != nil {
-		return m.RemoteAddrValue
+func (m *fakeStreamConn) RemoteAddr() net.Addr {
+	if m.remoteAddrValue != nil {
+		return m.remoteAddrValue
 	}
 	return &net.TCPAddr{}
 }
 
-func (m *FakeStreamConn) TLS() *tls.ConnectionState {
-	return m.TLSState
+func (m *fakeStreamConn) TLS() *tls.ConnectionState {
+	return m.tlsState
 }

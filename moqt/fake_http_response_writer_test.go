@@ -5,22 +5,22 @@ import (
 	"sync"
 )
 
-var _ http.ResponseWriter = (*FakeHTTPResponseWriter)(nil)
+var _ http.ResponseWriter = (*fakeHTTPResponseWriter)(nil)
 
-// FakeHTTPResponseWriter is a fake implementation of http.ResponseWriter.
+// fakeHTTPResponseWriter is a fake implementation of http.ResponseWriter.
 // Written bytes and the status code are recorded for assertions.
-type FakeHTTPResponseWriter struct {
+type fakeHTTPResponseWriter struct {
 	mu sync.Mutex
 
-	// WriteErr is returned by Write; the zero value means the write succeeds.
-	WriteErr error
+	// writeErr is returned by Write; the zero value means the write succeeds.
+	writeErr error
 
 	header     http.Header
 	written    []byte
 	statusCode int
 }
 
-func (m *FakeHTTPResponseWriter) Header() http.Header {
+func (m *fakeHTTPResponseWriter) Header() http.Header {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.header == nil {
@@ -29,24 +29,24 @@ func (m *FakeHTTPResponseWriter) Header() http.Header {
 	return m.header
 }
 
-func (m *FakeHTTPResponseWriter) Write(data []byte) (int, error) {
+func (m *fakeHTTPResponseWriter) Write(data []byte) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.WriteErr != nil {
-		return 0, m.WriteErr
+	if m.writeErr != nil {
+		return 0, m.writeErr
 	}
 	m.written = append(m.written, data...)
 	return len(data), nil
 }
 
-func (m *FakeHTTPResponseWriter) WriteHeader(statusCode int) {
+func (m *fakeHTTPResponseWriter) WriteHeader(statusCode int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.statusCode = statusCode
 }
 
 // Written returns a copy of every byte passed to a successful Write.
-func (m *FakeHTTPResponseWriter) Written() []byte {
+func (m *fakeHTTPResponseWriter) Written() []byte {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]byte, len(m.written))
@@ -55,7 +55,7 @@ func (m *FakeHTTPResponseWriter) Written() []byte {
 }
 
 // StatusCode returns the status code passed to WriteHeader, or 0 if unset.
-func (m *FakeHTTPResponseWriter) StatusCode() int {
+func (m *fakeHTTPResponseWriter) StatusCode() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.statusCode

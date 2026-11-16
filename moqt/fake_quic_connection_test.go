@@ -11,7 +11,10 @@ import (
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
-var _ StreamConn = (*FakeStreamConn)(nil)
+var (
+	_ StreamConn                    = (*fakeStreamConn)(nil)
+	_ transport.WebTransportSession = (*fakeWebTransportSession)(nil)
+)
 
 // biStreamResult is one queued outcome for a bidirectional stream open/accept.
 // Block parks the call until the connection context is done, modelling a peer
@@ -42,7 +45,7 @@ type closeCall struct {
 	Reason string
 }
 
-// FakeStreamConn is a fake implementation of StreamConn that models quic-go
+// fakeStreamConn is a fake implementation of StreamConn that models quic-go
 // connection semantics:
 //   - CloseWithError cancels Context() with *transport.ApplicationError as cause (first-writer-wins, idempotent, always returns nil)
 //   - After CloseWithError, AcceptStream/AcceptUniStream/OpenStream/OpenUniStream/OpenStreamSync/OpenUniStreamSync return the close error
@@ -51,30 +54,30 @@ type closeCall struct {
 // Stream open/accept behavior is driven by results queues: entries are returned
 // in order and the last entry repeats once exhausted. An empty queue returns
 // io.EOF for accepts and a nil stream for opens.
-type FakeStreamConn struct {
+type fakeStreamConn struct {
 	mu sync.Mutex
 
-	AcceptStreams    []biStreamResult
-	AcceptUniStreams []recvStreamResult
-	OpenStreams      []biStreamResult
-	OpenUniStreams   []sendStreamResult
+	acceptStreams    []biStreamResult
+	acceptUniStreams []recvStreamResult
+	openStreams      []biStreamResult
+	openUniStreams   []sendStreamResult
 
-	ParentCtx context.Context
+	parentCtx context.Context
 
 	// Value overrides; the zero value yields the documented default.
-	LocalAddrValue  net.Addr
-	RemoteAddrValue net.Addr
-	TLSState        *tls.ConnectionState
-	Stats           quicgo.ConnectionStats
-	CloseErr        error // returned by CloseWithError instead of nil
+	localAddrValue  net.Addr
+	remoteAddrValue net.Addr
+	tlsState        *tls.ConnectionState
+	stats           quicgo.ConnectionStats
+	closeErr        error // returned by CloseWithError instead of nil
 
-	// StatsBytesSentStep advances the reported BytesSent by this much on every
+	// statsBytesSentStep advances the reported BytesSent by this much on every
 	// ConnectionStats call, modelling a connection with ongoing traffic.
-	StatsBytesSentStep uint64
+	statsBytesSentStep uint64
 
 	// Notification channels; sends are non-blocking.
-	CloseNotify  chan<- closeCall
-	AcceptNotify chan<- struct{}
+	closeNotify  chan<- closeCall
+	acceptNotify chan<- struct{}
 
 	acceptIdx    int
 	acceptUniIdx int
@@ -87,14 +90,14 @@ type FakeStreamConn struct {
 
 	ctx         context.Context
 	cancelCause context.CancelCauseFunc
-	closeErr    error // set by first CloseWithError call
+	closedErr   error // set by first CloseWithError call
 }
 
 // ensureContext lazily initialises the internal cancellable context.
 // Must be called with m.mu held.
-func (m *FakeStreamConn) ensureContext() {
+func (m *fakeStreamConn) ensureContext() {
 	if m.ctx == nil {
-		parent := m.ParentCtx
+		parent := m.parentCtx
 		if parent == nil {
 			parent = context.Background()
 		}
@@ -102,14 +105,14 @@ func (m *FakeStreamConn) ensureContext() {
 	}
 }
 
-func (m *FakeStreamConn) TLS() *tls.ConnectionState {
+func (m *fakeStreamConn) TLS() *tls.ConnectionState {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.TLSState
+	return m.tlsState
 }
 
 // waitDone parks until the connection context is done, then reports the reason.
-func (m *FakeStreamConn) waitDone() error {
+func (m *fakeStreamConn) waitDone() error {
 	m.mu.Lock()
 	m.ensureContext()
 	ctx := m.ctx
@@ -119,25 +122,25 @@ func (m *FakeStreamConn) waitDone() error {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.closeErr != nil {
-		return m.closeErr
+	if m.closedErr != nil {
+		return m.closedErr
 	}
 	return context.Cause(ctx)
 }
 
-func (m *FakeStreamConn) AcceptStream(ctx context.Context) (transport.Stream, error) {
+func (m *fakeStreamConn) AcceptStream(ctx context.Context) (transport.Stream, error) {
 	m.mu.Lock()
-	signal(m.AcceptNotify)
-	if m.closeErr != nil {
-		err := m.closeErr
+	signal(m.acceptNotify)
+	if m.closedErr != nil {
+		err := m.closedErr
 		m.mu.Unlock()
 		return nil, err
 	}
-	if len(m.AcceptStreams) == 0 {
+	if len(m.acceptStreams) == 0 {
 		m.mu.Unlock()
 		return nil, io.EOF
 	}
-	r := m.AcceptStreams[min(m.acceptIdx, len(m.AcceptStreams)-1)]
+	r := m.acceptStreams[min(m.acceptIdx, len(m.acceptStreams)-1)]
 	m.acceptIdx++
 	m.mu.Unlock()
 
@@ -147,19 +150,19 @@ func (m *FakeStreamConn) AcceptStream(ctx context.Context) (transport.Stream, er
 	return r.Stream, r.Err
 }
 
-func (m *FakeStreamConn) AcceptUniStream(ctx context.Context) (transport.ReceiveStream, error) {
+func (m *fakeStreamConn) AcceptUniStream(ctx context.Context) (transport.ReceiveStream, error) {
 	m.mu.Lock()
-	signal(m.AcceptNotify)
-	if m.closeErr != nil {
-		err := m.closeErr
+	signal(m.acceptNotify)
+	if m.closedErr != nil {
+		err := m.closedErr
 		m.mu.Unlock()
 		return nil, err
 	}
-	if len(m.AcceptUniStreams) == 0 {
+	if len(m.acceptUniStreams) == 0 {
 		m.mu.Unlock()
 		return nil, io.EOF
 	}
-	r := m.AcceptUniStreams[min(m.acceptUniIdx, len(m.AcceptUniStreams)-1)]
+	r := m.acceptUniStreams[min(m.acceptUniIdx, len(m.acceptUniStreams)-1)]
 	m.acceptUniIdx++
 	m.mu.Unlock()
 
@@ -169,19 +172,19 @@ func (m *FakeStreamConn) AcceptUniStream(ctx context.Context) (transport.Receive
 	return r.Stream, r.Err
 }
 
-func (m *FakeStreamConn) OpenStream() (transport.Stream, error) {
+func (m *fakeStreamConn) OpenStream() (transport.Stream, error) {
 	m.mu.Lock()
 	m.openCalls++
-	if m.closeErr != nil {
-		err := m.closeErr
+	if m.closedErr != nil {
+		err := m.closedErr
 		m.mu.Unlock()
 		return nil, err
 	}
-	if len(m.OpenStreams) == 0 {
+	if len(m.openStreams) == 0 {
 		m.mu.Unlock()
 		return nil, nil
 	}
-	r := m.OpenStreams[min(m.openIdx, len(m.OpenStreams)-1)]
+	r := m.openStreams[min(m.openIdx, len(m.openStreams)-1)]
 	m.openIdx++
 	m.mu.Unlock()
 
@@ -191,18 +194,18 @@ func (m *FakeStreamConn) OpenStream() (transport.Stream, error) {
 	return r.Stream, r.Err
 }
 
-func (m *FakeStreamConn) OpenUniStream() (transport.SendStream, error) {
+func (m *fakeStreamConn) OpenUniStream() (transport.SendStream, error) {
 	m.mu.Lock()
-	if m.closeErr != nil {
-		err := m.closeErr
+	if m.closedErr != nil {
+		err := m.closedErr
 		m.mu.Unlock()
 		return nil, err
 	}
-	if len(m.OpenUniStreams) == 0 {
+	if len(m.openUniStreams) == 0 {
 		m.mu.Unlock()
 		return nil, nil
 	}
-	r := m.OpenUniStreams[min(m.openUniIdx, len(m.OpenUniStreams)-1)]
+	r := m.openUniStreams[min(m.openUniIdx, len(m.openUniStreams)-1)]
 	m.openUniIdx++
 	m.mu.Unlock()
 
@@ -214,22 +217,22 @@ func (m *FakeStreamConn) OpenUniStream() (transport.SendStream, error) {
 
 // OpenStreamSync models the blocking open as the non-blocking one, so tests
 // that populate OpenStreams cover production paths calling either form.
-func (m *FakeStreamConn) OpenStreamSync(ctx context.Context) (transport.Stream, error) {
+func (m *fakeStreamConn) OpenStreamSync(ctx context.Context) (transport.Stream, error) {
 	return m.OpenStream()
 }
 
-func (m *FakeStreamConn) OpenUniStreamSync(ctx context.Context) (transport.SendStream, error) {
+func (m *fakeStreamConn) OpenUniStreamSync(ctx context.Context) (transport.SendStream, error) {
 	m.mu.Lock()
-	if m.closeErr != nil {
-		err := m.closeErr
+	if m.closedErr != nil {
+		err := m.closedErr
 		m.mu.Unlock()
 		return nil, err
 	}
-	if len(m.OpenUniStreams) == 0 {
+	if len(m.openUniStreams) == 0 {
 		m.mu.Unlock()
-		return &FakeQUICSendStream{}, nil
+		return &fakeQUICSendStream{}, nil
 	}
-	r := m.OpenUniStreams[min(m.openUniIdx, len(m.OpenUniStreams)-1)]
+	r := m.openUniStreams[min(m.openUniIdx, len(m.openUniStreams)-1)]
 	m.openUniIdx++
 	m.mu.Unlock()
 
@@ -237,25 +240,25 @@ func (m *FakeStreamConn) OpenUniStreamSync(ctx context.Context) (transport.SendS
 		return nil, m.waitDone()
 	}
 	if r.Stream == nil && r.Err == nil {
-		return &FakeQUICSendStream{}, nil
+		return &fakeQUICSendStream{}, nil
 	}
 	return r.Stream, r.Err
 }
 
-func (m *FakeStreamConn) LocalAddr() net.Addr {
+func (m *fakeStreamConn) LocalAddr() net.Addr {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.LocalAddrValue != nil {
-		return m.LocalAddrValue
+	if m.localAddrValue != nil {
+		return m.localAddrValue
 	}
 	return &net.TCPAddr{}
 }
 
-func (m *FakeStreamConn) RemoteAddr() net.Addr {
+func (m *fakeStreamConn) RemoteAddr() net.Addr {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.RemoteAddrValue != nil {
-		return m.RemoteAddrValue
+	if m.remoteAddrValue != nil {
+		return m.remoteAddrValue
 	}
 	return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080}
 }
@@ -264,15 +267,15 @@ func (m *FakeStreamConn) RemoteAddr() net.Addr {
 //   - First call stores the close error and cancels Context() with *transport.ApplicationError as cause
 //   - Subsequent calls are no-ops
 //   - Returns nil (like quic-go) unless CloseErr is set
-func (m *FakeStreamConn) CloseWithError(code transport.ConnErrorCode, reason string) error {
+func (m *fakeStreamConn) CloseWithError(code transport.ConnErrorCode, reason string) error {
 	call := closeCall{Code: code, Reason: reason}
 
 	m.mu.Lock()
 	m.closeCalls = append(m.closeCalls, call)
-	notify := m.CloseNotify
-	if m.closeErr != nil {
+	notify := m.closeNotify
+	if m.closedErr != nil {
 		// Already closed — first-writer-wins, idempotent
-		closeErr := m.CloseErr
+		closeErr := m.closeErr
 		m.mu.Unlock()
 		if notify != nil {
 			select {
@@ -282,14 +285,14 @@ func (m *FakeStreamConn) CloseWithError(code transport.ConnErrorCode, reason str
 		}
 		return closeErr
 	}
-	m.closeErr = &transport.ApplicationError{
+	m.closedErr = &transport.ApplicationError{
 		ErrorCode:    transport.ApplicationErrorCode(code),
 		ErrorMessage: reason,
 	}
 	m.ensureContext()
 	cancel := m.cancelCause
-	cause := m.closeErr
-	closeErr := m.CloseErr
+	cause := m.closedErr
+	closeErr := m.closeErr
 	m.mu.Unlock()
 
 	cancel(cause)
@@ -304,21 +307,21 @@ func (m *FakeStreamConn) CloseWithError(code transport.ConnErrorCode, reason str
 
 // SetBytesSent overwrites the BytesSent the connection reports, for tests that
 // drive traffic growth on their own schedule rather than per sample.
-func (m *FakeStreamConn) SetBytesSent(n uint64) {
+func (m *fakeStreamConn) SetBytesSent(n uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.Stats.BytesSent = n
+	m.stats.BytesSent = n
 }
 
 // OpenCalls returns how many times a bidirectional stream open was requested.
-func (m *FakeStreamConn) OpenCalls() int {
+func (m *fakeStreamConn) OpenCalls() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.openCalls
 }
 
 // CloseCalls returns the CloseWithError invocations, in order.
-func (m *FakeStreamConn) CloseCalls() []closeCall {
+func (m *fakeStreamConn) CloseCalls() []closeCall {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]closeCall, len(m.closeCalls))
@@ -326,33 +329,33 @@ func (m *FakeStreamConn) CloseCalls() []closeCall {
 	return out
 }
 
-func (m *FakeStreamConn) Context() context.Context {
+func (m *fakeStreamConn) Context() context.Context {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.ensureContext()
 	return m.ctx
 }
 
-func (m *FakeStreamConn) ConnectionStats() quicgo.ConnectionStats {
+func (m *fakeStreamConn) ConnectionStats() quicgo.ConnectionStats {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.statsCalls++
-	m.Stats.BytesSent += m.StatsBytesSentStep
-	return m.Stats
+	m.stats.BytesSent += m.statsBytesSentStep
+	return m.stats
 }
 
 // StatsCalls returns how many times ConnectionStats has been sampled.
-func (m *FakeStreamConn) StatsCalls() int {
+func (m *fakeStreamConn) StatsCalls() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.statsCalls
 }
 
-type FakeWebTransportSession struct {
-	FakeStreamConn
-	SubprotocolValue string
+type fakeWebTransportSession struct {
+	fakeStreamConn
+	subprotocolValue string
 }
 
-func (m *FakeWebTransportSession) Subprotocol() string {
-	return m.SubprotocolValue
+func (m *fakeWebTransportSession) Subprotocol() string {
+	return m.subprotocolValue
 }

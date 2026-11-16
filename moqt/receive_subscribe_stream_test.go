@@ -35,7 +35,7 @@ func TestNewReceiveSubscribeStream(t *testing.T) {
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			rss := newReceiveSubscribeStream(tt.subscribeID, &FakeQUICStream{}, tt.config)
+			rss := newReceiveSubscribeStream(tt.subscribeID, &fakeQUICStream{}, tt.config)
 
 			assert.NotNil(t, rss, "newReceiveSubscribeStream should not return nil")
 			assert.Equal(t, tt.subscribeID, rss.SubscribeID(), "SubscribeID should match")
@@ -56,7 +56,7 @@ func TestReceiveSubscribeStream_ConstructorReadsNothing(t *testing.T) {
 	// re-served, and the test could never fail.
 	buf := &bytes.Buffer{}
 	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 9}.Encode(buf))
-	mockStream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
+	mockStream := &fakeQUICStream{reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
 
 	rss := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 	t.Cleanup(func() { _ = rss.closeWithError(SubscribeErrorCodeInternal) })
@@ -79,7 +79,7 @@ func TestReceiveSubscribeStream_SubscribeID(t *testing.T) {
 	}
 	for name, id := range tests {
 		t.Run(name, func(t *testing.T) {
-			rss := newReceiveSubscribeStream(id, &FakeQUICStream{}, &SubscribeConfig{Priority: TrackPriority(1)})
+			rss := newReceiveSubscribeStream(id, &fakeQUICStream{}, &SubscribeConfig{Priority: TrackPriority(1)})
 			assert.Equal(t, id, rss.SubscribeID(), "SubscribeID should match expected value")
 		})
 	}
@@ -95,7 +95,7 @@ func TestReceiveSubscribeStream_TrackConfig(t *testing.T) {
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			rss := newReceiveSubscribeStream(SubscribeID(123), &FakeQUICStream{}, tt.config)
+			rss := newReceiveSubscribeStream(SubscribeID(123), &fakeQUICStream{}, tt.config)
 
 			resultConfig := rss.TrackConfig()
 
@@ -112,7 +112,7 @@ func TestReceiveSubscribeStream_ReadUpdate(t *testing.T) {
 	// and makes it the current TrackConfig.
 	buf := &bytes.Buffer{}
 	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 5}.Encode(buf))
-	mockStream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
+	mockStream := &fakeQUICStream{reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
 
 	rss := newReceiveSubscribeStream(SubscribeID(123), mockStream, &SubscribeConfig{Priority: TrackPriority(1)})
 
@@ -127,7 +127,7 @@ func TestReceiveSubscribeStream_ReadUpdate_Sequence(t *testing.T) {
 	buf := &bytes.Buffer{}
 	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 1}.Encode(buf))
 	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 2}.Encode(buf))
-	mockStream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
+	mockStream := &fakeQUICStream{reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
 
 	rss := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
@@ -141,9 +141,9 @@ func TestReceiveSubscribeStream_ReadUpdate_Sequence(t *testing.T) {
 }
 
 func TestReceiveSubscribeStream_ReadUpdate_ErrorOnStreamEnd(t *testing.T) {
-	// A zero-value FakeQUICStream returns io.EOF on Read; readUpdate must surface
+	// A zero-value fakeQUICStream returns io.EOF on Read; readUpdate must surface
 	// an error so a caller's read loop terminates.
-	rss := newReceiveSubscribeStream(SubscribeID(1), &FakeQUICStream{}, &SubscribeConfig{})
+	rss := newReceiveSubscribeStream(SubscribeID(1), &fakeQUICStream{}, &SubscribeConfig{})
 
 	got, err := rss.readUpdate()
 	assert.Error(t, err, "stream end must return an error")
@@ -158,7 +158,7 @@ func TestReceiveSubscribeStream_CloseWithError(t *testing.T) {
 	}
 	for name, code := range tests {
 		t.Run(name, func(t *testing.T) {
-			mockStream := &FakeQUICStream{}
+			mockStream := &fakeQUICStream{}
 
 			rss := newReceiveSubscribeStream(SubscribeID(123), mockStream, &SubscribeConfig{})
 
@@ -172,7 +172,7 @@ func TestReceiveSubscribeStream_CloseWithError(t *testing.T) {
 func TestReceiveSubscribeStream_CloseWithError_Idempotent(t *testing.T) {
 	// Double close must be safe (no panic, no error) — the caller and the
 	// session-teardown path may both close a subscription.
-	rss := newReceiveSubscribeStream(SubscribeID(1), &FakeQUICStream{}, &SubscribeConfig{})
+	rss := newReceiveSubscribeStream(SubscribeID(1), &fakeQUICStream{}, &SubscribeConfig{})
 
 	assert.NoError(t, rss.closeWithError(SubscribeErrorCodeInternal))
 	assert.NoError(t, rss.closeWithError(SubscribeErrorCodeInternal))
@@ -185,9 +185,9 @@ func TestReceiveSubscribeStream_ReadUpdate_ConcurrentIsSerialized(t *testing.T) 
 	buf := &bytes.Buffer{}
 	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 1}.Encode(buf))
 	require.NoError(t, message.SubscribeUpdateMessage{SubscriberPriority: 2}.Encode(buf))
-	// FakeQUICStream.Read is internally mutex-serialized, so no extra locking
+	// fakeQUICStream.Read is internally mutex-serialized, so no extra locking
 	// is needed here to make concurrent Read calls safe.
-	mockStream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
+	mockStream := &fakeQUICStream{reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
 
 	rss := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
@@ -207,7 +207,7 @@ func TestReceiveSubscribeStream_ReadUpdate_ConcurrentIsSerialized(t *testing.T) 
 }
 
 func TestReceiveSubscribeStream_ConcurrentAccess(t *testing.T) {
-	rss := newReceiveSubscribeStream(SubscribeID(123), &FakeQUICStream{}, &SubscribeConfig{Priority: TrackPriority(1)})
+	rss := newReceiveSubscribeStream(SubscribeID(123), &fakeQUICStream{}, &SubscribeConfig{Priority: TrackPriority(1)})
 
 	var wg sync.WaitGroup
 	const numGoroutines = 10
@@ -232,7 +232,7 @@ func TestReceiveSubscribeStream_ConcurrentAccess(t *testing.T) {
 }
 
 func TestReceiveSubscribeStream_Close_DoesNotCancelReadOnGracefulClose(t *testing.T) {
-	mockStream := &FakeQUICStream{}
+	mockStream := &fakeQUICStream{}
 
 	rss := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 

@@ -19,6 +19,9 @@ const (
 	StreamTypeSetup StreamType = 0x1
 )
 
+// StreamType is the one-byte header that opens every stream and names what the
+// stream carries. Bidirectional and unidirectional streams number their types
+// separately, so the same value means different things on each.
 type StreamType byte
 
 // Encode writes a one-byte stream type header.
@@ -27,10 +30,12 @@ func (stm StreamType) Encode(w io.Writer) error {
 	return err
 }
 
+// Decode reads the one-byte stream type. It uses io.ReadFull rather than a bare
+// Read: a transport may return the byte together with io.EOF, or return no
+// bytes and no error, and both are valid io.Reader behavior.
 func (stm *StreamType) Decode(r io.Reader) error {
-	buf := make([]byte, 1)
-	_, err := r.Read(buf)
-	if err != nil {
+	var buf [1]byte
+	if _, err := io.ReadFull(r, buf[:]); err != nil {
 		return err
 	}
 	*stm = StreamType(buf[0])

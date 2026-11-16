@@ -26,13 +26,13 @@ func TestSession_handleGoawayStream(t *testing.T) {
 
 	var goaway bytes.Buffer
 	require.NoError(t, message.GoawayMessage{NewSessionURI: "https://example.com/next"}.Encode(&goaway))
-	stream := &FakeQUICStream{Reads: []streamResult{{Data: goaway.Bytes()}, {Err: io.EOF}}}
+	stream := &fakeQUICStream{reads: []streamResult{{Data: goaway.Bytes()}, {Err: io.EOF}}}
 
 	require.NoError(t, session.handleGoawayStream(stream))
 
 	assert.Equal(t, "https://example.com/next", gotURI)
 	assert.False(t, session.closed.Load(), "GOAWAY leaves the session open")
-	conn.OpenStreams = []biStreamResult{{Stream: &FakeQUICStream{}}}
+	conn.openStreams = []biStreamResult{{Stream: &fakeQUICStream{}}}
 	_, err := session.Fetch(&FetchRequest{BroadcastPath: "/test", TrackName: "video", GroupSequence: 1})
 	require.NoError(t, err, "the session still serves new work after GOAWAY")
 	require.NoError(t, session.CloseWithError(NoError, "done"))
@@ -68,7 +68,7 @@ func TestSession_Subscribe_FailureRemovesTrackReader(t *testing.T) {
 	for name, response := range tests {
 		t.Run(name, func(t *testing.T) {
 			session, conn := newTestSessionWithConn(t)
-			conn.OpenStreams = []biStreamResult{{Stream: &FakeQUICStream{Reads: []streamResult{response}}}}
+			conn.openStreams = []biStreamResult{{Stream: &fakeQUICStream{reads: []streamResult{response}}}}
 
 			reader, err := session.Subscribe(context.Background(), "/test", "video", nil)
 
@@ -88,8 +88,8 @@ func TestSession_Subscribe_FailureCancelsQueuedGroup(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gate := make(chan struct{})
 		// The response read parks until gate closes, then fails.
-		subStream := &FakeQUICStream{Reads: []streamResult{{Block: true}, {Err: errors.New("read error")}}, ReadGate: gate}
-		session := newTestSession(&FakeStreamConn{OpenStreams: []biStreamResult{{Stream: subStream}}})
+		subStream := &fakeQUICStream{reads: []streamResult{{Block: true}, {Err: errors.New("read error")}}, readGate: gate}
+		session := newTestSession(&fakeStreamConn{openStreams: []biStreamResult{{Stream: subStream}}})
 		defer func() { assert.NoError(t, session.CloseWithError(NoError, "")) }()
 
 		errCh := make(chan error, 1)
@@ -103,7 +103,7 @@ func TestSession_Subscribe_FailureCancelsQueuedGroup(t *testing.T) {
 		var group bytes.Buffer
 		require.NoError(t, message.StreamTypeGroup.Encode(&group))
 		require.NoError(t, message.GroupMessage{SubscribeID: 1, GroupSequence: 1}.Encode(&group))
-		groupStream := &FakeQUICReceiveStream{Reads: []streamResult{{Data: group.Bytes()}, {Block: true}}}
+		groupStream := &fakeQUICReceiveStream{reads: []streamResult{{Data: group.Bytes()}, {Block: true}}}
 		session.processUniStream(groupStream)
 
 		close(gate)
@@ -126,7 +126,7 @@ func TestAnnouncementReader_PeerEndsStream(t *testing.T) {
 			var buf bytes.Buffer
 			require.NoError(t, message.AnnounceOkMessage{}.Encode(&buf))
 			require.NoError(t, message.AnnounceBroadcastMessage{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ACTIVE}.Encode(&buf))
-			stream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}, end}}
+			stream := &fakeQUICStream{reads: []streamResult{{Data: buf.Bytes()}, end}}
 
 			ar := newAnnouncementReader(stream, "/test/", nil, nil)
 
@@ -178,8 +178,8 @@ func TestSession_Fetch_ContextLifecycle(t *testing.T) {
 		// t.Run is unsupported inside a synctest bubble, so the cases run in
 		// a plain loop.
 		for _, tc := range cases {
-			stream := &FakeQUICStream{Reads: []streamResult{{Err: io.EOF}}}
-			session := newTestSession(&FakeStreamConn{OpenStreams: []biStreamResult{{Stream: stream}}})
+			stream := &fakeQUICStream{reads: []streamResult{{Err: io.EOF}}}
+			session := newTestSession(&fakeStreamConn{openStreams: []biStreamResult{{Stream: stream}}})
 			ctx, cancel := context.WithCancel(context.Background())
 
 			group, err := session.Fetch((&FetchRequest{BroadcastPath: "/test", TrackName: "video", GroupSequence: 1}).WithContext(ctx))
@@ -201,8 +201,8 @@ func TestSession_Fetch_ContextLifecycle(t *testing.T) {
 // *GroupError from ReadFrame.
 func TestSession_Fetch_ResetDuringGroup(t *testing.T) {
 	refused := &transport.StreamError{ErrorCode: transport.StreamErrorCode(UnauthorizedGroupErrorCode), Remote: true}
-	stream := &FakeQUICStream{Reads: []streamResult{{Err: refused}}}
-	session := newTestSession(&FakeStreamConn{OpenStreams: []biStreamResult{{Stream: stream}}})
+	stream := &fakeQUICStream{reads: []streamResult{{Err: refused}}}
+	session := newTestSession(&fakeStreamConn{openStreams: []biStreamResult{{Stream: stream}}})
 	defer func() { _ = session.CloseWithError(NoError, "") }() // not actionable: the test is over
 
 	group, err := session.Fetch(&FetchRequest{BroadcastPath: "/test", TrackName: "video"})
@@ -217,9 +217,9 @@ func TestSession_Fetch_ResetDuringGroup(t *testing.T) {
 // TestSession_handleFetchStream_Malformed verifies a FETCH that cannot be
 // decoded is answered with a reset of its group.
 func TestSession_handleFetchStream_Malformed(t *testing.T) {
-	session := newTestSession(&FakeStreamConn{})
+	session := newTestSession(&fakeStreamConn{})
 	defer func() { _ = session.CloseWithError(NoError, "") }() // not actionable: the test is over
-	stream := &FakeQUICStream{Reads: []streamResult{{Err: io.ErrUnexpectedEOF}}}
+	stream := &fakeQUICStream{reads: []streamResult{{Err: io.ErrUnexpectedEOF}}}
 
 	session.handleFetchStream(stream)
 

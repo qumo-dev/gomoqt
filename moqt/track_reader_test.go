@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestTrackReader(tb testing.TB) (*TrackReader, *FakeQUICStream) {
+func newTestTrackReader(tb testing.TB) (*TrackReader, *fakeQUICStream) {
 	tb.Helper()
-	mockStream := &FakeQUICStream{}
+	mockStream := &fakeQUICStream{}
 
 	substr := newTestSendSubscribeStreamFromStream(mockStream, &SubscribeConfig{})
 	receiver := newTrackReader("/test", "video", substr, func() {})
@@ -23,7 +23,7 @@ func newTestTrackReader(tb testing.TB) (*TrackReader, *FakeQUICStream) {
 }
 
 func TestNewTrackReader(t *testing.T) {
-	mockStream := &FakeQUICStream{}
+	mockStream := &fakeQUICStream{}
 	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 	receiver := newTrackReader("/test", "video", substr, func() {})
 
@@ -49,8 +49,8 @@ func TestTrackReader_AcceptGroup(t *testing.T) {
 
 func TestTrackReader_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	mockStream := &FakeQUICStream{
-		ParentCtx: ctx,
+	mockStream := &fakeQUICStream{
+		parentCtx: ctx,
 	}
 	substr := newTestSendSubscribeStreamFromStream(mockStream, &SubscribeConfig{})
 	receiver := newTrackReader("/test", "video", substr, func() {})
@@ -72,7 +72,7 @@ func TestTrackReader_Context_FollowsStreamLifecycle(t *testing.T) {
 	_, cancelSetup := context.WithCancel(context.Background())
 	defer cancelSetup()
 
-	mockStream := &FakeQUICStream{}
+	mockStream := &fakeQUICStream{}
 
 	substr := newTestSendSubscribeStreamFromStream(mockStream, &SubscribeConfig{})
 	receiver := newTrackReader("/test", "video", substr, func() {})
@@ -101,7 +101,7 @@ func TestTrackReader_EnqueueGroup(t *testing.T) {
 	receiver, _ := newTestTrackReader(t)
 
 	// Mock receive stream
-	mockReceiveStream := &FakeQUICReceiveStream{}
+	mockReceiveStream := &fakeQUICReceiveStream{}
 
 	// Enqueue a group
 	receiver.enqueueGroup(GroupSequence(1), mockReceiveStream)
@@ -179,8 +179,8 @@ func TestTrackReader_AcceptDrop(t *testing.T) {
 		ErrorCode:  3,
 	}).Encode(&buf))
 
-	mockStream := &FakeQUICStream{
-		ReadFrom: &buf,
+	mockStream := &fakeQUICStream{
+		readFrom: &buf,
 	}
 
 	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
@@ -209,7 +209,7 @@ func TestTrackReader_CloseWithError(t *testing.T) {
 func TestGroupReader_CancelRead_RemovesFromManager(t *testing.T) {
 	receiver, _ := newTestTrackReader(t)
 
-	recvStream := &FakeQUICReceiveStream{}
+	recvStream := &fakeQUICReceiveStream{}
 	group := newGroupReader(GroupSequence(1), recvStream, receiver.groupManager)
 
 	assert.Len(t, receiver.groupManager.activeGroups, 1)
@@ -231,8 +231,8 @@ func TestTrackReader_Drops(t *testing.T) {
 		ErrorCode:  3,
 	}).Encode(&buf))
 
-	mockStream := &FakeQUICStream{
-		ReadFrom: &buf,
+	mockStream := &fakeQUICStream{
+		readFrom: &buf,
 	}
 
 	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
@@ -255,7 +255,7 @@ func TestTrackReader_Drops(t *testing.T) {
 }
 
 func TestTrackReader_Drops_ContextCanceled(t *testing.T) {
-	mockStream := &FakeQUICStream{}
+	mockStream := &fakeQUICStream{}
 
 	substr := newSendSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 	receiver := newTrackReader("/test", "video", substr, func() {})
@@ -281,7 +281,7 @@ func TestTrackReader_Update_NilConfig(t *testing.T) {
 }
 
 func TestTrackReader_SubscribeID(t *testing.T) {
-	mockStream := &FakeQUICStream{}
+	mockStream := &fakeQUICStream{}
 
 	substr := newSendSubscribeStream(SubscribeID(42), mockStream, &SubscribeConfig{})
 	receiver := newTrackReader("/test", "video", substr, func() {})
@@ -321,14 +321,14 @@ func TestTrackReader_AcceptGroup_EndsAfterSubscribeEnd(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				// The subscribe stream stays open until gate is closed.
 				gate := make(chan struct{})
-				stream := &FakeQUICStream{Reads: []streamResult{{Block: true}}, ReadGate: gate}
+				stream := &fakeQUICStream{reads: []streamResult{{Block: true}}, readGate: gate}
 				substr := newTestSendSubscribeStreamFromStream(stream, &SubscribeConfig{})
 				receiver := newTrackReader("/test", "video", substr, func() {})
 				if !tt.noOK {
 					substr.setResolvedStart(1) // SUBSCRIBE_OK: the subscription starts at group 1
 				}
 				for _, seq := range tt.queued {
-					receiver.enqueueGroup(seq, &FakeQUICReceiveStream{})
+					receiver.enqueueGroup(seq, &fakeQUICReceiveStream{})
 				}
 				ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 				defer cancel()
@@ -352,7 +352,7 @@ func TestTrackReader_AcceptGroup_EndsAfterSubscribeEnd(t *testing.T) {
 
 				substr.setEnd(tt.end)
 				for _, seq := range tt.late {
-					receiver.enqueueGroup(seq, &FakeQUICReceiveStream{})
+					receiver.enqueueGroup(seq, &fakeQUICReceiveStream{})
 				}
 				if tt.dropped != nil {
 					substr.appendDrop(*tt.dropped)
@@ -361,7 +361,7 @@ func TestTrackReader_AcceptGroup_EndsAfterSubscribeEnd(t *testing.T) {
 					close(gate)
 					synctest.Wait() // the close is seen before any group after it
 					for _, seq := range tt.afterFIN {
-						receiver.enqueueGroup(seq, &FakeQUICReceiveStream{})
+						receiver.enqueueGroup(seq, &fakeQUICReceiveStream{})
 					}
 				} else {
 					defer close(gate)
@@ -377,7 +377,7 @@ func TestTrackReader_AcceptGroup_EndsAfterSubscribeEnd(t *testing.T) {
 
 // A second SUBSCRIBE_END is ignored: the first one names the last group.
 func TestSendSubscribeStream_SetEnd_FirstWins(t *testing.T) {
-	substr := newSendSubscribeStream(SubscribeID(1), &FakeQUICStream{}, &SubscribeConfig{})
+	substr := newSendSubscribeStream(SubscribeID(1), &fakeQUICStream{}, &SubscribeConfig{})
 
 	substr.setEnd(5)
 	substr.setEnd(9)
@@ -391,11 +391,11 @@ func TestSendSubscribeStream_SetEnd_FirstWins(t *testing.T) {
 // AcceptGroup returns io.EOF exactly when the grace has passed, not before.
 func TestTrackReader_AcceptGroup_GraceAfterClose(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		stream := &FakeQUICStream{} // reads EOF at once: the publisher closed the stream
+		stream := &fakeQUICStream{} // reads EOF at once: the publisher closed the stream
 		substr := newTestSendSubscribeStreamFromStream(stream, &SubscribeConfig{})
 		receiver := newTrackReader("/test", "video", substr, func() {})
 		substr.setResolvedStart(1)
-		synctest.Wait() // readSubscribeResponses has seen the close
+		synctest.Wait()  // readSubscribeResponses has seen the close
 		substr.setEnd(3) // groups 1 to 3 are owed; none will come
 		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		defer cancel()
@@ -413,11 +413,11 @@ func TestTrackReader_AcceptGroup_GraceAfterClose(t *testing.T) {
 func TestTrackReader_AcceptGroup_EOFIsSticky(t *testing.T) {
 	gate := make(chan struct{})
 	defer close(gate)
-	stream := &FakeQUICStream{Reads: []streamResult{{Block: true}}, ReadGate: gate}
+	stream := &fakeQUICStream{reads: []streamResult{{Block: true}}, readGate: gate}
 	substr := newTestSendSubscribeStreamFromStream(stream, &SubscribeConfig{})
 	receiver := newTrackReader("/test", "video", substr, func() {})
 	substr.setResolvedStart(1)
-	receiver.enqueueGroup(1, &FakeQUICReceiveStream{})
+	receiver.enqueueGroup(1, &fakeQUICReceiveStream{})
 	substr.setEnd(1)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -425,7 +425,7 @@ func TestTrackReader_AcceptGroup_EOFIsSticky(t *testing.T) {
 	require.NoError(t, err)
 	_, err = receiver.AcceptGroup(ctx)
 	require.ErrorIs(t, err, io.EOF)
-	late := &FakeQUICReceiveStream{}
+	late := &fakeQUICReceiveStream{}
 
 	receiver.enqueueGroup(2, late)
 

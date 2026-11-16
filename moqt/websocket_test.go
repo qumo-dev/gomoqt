@@ -242,9 +242,9 @@ func TestWebSocketHandler_ServeHTTP_ServerShutdown(t *testing.T) {
 }
 
 func TestWebSocketHandler_ServeHTTP_UpgradeFunc(t *testing.T) {
-	conn := &FakeWebTransportSession{}
-	conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
-	conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+	conn := &fakeWebTransportSession{}
+	conn.acceptStreams = []biStreamResult{{Err: context.Canceled}}
+	conn.acceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
 
 	var got *Session
 	handler := &WebSocketHandler{
@@ -277,11 +277,11 @@ func TestDialer_Dial_WSSRoutesToDialWebSocket(t *testing.T) {
 					assert.True(t, ok, "the dial is bounded by the setup timeout")
 					assert.Equal(t, tt.url, addr)
 
-					conn := &FakeWebTransportSession{}
-					conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
-					conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
-					conn.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
-					conn.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
+					conn := &fakeWebTransportSession{}
+					conn.acceptStreams = []biStreamResult{{Err: context.Canceled}}
+					conn.acceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+					conn.localAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+					conn.remoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
 					return &http.Response{StatusCode: http.StatusSwitchingProtocols}, conn, nil
 				},
 			}

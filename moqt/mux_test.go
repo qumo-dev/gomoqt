@@ -137,10 +137,10 @@ func TestMux_Announce_WithNilHandler_ClosesTrack(t *testing.T) {
 	assert.Equal(t, reflect.ValueOf(NotFoundTrackHandler).Pointer(), reflect.ValueOf(h).Pointer())
 
 	// Now try serveTrack - should call CloseWithError and stream CancelWrite/CancelRead with TrackNotFoundErrorCode
-	mockStream := &FakeQUICStream{}
+	mockStream := &fakeQUICStream{}
 
 	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream { return mockStream }(), &SubscribeConfig{}), func(_ context.Context) (transport.SendStream, error) {
-		return &FakeQUICSendStream{}, nil
+		return &fakeQUICSendStream{}, nil
 	}, func() {})
 
 	// serveTrack will call CloseWithError
@@ -160,10 +160,10 @@ func TestMux_ServeTrack_NotFound_ClosesWithError(t *testing.T) {
 	mux := NewTrackMux(0)
 	path := BroadcastPath("/not/found/close")
 
-	mockStream := &FakeQUICStream{}
+	mockStream := &fakeQUICStream{}
 
 	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream { return mockStream }(), &SubscribeConfig{}), func(_ context.Context) (transport.SendStream, error) {
-		return &FakeQUICSendStream{}, nil
+		return &fakeQUICSendStream{}, nil
 	}, func() {})
 
 	mux.serveTrack(tw)
@@ -683,10 +683,10 @@ func TestNotFound(t *testing.T) {
 		"track writer with mock TrackWriter": {
 			trackWriter: newTrackWriter(BroadcastPath("/test"), TrackName("test"),
 				newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream {
-					return &FakeQUICStream{}
+					return &fakeQUICStream{}
 				}(), &SubscribeConfig{}),
 				func(_ context.Context) (transport.SendStream, error) {
-					return &FakeQUICSendStream{}, nil
+					return &fakeQUICSendStream{}, nil
 				}, func() {}),
 			expectPanic: false,
 		},
@@ -716,10 +716,10 @@ func TestNotFoundHandler(t *testing.T) {
 		"track writer with mock TrackWriter": {
 			trackWriter: newTrackWriter(BroadcastPath("/test"), TrackName("test"),
 				newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream {
-					return &FakeQUICStream{}
+					return &fakeQUICStream{}
 				}(), &SubscribeConfig{}),
 				func(_ context.Context) (transport.SendStream, error) {
-					return &FakeQUICSendStream{}, nil
+					return &fakeQUICSendStream{}, nil
 				}, func() {}),
 			expectPanic: false,
 		},
@@ -747,10 +747,10 @@ func TestTrackHandlerFunc(t *testing.T) {
 	// Create a proper TrackWriter with a valid receiveSubscribeStream
 	testTrackWriter := newTrackWriter(BroadcastPath("/test"), TrackName("test"),
 		newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream {
-			return &FakeQUICStream{}
+			return &fakeQUICStream{}
 		}(), &SubscribeConfig{}),
 		func(_ context.Context) (transport.SendStream, error) {
-			return &FakeQUICSendStream{}, nil
+			return &fakeQUICSendStream{}, nil
 		}, func() {})
 
 	handler.ServeTrack(testTrackWriter)
@@ -769,10 +769,10 @@ func TestTrackHandlerFuncServeTrack(t *testing.T) {
 	// Create a proper TrackWriter with a valid receiveSubscribeStream
 	trackWriter := newTrackWriter(BroadcastPath("/test"), TrackName("test"),
 		newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream {
-			return &FakeQUICStream{}
+			return &fakeQUICStream{}
 		}(), &SubscribeConfig{}),
 		func(_ context.Context) (transport.SendStream, error) {
-			return &FakeQUICSendStream{}, nil
+			return &fakeQUICSendStream{}, nil
 		}, func() {})
 
 	handler.ServeTrack(trackWriter)
@@ -921,9 +921,9 @@ func TestMux_ServeAnnouncements_InitSendsExistingAnnouncements(t *testing.T) {
 			defer cancel()
 			// Allow write calls (init + potential active messages)
 			writeCh := make(chan struct{}, 1)
-			mockStream := &FakeQUICStream{
-				ParentCtx:   streamCtx,
-				WriteNotify: writeCh,
+			mockStream := &fakeQUICStream{
+				parentCtx:   streamCtx,
+				writeNotify: writeCh,
 			}
 
 			aw := newAnnouncementWriter(mockStream, tc.writerPrefix, 0, 0, nil, nil)
@@ -972,21 +972,21 @@ func TestMux_ServeAnnouncements_AncestorAndDescendantReceive_AnnounceBefore(t *t
 		mux.Announce(ann, TrackHandlerFunc(func(tw *TrackWriter) {}))
 
 		// Root writer (prefix "/")
-		rootStream := &FakeQUICStream{}
+		rootStream := &fakeQUICStream{}
 		rootCtx, cancelR := context.WithCancel(context.Background())
 		defer cancelR()
-		rootStream.ParentCtx = rootCtx
+		rootStream.parentCtx = rootCtx
 		rootWriteCh := make(chan struct{}, 1)
-		rootStream.WriteNotify = rootWriteCh
+		rootStream.writeNotify = rootWriteCh
 		rootAW := newAnnouncementWriter(rootStream, "/", 0, 0, nil, nil)
 
 		// Descendant writer (prefix /share/)
-		shareStream := &FakeQUICStream{}
+		shareStream := &fakeQUICStream{}
 		shareCtx, cancelS := context.WithCancel(context.Background())
 		defer cancelS()
-		shareStream.ParentCtx = shareCtx
+		shareStream.parentCtx = shareCtx
 		shareWriteCh := make(chan struct{}, 1)
-		shareStream.WriteNotify = shareWriteCh
+		shareStream.writeNotify = shareWriteCh
 		shareAW := newAnnouncementWriter(shareStream, "/share/", 0, 0, nil, nil)
 
 		var wg sync.WaitGroup
@@ -1035,7 +1035,7 @@ func TestMux_ServeAnnouncements_InvalidPrefix_ClosesWithError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		mux := NewTrackMux(0)
 
-		mockStream := &FakeQUICStream{}
+		mockStream := &fakeQUICStream{}
 
 		aw := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil, nil)
 		// Force invalid prefix for this test case (no trailing slash)
@@ -1100,8 +1100,8 @@ func TestMux_ServeAnnouncements_InitWriteError_ClosesWithInternalError(t *testin
 			ErrorCode: transport.StreamErrorCode(42),
 		}
 
-		mockStream := &FakeQUICStream{
-			Writes: []streamResult{{Err: streamError}},
+		mockStream := &fakeQUICStream{
+			writes: []streamResult{{Err: streamError}},
 		}
 
 		aw := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil, nil)
@@ -1161,9 +1161,9 @@ func TestMux_ServeAnnouncements_SendAnnouncementWriteError_ClosesWithInternalErr
 		// Make the first Write (SendAnnouncement) fail with StreamError
 		streamErr := &transport.StreamError{StreamID: transport.StreamID(2), ErrorCode: transport.StreamErrorCode(99)}
 		writeCh := make(chan struct{}, 1)
-		mockStream := &FakeQUICStream{
-			WriteNotify: writeCh,
-			Writes:      []streamResult{{Err: streamErr}},
+		mockStream := &fakeQUICStream{
+			writeNotify: writeCh,
+			writes:      []streamResult{{Err: streamErr}},
 		}
 
 		aw := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil, nil)
@@ -1227,9 +1227,9 @@ func TestMux_ServeAnnouncements_ContextCancel_StopsLoop(t *testing.T) {
 		streamCtx, cancel := context.WithCancel(context.Background())
 		// allow Write if init happens
 		writeCh := make(chan struct{}, 1)
-		mockStream := &FakeQUICStream{
-			ParentCtx:   streamCtx,
-			WriteNotify: writeCh,
+		mockStream := &fakeQUICStream{
+			parentCtx:   streamCtx,
+			writeNotify: writeCh,
 		}
 
 		aw := newAnnouncementWriter(mockStream, "/test/", 0, 0, nil, nil)
@@ -1285,9 +1285,9 @@ func TestMux_ServeAnnouncements_SlowSubscriber_NoDeadlock(t *testing.T) {
 		streamCtx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		mockStream := &FakeQUICStream{
-			ParentCtx:  streamCtx,
-			WriteDelay: 50 * time.Millisecond, // slow write
+		mockStream := &fakeQUICStream{
+			parentCtx:  streamCtx,
+			writeDelay: 50 * time.Millisecond, // slow write
 		}
 
 		aw := newAnnouncementWriter(mockStream, "/slow/", 0, 0, nil, nil)
@@ -1341,18 +1341,18 @@ func TestMux_ServeAnnouncements_MultipleListeners_ReceiveAnnouncement(t *testing
 		// First mock stream
 		ctx1, cancel1 := context.WithCancel(context.Background())
 		writeCh1 := make(chan struct{}, 1)
-		mock1 := &FakeQUICStream{
-			ParentCtx:   ctx1,
-			WriteNotify: writeCh1,
+		mock1 := &fakeQUICStream{
+			parentCtx:   ctx1,
+			writeNotify: writeCh1,
 		}
 		aw1 := newAnnouncementWriter(mock1, "/multi/", 0, 0, nil, nil)
 
 		// Second mock stream
 		ctx2, cancel2 := context.WithCancel(context.Background())
 		writeCh2 := make(chan struct{}, 1)
-		mock2 := &FakeQUICStream{
-			ParentCtx:   ctx2,
-			WriteNotify: writeCh2,
+		mock2 := &fakeQUICStream{
+			parentCtx:   ctx2,
+			writeNotify: writeCh2,
 		}
 		aw2 := newAnnouncementWriter(mock2, "/multi/", 0, 0, nil, nil)
 
@@ -1425,8 +1425,8 @@ func TestMux_Announce_ClosesBusySubscriber(t *testing.T) {
 		mux := NewTrackMux(0)
 
 		// Prepare a real AnnouncementWriter and serveAnnouncements
-		mockStream := &FakeQUICStream{
-			WriteDelay: 50 * time.Millisecond,
+		mockStream := &fakeQUICStream{
+			writeDelay: 50 * time.Millisecond,
 		}
 
 		aw := newAnnouncementWriter(mockStream, "/busy/", 0, 0, nil, nil)
@@ -1475,9 +1475,9 @@ func TestMux_Publish_InitSendsExistingAnnouncements(t *testing.T) {
 	streamCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	writeCh := make(chan struct{}, 1)
-	mockStream := &FakeQUICStream{
-		ParentCtx:   streamCtx,
-		WriteNotify: writeCh,
+	mockStream := &fakeQUICStream{
+		parentCtx:   streamCtx,
+		writeNotify: writeCh,
 	}
 
 	aw := newAnnouncementWriter(mockStream, "/pubinit/", 0, 0, nil, nil)
@@ -1521,9 +1521,9 @@ func TestMux_Publish_AfterServeAnnouncements_SendsAnnouncement(t *testing.T) {
 	streamCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	writeCh := make(chan struct{}, 1)
-	mockStream := &FakeQUICStream{
-		ParentCtx:   streamCtx,
-		WriteNotify: writeCh,
+	mockStream := &fakeQUICStream{
+		parentCtx:   streamCtx,
+		writeNotify: writeCh,
 	}
 
 	aw := newAnnouncementWriter(mockStream, "/pubafter/", 0, 0, nil, nil)
@@ -1578,9 +1578,9 @@ func TestMux_PublishFunc_InitSendsExistingAnnouncements(t *testing.T) {
 	streamCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	writeCh := make(chan struct{}, 1)
-	mockStream := &FakeQUICStream{
-		ParentCtx:   streamCtx,
-		WriteNotify: writeCh,
+	mockStream := &fakeQUICStream{
+		parentCtx:   streamCtx,
+		writeNotify: writeCh,
 	}
 
 	aw := newAnnouncementWriter(mockStream, "/pubfuncinit/", 0, 0, nil, nil)
@@ -1624,9 +1624,9 @@ func TestMux_PublishFunc_AfterServeAnnouncements_SendsAnnouncement(t *testing.T)
 	streamCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	writeCh := make(chan struct{}, 1)
-	mockStream := &FakeQUICStream{
-		ParentCtx:   streamCtx,
-		WriteNotify: writeCh,
+	mockStream := &fakeQUICStream{
+		parentCtx:   streamCtx,
+		writeNotify: writeCh,
 	}
 
 	aw := newAnnouncementWriter(mockStream, "/pubfuncafter/", 0, 0, nil, nil)
@@ -1677,17 +1677,17 @@ func TestMux_ServeAnnouncements_ConcurrentAnnounce_NoDeadlock(t *testing.T) {
 		// Start several listeners (AnnouncementWriters)
 		listeners := 5
 		var aws []*AnnouncementWriter
-		var mocks []*FakeQUICStream
+		var mocks []*fakeQUICStream
 		var cancels []context.CancelFunc
 		var readyChans []chan struct{}
 		for range listeners {
-			ms := &FakeQUICStream{}
+			ms := &fakeQUICStream{}
 			// use cancellable contexts so we can stop goroutines later
 			cctx, cancel := context.WithCancel(context.Background())
 			cancels = append(cancels, cancel)
-			ms.ParentCtx = cctx
+			ms.parentCtx = cctx
 			ready := make(chan struct{}, 1)
-			ms.WriteNotify = ready
+			ms.writeNotify = ready
 			mocks = append(mocks, ms)
 			aw := newAnnouncementWriter(ms, "/race/", 0, 0, nil, nil)
 			aws = append(aws, aw)
@@ -1820,12 +1820,12 @@ func TestMux_ServeTrack_ClosesWhenAnnouncementEnds(t *testing.T) {
 	}))
 
 	// Mock receive stream expects Close / CancelRead to be called as part of Close()
-	mockStream := &FakeQUICStream{}
+	mockStream := &fakeQUICStream{}
 	streamCtx := t.Context()
-	mockStream.ParentCtx = streamCtx
+	mockStream.parentCtx = streamCtx
 
 	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream { return mockStream }(), &SubscribeConfig{}), func(_ context.Context) (transport.SendStream, error) {
-		return &FakeQUICSendStream{}, nil
+		return &fakeQUICSendStream{}, nil
 	}, func() {})
 
 	// Serve in a goroutine so handler can block and we can end the announcement
@@ -2143,10 +2143,10 @@ func TestMux_Publish_WithNilHandler_ClosesTrack(t *testing.T) {
 	mux.Publish(ctx, path, nil)
 
 	// Serve should close with TrackNotFound
-	mockStream := &FakeQUICStream{}
+	mockStream := &fakeQUICStream{}
 
 	tw := newTrackWriter(path, TrackName("test"), newReceiveSubscribeStream(SubscribeID(1), func() transport.Stream { return mockStream }(), &SubscribeConfig{}), func(_ context.Context) (transport.SendStream, error) {
-		return &FakeQUICSendStream{}, nil
+		return &fakeQUICSendStream{}, nil
 	}, func() {})
 
 	mux.serveTrack(tw)
@@ -2171,21 +2171,21 @@ func TestMux_ServeAnnouncements_AncestorAndDescendantReceive(t *testing.T) {
 		defer end()
 
 		// Root writer (prefix "/")
-		rootStream := &FakeQUICStream{}
+		rootStream := &fakeQUICStream{}
 		rootCtx, cancelR := context.WithCancel(context.Background())
 		defer cancelR()
-		rootStream.ParentCtx = rootCtx
+		rootStream.parentCtx = rootCtx
 		rootWriteCh := make(chan struct{}, 1)
-		rootStream.WriteNotify = rootWriteCh
+		rootStream.writeNotify = rootWriteCh
 		rootAW := newAnnouncementWriter(rootStream, "/", 0, 0, nil, nil)
 
 		// Descendant writer (prefix /share/)
-		shareStream := &FakeQUICStream{}
+		shareStream := &fakeQUICStream{}
 		shareCtx, cancelS := context.WithCancel(context.Background())
 		defer cancelS()
-		shareStream.ParentCtx = shareCtx
+		shareStream.parentCtx = shareCtx
 		shareWriteCh := make(chan struct{}, 1)
-		shareStream.WriteNotify = shareWriteCh
+		shareStream.writeNotify = shareWriteCh
 		shareAW := newAnnouncementWriter(shareStream, "/share/", 0, 0, nil, nil)
 
 		var wg sync.WaitGroup

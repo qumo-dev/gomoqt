@@ -29,11 +29,11 @@ func TestDialer_Dial_HTTPSRoutesToDialWebTransport(t *testing.T) {
 			assert.Nil(t, header)
 			assert.Nil(t, tlsConfig)
 
-			conn := &FakeWebTransportSession{}
-			conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
-			conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
-			conn.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
-			conn.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
+			conn := &fakeWebTransportSession{}
+			conn.acceptStreams = []biStreamResult{{Err: context.Canceled}}
+			conn.acceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+			conn.localAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+			conn.remoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
 
 			return &http.Response{StatusCode: http.StatusOK}, conn, nil
 		},
@@ -64,7 +64,7 @@ func TestDialer_Dial_MOQTRoutesToDialQUIC(t *testing.T) {
 			assert.Equal(t, []string{NextProtoMOQ}, tlsConfig.NextProtos)
 			assert.Nil(t, quicConfig)
 
-			conn := &FakeStreamConn{}
+			conn := &fakeStreamConn{}
 			return conn, nil
 		},
 	}
@@ -94,11 +94,11 @@ func TestDialer_Dial_WebTransportDefaultPath(t *testing.T) {
 		Config: &Config{SetupTimeout: 25 * time.Millisecond},
 		DialWebTransportFunc: func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config, quicConfig *quic.Config) (*http.Response, WebTransportSession, error) {
 			recordedTarget = addr
-			conn := &FakeWebTransportSession{}
-			conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
-			conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
-			conn.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
-			conn.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
+			conn := &fakeWebTransportSession{}
+			conn.acceptStreams = []biStreamResult{{Err: context.Canceled}}
+			conn.acceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+			conn.localAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+			conn.remoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
 			return &http.Response{StatusCode: http.StatusOK}, conn, nil
 		},
 	}
@@ -127,7 +127,7 @@ func TestDialer_Dial_QUICDefaultTLSConfig(t *testing.T) {
 			assert.Nil(t, quicConfig)
 			assert.Equal(t, []string{NextProtoMOQ}, tlsConfig.NextProtos)
 
-			conn := &FakeStreamConn{}
+			conn := &fakeStreamConn{}
 			return conn, nil
 		},
 	}
@@ -166,11 +166,11 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 			Config: &Config{SetupTimeout: 50 * time.Millisecond},
 			DialWebTransportFunc: func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config, quicConfig *quic.Config) (*http.Response, WebTransportSession, error) {
 				*recordTarget = addr
-				conn := &FakeWebTransportSession{}
-				conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
-				conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
-				conn.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
-				conn.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
+				conn := &fakeWebTransportSession{}
+				conn.acceptStreams = []biStreamResult{{Err: context.Canceled}}
+				conn.acceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+				conn.localAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+				conn.remoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
 				return &http.Response{StatusCode: http.StatusOK}, conn, nil
 			},
 		}
@@ -200,9 +200,9 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 		d := &Dialer{
 			Config: &Config{SetupTimeout: 50 * time.Millisecond},
 			DialQUICFunc: func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (StreamConn, error) {
-				conn := &FakeStreamConn{}
-				conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
-				conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+				conn := &fakeStreamConn{}
+				conn.acceptStreams = []biStreamResult{{Err: context.Canceled}}
+				conn.acceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
 				return conn, nil
 			},
 		}
@@ -218,9 +218,9 @@ func TestDialer_Dial_PopulatesSessionPath(t *testing.T) {
 		d := &Dialer{
 			Config: &Config{SetupTimeout: 50 * time.Millisecond},
 			DialQUICFunc: func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (StreamConn, error) {
-				conn := &FakeStreamConn{}
-				conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
-				conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+				conn := &fakeStreamConn{}
+				conn.acceptStreams = []biStreamResult{{Err: context.Canceled}}
+				conn.acceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
 				return conn, nil
 			},
 		}
@@ -242,11 +242,11 @@ func TestDialer_Dial_PreservesQuery(t *testing.T) {
 		Config: &Config{SetupTimeout: 50 * time.Millisecond},
 		DialWebTransportFunc: func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config, quicConfig *quic.Config) (*http.Response, WebTransportSession, error) {
 			target = addr
-			conn := &FakeWebTransportSession{}
-			conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
-			conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
-			conn.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
-			conn.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
+			conn := &fakeWebTransportSession{}
+			conn.acceptStreams = []biStreamResult{{Err: context.Canceled}}
+			conn.acceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+			conn.localAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+			conn.remoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
 			return &http.Response{StatusCode: http.StatusOK}, conn, nil
 		},
 	}
@@ -268,11 +268,11 @@ func TestDialer_Dial_StripsFragment(t *testing.T) {
 		Config: &Config{SetupTimeout: 50 * time.Millisecond},
 		DialWebTransportFunc: func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config, quicConfig *quic.Config) (*http.Response, WebTransportSession, error) {
 			target = addr
-			conn := &FakeWebTransportSession{}
-			conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
-			conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
-			conn.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
-			conn.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
+			conn := &fakeWebTransportSession{}
+			conn.acceptStreams = []biStreamResult{{Err: context.Canceled}}
+			conn.acceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+			conn.localAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+			conn.remoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
 			return &http.Response{StatusCode: http.StatusOK}, conn, nil
 		},
 	}
@@ -290,14 +290,14 @@ func TestDialer_Dial_StripsFragment(t *testing.T) {
 // draft-ietf-moq-transport's PATH parameter and the moq-lite reference
 // implementation use, and the session's RequestURI carries it the same way.
 func TestDialer_Dial_QUICCarriesQuery(t *testing.T) {
-	setupStream := &FakeQUICSendStream{}
+	setupStream := &fakeQUICSendStream{}
 	d := &Dialer{
 		Config: &Config{SetupTimeout: 50 * time.Millisecond},
 		DialQUICFunc: func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (StreamConn, error) {
-			conn := &FakeStreamConn{}
-			conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
-			conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
-			conn.OpenUniStreams = []sendStreamResult{{Stream: setupStream}}
+			conn := &fakeStreamConn{}
+			conn.acceptStreams = []biStreamResult{{Err: context.Canceled}}
+			conn.acceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+			conn.openUniStreams = []sendStreamResult{{Stream: setupStream}}
 			return conn, nil
 		},
 	}
@@ -315,14 +315,14 @@ func TestDialer_Dial_QUICCarriesQuery(t *testing.T) {
 // TestDialer_Dial_QUICWithoutQueryAppendsNothing verifies a moqt URL with no
 // query sends the bare path, with no trailing "?".
 func TestDialer_Dial_QUICWithoutQueryAppendsNothing(t *testing.T) {
-	setupStream := &FakeQUICSendStream{}
+	setupStream := &fakeQUICSendStream{}
 	d := &Dialer{
 		Config: &Config{SetupTimeout: 50 * time.Millisecond},
 		DialQUICFunc: func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (StreamConn, error) {
-			conn := &FakeStreamConn{}
-			conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
-			conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
-			conn.OpenUniStreams = []sendStreamResult{{Stream: setupStream}}
+			conn := &fakeStreamConn{}
+			conn.acceptStreams = []biStreamResult{{Err: context.Canceled}}
+			conn.acceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+			conn.openUniStreams = []sendStreamResult{{Stream: setupStream}}
 			return conn, nil
 		},
 	}
@@ -362,11 +362,11 @@ func TestDialer_Dial_DropsUserinfo(t *testing.T) {
 		Config: &Config{SetupTimeout: 50 * time.Millisecond},
 		DialWebTransportFunc: func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config, quicConfig *quic.Config) (*http.Response, WebTransportSession, error) {
 			target = addr
-			conn := &FakeWebTransportSession{}
-			conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
-			conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
-			conn.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
-			conn.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
+			conn := &fakeWebTransportSession{}
+			conn.acceptStreams = []biStreamResult{{Err: context.Canceled}}
+			conn.acceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+			conn.localAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+			conn.remoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
 			return &http.Response{StatusCode: http.StatusOK}, conn, nil
 		},
 	}
@@ -390,11 +390,11 @@ func TestDialer_Dial_BareQuestionMarkIsNotAQuery(t *testing.T) {
 			Config: &Config{SetupTimeout: 50 * time.Millisecond},
 			DialWebTransportFunc: func(ctx context.Context, addr string, header http.Header, tlsConfig *tls.Config, quicConfig *quic.Config) (*http.Response, WebTransportSession, error) {
 				target = addr
-				conn := &FakeWebTransportSession{}
-				conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
-				conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
-				conn.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
-				conn.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
+				conn := &fakeWebTransportSession{}
+				conn.acceptStreams = []biStreamResult{{Err: context.Canceled}}
+				conn.acceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+				conn.localAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+				conn.remoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
 				return &http.Response{StatusCode: http.StatusOK}, conn, nil
 			},
 		}
@@ -410,9 +410,9 @@ func TestDialer_Dial_BareQuestionMarkIsNotAQuery(t *testing.T) {
 		d := &Dialer{
 			Config: &Config{SetupTimeout: 50 * time.Millisecond},
 			DialQUICFunc: func(ctx context.Context, addr string, tlsConfig *tls.Config, quicConfig *quic.Config) (StreamConn, error) {
-				conn := &FakeStreamConn{}
-				conn.AcceptStreams = []biStreamResult{{Err: context.Canceled}}
-				conn.AcceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
+				conn := &fakeStreamConn{}
+				conn.acceptStreams = []biStreamResult{{Err: context.Canceled}}
+				conn.acceptUniStreams = []recvStreamResult{{Err: context.Canceled}}
 				return conn, nil
 			},
 		}
