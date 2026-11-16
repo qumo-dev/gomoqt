@@ -16,7 +16,7 @@ import (
 
 // discardStream returns a transport.Stream whose Write is a no-op success, so
 // the encode path is measured with no sink allocation on the writer side.
-func discardStream() *FakeQUICStream { return &FakeQUICStream{} }
+func discardStream() *fakeQUICStream { return &fakeQUICStream{} }
 
 // BenchmarkReceiveSubscribeStream_WriteOk measures writeOkLocked: it writes
 // a 1-byte SUBSCRIBE_OK type prefix ([]byte{...} — one allocation) then encodes

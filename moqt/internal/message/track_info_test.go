@@ -47,8 +47,8 @@ func TestTrackInfoMessage_DecodeErrors(t *testing.T) {
 	tests := map[string]struct {
 		data []byte
 	}{
-		"empty input":     {data: []byte{}},
-		"too short":       {data: []byte{0x01, 0x05}},
+		"empty input":    {data: []byte{}},
+		"too short":      {data: []byte{0x01, 0x05}},
 		"trailing bytes": {data: []byte{0x05, 0x01, 0x00, 0x00, 0x00, 0xFF}},
 	}
 

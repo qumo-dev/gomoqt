@@ -17,9 +17,9 @@ import (
 
 // newTestAnnouncementWriter creates a test AnnouncementWriter with default setup.
 // It uses the default prefix "/test/" unless a custom prefix is provided.
-// Optional setup functions configure the underlying FakeQUICStream.
-func newTestAnnouncementWriter(t *testing.T, opts ...func(*FakeQUICStream)) *AnnouncementWriter {
-	mockStream := &FakeQUICStream{}
+// Optional setup functions configure the underlying fakeQUICStream.
+func newTestAnnouncementWriter(t *testing.T, opts ...func(*fakeQUICStream)) *AnnouncementWriter {
+	mockStream := &fakeQUICStream{}
 	for _, f := range opts {
 		if f != nil {
 			f(mockStream)
@@ -29,7 +29,7 @@ func newTestAnnouncementWriter(t *testing.T, opts ...func(*FakeQUICStream)) *Ann
 }
 
 func TestNewAnnouncementWriter(t *testing.T) {
-	mockStream := &FakeQUICStream{}
+	mockStream := &fakeQUICStream{}
 	prefix := "/test/"
 	logger := &slog.Logger{}
 	aw := newAnnouncementWriter(mockStream, prefix, 0, 0, logger, nil)
@@ -49,7 +49,7 @@ func TestAnnouncementWriter_Init(t *testing.T) {
 		expectError          bool
 		expectedActives      int
 		expectedSuffixes     []string
-		setupMocks           func(*FakeQUICStream)
+		setupMocks           func(*fakeQUICStream)
 	}{
 		"empty initialization": {
 			initialAnnouncements: func(ctx context.Context) map[*Announcement]struct{} {
@@ -95,8 +95,8 @@ func TestAnnouncementWriter_Init(t *testing.T) {
 			},
 			expectError:     true,
 			expectedActives: 0,
-			setupMocks: func(mockStream *FakeQUICStream) {
-				mockStream.Writes = []streamResult{{Err: errors.New("write error")}}
+			setupMocks: func(mockStream *fakeQUICStream) {
+				mockStream.writes = []streamResult{{Err: errors.New("write error")}}
 			},
 		},
 		"invalid path announcement": {
@@ -141,8 +141,8 @@ func TestAnnouncementWriter_Init(t *testing.T) {
 }
 
 func TestAnnouncementWriter_SendAnnouncement_AfterInitError(t *testing.T) {
-	aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-		m.Writes = []streamResult{{Err: errors.New("write error")}}
+	aw := newTestAnnouncementWriter(t, func(m *fakeQUICStream) {
+		m.writes = []streamResult{{Err: errors.New("write error")}}
 	})
 	ann, _ := NewAnnouncement(context.Background(), BroadcastPath("/test/stream1"))
 
@@ -188,8 +188,8 @@ func TestAnnouncementWriter_Init_StreamError(t *testing.T) {
 		ErrorCode: transport.StreamErrorCode(42),
 	}
 
-	aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-		m.Writes = []streamResult{{Err: streamError}}
+	aw := newTestAnnouncementWriter(t, func(m *fakeQUICStream) {
+		m.writes = []streamResult{{Err: streamError}}
 	})
 
 	ann, _ := NewAnnouncement(context.Background(), BroadcastPath("/test/stream1"))
@@ -358,7 +358,7 @@ func TestAnnouncementWriter_SendAnnouncement_EncodesHops(t *testing.T) {
 	err = aw.SendAnnouncement(ann)
 	require.NoError(t, err)
 
-	written := aw.stream.(*FakeQUICStream).Written()
+	written := aw.stream.(*fakeQUICStream).Written()
 	r := bytes.NewReader(written)
 
 	// init writes ANNOUNCE_OK first, carrying this node's Hop ID.
@@ -394,8 +394,8 @@ func TestAnnouncementWriter_SendAnnouncement_WriteError(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-				m.Writes = []streamResult{{Err: tt.writeError}}
+			aw := newTestAnnouncementWriter(t, func(m *fakeQUICStream) {
+				m.writes = []streamResult{{Err: tt.writeError}}
 			})
 			ann, _ := NewAnnouncement(context.Background(), BroadcastPath("/test/stream1"))
 
@@ -456,8 +456,8 @@ func TestAnnouncementWriter_Close(t *testing.T) {
 
 	t.Run("handles stream close error", func(t *testing.T) {
 		expectedErr := fmt.Errorf("stream close error")
-		aw := newTestAnnouncementWriter(t, func(m *FakeQUICStream) {
-			m.CloseErr = expectedErr
+		aw := newTestAnnouncementWriter(t, func(m *fakeQUICStream) {
+			m.closeErr = expectedErr
 		})
 
 		err := aw.Close()
@@ -484,7 +484,7 @@ func TestAnnouncementWriter_Close_SendsNoEnded(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			streamCtx, endStream := context.WithCancel(t.Context())
 			defer endStream()
-			stream := &FakeQUICStream{ParentCtx: streamCtx}
+			stream := &fakeQUICStream{parentCtx: streamCtx}
 			aw := newAnnouncementWriter(stream, "/test/", 0, 0, nil, nil)
 			require.NoError(t, aw.init(map[*Announcement]struct{}{}))
 			ann, end := NewAnnouncement(t.Context(), BroadcastPath("/test/active"))
@@ -508,7 +508,7 @@ func TestAnnouncementWriter_Close_SendsNoEnded(t *testing.T) {
 
 func TestAnnouncementWriter_RegisterEndHandlerLocked_StreamEnded(t *testing.T) {
 	streamCtx, endStream := context.WithCancel(t.Context())
-	stream := &FakeQUICStream{ParentCtx: streamCtx}
+	stream := &fakeQUICStream{parentCtx: streamCtx}
 	aw := newAnnouncementWriter(stream, "/test/", 0, 0, nil, nil)
 	require.NoError(t, aw.init(map[*Announcement]struct{}{}))
 	ann, end := NewAnnouncement(t.Context(), BroadcastPath("/test/active"))
@@ -557,7 +557,7 @@ func TestAnnouncementWriter_CloseWithError(t *testing.T) {
 				assert.Nil(t, aw.actives)
 				assert.NotNil(t, aw.initDone)
 
-				mockStream := aw.stream.(*FakeQUICStream)
+				mockStream := aw.stream.(*fakeQUICStream)
 				assert.Equal(t, []transport.StreamErrorCode{transport.StreamErrorCode(tt.errorCode)}, mockStream.CancelReadCodes(), "CancelRead should be called")
 				assert.Equal(t, []transport.StreamErrorCode{transport.StreamErrorCode(tt.errorCode)}, mockStream.CancelWriteCodes(), "CancelWrite should be called")
 			})
@@ -586,7 +586,7 @@ func TestAnnouncementWriter_CloseWithError(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Nil(t, aw.actives)
 
-		mockStream := aw.stream.(*FakeQUICStream)
+		mockStream := aw.stream.(*fakeQUICStream)
 		assert.Equal(t, []transport.StreamErrorCode{transport.StreamErrorCode(AnnounceErrorCodeInternal)}, mockStream.CancelReadCodes(), "CancelRead should be called")
 		assert.Equal(t, []transport.StreamErrorCode{transport.StreamErrorCode(AnnounceErrorCodeInternal)}, mockStream.CancelWriteCodes(), "CancelWrite should be called")
 	})
@@ -729,7 +729,7 @@ func TestAnnouncementWriter_BoundaryValues(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			mockStream := &FakeQUICStream{}
+			mockStream := &fakeQUICStream{}
 			aw := newAnnouncementWriter(mockStream, tt.prefix, 0, 0, nil, nil)
 			ann, _ := NewAnnouncement(context.Background(), BroadcastPath(tt.broadcastPath))
 

@@ -90,7 +90,7 @@ func BenchmarkTrackMux_serveTrack(b *testing.B) {
 
 	// Create a test track writer
 	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
-		mockSendStream := &FakeQUICSendStream{}
+		mockSendStream := &fakeQUICSendStream{}
 		return mockSendStream, nil
 	}
 	onCloseTrack := func() {}
@@ -147,9 +147,9 @@ func BenchmarkTrackMux_ServeAnnouncements(b *testing.B) {
 			// init AND on each forwarded announcement). Used both to wait for
 			// init completion before timing and to acknowledge each fan-out.
 			delivered := make(chan struct{}, 1)
-			mockStream := &FakeQUICStream{
-				ParentCtx:   awCtx,
-				WriteNotify: delivered,
+			mockStream := &fakeQUICStream{
+				parentCtx:   awCtx,
+				writeNotify: delivered,
 			}
 			aw := newAnnouncementWriter(mockStream, "/room/", 0, 0, nil, nil)
 
@@ -595,9 +595,9 @@ func BenchmarkTrackMux_AnnouncementTree(b *testing.B) {
 			// why this avoids the overflow -> drop/close path).
 			awCtx, cancelAW := context.WithCancel(ctx)
 			delivered := make(chan struct{}, 1)
-			mockStream := &FakeQUICStream{
-				ParentCtx:   awCtx,
-				WriteNotify: delivered,
+			mockStream := &fakeQUICStream{
+				parentCtx:   awCtx,
+				writeNotify: delivered,
 			}
 			aw := newAnnouncementWriter(mockStream, "/level1/", 0, 0, nil, nil)
 
@@ -742,7 +742,7 @@ func BenchmarkTrackMux_CPUProfileOptimization(b *testing.B) {
 					BroadcastPath: path,
 					TrackName:     TrackName(fmt.Sprintf("track-%d", i)),
 					openUniStreamFunc: func(_ context.Context) (transport.SendStream, error) {
-						mockSendStream := &FakeQUICSendStream{}
+						mockSendStream := &fakeQUICSendStream{}
 						return mockSendStream, nil
 					},
 				}

@@ -92,7 +92,7 @@ func TestSendSubscribeStream_ReadSubscribeResponses_EndAndDrop(t *testing.T) {
 			return (&message.SubscribeDropMessage{GroupStart: 2, GroupEnd: 3, ErrorCode: 4}).Encode(b)
 		})
 
-	stream := &FakeQUICStream{Reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
+	stream := &fakeQUICStream{reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
 	substr := newSendSubscribeStream(SubscribeID(1), stream, &SubscribeConfig{})
 
 	done := make(chan struct{})
@@ -120,12 +120,12 @@ func TestSendSubscribeStream_ReadSubscribeResponses_EndAndDrop(t *testing.T) {
 // TestSendSubscribeStream_SetEnd_Direct exercises the setEnd path (used when
 // the first publisher response is SUBSCRIBE_END with no preceding OK).
 func TestSendSubscribeStream_SetEnd_Direct(t *testing.T) {
-	stream := &FakeQUICStream{}
+	stream := &fakeQUICStream{}
 	substr := newSendSubscribeStream(SubscribeID(2), stream, &SubscribeConfig{})
 
 	substr.setEnd(GroupSequence(42))
 
 	assert.True(t, substr.ended)
 	assert.Equal(t, GroupSequence(42), substr.endGroup)
-	
+
 }

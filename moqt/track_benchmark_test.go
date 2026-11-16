@@ -15,14 +15,14 @@ func BenchmarkTrackReader_EnqueueDequeue(b *testing.B) {
 
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("size-%d", size), func(b *testing.B) {
-			mockStream := &FakeQUICStream{}
+			mockStream := &fakeQUICStream{}
 			substr := newTestSendSubscribeStreamFromStream(mockStream, &SubscribeConfig{})
 			reader := newTrackReader("/test", "video", substr, func() {})
 
 			// Pre-create mock receive streams
 			streams := make([]transport.ReceiveStream, size)
 			for i := range streams {
-				mockRecvStream := &FakeQUICReceiveStream{}
+				mockRecvStream := &fakeQUICReceiveStream{}
 				streams[i] = mockRecvStream
 			}
 
@@ -47,7 +47,7 @@ func BenchmarkTrackReader_EnqueueDequeue(b *testing.B) {
 
 // BenchmarkTrackReader_AcceptGroup benchmarks accepting groups with queued data
 func BenchmarkTrackReader_AcceptGroup(b *testing.B) {
-	mockStream := &FakeQUICStream{}
+	mockStream := &fakeQUICStream{}
 	ctx := context.Background()
 	substr := newTestSendSubscribeStreamFromStream(mockStream, &SubscribeConfig{})
 	reader := newTrackReader("/test", "video", substr, func() {})
@@ -56,7 +56,7 @@ func BenchmarkTrackReader_AcceptGroup(b *testing.B) {
 
 	for i := 0; b.Loop(); i++ {
 		// Enqueue a group for this iteration
-		mockRecvStream := &FakeQUICReceiveStream{}
+		mockRecvStream := &fakeQUICReceiveStream{}
 		reader.enqueueGroup(GroupSequence(i), mockRecvStream)
 
 		// Accept it immediately (non-blocking since queue has data)
@@ -73,14 +73,14 @@ func BenchmarkTrackReader_ConcurrentAccess(b *testing.B) {
 
 	for _, conc := range concurrency {
 		b.Run(fmt.Sprintf("goroutines-%d", conc), func(b *testing.B) {
-			mockStream := &FakeQUICStream{}
+			mockStream := &fakeQUICStream{}
 			ctx := context.Background()
 			substr := newTestSendSubscribeStreamFromStream(mockStream, &SubscribeConfig{})
 			reader := newTrackReader("/test", "video", substr, func() {})
 
 			// Pre-populate queue
 			for i := range 100 {
-				mockRecvStream := &FakeQUICReceiveStream{}
+				mockRecvStream := &fakeQUICReceiveStream{}
 				reader.enqueueGroup(GroupSequence(i), mockRecvStream)
 			}
 
@@ -96,7 +96,7 @@ func BenchmarkTrackReader_ConcurrentAccess(b *testing.B) {
 					for i := 0; i < b.N/conc; i++ {
 						if id%2 == 0 {
 							// Enqueue
-							mockRecvStream := &FakeQUICReceiveStream{}
+							mockRecvStream := &fakeQUICReceiveStream{}
 
 							reader.enqueueGroup(GroupSequence(i+id*1000), mockRecvStream)
 						} else {
@@ -121,7 +121,7 @@ func BenchmarkTrackWriter_OpenGroup(b *testing.B) {
 
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("groups-%d", size), func(b *testing.B) {
-			mockStream := &FakeQUICStream{}
+			mockStream := &fakeQUICStream{}
 
 			substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
@@ -130,7 +130,7 @@ func BenchmarkTrackWriter_OpenGroup(b *testing.B) {
 				streamMu.Lock()
 				defer streamMu.Unlock()
 
-				mockSendStream := &FakeQUICSendStream{}
+				mockSendStream := &fakeQUICSendStream{}
 				return mockSendStream, nil
 			}
 
@@ -154,7 +154,7 @@ func BenchmarkTrackWriter_OpenGroup(b *testing.B) {
 
 // BenchmarkTrackWriter_ConcurrentOpenGroup benchmarks concurrent group opening.
 //
-// The openUniStreamFunc stand-in allocates a fresh FakeQUICSendStream per call
+// The openUniStreamFunc stand-in allocates a fresh fakeQUICSendStream per call
 // WITHOUT taking a shared mutex. Production's OpenUniStream (quic-go) draws a
 // stream from a connection-wide pool and does not serialize callers on a single
 // global lock, so the previous version's artificial streamMu inflated lock
@@ -166,14 +166,14 @@ func BenchmarkTrackWriter_ConcurrentOpenGroup(b *testing.B) {
 
 	for _, conc := range concurrency {
 		b.Run(fmt.Sprintf("goroutines-%d", conc), func(b *testing.B) {
-			mockStream := &FakeQUICStream{}
+			mockStream := &fakeQUICStream{}
 
 			substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
 			// No shared lock: each call returns an independent send stream,
 			// matching quic-go's non-serializing OpenUniStream semantics.
 			openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
-				mockSendStream := &FakeQUICSendStream{}
+				mockSendStream := &fakeQUICSendStream{}
 				return mockSendStream, nil
 			}
 
@@ -203,12 +203,12 @@ func BenchmarkTrackWriter_ActiveGroupManagement(b *testing.B) {
 
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("size-%d", size), func(b *testing.B) {
-			mockStream := &FakeQUICStream{}
+			mockStream := &fakeQUICStream{}
 
 			substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
 			openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
-				mockSendStream := &FakeQUICSendStream{}
+				mockSendStream := &fakeQUICSendStream{}
 				return mockSendStream, nil
 			}
 
@@ -249,12 +249,12 @@ func BenchmarkTrackWriter_MemoryAllocation(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; b.Loop(); i++ {
-		mockStream := &FakeQUICStream{}
+		mockStream := &fakeQUICStream{}
 
 		substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
 		openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
-			mockSendStream := &FakeQUICSendStream{}
+			mockSendStream := &fakeQUICSendStream{}
 			return mockSendStream, nil
 		}
 
@@ -275,12 +275,12 @@ func BenchmarkTrackReader_MemoryAllocation(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		mockStream := &FakeQUICStream{}
+		mockStream := &fakeQUICStream{}
 		substr := newTestSendSubscribeStreamFromStream(mockStream, &SubscribeConfig{})
 		reader := newTrackReader("/test", "video", substr, func() {})
 
 		// Enqueue and dequeue a group
-		mockRecvStream := &FakeQUICReceiveStream{}
+		mockRecvStream := &fakeQUICReceiveStream{}
 		reader.enqueueGroup(GroupSequence(1), mockRecvStream)
 
 		group, err := reader.AcceptGroup(context.Background())
@@ -301,12 +301,12 @@ func BenchmarkTrackWriter_CloseWithActiveGroups(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				mockStream := &FakeQUICStream{}
+				mockStream := &fakeQUICStream{}
 
 				substr := newReceiveSubscribeStream(SubscribeID(1), mockStream, &SubscribeConfig{})
 
 				openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
-					return &FakeQUICSendStream{}, nil
+					return &fakeQUICSendStream{}, nil
 				}
 
 				writer := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {})

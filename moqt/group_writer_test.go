@@ -15,18 +15,18 @@ import (
 
 func TestNewGroupWriter(t *testing.T) {
 	tests := map[string]struct {
-		setupMock func() *FakeQUICSendStream
+		setupMock func() *fakeQUICSendStream
 		sequence  GroupSequence
 	}{
 		"valid stream and sequence": {
-			setupMock: func() *FakeQUICSendStream {
-				return &FakeQUICSendStream{}
+			setupMock: func() *fakeQUICSendStream {
+				return &fakeQUICSendStream{}
 			},
 			sequence: GroupSequence(123),
 		},
 		"different sequence": {
-			setupMock: func() *FakeQUICSendStream {
-				return &FakeQUICSendStream{}
+			setupMock: func() *fakeQUICSendStream {
+				return &fakeQUICSendStream{}
 			},
 			sequence: GroupSequence(456),
 		},
@@ -50,7 +50,7 @@ func TestNewGroupWriter(t *testing.T) {
 }
 
 func TestGroupWriter_GroupSequence(t *testing.T) {
-	mockStream := &FakeQUICSendStream{}
+	mockStream := &fakeQUICSendStream{}
 	sequence := GroupSequence(789)
 	sgs := newGroupWriter(mockStream, sequence, newGroupWriterManager())
 
@@ -61,10 +61,10 @@ func TestGroupWriter_GroupSequence(t *testing.T) {
 func TestGroupWriter_WriteFrame(t *testing.T) {
 	tests := map[string]struct {
 		setupFrame       func() *Frame
-		setupMock        func() *FakeQUICSendStream
+		setupMock        func() *fakeQUICSendStream
 		expectError      bool
 		expectFrameCount uint64
-		verifyData       func(t *testing.T, stream *FakeQUICSendStream)
+		verifyData       func(t *testing.T, stream *fakeQUICSendStream)
 	}{
 		"write valid frame": {
 			setupFrame: func() *Frame {
@@ -72,12 +72,12 @@ func TestGroupWriter_WriteFrame(t *testing.T) {
 				_, _ = frame.Write([]byte("test data"))
 				return frame
 			},
-			setupMock: func() *FakeQUICSendStream {
-				return &FakeQUICSendStream{}
+			setupMock: func() *fakeQUICSendStream {
+				return &fakeQUICSendStream{}
 			},
 			expectError:      false,
 			expectFrameCount: 1,
-			verifyData: func(t *testing.T, stream *FakeQUICSendStream) {
+			verifyData: func(t *testing.T, stream *fakeQUICSendStream) {
 				// draft-05 frame format: varint(timestamp_delta) + varint(length) + payload.
 				// For the first frame with Timestamp 0: delta=0 (1 byte 0x00), length=9 (1 byte 0x09), payload="test data".
 				assert.Equal(t, append([]byte{0, 9}, []byte("test data")...), stream.Written())
@@ -87,8 +87,8 @@ func TestGroupWriter_WriteFrame(t *testing.T) {
 			setupFrame: func() *Frame {
 				return nil
 			},
-			setupMock: func() *FakeQUICSendStream {
-				return &FakeQUICSendStream{}
+			setupMock: func() *fakeQUICSendStream {
+				return &fakeQUICSendStream{}
 			},
 			expectError:      false,
 			expectFrameCount: 0,
@@ -99,9 +99,9 @@ func TestGroupWriter_WriteFrame(t *testing.T) {
 				_, _ = frame.Write([]byte("test data"))
 				return frame
 			},
-			setupMock: func() *FakeQUICSendStream {
-				return &FakeQUICSendStream{
-					Writes: []streamResult{{Err: errors.New("write error")}},
+			setupMock: func() *fakeQUICSendStream {
+				return &fakeQUICSendStream{
+					writes: []streamResult{{Err: errors.New("write error")}},
 				}
 			},
 			expectError:      true,
@@ -134,7 +134,7 @@ func TestGroupWriter_WriteFrame(t *testing.T) {
 // --- write deadline --------------------------------------------------------
 
 func TestGroupWriter_SetWriteDeadline(t *testing.T) {
-	mockStream := &FakeQUICSendStream{}
+	mockStream := &fakeQUICSendStream{}
 	deadline := time.Now().Add(time.Minute)
 	sgs := newGroupWriter(mockStream, GroupSequence(1), newGroupWriterManager())
 
@@ -145,7 +145,7 @@ func TestGroupWriter_SetWriteDeadline(t *testing.T) {
 // --- close behavior --------------------------------------------------------
 
 func TestGroupWriter_Close(t *testing.T) {
-	mockStream := &FakeQUICSendStream{}
+	mockStream := &fakeQUICSendStream{}
 
 	sgs := newGroupWriter(mockStream, GroupSequence(1), newGroupWriterManager())
 
@@ -156,8 +156,8 @@ func TestGroupWriter_Close(t *testing.T) {
 func TestGroupWriter_ContextCancellation(t *testing.T) {
 	t.Run("operations continue when context is cancelled", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
-		mockStream := &FakeQUICSendStream{
-			ParentCtx: ctx,
+		mockStream := &fakeQUICSendStream{
+			parentCtx: ctx,
 		}
 
 		sgs := newGroupWriter(mockStream, GroupSequence(1), newGroupWriterManager())
@@ -182,8 +182,8 @@ func TestGroupWriter_CloseWithStreamError(t *testing.T) {
 			ErrorCode: transport.StreamErrorCode(42),
 		}
 
-		mockStream := &FakeQUICSendStream{
-			CloseErr: streamErr,
+		mockStream := &fakeQUICSendStream{
+			closeErr: streamErr,
 		}
 
 		sgs := newGroupWriter(mockStream, GroupSequence(1), newGroupWriterManager())
@@ -196,8 +196,8 @@ func TestGroupWriter_CloseWithStreamError(t *testing.T) {
 	t.Run("close returns non-stream error", func(t *testing.T) {
 		otherErr := errors.New("some other error")
 
-		mockStream := &FakeQUICSendStream{
-			CloseErr: otherErr,
+		mockStream := &fakeQUICSendStream{
+			closeErr: otherErr,
 		}
 
 		sgs := newGroupWriter(mockStream, GroupSequence(1), newGroupWriterManager())
@@ -210,8 +210,8 @@ func TestGroupWriter_CloseWithStreamError(t *testing.T) {
 	t.Run("close when context already cancelled", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 
-		mockStream := &FakeQUICSendStream{
-			ParentCtx: ctx,
+		mockStream := &fakeQUICSendStream{
+			parentCtx: ctx,
 		}
 
 		sgs := newGroupWriter(mockStream, GroupSequence(1), newGroupWriterManager())
@@ -227,7 +227,7 @@ func TestGroupWriter_CloseWithStreamError(t *testing.T) {
 // --- context and cancellation ---------------------------------------------
 
 func TestGroupWriter_Context(t *testing.T) {
-	mockStream := &FakeQUICSendStream{}
+	mockStream := &fakeQUICSendStream{}
 
 	sgs := newGroupWriter(mockStream, GroupSequence(123), newGroupWriterManager())
 
@@ -253,7 +253,7 @@ func TestGroupWriter_CancelWrite(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			mockStream := &FakeQUICSendStream{}
+			mockStream := &fakeQUICSendStream{}
 
 			var groupManager *groupWriterManager
 			if tt.hasManager {

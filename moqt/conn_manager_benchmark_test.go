@@ -15,8 +15,8 @@ var sinkConns []StreamConn
 // (which would churn the doneChan) and pollute the measurement.
 func BenchmarkConnManager_AddRemove(b *testing.B) {
 	cm := newConnManager()
-	cm.addConn(&FakeStreamConn{}) // baseline; stays registered
-	target := &FakeStreamConn{}
+	cm.addConn(&fakeStreamConn{}) // baseline; stays registered
+	target := &fakeStreamConn{}
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -38,7 +38,7 @@ func BenchmarkConnManager_Snapshot(b *testing.B) {
 		b.Run("conns-"+formatInt(size), func(b *testing.B) {
 			cm := newConnManager()
 			for range size {
-				cm.addConn(&FakeStreamConn{})
+				cm.addConn(&fakeStreamConn{})
 			}
 
 			b.ReportAllocs()

@@ -23,7 +23,7 @@ func TestGroupWriterReader_TimestampRoundTrip(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var buf bytes.Buffer
 
-			writer := &GroupWriter{stream: &FakeQUICSendStream{WriteTo: &buf}}
+			writer := &GroupWriter{stream: &fakeQUICSendStream{writeTo: &buf}}
 			for i, ts := range tt.timestamps {
 				frame := NewFrame(8)
 				frame.Timestamp = ts
@@ -31,7 +31,7 @@ func TestGroupWriterReader_TimestampRoundTrip(t *testing.T) {
 				require.NoError(t, writer.WriteFrame(frame))
 			}
 
-			reader := &GroupReader{stream: &FakeQUICReceiveStream{ReadFrom: &buf}}
+			reader := &GroupReader{stream: &fakeQUICReceiveStream{readFrom: &buf}}
 			got := NewFrame(8)
 			for i, want := range tt.timestamps {
 				require.NoError(t, reader.ReadFrame(got))
@@ -58,7 +58,7 @@ func TestFrame_Encode_RejectsOutOfRangeTimestamp(t *testing.T) {
 	// range (reachable on a relay via uint64->int64 wraparound) must return
 	// ErrTimestampOutOfRange instead of panicking inside WriteVarint.
 	tests := map[string]struct {
-		ts        uint64
+		ts uint64
 	}{
 		"large positive delta": {ts: uint64(1<<63 - 1)},
 		"wraparound negative":  {ts: 1}, // prev=1<<63-1 makes delta hugely negative

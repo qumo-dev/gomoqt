@@ -31,16 +31,16 @@ func BenchmarkSession_Subscribe(b *testing.B) {
 
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("size-%d", size), func(b *testing.B) {
-			conn := &FakeStreamConn{}
+			conn := &fakeStreamConn{}
 
 			// Every opened stream completes the subscribe handshake: the single
 			// queue entry repeats, so each Read re-serves the whole SUBSCRIBE_OK.
-			conn.OpenStreams = []biStreamResult{
-				{Stream: &FakeQUICStream{
-					Reads: []streamResult{{Data: benchmarkSubscribeOk(b), Err: io.EOF}},
+			conn.openStreams = []biStreamResult{
+				{Stream: &fakeQUICStream{
+					reads: []streamResult{{Data: benchmarkSubscribeOk(b), Err: io.EOF}},
 					// Discard the subscribe writes: recording every iteration's
 					// bytes would show up as growing allocs/op.
-					WriteTo: io.Discard,
+					writeTo: io.Discard,
 				}},
 			}
 
@@ -74,16 +74,16 @@ func BenchmarkSession_ConcurrentSubscribe(b *testing.B) {
 
 	for _, conc := range concurrency {
 		b.Run(fmt.Sprintf("goroutines-%d", conc), func(b *testing.B) {
-			conn := &FakeStreamConn{}
+			conn := &fakeStreamConn{}
 
 			// The fake is mutex-guarded, so one shared stream serves every
 			// concurrent open; its single queue entry repeats per Read.
-			conn.OpenStreams = []biStreamResult{
-				{Stream: &FakeQUICStream{
-					Reads: []streamResult{{Data: benchmarkSubscribeOk(b), Err: io.EOF}},
+			conn.openStreams = []biStreamResult{
+				{Stream: &fakeQUICStream{
+					reads: []streamResult{{Data: benchmarkSubscribeOk(b), Err: io.EOF}},
 					// Discard the subscribe writes: recording every iteration's
 					// bytes would show up as growing allocs/op.
-					WriteTo: io.Discard,
+					writeTo: io.Discard,
 				}},
 			}
 
@@ -121,7 +121,7 @@ func BenchmarkSession_ConcurrentSubscribe(b *testing.B) {
 
 // BenchmarkSession_TrackReaderOperations benchmarks adding/removing track readers
 func BenchmarkSession_TrackReaderOperations(b *testing.B) {
-	conn := &FakeStreamConn{}
+	conn := &fakeStreamConn{}
 
 	session := newTestSession(conn)
 
@@ -131,7 +131,7 @@ func BenchmarkSession_TrackReaderOperations(b *testing.B) {
 		id := SubscribeID(i)
 
 		// Create mock subscribe stream
-		mockSubStream := &FakeQUICStream{}
+		mockSubStream := &fakeQUICStream{}
 
 		substr := newSendSubscribeStream(id, mockSubStream, &SubscribeConfig{})
 		trackReader := newTrackReader("/test", "video", substr, func() {})
@@ -149,7 +149,7 @@ func BenchmarkSession_TrackReaderOperations(b *testing.B) {
 
 // BenchmarkSession_TrackWriterOperations benchmarks adding/removing track writers
 func BenchmarkSession_TrackWriterOperations(b *testing.B) {
-	conn := &FakeStreamConn{}
+	conn := &fakeStreamConn{}
 
 	session := newTestSession(conn)
 
@@ -159,7 +159,7 @@ func BenchmarkSession_TrackWriterOperations(b *testing.B) {
 		id := SubscribeID(i)
 
 		// Create mock subscribe stream
-		mockSubStream := &FakeQUICStream{}
+		mockSubStream := &fakeQUICStream{}
 
 		substr := newReceiveSubscribeStream(id, mockSubStream, &SubscribeConfig{})
 		trackWriter := newTrackWriter(
@@ -187,14 +187,14 @@ func BenchmarkSession_MapLookup(b *testing.B) {
 
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("size-%d", size), func(b *testing.B) {
-			conn := &FakeStreamConn{}
+			conn := &fakeStreamConn{}
 
 			session := newTestSession(conn)
 
 			// Pre-populate with track readers
 			for i := range size {
 				id := SubscribeID(i)
-				mockSubStream := &FakeQUICStream{}
+				mockSubStream := &fakeQUICStream{}
 
 				substr := newSendSubscribeStream(id, mockSubStream, &SubscribeConfig{})
 				trackReader := newTrackReader("/test", "video", substr, func() {})
@@ -231,14 +231,14 @@ func BenchmarkSession_MemoryAllocation(b *testing.B) {
 			b.ReportAllocs()
 
 			for range b.N {
-				conn := &FakeStreamConn{}
+				conn := &fakeStreamConn{}
 
 				session := newTestSession(conn)
 
 				// Create many track readers
 				for j := range size {
 					id := SubscribeID(j)
-					mockSubStream := &FakeQUICStream{}
+					mockSubStream := &fakeQUICStream{}
 
 					substr := newSendSubscribeStream(id, mockSubStream, &SubscribeConfig{})
 					trackReader := newTrackReader("/test", "video", substr, func() {})
@@ -258,8 +258,8 @@ func BenchmarkSession_ContextCancellation(b *testing.B) {
 	for range b.N {
 		ctx, cancel := context.WithCancel(context.Background())
 
-		conn := &FakeStreamConn{}
-		conn.ParentCtx = ctx
+		conn := &fakeStreamConn{}
+		conn.parentCtx = ctx
 
 		session := newTestSession(conn)
 

@@ -1804,11 +1804,11 @@ func TestBroadcast_RegisterTrack_ReplacesExisting(t *testing.T) {
 	b, err := NewBroadcast(Catalog{Version: 1})
 	require.NoError(t, err)
 
-	handler1 := &FakeTrackHandler{}
+	handler1 := &fakeTrackHandler{}
 	require.NoError(t, b.RegisterTrack(Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}, handler1))
 
 	// Register same track name again — hits replaced=true path.
-	handler2 := &FakeTrackHandler{}
+	handler2 := &fakeTrackHandler{}
 	err = b.RegisterTrack(Track{Name: "video", Packaging: PackagingLOC, IsLive: new(false)}, handler2)
 	require.NoError(t, err)
 
@@ -1824,8 +1824,8 @@ func TestBroadcast_SetCatalog_KeepsActiveRemovesStale(t *testing.T) {
 	b, err := NewBroadcast(Catalog{Version: 1})
 	require.NoError(t, err)
 
-	require.NoError(t, b.RegisterTrack(Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}, &FakeTrackHandler{}))
-	require.NoError(t, b.RegisterTrack(Track{Name: "audio", Packaging: PackagingLOC, IsLive: new(true)}, &FakeTrackHandler{}))
+	require.NoError(t, b.RegisterTrack(Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}, &fakeTrackHandler{}))
+	require.NoError(t, b.RegisterTrack(Track{Name: "audio", Packaging: PackagingLOC, IsLive: new(true)}, &fakeTrackHandler{}))
 
 	// New catalog keeps "video", drops "audio" → staleTrackNamesLocked hits continue for "video", appends "audio".
 	newCatalog := Catalog{

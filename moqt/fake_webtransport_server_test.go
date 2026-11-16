@@ -2,28 +2,28 @@ package moqt
 
 import "sync"
 
-var _ WebTransportServer = (*FakeWebTransportServer)(nil)
+var _ WebTransportServer = (*fakeWebTransportServer)(nil)
 
-// FakeWebTransportServer is a fake implementation of the WebTransportServer interface.
-type FakeWebTransportServer struct {
+// fakeWebTransportServer is a fake implementation of the WebTransportServer interface.
+type fakeWebTransportServer struct {
 	mu sync.Mutex
 
 	// Error overrides; the zero value means the call succeeds.
-	ServeQUICConnErr error
-	CloseErr         error
+	serveQUICConnErr error
+	closeErr         error
 
-	// ServeNotify receives each served connection. Sends are non-blocking.
-	ServeNotify chan<- StreamConn
+	// serveNotify receives each served connection. Sends are non-blocking.
+	serveNotify chan<- StreamConn
 
 	served     []StreamConn
 	closeCalls int
 }
 
-func (m *FakeWebTransportServer) ServeQUICConn(conn StreamConn) error {
+func (m *fakeWebTransportServer) ServeQUICConn(conn StreamConn) error {
 	m.mu.Lock()
 	m.served = append(m.served, conn)
-	err := m.ServeQUICConnErr
-	notify := m.ServeNotify
+	err := m.serveQUICConnErr
+	notify := m.serveNotify
 	m.mu.Unlock()
 
 	if notify != nil {
@@ -36,7 +36,7 @@ func (m *FakeWebTransportServer) ServeQUICConn(conn StreamConn) error {
 }
 
 // Served returns the connections passed to ServeQUICConn, in order.
-func (m *FakeWebTransportServer) Served() []StreamConn {
+func (m *fakeWebTransportServer) Served() []StreamConn {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]StreamConn, len(m.served))
@@ -46,15 +46,15 @@ func (m *FakeWebTransportServer) Served() []StreamConn {
 
 // CloseCalls returns how many times Close has been called. Server.Close
 // discards the returned error, so this is the only way to observe the call.
-func (m *FakeWebTransportServer) CloseCalls() int {
+func (m *fakeWebTransportServer) CloseCalls() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.closeCalls
 }
 
-func (m *FakeWebTransportServer) Close() error {
+func (m *fakeWebTransportServer) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.closeCalls++
-	return m.CloseErr
+	return m.closeErr
 }

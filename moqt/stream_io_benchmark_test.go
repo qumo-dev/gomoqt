@@ -206,7 +206,7 @@ func BenchmarkWriteThroughput_Memcpy(b *testing.B) {
 // BenchmarkWriteCount_GroupHeader counts the Write calls performed while
 // opening a group and writing a single frame, to characterize the
 // "two-header-writes per group" hypothesis. It uses a counting wrapper around
-// a FakeQUICSendStream and reproduces the EXACT OpenGroup write sequence from
+// a fakeQUICSendStream and reproduces the EXACT OpenGroup write sequence from
 // track_writer.go:
 //
 //  1. message.StreamTypeGroup.Encode(stream)   -> 1 Write (1 byte)
@@ -230,7 +230,7 @@ func BenchmarkWriteCount_GroupHeader(b *testing.B) {
 			}
 
 			// Discard-backed fake so we isolate WRITE-COUNT, not throughput.
-			fake := &FakeQUICSendStream{WriteTo: io.Discard}
+			fake := &fakeQUICSendStream{writeTo: io.Discard}
 			counting := NewCountingSendStream(fake)
 
 			// Pre-build the frame once; payload is fixed across iterations.

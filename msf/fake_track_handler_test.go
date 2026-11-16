@@ -4,15 +4,15 @@ import (
 	"github.com/qumo-dev/gomoqt/moqt"
 )
 
-var _ moqt.TrackHandler = (*FakeTrackHandler)(nil)
+var _ moqt.TrackHandler = (*fakeTrackHandler)(nil)
 
-// FakeTrackHandler is a fake implementation of moqt.TrackHandler that records calls.
-type FakeTrackHandler struct {
-	ServeTrackFunc func(tw *moqt.TrackWriter)
+// fakeTrackHandler is a fake implementation of moqt.TrackHandler that records calls.
+type fakeTrackHandler struct {
+	serveTrackFunc func(tw *moqt.TrackWriter)
 }
 
-func (m *FakeTrackHandler) ServeTrack(tw *moqt.TrackWriter) {
-	if m.ServeTrackFunc != nil {
-		m.ServeTrackFunc(tw)
+func (m *fakeTrackHandler) ServeTrack(tw *moqt.TrackWriter) {
+	if m.serveTrackFunc != nil {
+		m.serveTrackFunc(tw)
 	}
 }

@@ -21,23 +21,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestNativeQUICConn(tb testing.TB, opts ...func(*FakeStreamConn)) *FakeStreamConn {
+func newTestNativeQUICConn(tb testing.TB, opts ...func(*fakeStreamConn)) *fakeStreamConn {
 	tb.Helper()
-	conn := &FakeStreamConn{}
-	conn.TLSState = &tls.ConnectionState{NegotiatedProtocol: NextProtoMOQ}
+	conn := &fakeStreamConn{}
+	conn.tlsState = &tls.ConnectionState{NegotiatedProtocol: NextProtoMOQ}
 	for _, opt := range opts {
 		opt(conn)
 	}
 	return conn
 }
 
-// withClientSetup returns a FakeStreamConn option that makes the connection's
+// withClientSetup returns a fakeStreamConn option that makes the connection's
 // first uni stream carry a SETUP message with the given Path (the client's
 // mandatory Setup Stream on a native-QUIC connection). An empty path omits the
 // Path parameter. Subsequent AcceptUniStream calls return io.EOF, modeling a
 // connection with no further inbound uni streams.
-func withClientSetup(path string) func(*FakeStreamConn) {
-	return func(conn *FakeStreamConn) {
+func withClientSetup(path string) func(*fakeStreamConn) {
+	return func(conn *fakeStreamConn) {
 		var buf bytes.Buffer
 		if err := message.StreamTypeSetup.Encode(&buf); err != nil {
 			panic(err)
@@ -50,8 +50,8 @@ func withClientSetup(path string) func(*FakeStreamConn) {
 			panic(err)
 		}
 		data := buf.Bytes()
-		conn.AcceptUniStreams = []recvStreamResult{
-			{Stream: &FakeQUICReceiveStream{Reads: []streamResult{{Data: data}}}},
+		conn.acceptUniStreams = []recvStreamResult{
+			{Stream: &fakeQUICReceiveStream{reads: []streamResult{{Data: data}}}},
 			{Err: io.EOF},
 		}
 	}
@@ -290,7 +290,7 @@ func TestServer_connContext_AppliesCustomAndInjectsServer(t *testing.T) {
 	}
 	s.init()
 
-	ctx := s.connContext(context.Background(), &FakeStreamConn{})
+	ctx := s.connContext(context.Background(), &fakeStreamConn{})
 
 	assert.Equal(t, "ok", ctx.Value(customKey{}))
 	ctxServer, ok := ctx.Value(serverContextKey).(*connManager)
@@ -306,7 +306,7 @@ func TestServer_connContext_PanicsOnNilCustomContext(t *testing.T) {
 	}
 
 	assert.Panics(t, func() {
-		_ = s.connContext(context.Background(), &FakeStreamConn{})
+		_ = s.connContext(context.Background(), &fakeStreamConn{})
 	})
 }
 
@@ -318,14 +318,14 @@ func TestServer_ServeQUICListener_ShuttingDown(t *testing.T) {
 		s.shutdownCancel()
 	}
 
-	err := s.ServeQUICListener(&FakeEarlyListener{})
+	err := s.ServeQUICListener(&fakeEarlyListener{})
 	assert.Equal(t, ErrServerClosed, err)
 }
 
 func TestServer_ServeQUICConn_UnsupportedProtocol(t *testing.T) {
 	s := &Server{}
-	conn := &FakeStreamConn{}
-	conn.TLSState = &tls.ConnectionState{NegotiatedProtocol: "unknown"}
+	conn := &fakeStreamConn{}
+	conn.tlsState = &tls.ConnectionState{NegotiatedProtocol: "unknown"}
 
 	err := s.ServeQUICConn(conn)
 	assert.Error(t, err)
@@ -333,9 +333,9 @@ func TestServer_ServeQUICConn_UnsupportedProtocol(t *testing.T) {
 }
 
 func TestServer_ServeQUICConn_WebTransport(t *testing.T) {
-	s := &Server{WebTransportServer: &FakeWebTransportServer{}}
-	conn := &FakeStreamConn{}
-	conn.TLSState = &tls.ConnectionState{NegotiatedProtocol: NextProtoH3}
+	s := &Server{WebTransportServer: &fakeWebTransportServer{}}
+	conn := &fakeStreamConn{}
+	conn.tlsState = &tls.ConnectionState{NegotiatedProtocol: NextProtoH3}
 
 	err := s.ServeQUICConn(conn)
 	assert.NoError(t, err)
@@ -422,11 +422,11 @@ func TestServer_ListenAndServeTLS_InvalidKeyPair(t *testing.T) {
 }
 
 func TestServer_Close_ClosesListenersAndWTServer(t *testing.T) {
-	wts := &FakeWebTransportServer{}
+	wts := &fakeWebTransportServer{}
 	s := &Server{WebTransportServer: wts}
 	s.init()
 
-	ln := &FakeEarlyListener{}
+	ln := &fakeEarlyListener{}
 	s.listeners[ln] = struct{}{}
 
 	err := s.Close()
@@ -515,7 +515,7 @@ func TestServer_addRemoveSession_ShutdownCompletesWhenLastSessionLeaves(t *testi
 		s.shutdownCancel()
 	}
 
-	conn := &FakeStreamConn{}
+	conn := &fakeStreamConn{}
 
 	sess := newSession(conn, nil, nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
 	t.Cleanup(func() { _ = sess.CloseWithError(NoError, "") })
@@ -535,12 +535,12 @@ func TestServer_addRemoveSession_ShutdownCompletesWhenLastSessionLeaves(t *testi
 func TestWebTransportHandler_upgradeWebTransport_WithoutServerContext(t *testing.T) {
 	u := &WebTransportHandler{
 		UpgradeFunc: func(w http.ResponseWriter, r *http.Request) (WebTransportSession, error) {
-			conn := &FakeWebTransportSession{}
+			conn := &fakeWebTransportSession{}
 			return conn, nil
 		},
 	}
 	r := &http.Request{TLS: &tls.ConnectionState{}}
-	conn, err := u.upgradeWebTransport(&FakeHTTPResponseWriter{}, r)
+	conn, err := u.upgradeWebTransport(&fakeHTTPResponseWriter{}, r)
 	require.NoError(t, err)
 	require.NotNil(t, conn)
 }
@@ -552,7 +552,7 @@ func TestWebTransportHandler_upgradeWebTransport_PlainHTTPRejected(t *testing.T)
 	r.TLS = nil
 	r.RemoteAddr = "127.0.0.1:443"
 
-	w := &FakeHTTPResponseWriter{}
+	w := &fakeHTTPResponseWriter{}
 
 	_, err := u.upgradeWebTransport(w, r)
 	assert.Error(t, err)
@@ -566,9 +566,9 @@ func TestWebTransportHandler_upgradeWebTransport_UsesCustomUpgradeFunc(t *testin
 	u := &WebTransportHandler{
 		TrackMux: NewTrackMux(0),
 		UpgradeFunc: func(w http.ResponseWriter, r *http.Request) (WebTransportSession, error) {
-			conn := &FakeWebTransportSession{}
-			conn.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
-			conn.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+			conn := &fakeWebTransportSession{}
+			conn.remoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
+			conn.localAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
 			return conn, nil
 		},
 	}
@@ -576,7 +576,7 @@ func TestWebTransportHandler_upgradeWebTransport_UsesCustomUpgradeFunc(t *testin
 	r, _ := http.NewRequest(http.MethodGet, "https://example.com/moq", nil)
 	r.TLS = &tls.ConnectionState{}
 
-	w := &FakeHTTPResponseWriter{}
+	w := &fakeHTTPResponseWriter{}
 
 	conn, err := u.upgradeWebTransport(w, r)
 	require.NoError(t, err)
@@ -585,7 +585,7 @@ func TestWebTransportHandler_upgradeWebTransport_UsesCustomUpgradeFunc(t *testin
 
 func TestServer_handleNativeQUIC_NoHandlerConfigured(t *testing.T) {
 	s := &Server{}
-	conn := &FakeStreamConn{}
+	conn := &fakeStreamConn{}
 	err := s.handleNativeQUIC(conn)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no native QUIC handler configured")
@@ -597,12 +597,12 @@ func TestServer_handleNativeQUIC_NoHandlerConfigured(t *testing.T) {
 // owns it, so nothing else would close it.
 func TestServer_handleNativeQUIC_ClosesConnOnSetupFailure(t *testing.T) {
 	tests := map[string]struct {
-		opts   []func(*FakeStreamConn)
+		opts   []func(*fakeStreamConn)
 		reason string
 	}{
 		"no setup stream": {reason: "setup failed"},
-		"missing path":    {opts: []func(*FakeStreamConn){withClientSetup("")}, reason: "missing or invalid Path parameter"},
-		"unrooted path":   {opts: []func(*FakeStreamConn){withClientSetup("live")}, reason: "missing or invalid Path parameter"},
+		"missing path":    {opts: []func(*fakeStreamConn){withClientSetup("")}, reason: "missing or invalid Path parameter"},
+		"unrooted path":   {opts: []func(*fakeStreamConn){withClientSetup("live")}, reason: "missing or invalid Path parameter"},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -706,7 +706,7 @@ func TestListenAndServe_PackageLevel(t *testing.T) {
 
 func TestStreamConnContext_Context(t *testing.T) {
 	ctx := context.WithValue(context.Background(), serverContextKey, "test-value")
-	inner := &FakeStreamConn{}
+	inner := &fakeStreamConn{}
 	w := &streamConnContext{StreamConn: inner, ctx: ctx}
 
 	assert.Equal(t, ctx, w.Context())
@@ -714,7 +714,7 @@ func TestStreamConnContext_Context(t *testing.T) {
 }
 
 func TestStreamConnContext_QUICConn_NoProvider(t *testing.T) {
-	inner := &FakeStreamConn{}
+	inner := &fakeStreamConn{}
 	w := &streamConnContext{StreamConn: inner, ctx: context.Background()}
 
 	assert.Nil(t, w.QUICConn())
@@ -725,9 +725,9 @@ func TestWebTransportHandler_ServeHTTP_UpgradeSuccess(t *testing.T) {
 	u := &WebTransportHandler{
 		TrackMux: NewTrackMux(0),
 		UpgradeFunc: func(w http.ResponseWriter, r *http.Request) (WebTransportSession, error) {
-			sess := &FakeWebTransportSession{}
-			sess.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
-			sess.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+			sess := &fakeWebTransportSession{}
+			sess.remoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
+			sess.localAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
 			return sess, nil
 		},
 		Handler: HandleFunc(func(sess *Session) {
@@ -737,7 +737,7 @@ func TestWebTransportHandler_ServeHTTP_UpgradeSuccess(t *testing.T) {
 
 	r, _ := http.NewRequest(http.MethodGet, "https://example.com/moq", nil)
 	r.TLS = &tls.ConnectionState{}
-	w := &FakeHTTPResponseWriter{}
+	w := &fakeHTTPResponseWriter{}
 
 	u.ServeHTTP(w, r)
 	assert.True(t, handlerCalled)
@@ -764,9 +764,9 @@ func TestWebTransportHandler_ServeHTTP_HandlerSeesRequestURI(t *testing.T) {
 			u := &WebTransportHandler{
 				TrackMux: NewTrackMux(0),
 				UpgradeFunc: func(w http.ResponseWriter, r *http.Request) (WebTransportSession, error) {
-					sess := &FakeWebTransportSession{}
-					sess.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
-					sess.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+					sess := &fakeWebTransportSession{}
+					sess.remoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
+					sess.localAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
 					return sess, nil
 				},
 				Handler: HandleFunc(func(sess *Session) {
@@ -777,7 +777,7 @@ func TestWebTransportHandler_ServeHTTP_HandlerSeesRequestURI(t *testing.T) {
 			r, _ := http.NewRequest(http.MethodGet, tc.url, nil)
 			r.TLS = &tls.ConnectionState{}
 
-			u.ServeHTTP(&FakeHTTPResponseWriter{}, r)
+			u.ServeHTTP(&fakeHTTPResponseWriter{}, r)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -791,9 +791,9 @@ func TestWebTransportHandler_ServeHTTP_UpgradeSuccessWithConnManager(t *testing.
 	u := &WebTransportHandler{
 		TrackMux: NewTrackMux(0),
 		UpgradeFunc: func(w http.ResponseWriter, r *http.Request) (WebTransportSession, error) {
-			sess := &FakeWebTransportSession{}
-			sess.RemoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
-			sess.LocalAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
+			sess := &fakeWebTransportSession{}
+			sess.remoteAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}
+			sess.localAddrValue = &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8443}
 			return sess, nil
 		},
 		Handler: HandleFunc(func(sess *Session) {
@@ -805,7 +805,7 @@ func TestWebTransportHandler_ServeHTTP_UpgradeSuccessWithConnManager(t *testing.
 	ctx := context.WithValue(r.Context(), serverContextKey, s.connManager)
 	r = r.WithContext(ctx)
 	r.TLS = &tls.ConnectionState{}
-	w := &FakeHTTPResponseWriter{}
+	w := &fakeHTTPResponseWriter{}
 
 	u.ServeHTTP(w, r)
 	assert.True(t, handlerCalled)
@@ -822,7 +822,7 @@ func TestWebTransportHandler_ServeHTTP_UpgradeFailFallback(t *testing.T) {
 	}
 
 	r, _ := http.NewRequest(http.MethodGet, "https://example.com/moq", nil)
-	w := &FakeHTTPResponseWriter{}
+	w := &fakeHTTPResponseWriter{}
 
 	u.ServeHTTP(w, r)
 }
@@ -836,7 +836,7 @@ func TestWebTransportHandler_Fallback_WithHandler(t *testing.T) {
 	}
 
 	r, _ := http.NewRequest(http.MethodGet, "https://example.com/moq", nil)
-	w := &FakeHTTPResponseWriter{}
+	w := &fakeHTTPResponseWriter{}
 
 	h.fallback(w, r)
 	assert.True(t, called)
@@ -846,7 +846,7 @@ func TestWebTransportHandler_Fallback_NoHandler(t *testing.T) {
 	h := &WebTransportHandler{}
 
 	r, _ := http.NewRequest(http.MethodGet, "https://example.com/moq", nil)
-	w := &FakeHTTPResponseWriter{}
+	w := &fakeHTTPResponseWriter{}
 
 	h.fallback(w, r)
 }
@@ -854,19 +854,19 @@ func TestWebTransportHandler_Fallback_NoHandler(t *testing.T) {
 func TestServer_ServeQUICListener_AcceptsAndServesConn(t *testing.T) {
 	served := make(chan StreamConn, 1)
 	s := &Server{
-		WebTransportServer: &FakeWebTransportServer{
-			ServeNotify: served,
+		WebTransportServer: &fakeWebTransportServer{
+			serveNotify: served,
 		},
 	}
 
-	conn := &FakeStreamConn{}
-	conn.TLSState = &tls.ConnectionState{NegotiatedProtocol: NextProtoH3}
+	conn := &fakeStreamConn{}
+	conn.tlsState = &tls.ConnectionState{NegotiatedProtocol: NextProtoH3}
 
 	// Hand out the connection exactly once, then park: without the trailing
 	// Block the repeated last entry would re-accept the same connection in a
 	// tight loop, spawning an unbounded number of serve goroutines.
-	ln := &FakeEarlyListener{
-		Accepts: []connResult{{Conn: conn}, {Block: true}},
+	ln := &fakeEarlyListener{
+		accepts: []connResult{{Conn: conn}, {Block: true}},
 	}
 
 	errCh := make(chan error, 1)
@@ -899,8 +899,8 @@ func TestServer_ServeQUICListener_AcceptsAndServesConn(t *testing.T) {
 
 func TestServer_ServeQUICListener_AcceptError(t *testing.T) {
 	s := &Server{}
-	ln := &FakeEarlyListener{
-		Accepts: []connResult{{Err: errors.New("accept failed")}},
+	ln := &fakeEarlyListener{
+		accepts: []connResult{{Err: errors.New("accept failed")}},
 	}
 
 	err := s.ServeQUICListener(ln)
@@ -950,7 +950,7 @@ func TestServer_handleNativeQUIC_IncrementsNativeSessions(t *testing.T) {
 
 func TestServer_ServeQUICConn_NilTLS(t *testing.T) {
 	s := &Server{}
-	conn := &FakeStreamConn{} // TLS returns nil by default
+	conn := &fakeStreamConn{} // TLS returns nil by default
 
 	err := s.ServeQUICConn(conn)
 	assert.Error(t, err)
@@ -958,12 +958,12 @@ func TestServer_ServeQUICConn_NilTLS(t *testing.T) {
 }
 
 func TestServer_goAway_SendsGoawayMessage(t *testing.T) {
-	stream := &FakeQUICStream{}
+	stream := &fakeQUICStream{}
 
 	connCtx, connCancel := context.WithCancel(context.Background())
-	conn := &FakeStreamConn{
-		OpenStreams: []biStreamResult{{Stream: stream}},
-		ParentCtx:   connCtx,
+	conn := &fakeStreamConn{
+		openStreams: []biStreamResult{{Stream: stream}},
+		parentCtx:   connCtx,
 	}
 
 	// Cancel the connection context to simulate connection close
@@ -976,8 +976,8 @@ func TestServer_goAway_SendsGoawayMessage(t *testing.T) {
 }
 
 func TestServer_goAway_OpenStreamError(t *testing.T) {
-	conn := &FakeStreamConn{
-		OpenStreams: []biStreamResult{{Err: errors.New("stream error")}},
+	conn := &fakeStreamConn{
+		openStreams: []biStreamResult{{Err: errors.New("stream error")}},
 	}
 
 	s := &Server{}
@@ -987,10 +987,10 @@ func TestServer_goAway_OpenStreamError(t *testing.T) {
 }
 
 func TestServer_goAway_ContextCanceled(t *testing.T) {
-	stream := &FakeQUICStream{}
+	stream := &fakeQUICStream{}
 
-	conn := &FakeStreamConn{
-		OpenStreams: []biStreamResult{{Stream: stream}},
+	conn := &fakeStreamConn{
+		openStreams: []biStreamResult{{Stream: stream}},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1005,7 +1005,7 @@ func TestServer_addListener_removeListener(t *testing.T) {
 	s := &Server{}
 	s.init()
 
-	ln := &FakeEarlyListener{}
+	ln := &fakeEarlyListener{}
 	s.addListener(ln)
 
 	s.listenerMu.RLock()
@@ -1025,7 +1025,7 @@ func TestServer_removeListener_NotPresent(t *testing.T) {
 	s := &Server{}
 	s.init()
 
-	ln := &FakeEarlyListener{}
+	ln := &fakeEarlyListener{}
 	// Removing a listener that was never added should not panic
 	s.removeListener(ln)
 }
@@ -1033,7 +1033,7 @@ func TestServer_removeListener_NotPresent(t *testing.T) {
 func TestServer_addListener_NilMap(t *testing.T) {
 	s := &Server{}
 	// Don't call init — listeners map is nil
-	ln := &FakeEarlyListener{}
+	ln := &fakeEarlyListener{}
 	s.addListener(ln)
 
 	s.listenerMu.RLock()
@@ -1175,4 +1175,3 @@ func TestWebTransportHandler_ServeHTTP_ProtocolMismatchFallsBack(t *testing.T) {
 	assert.True(t, fallbackCalled, "unmatched application protocol should trigger fallback")
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
-

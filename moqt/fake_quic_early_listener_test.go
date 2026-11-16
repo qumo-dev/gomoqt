@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-var _ QUICListener = (*FakeEarlyListener)(nil)
+var _ QUICListener = (*fakeEarlyListener)(nil)
 
 // connResult is one queued outcome for a listener accept.
 // Block parks the call until Close or ctx cancellation, modelling a listener
@@ -19,7 +19,7 @@ type connResult struct {
 	Block bool
 }
 
-// FakeEarlyListener is a fake implementation of QUICListener that models
+// fakeEarlyListener is a fake implementation of QUICListener that models
 // quic-go Listener/EarlyListener semantics:
 //   - Close() always returns nil, is idempotent (first-writer-wins)
 //   - After Close(), Accept() returns the close error (ErrServerClosed by default)
@@ -27,11 +27,11 @@ type connResult struct {
 // Accepts is a results queue: entries are returned in order and the last entry
 // repeats once exhausted. An empty queue, like a Block entry, parks until Close
 // or ctx cancellation, which is the usual shape for a listener under test.
-type FakeEarlyListener struct {
-	Accepts []connResult
+type fakeEarlyListener struct {
+	accepts []connResult
 
-	// AddrValue overrides the reported listen address.
-	AddrValue net.Addr
+	// addrValue overrides the reported listen address.
+	addrValue net.Addr
 
 	mu        sync.Mutex
 	acceptIdx int
@@ -40,21 +40,21 @@ type FakeEarlyListener struct {
 	closeCh   chan struct{} // signalled on Close
 }
 
-func (m *FakeEarlyListener) initCloseCh() {
+func (m *fakeEarlyListener) initCloseCh() {
 	if m.closeCh == nil {
 		m.closeCh = make(chan struct{})
 	}
 }
 
-func (m *FakeEarlyListener) Accept(ctx context.Context) (StreamConn, error) {
+func (m *fakeEarlyListener) Accept(ctx context.Context) (StreamConn, error) {
 	m.mu.Lock()
 	if m.closed {
 		err := m.closeErr
 		m.mu.Unlock()
 		return nil, err
 	}
-	if len(m.Accepts) > 0 {
-		r := m.Accepts[min(m.acceptIdx, len(m.Accepts)-1)]
+	if len(m.accepts) > 0 {
+		r := m.accepts[min(m.acceptIdx, len(m.accepts)-1)]
 		m.acceptIdx++
 		if !r.Block {
 			m.mu.Unlock()
@@ -77,11 +77,11 @@ func (m *FakeEarlyListener) Accept(ctx context.Context) (StreamConn, error) {
 	}
 }
 
-func (m *FakeEarlyListener) Addr() net.Addr {
+func (m *fakeEarlyListener) Addr() net.Addr {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.AddrValue != nil {
-		return m.AddrValue
+	if m.addrValue != nil {
+		return m.addrValue
 	}
 	return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080}
 }
@@ -90,7 +90,7 @@ func (m *FakeEarlyListener) Addr() net.Addr {
 //   - First call stores ErrServerClosed and signals Accept to return
 //   - Subsequent calls are no-ops
 //   - Always returns nil (like quic-go)
-func (m *FakeEarlyListener) Close() error {
+func (m *fakeEarlyListener) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {

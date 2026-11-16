@@ -8,34 +8,34 @@ import (
 	"github.com/qumo-dev/gomoqt/transport"
 )
 
-var _ transport.ReceiveStream = (*FakeQUICReceiveStream)(nil)
+var _ transport.ReceiveStream = (*fakeQUICReceiveStream)(nil)
 
-// FakeQUICReceiveStream is a fake implementation of ReceiveStream for testing.
+// fakeQUICReceiveStream is a fake implementation of ReceiveStream for testing.
 // Models quic-go behavior: CancelRead makes subsequent Read return *transport.StreamError.
 //
 // Read behavior is driven by the Reads results queue: entries are returned in
 // order and the last entry repeats once exhausted; an empty queue returns
 // io.EOF. A Block entry parks the read until CancelRead.
-type FakeQUICReceiveStream struct {
+type fakeQUICReceiveStream struct {
 	mu sync.Mutex
 
-	Reads []streamResult
+	reads []streamResult
 
-	// ReadFrom backs the stream with a real source, for cases a finite queue
+	// readFrom backs the stream with a real source, for cases a finite queue
 	// cannot express — typically an endless generator in a benchmark. It
 	// applies only when the Reads queue is empty; an explicit queue wins.
-	ReadFrom io.Reader
+	readFrom io.Reader
 
-	SetReadDeadlineErr error
+	setReadDeadlineErr error
 
-	// ReadGate, when set, releases a read parked on a Block entry.
-	ReadGate <-chan struct{}
+	// readGate, when set, releases a read parked on a Block entry.
+	readGate <-chan struct{}
 
-	CancelReadNotify chan<- transport.StreamErrorCode
-	// DrainNotify is signalled once every queued read has been consumed.
-	DrainNotify chan<- struct{}
+	cancelReadNotify chan<- transport.StreamErrorCode
+	// drainNotify is signalled once every queued read has been consumed.
+	drainNotify chan<- struct{}
 
-	reads           resultQueue
+	readQueue       resultQueue
 	cancelReadCodes []transport.StreamErrorCode
 	unblock         chan struct{}
 
@@ -44,26 +44,26 @@ type FakeQUICReceiveStream struct {
 
 // ensureUnblock lazily creates the channel that releases blocked reads.
 // Must be called with m.mu held.
-func (m *FakeQUICReceiveStream) ensureUnblock() {
+func (m *fakeQUICReceiveStream) ensureUnblock() {
 	if m.unblock == nil {
 		m.unblock = make(chan struct{})
 	}
 }
 
-func (m *FakeQUICReceiveStream) Read(p []byte) (int, error) {
+func (m *fakeQUICReceiveStream) Read(p []byte) (int, error) {
 	m.mu.Lock()
 	if m.cancelReadErr != nil {
 		err := m.cancelReadErr
 		m.mu.Unlock()
 		return 0, err
 	}
-	if m.reads.entries == nil && m.Reads != nil {
-		m.reads.entries = m.Reads
+	if m.readQueue.entries == nil && m.reads != nil {
+		m.readQueue.entries = m.reads
 	}
-	if m.reads.blocking() {
+	if m.readQueue.blocking() {
 		m.ensureUnblock()
 		unblock := m.unblock
-		gate := m.ReadGate
+		gate := m.readGate
 		m.mu.Unlock()
 
 		select {
@@ -78,9 +78,9 @@ func (m *FakeQUICReceiveStream) Read(p []byte) (int, error) {
 			return 0, err
 		}
 		// A Block entry with more behind it is a pause, not an ending.
-		if m.reads.idx < len(m.reads.entries)-1 {
-			m.reads.idx++
-			m.reads.off = 0
+		if m.readQueue.idx < len(m.readQueue.entries)-1 {
+			m.readQueue.idx++
+			m.readQueue.off = 0
 			n, err := m.readLocked(p)
 			m.mu.Unlock()
 			return n, err
@@ -88,8 +88,8 @@ func (m *FakeQUICReceiveStream) Read(p []byte) (int, error) {
 		m.mu.Unlock()
 		return 0, io.EOF
 	}
-	if len(m.reads.entries) == 0 && m.ReadFrom != nil {
-		src := m.ReadFrom
+	if len(m.readQueue.entries) == 0 && m.readFrom != nil {
+		src := m.readFrom
 		m.mu.Unlock()
 		return src.Read(p)
 	}
@@ -100,15 +100,15 @@ func (m *FakeQUICReceiveStream) Read(p []byte) (int, error) {
 
 // readLocked serves the queue and signals DrainNotify once it is exhausted.
 // Must be called with m.mu held.
-func (m *FakeQUICReceiveStream) readLocked(p []byte) (int, error) {
-	n, err := m.reads.readInto(p)
-	if m.reads.drained() {
-		signal(m.DrainNotify)
+func (m *fakeQUICReceiveStream) readLocked(p []byte) (int, error) {
+	n, err := m.readQueue.readInto(p)
+	if m.readQueue.drained() {
+		signal(m.drainNotify)
 	}
 	return n, err
 }
 
-func (m *FakeQUICReceiveStream) CancelRead(code transport.StreamErrorCode) {
+func (m *fakeQUICReceiveStream) CancelRead(code transport.StreamErrorCode) {
 	m.mu.Lock()
 	m.cancelReadCodes = append(m.cancelReadCodes, code)
 	if m.cancelReadErr == nil {
@@ -120,7 +120,7 @@ func (m *FakeQUICReceiveStream) CancelRead(code transport.StreamErrorCode) {
 	default:
 		close(m.unblock)
 	}
-	notify := m.CancelReadNotify
+	notify := m.cancelReadNotify
 	m.mu.Unlock()
 
 	if notify != nil {
@@ -132,7 +132,7 @@ func (m *FakeQUICReceiveStream) CancelRead(code transport.StreamErrorCode) {
 }
 
 // CancelReadCodes returns the codes passed to CancelRead, in order.
-func (m *FakeQUICReceiveStream) CancelReadCodes() []transport.StreamErrorCode {
+func (m *fakeQUICReceiveStream) CancelReadCodes() []transport.StreamErrorCode {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]transport.StreamErrorCode, len(m.cancelReadCodes))
@@ -140,8 +140,8 @@ func (m *FakeQUICReceiveStream) CancelReadCodes() []transport.StreamErrorCode {
 	return out
 }
 
-func (m *FakeQUICReceiveStream) SetReadDeadline(t time.Time) error {
+func (m *fakeQUICReceiveStream) SetReadDeadline(t time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.SetReadDeadlineErr
+	return m.setReadDeadlineErr
 }

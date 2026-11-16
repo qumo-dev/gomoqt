@@ -59,4 +59,3 @@ func TestUpgrader_hasMatchingProtocol(t *testing.T) {
 		assert.True(t, u.hasMatchingProtocol([]string{`"moq-lite-04", "moq-lite-05"`}))
 	})
 }
-
