@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.29.1] - 2026-11-17
+
+> **Go module only.** `@qumo/moq` is unchanged from `0.29.0` and goes to `0.29.1`, so both stay on the same version. A stream whose type byte arrives in the same read as the stream's end is now decoded instead of dropped.
+
 ### Fixed
 
 - **A stream's type byte is read however the transport delivers it (`moqt`).** Decoding the type at the start of a stream used a single `Read`, so a stream whose type byte arrived in the same read as its end (`n == 1` with `io.EOF`, which the `io.Reader` contract allows) was dropped as empty, and a read that returned no bytes and no error was decoded as type `0`. It now reads with `io.ReadFull`.
