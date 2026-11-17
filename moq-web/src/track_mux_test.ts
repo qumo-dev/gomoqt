@@ -906,3 +906,18 @@ Deno.test("TrackMux resolves a path to the most specific announced route", async
 		});
 	}
 });
+
+Deno.test("TrackMux resolves a long peer path to its route", async () => {
+	const mux = new TrackMux();
+	const [ctx, cancel] = withCancelCause(background());
+	const handler = {
+		serveTrack: () => {},
+		trackInfo: () => ({ priority: 7, maxAge: 0, timescale: 1000 }),
+	};
+	await mux.publish(ctx.done(), "/live", handler);
+
+	const info = mux.trackInfo(`/live/${"/".repeat(60_000)}`, "video");
+
+	assertEquals(info?.priority, 7);
+	cancel(undefined);
+});

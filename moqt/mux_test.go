@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -2353,4 +2354,39 @@ func TestMux_ServeTrack_RouteServesTheRequestedPath(t *testing.T) {
 	mux.serveTrack(tw)
 
 	assert.Equal(t, BroadcastPath("/live/alice"), <-served)
+}
+
+func TestMux_TrackHandler_LongPeerPathResolves(t *testing.T) {
+	mux := NewTrackMux(0)
+	mux.PublishFunc(t.Context(), "/live", func(*TrackWriter) {})
+	// A path within the message size limit, nearly all separators.
+	path := BroadcastPath("/live/" + strings.Repeat("/", 60_000))
+
+	ann, _ := mux.TrackHandler(path)
+
+	require.NotNil(t, ann)
+	assert.Equal(t, BroadcastPath("/live"), ann.BroadcastPath())
+}
+
+func TestMux_TrackHandler_RouteSurvivesReplacementAndEnd(t *testing.T) {
+	mux := NewTrackMux(0)
+	ctx, cancel := context.WithCancel(t.Context())
+	mux.PublishFunc(ctx, "/live", func(*TrackWriter) {})
+	mux.PublishFunc(t.Context(), "/live", func(*TrackWriter) {}) // replaces the first
+	cancel()                                                     // the replaced one ends
+
+	ann, _ := mux.TrackHandler("/live/alice")
+
+	require.NotNil(t, ann, "the replacing route still serves beneath it")
+	assert.Equal(t, BroadcastPath("/live"), ann.BroadcastPath())
+}
+
+func BenchmarkMux_TrackHandler_LongPeerPath(b *testing.B) {
+	mux := NewTrackMux(0)
+	mux.PublishFunc(b.Context(), "/live", func(*TrackWriter) {})
+	path := BroadcastPath("/live/" + strings.Repeat("/", 60_000))
+	b.ReportAllocs()
+	for b.Loop() {
+		mux.TrackHandler(path)
+	}
 }

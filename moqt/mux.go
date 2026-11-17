@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -85,6 +86,12 @@ type TrackMux struct {
 
 	mu                sync.RWMutex
 	trackHandlerIndex map[BroadcastPath]*announcedTrackHandler
+	// routeLens counts the paths in trackHandlerIndex by length, and
+	// routeLensDesc lists those lengths, longest first. findTrackHandler
+	// tries only prefixes of those lengths, so its cost does not grow with
+	// the path, which is peer input and may hold thousands of segments.
+	routeLens     map[int]int
+	routeLensDesc []int
 
 	announcementTree announcingNode
 }
@@ -125,6 +132,9 @@ func (mux *TrackMux) registerHandler(ann *Announcement, handler TrackHandler) *a
 	mux.mu.Lock()
 	announced, ok := mux.trackHandlerIndex[path]
 	mux.trackHandlerIndex[path] = newHandler
+	if !ok {
+		mux.addRouteLenLocked(len(path))
+	}
 	mux.mu.Unlock()
 
 	// Cleanup old handler outside lock
@@ -135,12 +145,37 @@ func (mux *TrackMux) registerHandler(ann *Announcement, handler TrackHandler) *a
 	return newHandler
 }
 
+// addRouteLenLocked counts a newly published path of length n. Caller MUST
+// hold mux.mu.
+func (mux *TrackMux) addRouteLenLocked(n int) {
+	if mux.routeLens == nil {
+		mux.routeLens = make(map[int]int)
+	}
+	if mux.routeLens[n]++; mux.routeLens[n] == 1 {
+		i, _ := slices.BinarySearchFunc(mux.routeLensDesc, n, func(e, t int) int { return t - e })
+		mux.routeLensDesc = slices.Insert(mux.routeLensDesc, i, n)
+	}
+}
+
+// removeRouteLenLocked uncounts a removed path of length n. Caller MUST hold
+// mux.mu.
+func (mux *TrackMux) removeRouteLenLocked(n int) {
+	if mux.routeLens[n]--; mux.routeLens[n] > 0 {
+		return
+	}
+	delete(mux.routeLens, n)
+	if i, found := slices.BinarySearchFunc(mux.routeLensDesc, n, func(e, t int) int { return t - e }); found {
+		mux.routeLensDesc = slices.Delete(mux.routeLensDesc, i, i+1)
+	}
+}
+
 func (mux *TrackMux) removeHandler(handler *announcedTrackHandler) {
 	path := handler.BroadcastPath()
 	mux.mu.Lock()
 	defer mux.mu.Unlock()
 	if ath, ok := mux.trackHandlerIndex[path]; ok && ath == handler {
 		delete(mux.trackHandlerIndex, path)
+		mux.removeRouteLenLocked(len(path))
 	}
 }
 
@@ -229,8 +264,10 @@ func (mux *TrackMux) TrackHandler(path BroadcastPath) (*Announcement, TrackHandl
 }
 
 // findTrackHandler returns the handler of the most specific announced route
-// covering path, trying path itself and then each shorter route by segment:
-// for "/a/b" that is "/a/b", "/a/", "/a", "/". It allocates nothing.
+// covering path: path itself, then the longest published route that is a
+// leading run of its segments ("/a/b", "/a/", "/a", "/"). It tries only the
+// lengths a published path has, so it allocates nothing and its cost does
+// not grow with path.
 func (mux *TrackMux) findTrackHandler(path BroadcastPath) *announcedTrackHandler {
 	if len(path) == 0 || path[0] != '/' {
 		return nil
@@ -242,19 +279,14 @@ func (mux *TrackMux) findTrackHandler(path BroadcastPath) *announcedTrackHandler
 	if ath := usableHandler(mux.trackHandlerIndex[path]); ath != nil {
 		return ath
 	}
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] != '/' {
+	for _, n := range mux.routeLensDesc {
+		// path[:n] covers path when it ends a segment there: it ends in "/"
+		// itself, or path continues with "/".
+		if n >= len(path) || (path[n-1] != '/' && path[n] != '/') {
 			continue
 		}
-		if i+1 < len(path) {
-			if ath := usableHandler(mux.trackHandlerIndex[path[:i+1]]); ath != nil {
-				return ath
-			}
-		}
-		if i > 0 {
-			if ath := usableHandler(mux.trackHandlerIndex[path[:i]]); ath != nil {
-				return ath
-			}
+		if ath := usableHandler(mux.trackHandlerIndex[path[:n]]); ath != nil {
+			return ath
 		}
 	}
 	return nil
