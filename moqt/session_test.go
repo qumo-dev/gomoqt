@@ -854,8 +854,9 @@ func TestSession_WithRealMux(t *testing.T) {
 
 	mux := NewTrackMux(0)
 
-	session := newTestSession(conn)
-	session.mux = mux
+	// The mux is passed at construction: the Setup Stream goroutine reads it
+	// (for the Hop ID) as soon as the session starts.
+	session := newSession(conn, mux, nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
 
 	assert.Equal(t, mux, session.mux, "Mux should be set correctly in the session")
 
