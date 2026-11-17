@@ -183,8 +183,8 @@ Deno.test("Client shim - dial() delegates to connect()", () => {
 	p.catch(() => {});
 });
 
-Deno.test("Client - ALPN constant is moq-lite-05", () => {
-	assertEquals(ALPN, "moq-lite-05");
+Deno.test("Client - ALPN constant is moq-lite-06", () => {
+	assertEquals(ALPN, "moq-lite-06");
 });
 
 // A transport whose handshake fails, as a full relay's refused upgrade does.
@@ -425,7 +425,7 @@ for (const c of webSocketDialCases) {
 
 			assertEquals(server.requests, [{
 				path: c.expectedPath,
-				subprotocols: "qmux-02.moq-lite-05",
+				subprotocols: "qmux-02.moq-lite-06",
 			}]);
 		},
 	});

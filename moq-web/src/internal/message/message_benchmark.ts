@@ -225,7 +225,7 @@ const LONG_PATH = "/" + "segment/".repeat(16) + "track.mp4";
 		trackName: "camera-hd",
 		subscriberPriority: 5,
 		subscriberOrdered: 1,
-		subscriberMaxLatency: 100,
+		subscriberMaxAge: 100,
 		startGroup: 0,
 		endGroup: 1000,
 	};

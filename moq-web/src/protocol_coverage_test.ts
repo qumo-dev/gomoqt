@@ -55,15 +55,14 @@ class BufWriter {
 
 Deno.test("Broadcast.registerWithInfo/trackInfo", async () => {
 	const b = new Broadcast();
-	const info = { priority: 7, ordered: true, maxLatency: 500, timescale: 48000 };
+	const info = { priority: 7, maxAge: 500, timescale: 48000 };
 	await b.registerWithInfo("audio", info, nopHandler);
 	await b.register("video", nopHandler);
 
 	assertEquals(b.trackInfo("audio"), info);
 	assertEquals(b.trackInfo("video"), {
 		priority: 0,
-		ordered: false,
-		maxLatency: 0,
+		maxAge: 0,
 		timescale: 0,
 	});
 	assertEquals(b.trackInfo("missing"), undefined);
@@ -72,7 +71,7 @@ Deno.test("Broadcast.registerWithInfo/trackInfo", async () => {
 Deno.test("TrackMux.trackInfo delegates to a Broadcast provider", async () => {
 	const mux = new TrackMux();
 	const b = new Broadcast();
-	const info = { priority: 3, ordered: false, maxLatency: 0, timescale: 90000 };
+	const info = { priority: 3, maxAge: 0, timescale: 90000 };
 	await b.registerWithInfo("video", info, nopHandler);
 	await mux.publish(background().done(), "/live", b);
 
@@ -86,8 +85,7 @@ Deno.test("TrackMux.trackInfo serves defaults for a plain handler", async () => 
 	await mux.publish(background().done(), "/plain", nopHandler);
 	assertEquals(mux.trackInfo("/plain", "anything"), {
 		priority: 0,
-		ordered: false,
-		maxLatency: 0,
+		maxAge: 0,
 		timescale: 1000,
 	});
 });

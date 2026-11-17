@@ -48,8 +48,7 @@ Deno.test("TrackReader", async (t) => {
 			const tr = new TrackReader("/test", "name", sss, queue, onClose);
 			const err = await tr.update({
 				priority: 5,
-				ordered: false,
-				maxLatency: 0,
+				maxAge: 0,
 				startGroup: 0,
 				endGroup: 0,
 			});

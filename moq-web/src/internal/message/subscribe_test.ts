@@ -10,8 +10,7 @@ Deno.test("SubscribeMessage - encode/decode roundtrip - multiple scenarios", asy
 			broadcastPath: "path",
 			trackName: "track",
 			subscriberPriority: 1,
-			subscriberOrdered: 1,
-			subscriberMaxLatency: 100,
+			subscriberMaxAge: 100,
 			groupStart: 5,
 			groupEnd: 10,
 		},
@@ -20,8 +19,7 @@ Deno.test("SubscribeMessage - encode/decode roundtrip - multiple scenarios", asy
 			broadcastPath: "long/path/to/resource",
 			trackName: "long-track-name-with-hyphens",
 			subscriberPriority: 255,
-			subscriberOrdered: 0,
-			subscriberMaxLatency: 0,
+			subscriberMaxAge: 0,
 			groupStart: 0,
 			groupEnd: 0,
 		},
@@ -30,8 +28,7 @@ Deno.test("SubscribeMessage - encode/decode roundtrip - multiple scenarios", asy
 			broadcastPath: "",
 			trackName: "",
 			subscriberPriority: 0,
-			subscriberOrdered: 0,
-			subscriberMaxLatency: 0,
+			subscriberMaxAge: 0,
 			groupStart: 0,
 			groupEnd: 0,
 		},
@@ -40,8 +37,7 @@ Deno.test("SubscribeMessage - encode/decode roundtrip - multiple scenarios", asy
 			broadcastPath: "a",
 			trackName: "b",
 			subscriberPriority: 1,
-			subscriberOrdered: 1,
-			subscriberMaxLatency: 500,
+			subscriberMaxAge: 500,
 			groupStart: 0,
 			groupEnd: 20,
 		},
@@ -84,14 +80,9 @@ Deno.test("SubscribeMessage - encode/decode roundtrip - multiple scenarios", asy
 				`subscriberPriority mismatch for ${caseName}`,
 			);
 			assertEquals(
-				decodedMessage.subscriberOrdered,
-				input.subscriberOrdered,
-				`subscriberOrdered mismatch for ${caseName}`,
-			);
-			assertEquals(
-				decodedMessage.subscriberMaxLatency,
-				input.subscriberMaxLatency,
-				`subscriberMaxLatency mismatch for ${caseName}`,
+				decodedMessage.subscriberMaxAge,
+				input.subscriberMaxAge,
+				`subscriberMaxAge mismatch for ${caseName}`,
 			);
 			assertEquals(
 				decodedMessage.groupStart,

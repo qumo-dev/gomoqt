@@ -34,8 +34,7 @@ Deno.test("SendSubscribeStream.update writes update to writable", async () => {
 	const sss = new SendSubscribeStream(ctx, s, subscribe, ok);
 	const err = await sss.update({
 		priority: 1,
-		ordered: false,
-		maxLatency: 0,
+		maxAge: 0,
 		startGroup: 0,
 		endGroup: 0,
 	});

@@ -52,7 +52,7 @@ export class Broadcast implements TrackHandler, TrackInfoProvider {
 		if (!entry) {
 			return undefined;
 		}
-		return entry.info ?? { priority: 0, ordered: false, maxLatency: 0, timescale: 0 };
+		return entry.info ?? { priority: 0, maxAge: 0, timescale: 0 };
 	}
 
 	async remove(name: string): Promise<boolean> {

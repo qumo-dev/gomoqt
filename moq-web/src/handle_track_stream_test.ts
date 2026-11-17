@@ -17,7 +17,7 @@ async function trackRequestBytes(path: string, name: string): Promise<Uint8Array
 Deno.test("Session handles incoming Track stream and replies with TRACK_INFO", async () => {
 	const mux = new (await import("./track_mux.ts")).TrackMux();
 	const b = new Broadcast();
-	const info = { priority: 4, ordered: true, maxLatency: 300, timescale: 48000 };
+	const info = { priority: 4, maxAge: 300, timescale: 48000 };
 	await b.registerWithInfo("audio", info, { serveTrack: () => {} });
 	await mux.publish(background().done(), "/live", b);
 
@@ -33,8 +33,7 @@ Deno.test("Session handles incoming Track stream and replies with TRACK_INFO", a
 	const tim = new TrackInfoMessage({});
 	await tim.decode(toReader(written));
 	assertEquals(tim.publisherPriority, 4);
-	assertEquals(tim.publisherOrdered, 1);
-	assertEquals(tim.publisherMaxLatency, 300);
+	assertEquals(tim.publisherMaxAge, 300);
 	assertEquals(tim.timescale, 48000);
 
 	await session.close();

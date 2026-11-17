@@ -2,13 +2,16 @@ import {
 	AnnounceRequestMessage,
 	AuthErrorMessage,
 	AuthMessage,
+	DEFAULT_COST,
 	FetchMessage,
 	GoawayMessage,
 	GroupMessage,
+	NewSessionURITooLongError,
 	ProbeLevels,
 	ProbeMessage,
 	readVarint,
 	SetupMessage,
+	SetupParamIDs,
 	SubscribeMessage,
 	TrackInfoMessage,
 	TrackMessage,
@@ -35,6 +38,7 @@ import {
 	SendSubscribeStream,
 } from "./subscribe_stream.ts";
 import type { TrackConfig } from "./subscribe_stream.ts";
+import { trackRangeToWire, validateTrackConfig } from "./subscribe_stream.ts";
 import { type BroadcastPath, validateBroadcastPath } from "./broadcast_path.ts";
 import { TrackReader } from "./track_reader.ts";
 import { TrackWriter } from "./track_writer.ts";
@@ -62,6 +66,11 @@ import type { MoqOptions } from "./options.ts";
 import { defaultProbeIntervalMs, defaultProbeMaxAgeMs, defaultProbeMaxDelta } from "./options.ts";
 import { ProbeResult } from "./probe.ts";
 import { DEFAULT_TIMESCALE, type Info } from "./info.ts";
+
+/** Stream reset for an unknown stream type (gomoqt's NOT_SUPPORTED, 0x45). */
+const streamNotSupported = 0x45;
+/** Stream reset for an implementation-specific failure (INTERNAL_ERROR, 0x0). */
+const streamInternalError = 0x0;
 
 function cancelStreamWithError(stream: Stream, code: number): void {
 	stream.readable.cancel(code).catch(() => {});
@@ -180,7 +189,7 @@ export class Session {
 	 */
 	readonly closed: Promise<MOQCloseInfo>;
 	/**
-	 * The negotiated MOQ protocol identifier, such as `moq-lite-05`.
+	 * The negotiated MOQ protocol identifier, such as `moq-lite-06`.
 	 *
 	 * This is available after {@link ready} resolves and is useful for
 	 * diagnostics and version-gated application behavior.
@@ -222,6 +231,11 @@ export class Session {
 	// Whether the peer's SETUP said it follows SUBSCRIBE_REDIRECT.
 	#peerFollowsRedirect: boolean = false;
 	#peerProbeLevel: number = ProbeLevels.None;
+	// The Hop ID and Cost the peer declared in its SETUP.
+	#peerHopId: number = 0;
+	#peerCost: number = DEFAULT_COST;
+	// Set by the first GOAWAY; a second one is a protocol violation.
+	#goawayReceived: boolean = false;
 
 	// Decides which redirects subscribe follows; see SessionInit.checkRedirect.
 	#checkRedirect?: (to: Redirect, via: Redirect[]) => Error | undefined;
@@ -315,10 +329,12 @@ export class Session {
 		const [, typeErr] = await writeVarint(stream, UniStreamTypes.SetupStreamType);
 		if (typeErr) {
 			console.error("moq: failed to write setup stream type:", typeErr);
-			await stream.cancel(SessionErrorCode.InternalError).catch(() => {});
+			await stream.cancel(streamInternalError).catch(() => {});
 			return;
 		}
 
+		// This endpoint has no Hop ID (it is not a relay), so it sends no Hop
+		// parameter, and no Cost: an absent Cost is the neutral default of 1.
 		const sm = new SetupMessage({});
 		if (this.#localProbeLevel !== ProbeLevels.None) {
 			sm.addProbe(this.#localProbeLevel);
@@ -328,7 +344,7 @@ export class Session {
 		const err = await sm.encode(stream);
 		if (err) {
 			console.error("moq: failed to send SETUP message:", err);
-			await stream.cancel(SessionErrorCode.InternalError).catch(() => {});
+			await stream.cancel(streamInternalError).catch(() => {});
 			return;
 		}
 
@@ -363,9 +379,16 @@ export class Session {
 			violate("server sent Path parameter");
 			return;
 		}
+		// Only a client sends the Role parameter (moq-lite-06 §7.3.3).
+		if (sm.has(SetupParamIDs.Role)) {
+			violate("server sent Role parameter");
+			return;
+		}
 
 		this.#peerProbeLevel = sm.probeLevel();
 		this.#peerFollowsRedirect = sm.followsRedirect();
+		this.#peerHopId = sm.hopId();
+		this.#peerCost = sm.cost();
 		this.#resolvePeerSetup();
 	}
 
@@ -509,7 +532,35 @@ export class Session {
 
 		// debug log removed
 
-		return [new AnnouncementReader(this.#ctx, stream, req), undefined];
+		return [
+			new AnnouncementReader(this.#ctx, stream, req, {
+				peerCost: async () => (await this.#waitPeerSetup()) ? this.#peerCost : DEFAULT_COST,
+				onProtocolViolation: (reason) => {
+					this.closeWithError(SessionErrorCode.ProtocolViolation, reason).catch(() => {});
+				},
+			}),
+			undefined,
+		];
+	}
+
+	// Waits for the peer's SETUP, up to peerSetupWaitMs, and reports whether it
+	// arrived. The session ending also ends the wait.
+	async #waitPeerSetup(): Promise<boolean> {
+		if (this.#peerSetupReceived) {
+			await Promise.race([this.#peerSetup, this.#ctx.done()]);
+			return !this.#ctx.err();
+		}
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		let processed = false;
+		const setup = this.#peerSetup.then(() => {
+			processed = true;
+		});
+		const timeout = new Promise<void>((resolve) => {
+			timer = setTimeout(resolve, peerSetupWaitMs);
+		});
+		await Promise.race([setup, this.#ctx.done(), timeout]);
+		clearTimeout(timer);
+		return processed;
 	}
 
 	/**
@@ -542,6 +593,12 @@ export class Session {
 		config: TrackConfig | undefined,
 		via: Redirect[],
 	): Promise<[TrackReader, undefined] | [undefined, Error]> {
+		if (config) {
+			const invalid = validateTrackConfig(config);
+			if (invalid) {
+				return [undefined, invalid];
+			}
+		}
 		const subscribeId = this.#subscribeIDCounter++;
 		// Check for subscribe ID collision
 		if (this.#queues.has(subscribeId)) {
@@ -573,10 +630,8 @@ export class Session {
 			broadcastPath: path,
 			trackName: name,
 			subscriberPriority: config?.priority ?? 0,
-			subscriberOrdered: config?.ordered ? 1 : 0,
-			subscriberMaxLatency: config?.maxLatency ?? 0,
-			groupStart: config?.startGroup ? config.startGroup + 1 : 0,
-			groupEnd: config?.endGroup ? config.endGroup + 1 : 0,
+			subscriberMaxAge: config?.maxAge ?? 0,
+			...(config ? trackRangeToWire(config) : {}),
 		});
 		err = await req.encode(stream.writable);
 		if (err) {
@@ -694,6 +749,10 @@ export class Session {
 	async fetch(
 		req: FetchRequest,
 	): Promise<[GroupReader, undefined] | [undefined, Error]> {
+		const invalid = req.validate();
+		if (invalid) {
+			return [undefined, invalid];
+		}
 		const [stream, openErr] = await this.#webtransport.openStream();
 		if (openErr) {
 			console.error("moq: failed to open fetch stream:", openErr);
@@ -716,6 +775,8 @@ export class Session {
 			trackName: req.trackName,
 			priority: req.priority,
 			groupSequence: req.groupSequence,
+			frameStart: req.frameStart,
+			frameEnd: req.frameEnd,
 		});
 		err = await msg.encode(stream.writable);
 		if (err) {
@@ -726,12 +787,13 @@ export class Session {
 		const group = new GroupReader(
 			this.#ctx,
 			stream.readable,
-			new GroupMessage({ sequence: req.groupSequence }),
+			// The first returned frame is implicit from the request.
+			new GroupMessage({ sequence: req.groupSequence, frameStart: req.frameStart }),
 		);
 
 		// Cancel the group when the request is done
 		req.done().then(() => {
-			group.cancel(GroupErrorCode.ExpiredGroup);
+			group.cancel(GroupErrorCode.SubscribeCanceled);
 		}).catch(() => {});
 
 		return [group, undefined];
@@ -855,35 +917,35 @@ export class Session {
 
 		let [, err] = await writeVarint(stream.writable, BiStreamTypes.TrackStreamType);
 		if (err) {
-			cancelStreamWithError(stream, SessionErrorCode.InternalError);
+			cancelStreamWithError(stream, streamInternalError);
 			return [undefined, err];
 		}
 
 		const req = new TrackMessage({ broadcastPath: path, trackName: name });
 		err = await req.encode(stream.writable);
 		if (err) {
-			cancelStreamWithError(stream, SessionErrorCode.InternalError);
+			cancelStreamWithError(stream, streamInternalError);
 			return [undefined, err];
 		}
 
 		const rsp = new TrackInfoMessage({});
 		err = await rsp.decode(stream.readable);
 		if (err) {
-			cancelStreamWithError(stream, SessionErrorCode.InternalError);
+			cancelStreamWithError(stream, streamInternalError);
 			return [undefined, err];
 		}
 
 		await stream.writable.close().catch(() => {});
 
 		if (rsp.timescale === 0) {
-			cancelStreamWithError(stream, SessionErrorCode.InternalError);
+			// moq-lite-06 §7.12: reset the stream with a protocol violation.
+			cancelStreamWithError(stream, SubscribeErrorCode.InvalidRange);
 			return [undefined, new Error("moq: received TRACK_INFO with zero Timescale")];
 		}
 
 		return [{
 			priority: rsp.publisherPriority,
-			ordered: rsp.publisherOrdered !== 0,
-			maxLatency: rsp.publisherMaxLatency,
+			maxAge: rsp.publisherMaxAge,
 			timescale: rsp.timescale,
 		}, undefined];
 	}
@@ -893,7 +955,7 @@ export class Session {
 		const err = await req.decode(stream.readable);
 		if (err) {
 			console.error("Failed to decode TrackMessage:", err);
-			cancelStreamWithError(stream, SessionErrorCode.InternalError);
+			cancelStreamWithError(stream, streamInternalError);
 			return;
 		}
 
@@ -909,14 +971,13 @@ export class Session {
 
 		const rsp = new TrackInfoMessage({
 			publisherPriority: info.priority,
-			publisherOrdered: info.ordered ? 1 : 0,
-			publisherMaxLatency: info.maxLatency,
+			publisherMaxAge: info.maxAge,
 			timescale: info.timescale === 0 ? DEFAULT_TIMESCALE : info.timescale,
 		});
 		const encErr = await rsp.encode(stream.writable);
 		if (encErr) {
 			console.error("moq: failed to encode TRACK_INFO message:", encErr);
-			cancelStreamWithError(stream, SessionErrorCode.InternalError);
+			cancelStreamWithError(stream, streamInternalError);
 			return;
 		}
 
@@ -960,13 +1021,21 @@ export class Session {
 		}
 
 		const subscribeStream = new ReceiveSubscribeStream(this.#ctx, stream, req);
+		if (validateTrackConfig(subscribeStream.trackConfig)) {
+			// moq-lite-06 §3.6: a protocol violation that resets the stream.
+			await subscribeStream.closeWithError(SubscribeErrorCode.InvalidRange);
+			return;
+		}
 
+		const path = validateBroadcastPath(req.broadcastPath);
 		const trackWriter = new TrackWriter(
-			validateBroadcastPath(req.broadcastPath),
+			path,
 			req.trackName,
 			subscribeStream,
 			this.#webtransport.openUniStream.bind(this.#webtransport),
 			(signal) => this.#followsRedirect(signal),
+			// Max Age is measured in the track's own timestamps.
+			this.mux.trackInfo(path, req.trackName)?.timescale || DEFAULT_TIMESCALE,
 		);
 
 		await this.mux.serveTrack(trackWriter);
@@ -1026,7 +1095,10 @@ export class Session {
 
 		// debug log removed
 
-		const aw = new AnnouncementWriter(this.#ctx, stream, req);
+		// A path through the Hop ID the peer declared in its SETUP is never
+		// advertised to it (moq-lite-06 §5.1.1.1), so the SETUP is waited for.
+		await this.#waitPeerSetup();
+		const aw = new AnnouncementWriter(this.#ctx, stream, req, this.#peerHopId);
 
 		await this.mux.serveAnnouncement(aw, aw.prefix);
 	}
@@ -1121,13 +1193,23 @@ export class Session {
 			trackName: fm.trackName,
 			priority: fm.priority,
 			groupSequence: fm.groupSequence,
+			frameStart: fm.frameStart,
+			frameEnd: fm.frameEnd,
 			done: fetchCtx.done(),
 		});
+		if (req.validate()) {
+			// moq-lite-06 §7.16: a Frame End below Frame Start is a protocol
+			// violation.
+			cancelFetch(undefined);
+			cancelStreamWithError(stream, GroupErrorCode.InvalidRange);
+			return;
+		}
 
 		const group = new GroupWriter(
 			fetchCtx,
 			stream.writable,
-			new GroupMessage({ sequence: fm.groupSequence }),
+			new GroupMessage({ sequence: fm.groupSequence, frameStart: fm.frameStart }),
+			{ frameEnd: fm.frameEnd },
 		);
 
 		try {
@@ -1141,9 +1223,23 @@ export class Session {
 	}
 
 	async #handleGoawayStream(stream: Stream): Promise<void> {
+		const violate = (reason: string): void => {
+			this.closeWithError(SessionErrorCode.ProtocolViolation, reason).catch(() => {});
+		};
+		// moq-lite-06 §7.18: more than one GOAWAY is a protocol violation.
+		if (this.#goawayReceived) {
+			violate("duplicate GOAWAY");
+			return;
+		}
+		this.#goawayReceived = true;
+
 		const gm = new GoawayMessage({});
 		const err = await gm.decode(stream.readable);
 		if (err) {
+			if (err instanceof NewSessionURITooLongError) {
+				violate("GOAWAY new session URI too long");
+				return;
+			}
 			console.error("Failed to decode GoawayMessage:", err);
 			return;
 		}
@@ -1197,7 +1293,9 @@ export class Session {
 						pendingHandles.push(this.#handleAuthStream(stream));
 						break;
 					default:
-						cancelStreamWithError(stream, SessionErrorCode.InternalError);
+						// Unknown stream types are reset, never fatal: it is how an
+						// extension stream fails against a peer without it.
+						cancelStreamWithError(stream, streamNotSupported);
 						break;
 				}
 			}
@@ -1244,7 +1342,7 @@ export class Session {
 						pendingHandles.push(this.#handleSetupStream(stream));
 						break;
 					default:
-						stream.cancel(SessionErrorCode.InternalError).catch(() => {});
+						stream.cancel(streamNotSupported).catch(() => {});
 						break;
 				}
 			}

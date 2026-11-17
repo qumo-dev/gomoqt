@@ -7,19 +7,15 @@ Deno.test("AnnounceRequestMessage - encode/decode roundtrip - multiple scenarios
 	const testCases = {
 		"normal case": {
 			prefix: "test",
-			excludeHop: 0,
 		},
 		"empty prefix": {
 			prefix: "",
-			excludeHop: 0,
 		},
 		"long prefix": {
 			prefix: "very/long/path/to/namespace/prefix",
-			excludeHop: 42,
 		},
 		"prefix with special characters": {
 			prefix: "test-prefix_123",
-			excludeHop: 7,
 		},
 	};
 
@@ -41,11 +37,6 @@ Deno.test("AnnounceRequestMessage - encode/decode roundtrip - multiple scenarios
 				decodedMessage.prefix,
 				input.prefix,
 				`prefix mismatch for ${caseName}`,
-			);
-			assertEquals(
-				decodedMessage.excludeHop,
-				input.excludeHop,
-				`excludeHop mismatch for ${caseName}`,
 			);
 		});
 	}

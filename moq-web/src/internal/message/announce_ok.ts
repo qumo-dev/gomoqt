@@ -1,5 +1,6 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
 import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
+import { AnnounceDecodeError } from "./announce.ts";
 
 export interface AnnounceOkMessageInit {
 	hopID?: number;
@@ -21,10 +22,11 @@ export interface AnnounceOkMessageInit {
 export class AnnounceOkMessage {
 	/**
 	 * The publisher's own Hop ID: the implicit trailing entry of every
-	 * ANNOUNCE_BROADCAST's Hop ID list on this stream. 0 means unknown.
+	 * ANNOUNCE_START / ANNOUNCE_UPDATE Hop ID list on this stream. 0 means
+	 * unknown.
 	 */
 	hopID: number;
-	/** Number of active ANNOUNCE_BROADCAST messages sent as the initial set. */
+	/** Number of ANNOUNCE_START messages sent as the initial set. */
 	activeCount: number;
 
 	constructor(init: AnnounceOkMessageInit = {}) {
@@ -54,9 +56,17 @@ export class AnnounceOkMessage {
 		const [, err2] = await readFull(r, buf);
 		if (err2) return err2;
 
+		// Strict: an announcement where ANNOUNCE_OK belongs does not parse as
+		// one, which is how a reader detects an announcement before ANNOUNCE_OK.
 		const d = new MessageDecoder(buf);
+		if (d.remaining() < 2) {
+			return new AnnounceDecodeError("ANNOUNCE_OK too short");
+		}
 		this.hopID = d.varint();
 		this.activeCount = d.varint();
+		if (!d.eof() || d.remaining() < 0 || Number.isNaN(this.hopID + this.activeCount)) {
+			return new AnnounceDecodeError("ANNOUNCE_OK length mismatch");
+		}
 
 		return undefined;
 	}

@@ -1,6 +1,6 @@
 export * from "./message.ts";
 export * from "./announce_request.ts";
-export * from "./announce_broadcast.ts";
+export * from "./announce.ts";
 export * from "./announce_ok.ts";
 export * from "./setup.ts";
 export * from "./track.ts";

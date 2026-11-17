@@ -7,7 +7,7 @@ export interface SubscribeEndMessageInit {
 
 /**
  * SUBSCRIBE_END message (type 0x1), sent by the publisher to signal that
- * no group after the given sequence will be produced. The type varint is
+ * no group at or after the given sequence will be produced. The type varint is
  * written by the caller before `encode` / consumed before `decode`.
  *
  * ```text
@@ -19,7 +19,10 @@ export interface SubscribeEndMessageInit {
  * ```
  */
 export class SubscribeEndMessage {
-	/** Absolute sequence of the last group that may be delivered (inclusive). */
+	/**
+	 * Exclusive end of the range: the first group that will never be
+	 * delivered. 0 means the track ended before producing any group.
+	 */
 	group: number;
 
 	constructor(init: SubscribeEndMessageInit = {}) {
