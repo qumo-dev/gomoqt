@@ -11,7 +11,7 @@ import (
 )
 
 func TestBroadcastRegisterTrack_UpdatesCatalogAndHandler(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	handler := &fakeTrackHandler{}
@@ -32,7 +32,7 @@ func TestBroadcastRegisterTrack_UpdatesCatalogAndHandler(t *testing.T) {
 }
 
 func TestBroadcastHandler_ResolvesCatalogAndTrackHandlers(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	handler := &fakeTrackHandler{}
@@ -52,7 +52,7 @@ func TestBroadcastHandler_ResolvesCatalogAndTrackHandlers(t *testing.T) {
 }
 
 func TestBroadcastRemoveTrack_RemovesCatalogEntryAndHandler(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	handler := &fakeTrackHandler{}
@@ -63,8 +63,8 @@ func TestBroadcastRemoveTrack_RemovesCatalogEntryAndHandler(t *testing.T) {
 	}, handler)
 	require.NoError(t, err)
 
-	removed := broadcast.RemoveTrack("video")
-	assert.True(t, removed)
+	require.NoError(t, broadcast.RemoveTrack("video"))
+	assert.ErrorIs(t, broadcast.RemoveTrack("video"), ErrTrackNotFound)
 	assert.Empty(t, broadcast.Catalog().Tracks)
 	tw := &moqt.TrackWriter{TrackName: "video"}
 	broadcast.Handler("video").ServeTrack(tw)
@@ -72,7 +72,7 @@ func TestBroadcastRemoveTrack_RemovesCatalogEntryAndHandler(t *testing.T) {
 }
 
 func TestBroadcastCatalogBytes_EncodesCurrentCatalog(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 	handler := &fakeTrackHandler{}
 
@@ -93,7 +93,7 @@ func TestBroadcastCatalogBytes_EncodesCurrentCatalog(t *testing.T) {
 }
 
 func TestBroadcastRegisterTrack_RejectsReservedCatalogTrackName(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 	handler := &fakeTrackHandler{}
 
@@ -131,7 +131,7 @@ func TestBroadcastRegisterTrack_RejectsInvalidInput(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			broadcast, err := NewBroadcast(Catalog{Version: 1})
+			broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 			require.NoError(t, err)
 
 			err = broadcast.RegisterTrack(tt.track, tt.handler)
@@ -142,7 +142,7 @@ func TestBroadcastRegisterTrack_RejectsInvalidInput(t *testing.T) {
 }
 
 func TestBroadcastRegisterTrack_ReplacesExistingTrackAndHandler(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	firstHandler := &fakeTrackHandler{}
@@ -183,18 +183,18 @@ func TestBroadcastZeroValue_UsesDefaultCatalogTrackName(t *testing.T) {
 	assert.Zero(t, broadcast.Catalog().Version)
 	assert.Empty(t, broadcast.Catalog().Tracks)
 
-	require.NoError(t, broadcast.SetCatalog(Catalog{Version: 1}))
+	require.NoError(t, broadcast.SetCatalog(Catalog{Version: CurrentVersion}))
 	assert.Equal(t, DefaultCatalogTrackName, broadcast.CatalogTrackName())
-	assert.Equal(t, 1, broadcast.Catalog().Version)
+	assert.Equal(t, CurrentVersion, broadcast.Catalog().Version)
 	assert.NotNil(t, broadcast.Handler(DefaultCatalogTrackName))
-	assert.False(t, broadcast.RemoveTrack(DefaultCatalogTrackName))
-	assert.False(t, broadcast.RemoveTrack(""))
+	assert.ErrorContains(t, broadcast.RemoveTrack(DefaultCatalogTrackName), "reserved for the catalog track")
+	assert.ErrorContains(t, broadcast.RemoveTrack(""), "track name is required")
 	handler := &fakeTrackHandler{}
 	assert.Error(t, broadcast.RegisterTrack(Track{Name: string(DefaultCatalogTrackName)}, handler))
 }
 
 func TestBroadcastSetCatalog_PrunesRemovedTrackHandlers(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	handler := &fakeTrackHandler{}
@@ -205,7 +205,7 @@ func TestBroadcastSetCatalog_PrunesRemovedTrackHandlers(t *testing.T) {
 	}, handler)
 	require.NoError(t, err)
 
-	err = broadcast.SetCatalog(Catalog{Version: 1, Tracks: []Track{{
+	err = broadcast.SetCatalog(Catalog{Version: CurrentVersion, Tracks: []Track{{
 		Name:      "audio",
 		Packaging: PackagingLOC,
 		IsLive:    new(false),
@@ -218,10 +218,10 @@ func TestBroadcastSetCatalog_PrunesRemovedTrackHandlers(t *testing.T) {
 }
 
 func TestBroadcastSetCatalog_RejectsReservedCatalogTrackName(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
-	err = broadcast.SetCatalog(Catalog{Version: 1, Tracks: []Track{{
+	err = broadcast.SetCatalog(Catalog{Version: CurrentVersion, Tracks: []Track{{
 		Name:      string(DefaultCatalogTrackName),
 		Packaging: PackagingLOC,
 		IsLive:    new(false),
@@ -231,7 +231,7 @@ func TestBroadcastSetCatalog_RejectsReservedCatalogTrackName(t *testing.T) {
 }
 
 func TestNewBroadcast_RejectsReservedCatalogTrackName(t *testing.T) {
-	_, err := NewBroadcast(Catalog{Version: 1, Tracks: []Track{{
+	_, err := NewBroadcast(Catalog{Version: CurrentVersion, Tracks: []Track{{
 		Name:      string(DefaultCatalogTrackName),
 		Packaging: PackagingLOC,
 		IsLive:    new(false),
@@ -241,7 +241,7 @@ func TestNewBroadcast_RejectsReservedCatalogTrackName(t *testing.T) {
 }
 
 func TestBroadcast_ServeTrack_NilTrackWriter(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	// Should not panic with nil TrackWriter.
@@ -249,7 +249,7 @@ func TestBroadcast_ServeTrack_NilTrackWriter(t *testing.T) {
 }
 
 func TestBroadcast_ServeTrack_DispatchesToHandler(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	handler := &fakeTrackHandler{}
@@ -276,7 +276,7 @@ func TestBroadcast_NilReceiver(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil broadcast")
 
-	err = broadcast.SetCatalog(Catalog{Version: 1})
+	err = broadcast.SetCatalog(Catalog{Version: CurrentVersion})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil broadcast")
 
@@ -284,14 +284,14 @@ func TestBroadcast_NilReceiver(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil broadcast")
 
-	assert.False(t, broadcast.RemoveTrack("video"))
+	assert.ErrorContains(t, broadcast.RemoveTrack("video"), "nil broadcast")
 
 	h := broadcast.Handler("video")
 	assert.Equal(t, reflect.ValueOf(moqt.NotFoundTrackHandler).Pointer(), reflect.ValueOf(h).Pointer())
 }
 
 func TestBroadcast_SetCatalog_RejectsInvalidCatalog(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	err = broadcast.SetCatalog(Catalog{})
@@ -300,7 +300,7 @@ func TestBroadcast_SetCatalog_RejectsInvalidCatalog(t *testing.T) {
 }
 
 func TestBroadcast_RegisterTrack_RejectsInvalidCatalogAfterAdd(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	handler := &fakeTrackHandler{}
@@ -320,11 +320,11 @@ func TestBroadcast_staleTrackNamesLocked_EmptyCurrent(t *testing.T) {
 }
 
 func TestBroadcastSetCatalog_RejectsDuplicateTrackNamesAcrossNamespaces(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	err = broadcast.SetCatalog(Catalog{
-		Version:          1,
+		Version:          CurrentVersion,
 		DefaultNamespace: "live/main",
 		Tracks: []Track{
 			{Name: "video", Packaging: PackagingLOC, IsLive: new(false)},
@@ -337,7 +337,7 @@ func TestBroadcastSetCatalog_RejectsDuplicateTrackNamesAcrossNamespaces(t *testi
 
 func TestBroadcastRegisterTrack_RejectsDuplicateTrackNamesAcrossNamespaces(t *testing.T) {
 	broadcast, err := NewBroadcast(Catalog{
-		Version:          1,
+		Version:          CurrentVersion,
 		DefaultNamespace: "live/main",
 		Tracks: []Track{{
 			Name:      "video",
@@ -356,4 +356,81 @@ func TestBroadcastRegisterTrack_RejectsDuplicateTrackNamesAcrossNamespaces(t *te
 	}, handler)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unique track names across namespaces")
+}
+
+// TestBroadcast_RemoveTrack_KeepsCatalogValid checks that RemoveTrack refuses
+// a removal that would leave a dangling reference, and leaves the catalog and
+// the handler as they were.
+func TestBroadcast_RemoveTrack_KeepsCatalogValid(t *testing.T) {
+	video := Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true), RenderGroup: new(int64(1))}
+	audio := Track{Name: "audio", Packaging: PackagingLOC, IsLive: new(true), RenderGroup: new(int64(1))}
+	byName := Track{Name: "timeline", Packaging: PackagingMediaTimeline, IsLive: new(true), Depends: []Dependency{DependsOnTrack("video")}}
+	byGroup := Track{Name: "timeline", Packaging: PackagingMediaTimeline, IsLive: new(true), Depends: []Dependency{DependsOnRenderGroup(1)}}
+
+	tests := map[string]struct {
+		tracks   []Track // registered in this order
+		remove   moqt.TrackName
+		errMatch string
+	}{
+		"track named by depends": {
+			tracks:   []Track{video, byName},
+			remove:   "video",
+			errMatch: `track name "video" does not match any other track`,
+		},
+		"last track of a depended-on render group": {
+			tracks:   []Track{video, byGroup},
+			remove:   "video",
+			errMatch: "renderGroup 1 does not match any track",
+		},
+		"render group keeps another member": {
+			tracks: []Track{video, audio, byGroup},
+			remove: "video",
+		},
+		"dependent track itself": {
+			tracks: []Track{video, byName},
+			remove: "timeline",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
+			require.NoError(t, err)
+			handler := &fakeTrackHandler{}
+			for _, track := range tt.tracks {
+				require.NoError(t, broadcast.RegisterTrack(track, handler))
+			}
+			before := broadcast.Catalog()
+
+			err = broadcast.RemoveTrack(tt.remove)
+
+			if tt.errMatch == "" {
+				require.NoError(t, err)
+				assert.Len(t, broadcast.Catalog().Tracks, len(tt.tracks)-1)
+				require.NoError(t, broadcast.Catalog().Validate())
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errMatch)
+			var validationErr *ValidationError
+			assert.ErrorAs(t, err, &validationErr)
+			assert.Equal(t, before, broadcast.Catalog(), "a refused removal leaves the catalog unchanged")
+			broadcast.Handler(tt.remove).ServeTrack(&moqt.TrackWriter{TrackName: tt.remove})
+			assert.Len(t, handler.servedTracks(), 1, "a refused removal keeps the handler")
+			// The catalog stayed valid, so later registrations still work.
+			require.NoError(t, broadcast.RegisterTrack(Track{Name: "extra", Packaging: PackagingLOC, IsLive: new(true)}, handler))
+		})
+	}
+}
+
+func TestBroadcast_RegisterTrack_RequiresDependencyOrder(t *testing.T) {
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
+	require.NoError(t, err)
+	handler := &fakeTrackHandler{}
+
+	timeline := Track{Name: "timeline", Packaging: PackagingMediaTimeline, IsLive: new(true), Depends: []Dependency{DependsOnTrack("video")}}
+	require.Error(t, broadcast.RegisterTrack(timeline, handler), "a track cannot register before what it depends on")
+
+	require.NoError(t, broadcast.RegisterTrack(Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}, handler))
+	require.NoError(t, broadcast.RegisterTrack(timeline, handler))
 }

@@ -1,0 +1,9 @@
+{
+     "generatedAt": 1746104606044,
+     "deltaUpdate": [
+       {
+         "op": "remove",
+         "tracks": [{"name": "video"}, {"name": "slides"}]
+       }
+     ]
+   }

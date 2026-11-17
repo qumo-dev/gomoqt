@@ -79,18 +79,33 @@ func (e *MediaTimelineEntry) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// ValidateMediaTimeline checks that the entries of an explicit-format media
+// timeline are ordered by media time (draft-ietf-moq-msf-02 §7.1.1). Group
+// IDs are not checked: they need not be sequential or monotonically
+// increasing (§7.1).
+func ValidateMediaTimeline(entries []MediaTimelineEntry) error {
+	for i := 1; i < len(entries); i++ {
+		if entries[i].MediaTime < entries[i-1].MediaTime {
+			return fmt.Errorf("msf: media timeline entry %d has media time %d before the previous entry's %d", i, entries[i].MediaTime, entries[i-1].MediaTime)
+		}
+	}
+	return nil
+}
+
 // EventTimelineRecord represents a single event in an event-timeline track.
 // Exactly one of Wallclock, Location or MediaTime must be non‑nil, indicating
 // which index is used for the record.  The Data field contains the event
 // payload as raw JSON.  Any additional properties are preserved in
-// ExtraFields.  The JSON encoding is an object with keys "t" (wallclock),
-// "l" (location), "m" (mediaTime), "data" and optionally others.
+// ExtraFields.  The JSON encoding (draft-ietf-moq-msf-02 §8.2) is an object
+// with the uppercase index keys "T" (wallclock), "L" (location) or "M"
+// (mediaTime), "data" and optionally others.
 type EventTimelineRecord struct {
 	// one of the following three pointers is set to select the index type
 	Wallclock *int64    `json:"-"`
 	Location  *Location `json:"-"`
 	MediaTime *int64    `json:"-"`
-	// Data is the event payload; must be non-empty
+	// Data is the event payload: any JSON value, including null, whose
+	// structure is defined by the track's eventType. It must be present.
 	Data json.RawMessage `json:"-"`
 
 	// ExtraFields holds unknown JSON properties for round-tripping.
@@ -113,7 +128,7 @@ func (r EventTimelineRecord) Validate() error {
 		count++
 	}
 	if count != 1 {
-		return fmt.Errorf("msf: event timeline record must contain exactly one of t, l, or m")
+		return fmt.Errorf("msf: event timeline record must contain exactly one of T, L, or M")
 	}
 	if len(r.Data) == 0 {
 		return fmt.Errorf("msf: event timeline record must contain data")
@@ -121,20 +136,20 @@ func (r EventTimelineRecord) Validate() error {
 	return nil
 }
 
-// MarshalJSON encodes the event timeline record using the draft-01 JSON shape.
+// MarshalJSON encodes the event timeline record using the draft-02 JSON shape.
 func (r EventTimelineRecord) MarshalJSON() ([]byte, error) {
 	obj := make(map[string]any, len(r.ExtraFields)+2)
 	for key, raw := range r.ExtraFields {
 		obj[key] = append(json.RawMessage(nil), raw...)
 	}
 	if r.Wallclock != nil {
-		obj["t"] = *r.Wallclock
+		obj["T"] = *r.Wallclock
 	}
 	if r.Location != nil {
-		obj["l"] = *r.Location
+		obj["L"] = *r.Location
 	}
 	if r.MediaTime != nil {
-		obj["m"] = *r.MediaTime
+		obj["M"] = *r.MediaTime
 	}
 	if len(r.Data) > 0 {
 		obj["data"] = append(json.RawMessage(nil), r.Data...)
@@ -142,7 +157,7 @@ func (r EventTimelineRecord) MarshalJSON() ([]byte, error) {
 	return json.Marshal(obj)
 }
 
-// UnmarshalJSON decodes the event timeline record using the draft-01 JSON shape.
+// UnmarshalJSON decodes the event timeline record using the draft-02 JSON shape.
 func (r *EventTimelineRecord) UnmarshalJSON(data []byte) error {
 	*r = EventTimelineRecord{ExtraFields: make(map[string]json.RawMessage)}
 
@@ -152,19 +167,19 @@ func (r *EventTimelineRecord) UnmarshalJSON(data []byte) error {
 	}
 	for key, value := range raw {
 		switch key {
-		case "t":
+		case "T":
 			var v int64
 			if err := json.Unmarshal(value, &v); err != nil {
 				return err
 			}
 			r.Wallclock = &v
-		case "l":
+		case "L":
 			var v Location
 			if err := json.Unmarshal(value, &v); err != nil {
 				return err
 			}
 			r.Location = &v
-		case "m":
+		case "M":
 			var v int64
 			if err := json.Unmarshal(value, &v); err != nil {
 				return err
@@ -181,7 +196,7 @@ func (r *EventTimelineRecord) UnmarshalJSON(data []byte) error {
 }
 
 // Template describes a media-timeline template for tracks with fixed-duration
-// segments (draft-ietf-moq-msf-01 §5.2.15 / §7.4). The JSON form is a
+// segments (draft-ietf-moq-msf-02 §5.2.16 / §7.4). The JSON form is a
 // six-element array:
 //
 //	[startMediaTime, deltaMediaTime, [groupID, objectID], [deltaGroup, deltaObject], startWallclock, deltaWallclock]
@@ -202,7 +217,7 @@ type Template struct {
 	DeltaWallclock int64
 }
 
-// MarshalJSON encodes the template as the draft-01 six-element array form.
+// MarshalJSON encodes the template as the draft-02 six-element array form.
 func (t Template) MarshalJSON() ([]byte, error) {
 	return json.Marshal([]any{
 		t.StartMediaTime,
@@ -214,7 +229,7 @@ func (t Template) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// UnmarshalJSON decodes the template from the draft-01 six-element array form.
+// UnmarshalJSON decodes the template from the draft-02 six-element array form.
 func (t *Template) UnmarshalJSON(data []byte) error {
 	var raw []json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -254,7 +269,7 @@ func (t *Template) Clone() *Template {
 }
 
 // Entry returns the n-th (zero-based) timeline entry computed from the template
-// per the formulas in draft-ietf-moq-msf-01 §7.4.1.
+// per the formulas in draft-ietf-moq-msf-02 §7.4.1.
 //
 // n MUST be non-negative; the template formulas are defined only for n >= 0 and
 // the location computation uses unsigned arithmetic.

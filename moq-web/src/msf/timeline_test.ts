@@ -2,10 +2,15 @@ import { assertEquals, assertThrows } from "@std/assert";
 import {
 	decodeLocation,
 	decodeMediaTimelineEntry,
+	encodeEventTimelineRecord,
 	encodeLocation,
 	encodeMediaTimelineEntry,
+	parseCatalog,
 	parseEventTimelineRecord,
+	type Template,
+	templateEntry,
 	validateEventTimelineRecord,
+	validateMediaTimeline,
 } from "./mod.ts";
 
 // ─── decodeLocation ──────────────────────────────────────────────────────────
@@ -69,42 +74,87 @@ Deno.test("encodeMediaTimelineEntry returns tuple", () => {
 	assertEquals(encoded, [100, [5, 9], 200]);
 });
 
-// ─── validateEventTimelineRecord ─────────────────────────────────────────────
+// ─── validateMediaTimeline ───────────────────────────────────────────────────
 
-Deno.test("validateEventTimelineRecord rejects record with no timing field", () => {
+Deno.test("validateMediaTimeline accepts entries ordered by media time", () => {
+	validateMediaTimeline([
+		{ mediaTime: 0, location: { groupId: 9, objectId: 0 }, wallclock: 0 },
+		{ mediaTime: 0, location: { groupId: 3, objectId: 0 }, wallclock: 0 },
+		{ mediaTime: 10, location: { groupId: 1, objectId: 0 }, wallclock: 0 },
+	]);
+});
+
+Deno.test("validateMediaTimeline rejects an entry earlier than the one before it", () => {
 	assertThrows(
-		() => validateEventTimelineRecord({ data: "payload" }),
+		() =>
+			validateMediaTimeline([
+				{ mediaTime: 10, location: { groupId: 0, objectId: 0 }, wallclock: 0 },
+				{ mediaTime: 5, location: { groupId: 1, objectId: 0 }, wallclock: 0 },
+			]),
 		Error,
-		"exactly one of t, l, or m",
+		"entry 1 has media time 5 before the previous entry's 10",
 	);
 });
 
-Deno.test("validateEventTimelineRecord rejects record with multiple timing fields", () => {
-	assertThrows(
-		() => validateEventTimelineRecord({ t: 1, l: { groupId: 0, objectId: 0 }, data: "x" }),
-		Error,
-		"exactly one of t, l, or m",
+// ─── templates ───────────────────────────────────────────────────────────────
+
+const template: Template = {
+	startMediaTime: 1000,
+	deltaMediaTime: 2000,
+	startLocation: { groupId: 5, objectId: 0 },
+	deltaLocation: { groupId: 1, objectId: 0 },
+	startWallclock: 1746104600000,
+	deltaWallclock: 2000,
+};
+
+Deno.test("templateEntry computes the n-th entry of a template", () => {
+	assertEquals(templateEntry(template, 3), {
+		mediaTime: 7000,
+		location: { groupId: 8, objectId: 0 },
+		wallclock: 1746104606000,
+	});
+});
+
+Deno.test("templateEntry rejects a negative or fractional index", async (t) => {
+	for (const n of [-1, 1.5]) {
+		await t.step(String(n), () => {
+			assertThrows(() => templateEntry(template, n), RangeError);
+		});
+	}
+});
+
+Deno.test("a track's template is read from its six-element array form", () => {
+	const catalog = parseCatalog(
+		'{"tracks":[{"name":"v","template":[1000,2000,[5,0],[1,0],1746104600000,2000]}]}',
 	);
+
+	assertEquals(catalog.tracks[0]?.template, template);
+});
+
+// ─── validateEventTimelineRecord ─────────────────────────────────────────────
+
+Deno.test("validateEventTimelineRecord requires exactly one index", async (t) => {
+	const cases = [
+		{ name: "none", record: { data: "x" } },
+		{ name: "two", record: { wallclock: 1, location: { groupId: 0, objectId: 0 }, data: "x" } },
+	];
+	for (const c of cases) {
+		await t.step(c.name, () => {
+			assertThrows(
+				() => validateEventTimelineRecord(c.record),
+				Error,
+				"exactly one of T, L, or M",
+			);
+		});
+	}
 });
 
 Deno.test("validateEventTimelineRecord rejects record missing data", () => {
-	assertThrows(
-		() => validateEventTimelineRecord({ t: 1 }),
-		Error,
-		"must contain data",
-	);
+	assertThrows(() => validateEventTimelineRecord({ wallclock: 1 }), Error, "must contain data");
 });
 
-Deno.test("validateEventTimelineRecord accepts record with t and data", () => {
-	validateEventTimelineRecord({ t: 1, data: "payload" });
-});
-
-Deno.test("validateEventTimelineRecord accepts record with l and data", () => {
-	validateEventTimelineRecord({ l: { groupId: 0, objectId: 1 }, data: 42 });
-});
-
-Deno.test("validateEventTimelineRecord accepts record with m and data", () => {
-	validateEventTimelineRecord({ m: 500, data: { key: "value" } });
+Deno.test("validateEventTimelineRecord accepts a null data payload", () => {
+	validateEventTimelineRecord({ mediaTime: 500, data: null });
 });
 
 // ─── parseEventTimelineRecord ─────────────────────────────────────────────────
@@ -117,31 +167,42 @@ Deno.test("parseEventTimelineRecord rejects non-object", () => {
 	);
 });
 
-Deno.test("parseEventTimelineRecord returns record with t", () => {
-	const record = parseEventTimelineRecord({ t: 42, data: "payload" });
-	assertEquals(record.t, 42);
-	assertEquals(record.data, "payload");
-	assertEquals(record.l, undefined);
-	assertEquals(record.m, undefined);
+Deno.test("parseEventTimelineRecord reads the T, L and M indexes", async (t) => {
+	const cases = [
+		{ input: { T: 42, data: "payload" }, expected: { wallclock: 42, data: "payload" } },
+		{
+			input: { L: [3, 7], data: null },
+			expected: { location: { groupId: 3, objectId: 7 }, data: null },
+		},
+		{ input: { M: 100, data: [1, 2, 3] }, expected: { mediaTime: 100, data: [1, 2, 3] } },
+	];
+	for (const c of cases) {
+		await t.step(Object.keys(c.input)[0] ?? "", () => {
+			assertEquals(parseEventTimelineRecord(c.input), c.expected);
+		});
+	}
 });
 
-Deno.test("parseEventTimelineRecord returns record with l", () => {
-	const record = parseEventTimelineRecord({ l: [3, 7], data: null });
-	assertEquals(record.l, { groupId: 3, objectId: 7 });
-	assertEquals(record.data, null);
-});
-
-Deno.test("parseEventTimelineRecord returns record with m", () => {
-	const record = parseEventTimelineRecord({ m: 100, data: [1, 2, 3] });
-	assertEquals(record.m, 100);
+Deno.test("parseEventTimelineRecord does not read the draft-01 lowercase index keys", () => {
+	assertThrows(
+		() => parseEventTimelineRecord({ t: 1, data: "x" }),
+		Error,
+		"exactly one of T, L, or M",
+	);
 });
 
 Deno.test("parseEventTimelineRecord preserves extraFields", () => {
-	const record = parseEventTimelineRecord({ t: 1, data: "x", custom: "hello", num: 99 });
+	const record = parseEventTimelineRecord({ T: 1, data: "x", custom: "hello", num: 99 });
+
 	assertEquals(record.extraFields, { custom: "hello", num: 99 });
 });
 
-Deno.test("parseEventTimelineRecord returns no extraFields when none present", () => {
-	const record = parseEventTimelineRecord({ t: 1, data: "x" });
-	assertEquals(record.extraFields, undefined);
+Deno.test("encodeEventTimelineRecord writes the T, L and M keys", () => {
+	const encoded = encodeEventTimelineRecord({
+		location: { groupId: 3, objectId: 7 },
+		data: { score: 1 },
+		extraFields: { custom: true },
+	});
+
+	assertEquals(encoded, { custom: true, L: [3, 7], data: { score: 1 } });
 });

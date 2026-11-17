@@ -27,7 +27,7 @@ func BenchmarkBroadcastSetCatalog_SameNames(b *testing.B) {
 					IsLive:    new(false),
 				}
 			}
-			catalog := Catalog{Version: 1, Tracks: tracks}
+			catalog := Catalog{Version: CurrentVersion, Tracks: tracks}
 
 			broadcast, err := NewBroadcast(catalog)
 			if err != nil {
@@ -64,7 +64,7 @@ func BenchmarkBroadcastSetCatalog_AllStale(b *testing.B) {
 					IsLive:    new(false),
 				}
 			}
-			oldCatalog := Catalog{Version: 1, Tracks: oldTracks}
+			oldCatalog := Catalog{Version: CurrentVersion, Tracks: oldTracks}
 
 			newTracks := make([]Track, size)
 			for i := range size {
@@ -75,7 +75,7 @@ func BenchmarkBroadcastSetCatalog_AllStale(b *testing.B) {
 					IsLive:    new(false),
 				}
 			}
-			newCatalog := Catalog{Version: 1, Tracks: newTracks}
+			newCatalog := Catalog{Version: CurrentVersion, Tracks: newTracks}
 
 			broadcast, err := NewBroadcast(oldCatalog)
 			if err != nil {
@@ -105,7 +105,7 @@ func BenchmarkBroadcastRegisterTrack(b *testing.B) {
 
 	for _, size := range []int{5, 10, 16, 32, 100, 1000} {
 		b.Run(fmt.Sprintf("N=%d", size), func(b *testing.B) {
-			broadcast, err := NewBroadcast(Catalog{Version: 1})
+			broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -134,7 +134,9 @@ func BenchmarkBroadcastRegisterTrack(b *testing.B) {
 					b.Fatal(err)
 				}
 				b.StopTimer()
-				broadcast.RemoveTrack(moqt.TrackName(newTrack.Name))
+				if err := broadcast.RemoveTrack(moqt.TrackName(newTrack.Name)); err != nil {
+					b.Fatal(err)
+				}
 				b.StartTimer()
 			}
 		})

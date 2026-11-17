@@ -2,21 +2,45 @@
 title: "Catalog Delta"
 ---
 
-A `CatalogDelta` represents an incremental update to an existing catalog. Instead of resending the full track list, a delta contains add, remove, and clone operations.
+A `CatalogDelta` represents an incremental update to an existing catalog. Instead of resending the full track list, a delta carries `add`, `remove`, `clone` and `update` operations, plus the `generatedAt` timestamp every delta must have. A delta must not carry any other root catalog field (`version`, `isComplete`, `tracks`, `publishTracks`, `initDataList`).
 
 ## Parse and Apply
 
 ```go
-    delta, err := msf.ParseCatalogDelta(deltaJSON)
-    if err != nil {
-        // handle error
-    }
+// Example: ExampleCatalog_ApplyDelta
+base := msf.Catalog{
+    Version: msf.CurrentVersion,
+    Tracks: []msf.Track{
+        {Name: "video", Packaging: msf.PackagingLOC, IsLive: new(true), Bitrate: new(int64(5000000))},
+        {Name: "old-audio", Packaging: msf.PackagingLOC, IsLive: new(true)},
+    },
+}
 
-    updated, err := baseCatalog.ApplyDelta(delta)
-    if err != nil {
-        // handle error
-    }
+delta, err := msf.ParseCatalogDelta([]byte(`{
+    "generatedAt": 1746104606044,
+    "deltaUpdate": [
+        {"op": "update", "tracks": [{"parentName": "video", "bitrate": 4000000}]},
+        {"op": "add", "tracks": [{"name": "subtitle", "packaging": "loc", "isLive": true, "role": "subtitle"}]},
+        {"op": "remove", "tracks": [{"name": "old-audio"}]}
+    ]
+}`))
+if err != nil {
+    fmt.Println(err)
+    return
+}
+
+updated, err := base.ApplyDelta(delta)
+if err != nil {
+    fmt.Println(err)
+    return
+}
+for _, track := range updated.Tracks {
+    fmt.Println(track.Name)
+}
+fmt.Println("video bitrate:", *updated.Tracks[0].Bitrate)
 ```
+
+Operations apply in order, each to the result of the previous one. `ApplyDelta` rejects the whole delta when an operation is illogical — adding or cloning to an existing Full Track Name, removing or updating an unknown track, renaming onto another track, or setting `isLive` back to `true` — and when the result does not validate, for example because a removed track is still named in a `depends`. A catalog with `isComplete` set accepts no delta (`msf.ErrCatalogComplete`). The base catalog is never modified.
 
 ## `msf.CatalogDelta`
 
@@ -24,10 +48,11 @@ A `CatalogDelta` represents an incremental update to an existing catalog. Instea
 type CatalogDelta struct {
     DefaultNamespace string
     GeneratedAt      *int64
-    IsComplete       bool
     AddTracks        []Track
     RemoveTracks     []TrackRef
     CloneTracks      []TrackClone
+    UpdateTracks     []TrackUpdate
+    ExtraFields      map[string]json.RawMessage
 }
 
 func ParseCatalogDelta(data []byte) (CatalogDelta, error)
@@ -38,53 +63,47 @@ func (d CatalogDelta) Clone() CatalogDelta
 
 ### Delta Operations
 
-| Field          | Type           | Description                                        |
-|----------------|----------------|----------------------------------------------------|
-| `AddTracks`    | `[]Track`      | New tracks to append to the catalog                |
-| `RemoveTracks` | `[]TrackRef`   | Tracks to remove (by namespace + name)             |
-| `CloneTracks`  | `[]TrackClone` | New tracks derived from an existing parent track   |
+| Field          | Wire op    | Type            | Description                                              |
+|----------------|------------|-----------------|----------------------------------------------------------|
+| `AddTracks`    | `"add"`    | `[]Track`       | New tracks to append to the catalog                      |
+| `RemoveTracks` | `"remove"` | `[]TrackRef`    | Tracks to remove, by name and optional namespace only    |
+| `CloneTracks`  | `"clone"`  | `[]TrackClone`  | New tracks derived from an existing parent track         |
+| `UpdateTracks` | `"update"` | `[]TrackUpdate` | Field overrides for an existing track                    |
 
-The operation order declared in the original JSON is preserved during application.
+A decoded delta keeps the order of its wire operations. Operations added in code beyond them apply in add, remove, clone, update order, so an update can target a track the same delta adds.
 
-### `TrackRef`
+### `TrackClone` and `TrackUpdate`
 
-Identifies a track by namespace and name, used in `RemoveTracks`:
-
-```go
-type TrackRef struct {
-    Namespace string
-    Name      string
-}
-```
-
-### `TrackClone`
-
-Describes a clone operation — a new track derived from an existing parent with optional overrides:
+Both name an existing track by `parentName` and an optional `parentNamespace`; without it the catalog namespace is assumed. The fields of the embedded `Track` override the parent's. A clone also gives the new track its `Name`.
 
 ```go
 type TrackClone struct {
-    Track               // override values
-    ParentName string   // source track to clone from
+    Track                  // overrides, including the new Name
+    ParentName      string // track to clone
+    ParentNamespace string // its namespace, when not the catalog's
+}
+
+type TrackUpdate struct {
+    Track                  // overrides
+    ParentName      string // track to update
+    ParentNamespace string // its namespace, when not the catalog's
 }
 ```
 
 ## Example
 
-```go
-    base, _ := msf.ParseCatalog(baseJSON)
+The delta of draft-02 §5.6.4:
 
-    delta, _ := msf.ParseCatalogDelta([]byte(`{
-        "deltaUpdate": true,
-        "addTracks": [
-            {"namespace": "ns", "name": "subtitle", "packaging": "loc"}
-        ],
-        "removeTracks": [
-            {"namespace": "ns", "name": "old-audio"}
-        ]
-    }`))
-
-    updated, err := base.ApplyDelta(delta)
-    if err != nil {
-        // handle error
-    }
+```json
+{
+    "generatedAt": 1746104606044,
+    "deltaUpdate": [
+        {"op": "update", "tracks": [{"parentName": "video-1080", "bitrate": 4000000}]},
+        {"op": "add", "tracks": [{"name": "slides", "packaging": "loc", "isLive": true,
+            "role": "video", "codec": "av01.0.08M.10.0.110.09", "width": 1920, "height": 1080,
+            "framerate": 15, "bitrate": 750000, "renderGroup": 1}]},
+        {"op": "clone", "tracks": [{"parentName": "video-1080", "parentNamespace": "example.com/custom",
+            "name": "video-720", "width": 1280, "height": 720, "bitrate": 600000}]}
+    ]
+}
 ```

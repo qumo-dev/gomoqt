@@ -2,6 +2,7 @@ package msf
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -77,7 +78,7 @@ func TestCatalogValidate_Errors(t *testing.T) {
 	}{
 		"duplicate track identity": {
 			catalog: Catalog{
-				Version:          1,
+				Version:          CurrentVersion,
 				DefaultNamespace: "live/demo",
 				Tracks: []Track{
 					{Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
@@ -86,16 +87,25 @@ func TestCatalogValidate_Errors(t *testing.T) {
 			},
 			errorMessage: "duplicate track identity",
 		},
-		"loc packaging requires isLive": {
+		"duplicate identity across tracks and publishTracks": {
 			catalog: Catalog{
-				Version: 1,
-				Tracks:  []Track{{Name: "video", Packaging: PackagingLOC}},
+				Version:          CurrentVersion,
+				DefaultNamespace: "live/demo",
+				Tracks:           []Track{{Name: "0", Packaging: PackagingLOC, IsLive: new(true)}},
+				PublishTracks:    []Track{{Name: "0", Packaging: PackagingMoqLog, Role: RoleLog, IsLive: new(true)}},
 			},
-			errorMessage: "isLive is required for loc tracks",
+			errorMessage: "publishTracks[0]: duplicate track identity",
+		},
+		"every track requires isLive": {
+			catalog: Catalog{
+				Version: CurrentVersion,
+				Tracks:  []Track{{Name: "events", Packaging: PackagingEventTimeline, EventType: "com.example.e"}},
+			},
+			errorMessage: "isLive is required",
 		},
 		"live track rejects duration": {
 			catalog: Catalog{
-				Version: 1,
+				Version: CurrentVersion,
 				Tracks: []Track{{
 					Name:          "video",
 					Packaging:     PackagingLOC,
@@ -128,23 +138,23 @@ func TestCatalogValidate_RequiresVersionForIndependentCatalog(t *testing.T) {
 
 func TestCatalogValidate_TimelineRequirements(t *testing.T) {
 	catalog := Catalog{
-		Version: 1,
+		Version: CurrentVersion,
 		Tracks: []Track{
-			{Name: "timeline", Packaging: PackagingMediaTimeline},
-			{Name: "events", Packaging: PackagingEventTimeline, MimeType: "application/json", Depends: []string{"video"}},
+			{Name: "timeline", Packaging: PackagingMediaTimeline, IsLive: new(true)},
+			{Name: "events", Packaging: PackagingEventTimeline, IsLive: new(true)},
 		},
 	}
 
 	err := catalog.Validate()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "mediatimeline tracks must use mimeType application/json")
 	assert.Contains(t, err.Error(), "mediatimeline tracks must declare depends")
 	assert.Contains(t, err.Error(), "eventType is required for eventtimeline tracks")
+	assert.NotContains(t, err.Error(), "mimeType")
 }
 
 func TestCatalogRoundTrip_PreservesCustomFields(t *testing.T) {
 	input := []byte(`{
-		"version": 1,
+		"version": "draft-02",
 		"generatedAt": 1234,
 		"com.example.catalog": "premium",
 		"tracks": [
@@ -170,7 +180,7 @@ func TestCatalogRoundTrip_PreservesCustomFields(t *testing.T) {
 
 func TestParseCatalogString_RoundTrip(t *testing.T) {
 	input := `{
-		"version": 1,
+		"version": "draft-02",
 		"tracks": [
 			{"name": "video", "packaging": "loc", "isLive": true}
 		]
@@ -178,7 +188,7 @@ func TestParseCatalogString_RoundTrip(t *testing.T) {
 
 	catalog, err := ParseCatalogString(input)
 	require.NoError(t, err)
-	assert.Equal(t, 1, catalog.Version)
+	assert.Equal(t, CurrentVersion, catalog.Version)
 	require.Len(t, catalog.Tracks, 1)
 	assert.Equal(t, "video", catalog.Tracks[0].Name)
 	assert.Equal(t, PackagingLOC, catalog.Tracks[0].Packaging)
@@ -187,20 +197,20 @@ func TestParseCatalogString_RoundTrip(t *testing.T) {
 }
 
 func TestParseCatalog_RejectsDeltaJSON(t *testing.T) {
-	_, err := ParseCatalog([]byte(`{"deltaUpdate": [{"op":"add","tracks":[{"name": "video", "packaging": "loc", "isLive": true}]}]}`))
+	_, err := ParseCatalog([]byte(`{"generatedAt": 1, "deltaUpdate": [{"op":"add","tracks":[{"name": "video", "packaging": "loc", "isLive": true}]}]}`))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "delta catalog fields are not allowed")
 }
 
 func TestParseCatalog_RejectsTrailingJSON(t *testing.T) {
-	_, err := ParseCatalog([]byte(`{"version":1} {"extra":2}`))
+	_, err := ParseCatalog([]byte(`{"version": "draft-02"} {"extra":2}`))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "after top-level value")
 }
 
 func TestParseCatalogDelta_RoundTrip(t *testing.T) {
 	input := `{
-		"deltaUpdate": [
+		"generatedAt": 1, "deltaUpdate": [
 			{"op": "add", "tracks": [
 				{"name": "video", "packaging": "loc", "isLive": true}
 			]}
@@ -218,7 +228,7 @@ func TestParseCatalogDelta_RoundTrip(t *testing.T) {
 
 func TestParseCatalogDelta_ValidJSON(t *testing.T) {
 	input := []byte(`{
-		"deltaUpdate": [
+		"generatedAt": 1, "deltaUpdate": [
 			{"op": "add", "tracks": [
 				{"name": "video", "packaging": "loc", "isLive": true}
 			]}
@@ -236,7 +246,7 @@ func TestParseCatalogDelta_ValidJSON(t *testing.T) {
 
 func TestParseCatalogDelta_InvalidJSON(t *testing.T) {
 	input := []byte(`{
-		"deltaUpdate": [
+		"generatedAt": 1, "deltaUpdate": [
 			{"op": "add", "tracks": [
 				{"name": "video", "packaging": "loc", "isLive": true
 			]}
@@ -248,9 +258,9 @@ func TestParseCatalogDelta_InvalidJSON(t *testing.T) {
 }
 
 func TestParseCatalogDelta_RejectsIndependentJSON(t *testing.T) {
-	_, err := ParseCatalogDelta([]byte(`{"version": 1, "tracks": [{"name": "video", "packaging": "loc", "isLive": true}]}`))
+	_, err := ParseCatalogDelta([]byte(`{"version": "draft-02", "tracks": [{"name": "video", "packaging": "loc", "isLive": true}]}`))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "independent catalog fields are not allowed")
+	assert.Contains(t, err.Error(), "is not allowed in a delta catalog")
 }
 
 func TestParseCatalogDelta_RejectsTrailingJSON(t *testing.T) {
@@ -264,7 +274,7 @@ func TestParseCatalogDelta_RejectsTrailingJSON(t *testing.T) {
 // decoder must unmarshal into a fresh slice and append (see decodeDeltaOps).
 func TestParseCatalogDelta_RepeatedSameTypeOpsAccumulate(t *testing.T) {
 	delta, err := ParseCatalogDeltaString(`{
-		"deltaUpdate": [
+		"generatedAt": 1, "deltaUpdate": [
 			{"op": "add", "tracks": [{"name": "a", "packaging": "loc", "isLive": true}]},
 			{"op": "remove", "tracks": [{"name": "old"}]},
 			{"op": "add", "tracks": [{"name": "b", "packaging": "loc", "isLive": true}]}
@@ -284,14 +294,14 @@ func TestParseCatalogDelta_RepeatedSameTypeOpsAccumulate(t *testing.T) {
 // add and fail on an unknown track.
 func TestCatalogApplyDelta_InterleavedOperations(t *testing.T) {
 	base := Catalog{
-		Version: 1,
+		Version: CurrentVersion,
 		Tracks: []Track{
 			{Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
 			{Name: "audio", Packaging: PackagingLOC, IsLive: new(true)},
 		},
 	}
 	delta, err := ParseCatalogDeltaString(`{
-		"deltaUpdate": [
+		"generatedAt": 1, "deltaUpdate": [
 			{"op": "remove", "tracks": [{"name": "video"}]},
 			{"op": "add", "tracks": [{"name": "video", "packaging": "loc", "isLive": true}]},
 			{"op": "remove", "tracks": [{"name": "video"}]}
@@ -350,13 +360,13 @@ func TestCatalogDelta_MarshalJSON_Operations(t *testing.T) {
 
 func TestCatalogApplyDelta_PreservesDeclaredOperationOrder(t *testing.T) {
 	base := Catalog{
-		Version: 1,
+		Version: CurrentVersion,
 		Tracks:  []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(true), Bitrate: new(int64(1000))}},
 	}
 
 	var delta CatalogDelta
 	require.NoError(t, json.Unmarshal([]byte(`{
-		"deltaUpdate": [
+		"generatedAt": 1, "deltaUpdate": [
 			{"op": "remove", "tracks": [{"name": "video"}]},
 			{"op": "add", "tracks": [{"name": "video", "packaging": "loc", "isLive": true, "bitrate": 2000}]}
 		]
@@ -371,7 +381,7 @@ func TestCatalogApplyDelta_PreservesDeclaredOperationOrder(t *testing.T) {
 
 func TestCatalogApplyDelta_CloneTrackInheritsParent(t *testing.T) {
 	base := Catalog{
-		Version: 1,
+		Version: CurrentVersion,
 		Tracks: []Track{{
 			Name:        "video-1080",
 			Packaging:   PackagingLOC,
@@ -384,6 +394,7 @@ func TestCatalogApplyDelta_CloneTrackInheritsParent(t *testing.T) {
 		}},
 	}
 	delta := CatalogDelta{
+		GeneratedAt: new(int64(1)),
 		CloneTracks: []TrackClone{{
 			Name:       "video-720",
 			Width:      new(int64(1280)),
@@ -413,20 +424,22 @@ func TestCatalogApplyDelta_Errors(t *testing.T) {
 	}{
 		"remove unknown track": {
 			base: Catalog{
-				Version: 1,
+				Version: CurrentVersion,
 				Tracks:  []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}},
 			},
 			delta: CatalogDelta{
+				GeneratedAt:  new(int64(1)),
 				RemoveTracks: []TrackRef{{Name: "audio"}},
 			},
 			errorMessage: "cannot remove unknown track",
 		},
 		"clone unknown parent": {
 			base: Catalog{
-				Version: 1,
+				Version: CurrentVersion,
 				Tracks:  []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}},
 			},
 			delta: CatalogDelta{
+				GeneratedAt: new(int64(1)),
 				CloneTracks: []TrackClone{{Name: "audio", ParentName: "missing"}},
 			},
 			errorMessage: "cannot clone unknown parent track",
@@ -445,7 +458,7 @@ func TestCatalogApplyDelta_Errors(t *testing.T) {
 func TestCatalogApplyDelta_MergesMetadata(t *testing.T) {
 	generatedAt := int64(1234)
 	base := Catalog{
-		Version:          1,
+		Version:          CurrentVersion,
 		DefaultNamespace: "live/demo",
 		Tracks:           []Track{{Namespace: "live/demo", Name: "video", Packaging: PackagingLOC, IsLive: new(true)}},
 		ExtraFields:      map[string]json.RawMessage{"base": json.RawMessage(`true`)},
@@ -453,7 +466,6 @@ func TestCatalogApplyDelta_MergesMetadata(t *testing.T) {
 	delta := CatalogDelta{
 		DefaultNamespace: "live/updated",
 		GeneratedAt:      &generatedAt,
-		IsComplete:       true,
 		ExtraFields:      map[string]json.RawMessage{"delta": json.RawMessage(`{"ok":true}`)},
 		AddTracks:        []Track{{Name: "audio", Packaging: PackagingLOC, IsLive: new(false)}},
 	}
@@ -463,7 +475,7 @@ func TestCatalogApplyDelta_MergesMetadata(t *testing.T) {
 	assert.Equal(t, "live/updated", updated.DefaultNamespace)
 	require.NotNil(t, updated.GeneratedAt)
 	assert.Equal(t, generatedAt, *updated.GeneratedAt)
-	assert.True(t, updated.IsComplete)
+	assert.False(t, updated.IsComplete)
 	assert.Contains(t, updated.ExtraFields, "base")
 	assert.Contains(t, updated.ExtraFields, "delta")
 	require.Len(t, updated.Tracks, 2)
@@ -472,7 +484,7 @@ func TestCatalogApplyDelta_MergesMetadata(t *testing.T) {
 
 func TestCatalogApplyDelta_RejectsChangingDefaultNamespaceForInheritedTracks(t *testing.T) {
 	base := Catalog{
-		Version:          1,
+		Version:          CurrentVersion,
 		DefaultNamespace: "live/demo",
 		Tracks: []Track{{
 			Name:      "video",
@@ -481,6 +493,7 @@ func TestCatalogApplyDelta_RejectsChangingDefaultNamespaceForInheritedTracks(t *
 		}},
 	}
 	delta := CatalogDelta{
+		GeneratedAt:      new(int64(1)),
 		DefaultNamespace: "live/updated",
 		AddTracks: []Track{{
 			Namespace: "live/updated",
@@ -498,7 +511,7 @@ func TestCatalogApplyDelta_RejectsChangingDefaultNamespaceForInheritedTracks(t *
 func TestCatalogDeltaValidate_RemoveTracksRejectExtraFields(t *testing.T) {
 	var delta CatalogDelta
 	require.NoError(t, json.Unmarshal([]byte(`{
-		"deltaUpdate": [
+		"generatedAt": 1, "deltaUpdate": [
 			{"op": "remove", "tracks": [{"name": "video", "codec": "av01"}]}
 		]
 	}`), &delta))
@@ -552,7 +565,7 @@ func TestTrackRoundTrip_AllFields(t *testing.T) {
 		RenderGroup:   new(int64(1)),
 		AltGroup:      new(int64(2)),
 		InitRef:       "init1",
-		Depends:       []string{"audio"},
+		Depends:       []Dependency{{TrackName: "audio"}},
 		TemporalID:    new(int64(3)),
 		SpatialID:     new(int64(1)),
 		Codec:         "av01",
@@ -587,7 +600,7 @@ func TestTrackRoundTrip_AllFields(t *testing.T) {
 	assert.Equal(t, int64(1), *decoded.RenderGroup)
 	assert.Equal(t, int64(2), *decoded.AltGroup)
 	assert.Equal(t, "init1", decoded.InitRef)
-	assert.Equal(t, []string{"audio"}, decoded.Depends)
+	assert.Equal(t, []Dependency{{TrackName: "audio"}}, decoded.Depends)
 	assert.Equal(t, int64(3), *decoded.TemporalID)
 	assert.Equal(t, int64(1), *decoded.SpatialID)
 	assert.Equal(t, "av01", decoded.Codec)
@@ -613,39 +626,19 @@ func TestTrackValidate_EventTimeline(t *testing.T) {
 			track: Track{
 				Name:      "events",
 				Packaging: PackagingEventTimeline,
-				MimeType:  "application/json",
-				Depends:   []string{"video"},
+				IsLive:    new(true),
 			},
 			errorMessage: "eventType is required for eventtimeline tracks",
-		},
-		"eventtimeline wrong mimeType": {
-			track: Track{
-				Name:      "events",
-				Packaging: PackagingEventTimeline,
-				EventType: "scene-change",
-				MimeType:  "text/plain",
-				Depends:   []string{"video"},
-			},
-			errorMessage: "eventtimeline tracks must use mimeType application/json",
-		},
-		"eventtimeline missing depends": {
-			track: Track{
-				Name:      "events",
-				Packaging: PackagingEventTimeline,
-				EventType: "scene-change",
-				MimeType:  "application/json",
-			},
-			errorMessage: "eventtimeline tracks must declare depends",
 		},
 		"mediatimeline eventType must not be set": {
 			track: Track{
 				Name:      "timeline",
 				Packaging: PackagingMediaTimeline,
 				EventType: "invalid",
-				MimeType:  "application/json",
-				Depends:   []string{"video"},
+				IsLive:    new(true),
+				Depends:   []Dependency{{TrackName: "video"}},
 			},
-			errorMessage: "eventType must not be set for mediatimeline tracks",
+			errorMessage: "eventType must only be set for eventtimeline tracks",
 		},
 		"loc eventType must not be set": {
 			track: Track{
@@ -654,13 +647,14 @@ func TestTrackValidate_EventTimeline(t *testing.T) {
 				EventType: "invalid",
 				IsLive:    new(true),
 			},
-			errorMessage: "eventType must not be set for loc tracks",
+			errorMessage: "eventType must only be set for eventtimeline tracks",
 		},
 		"other packaging eventType must not be set": {
 			track: Track{
 				Name:      "video",
 				Packaging: PackagingCMAF,
 				EventType: "invalid",
+				IsLive:    new(true),
 			},
 			errorMessage: "eventType must only be set for eventtimeline tracks",
 		},
@@ -673,7 +667,8 @@ func TestTrackValidate_EventTimeline(t *testing.T) {
 		},
 		"track missing packaging": {
 			track: Track{
-				Name: "video",
+				Name:   "video",
+				IsLive: new(true),
 			},
 			errorMessage: "packaging is required",
 		},
@@ -681,17 +676,22 @@ func TestTrackValidate_EventTimeline(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			problems := tt.track.validate("test")
+			problems := tt.track.validate(trackListTracks)
 			require.NotEmpty(t, problems)
 			assert.Contains(t, problems[0], tt.errorMessage)
 		})
 	}
 }
 
+func TestTrackValidate_EventTimelineNeedsNoDependsOrMimeType(t *testing.T) {
+	track := Track{Name: "events", Packaging: PackagingEventTimeline, EventType: "com.example.score", IsLive: new(true)}
+	assert.Empty(t, track.validate(trackListTracks))
+}
+
 func TestCatalogMarshalJSON_AllFields(t *testing.T) {
 	generatedAt := int64(9999)
 	catalog := Catalog{
-		Version:     1,
+		Version:     CurrentVersion,
 		GeneratedAt: &generatedAt,
 		IsComplete:  true,
 		Tracks: []Track{{
@@ -705,11 +705,11 @@ func TestCatalogMarshalJSON_AllFields(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(data), `"generatedAt":9999`)
 	assert.Contains(t, string(data), `"isComplete":true`)
-	assert.Contains(t, string(data), `"version":1`)
+	assert.Contains(t, string(data), `"version":"draft-02"`)
 }
 
 func TestCatalogUnmarshalJSON_IsComplete(t *testing.T) {
-	input := `{"version":1,"isComplete":true}`
+	input := `{"version": "draft-02","isComplete":true}`
 	catalog, err := ParseCatalogString(input)
 	require.NoError(t, err)
 	assert.True(t, catalog.IsComplete)
@@ -723,15 +723,6 @@ func TestTrack_applyOverrides_AllFields(t *testing.T) {
 	}
 
 	override := Track{
-		presentFields: map[string]struct{}{
-			"namespace": {}, "name": {}, "packaging": {}, "eventType": {},
-			"role": {}, "isLive": {}, "targetLatency": {}, "label": {},
-			"renderGroup": {}, "altGroup": {}, "initRef": {}, "depends": {},
-			"temporalId": {}, "spatialId": {}, "codec": {}, "mimeType": {},
-			"framerate": {}, "timescale": {}, "bitrate": {}, "width": {},
-			"height": {}, "samplerate": {}, "channelConfig": {}, "displayWidth": {},
-			"displayHeight": {}, "lang": {}, "trackDuration": {},
-		},
 		Namespace:     "live/new",
 		Name:          "audio",
 		Packaging:     PackagingCMAF,
@@ -743,7 +734,7 @@ func TestTrack_applyOverrides_AllFields(t *testing.T) {
 		RenderGroup:   new(int64(5)),
 		AltGroup:      new(int64(3)),
 		InitRef:       "init1",
-		Depends:       []string{"sub"},
+		Depends:       []Dependency{{TrackName: "sub"}},
 		TemporalID:    new(int64(2)),
 		SpatialID:     new(int64(0)),
 		Codec:         "opus",
@@ -775,7 +766,7 @@ func TestTrack_applyOverrides_AllFields(t *testing.T) {
 	assert.Equal(t, int64(5), *base.RenderGroup)
 	assert.Equal(t, int64(3), *base.AltGroup)
 	assert.Equal(t, "init1", base.InitRef)
-	assert.Equal(t, []string{"sub"}, base.Depends)
+	assert.Equal(t, []Dependency{{TrackName: "sub"}}, base.Depends)
 	assert.Equal(t, int64(2), *base.TemporalID)
 	assert.Equal(t, int64(0), *base.SpatialID)
 	assert.Equal(t, "opus", base.Codec)
@@ -795,11 +786,12 @@ func TestTrack_applyOverrides_AllFields(t *testing.T) {
 
 func TestCatalogApplyDelta_AddDuplicateTrack(t *testing.T) {
 	base := Catalog{
-		Version: 1,
+		Version: CurrentVersion,
 		Tracks:  []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}},
 	}
 	delta := CatalogDelta{
-		AddTracks: []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(false)}},
+		GeneratedAt: new(int64(1)),
+		AddTracks:   []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(false)}},
 	}
 
 	_, err := base.ApplyDelta(delta)
@@ -809,13 +801,14 @@ func TestCatalogApplyDelta_AddDuplicateTrack(t *testing.T) {
 
 func TestCatalogApplyDelta_CloneDuplicateTrack(t *testing.T) {
 	base := Catalog{
-		Version: 1,
+		Version: CurrentVersion,
 		Tracks: []Track{
 			{Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
 			{Name: "video-copy", Packaging: PackagingLOC, IsLive: new(true)},
 		},
 	}
 	delta := CatalogDelta{
+		GeneratedAt: new(int64(1)),
 		CloneTracks: []TrackClone{{
 			Name:       "video-copy",
 			ParentName: "video",
@@ -829,10 +822,11 @@ func TestCatalogApplyDelta_CloneDuplicateTrack(t *testing.T) {
 
 func TestCatalogApplyDelta_CloneMissingName(t *testing.T) {
 	base := Catalog{
-		Version: 1,
+		Version: CurrentVersion,
 		Tracks:  []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}},
 	}
 	delta := CatalogDelta{
+		GeneratedAt: new(int64(1)),
 		CloneTracks: []TrackClone{{
 			Track:      Track{},
 			ParentName: "video",
@@ -847,7 +841,8 @@ func TestCatalogApplyDelta_CloneMissingName(t *testing.T) {
 func TestCatalogApplyDelta_InvalidBaseCatalog(t *testing.T) {
 	base := Catalog{}
 	delta := CatalogDelta{
-		AddTracks: []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}},
+		GeneratedAt: new(int64(1)),
+		AddTracks:   []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}},
 	}
 
 	_, err := base.ApplyDelta(delta)
@@ -857,7 +852,7 @@ func TestCatalogApplyDelta_InvalidBaseCatalog(t *testing.T) {
 
 func TestCatalogApplyDelta_InvalidDelta(t *testing.T) {
 	base := Catalog{
-		Version: 1,
+		Version: CurrentVersion,
 		Tracks:  []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}},
 	}
 	delta := CatalogDelta{}
@@ -953,7 +948,7 @@ func TestCatalogMarshalJSON_EmptyCatalog(t *testing.T) {
 	catalog := Catalog{}
 	data, err := json.Marshal(catalog)
 	require.NoError(t, err)
-	assert.Equal(t, `{}`, string(data))
+	assert.Equal(t, `{"tracks":[]}`, string(data))
 }
 
 func TestTrack_hasField_UnknownField(t *testing.T) {
@@ -974,7 +969,7 @@ func TestTrack_hasField_MateriallySet(t *testing.T) {
 		RenderGroup:   new(int64(1)),
 		AltGroup:      new(int64(1)),
 		InitRef:       "init1",
-		Depends:       []string{"a"},
+		Depends:       []Dependency{{TrackName: "a"}},
 		TemporalID:    new(int64(0)),
 		SpatialID:     new(int64(0)),
 		Codec:         "av01",
@@ -1008,7 +1003,7 @@ func TestTrack_hasField_MateriallySet(t *testing.T) {
 
 func TestTrackDuration_VODRoundTrip(t *testing.T) {
 	input := `{
-		"version": 1,
+		"version": "draft-02",
 		"tracks": [{
 			"name": "video",
 			"packaging": "loc",
@@ -1033,10 +1028,10 @@ func TestCatalogDelta_Clone(t *testing.T) {
 	delta := CatalogDelta{
 		DefaultNamespace: "live/demo",
 		GeneratedAt:      &generatedAt,
-		IsComplete:       true,
 		AddTracks:        []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}},
 		RemoveTracks:     []TrackRef{{Name: "old", Namespace: "ns"}},
-		CloneTracks:      []TrackClone{{Name: "video-720", ParentName: "video-1080"}},
+		CloneTracks:      []TrackClone{{Track: Track{Name: "video-720"}, ParentName: "video-1080"}},
+		UpdateTracks:     []TrackUpdate{{Track: Track{Bitrate: new(int64(1))}, ParentName: "video"}},
 		ExtraFields:      map[string]json.RawMessage{"ext": json.RawMessage(`1`)},
 		ops:              []deltaOp{{kind: deltaOperationAdd, n: 1}, {kind: deltaOperationRemove, n: 1}, {kind: deltaOperationClone, n: 1}},
 	}
@@ -1045,19 +1040,24 @@ func TestCatalogDelta_Clone(t *testing.T) {
 	assert.Equal(t, delta.DefaultNamespace, clone.DefaultNamespace)
 	require.NotNil(t, clone.GeneratedAt)
 	assert.Equal(t, generatedAt, *clone.GeneratedAt)
-	assert.True(t, clone.IsComplete)
 	require.Len(t, clone.AddTracks, 1)
 	assert.Equal(t, "video", clone.AddTracks[0].Name)
 	require.Len(t, clone.RemoveTracks, 1)
 	assert.Equal(t, "old", clone.RemoveTracks[0].Name)
 	require.Len(t, clone.CloneTracks, 1)
 	assert.Equal(t, "video-720", clone.CloneTracks[0].Name)
+	require.Len(t, clone.UpdateTracks, 1)
+	assert.Equal(t, "video", clone.UpdateTracks[0].ParentName)
 	assert.Contains(t, clone.ExtraFields, "ext")
 	assert.Equal(t, []deltaOp{{kind: deltaOperationAdd, n: 1}, {kind: deltaOperationRemove, n: 1}, {kind: deltaOperationClone, n: 1}}, clone.ops)
 
 	// Mutating clone should not affect original.
 	clone.AddTracks[0].Name = "mutated"
 	assert.Equal(t, "video", delta.AddTracks[0].Name)
+	*clone.GeneratedAt = 1
+	assert.Equal(t, generatedAt, *delta.GeneratedAt)
+	*clone.UpdateTracks[0].Bitrate = 2
+	assert.Equal(t, int64(1), *delta.UpdateTracks[0].Bitrate)
 
 	clone.ops[0].kind = deltaOperationRemove
 	assert.Equal(t, []deltaOp{{kind: deltaOperationAdd, n: 1}, {kind: deltaOperationRemove, n: 1}, {kind: deltaOperationClone, n: 1}}, delta.ops)
@@ -1067,7 +1067,6 @@ func TestCatalogDelta_MarshalJSON_RoundTrip(t *testing.T) {
 	generatedAt := int64(42)
 	delta := CatalogDelta{
 		GeneratedAt: &generatedAt,
-		IsComplete:  true,
 		AddTracks:   []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}},
 		RemoveTracks: []TrackRef{{
 			Namespace: "live",
@@ -1084,7 +1083,7 @@ func TestCatalogDelta_MarshalJSON_RoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(data), `"deltaUpdate"`)
 	assert.Contains(t, string(data), `"generatedAt":42`)
-	assert.Contains(t, string(data), `"isComplete":true`)
+	assert.NotContains(t, string(data), `"isComplete"`)
 	assert.Contains(t, string(data), `"op":"add"`)
 	assert.Contains(t, string(data), `"op":"remove"`)
 	assert.Contains(t, string(data), `"op":"clone"`)
@@ -1094,7 +1093,6 @@ func TestCatalogDelta_MarshalJSON_RoundTrip(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &decoded))
 	require.NotNil(t, decoded.GeneratedAt)
 	assert.Equal(t, int64(42), *decoded.GeneratedAt)
-	assert.True(t, decoded.IsComplete)
 	require.Len(t, decoded.AddTracks, 1)
 	assert.Equal(t, "video", decoded.AddTracks[0].Name)
 	require.Len(t, decoded.RemoveTracks, 1)
@@ -1318,6 +1316,7 @@ func TestTrackClone_Validate(t *testing.T) {
 
 func TestCatalogDeltaValidate_Valid(t *testing.T) {
 	delta := CatalogDelta{
+		GeneratedAt: new(int64(1)),
 		AddTracks: []Track{
 			{Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
 		},
@@ -1332,32 +1331,36 @@ func TestCatalogDeltaValidate_Errors(t *testing.T) {
 	}{
 		"missing operations": {
 			delta:        CatalogDelta{},
-			errorMessage: "delta catalog must contain addTracks, removeTracks, or cloneTracks",
+			errorMessage: "delta catalog must contain at least one add, remove, clone, or update track",
 		},
 		"add track invalid": {
 			delta: CatalogDelta{
-				AddTracks: []Track{{Packaging: PackagingLOC}}, // missing name
+				GeneratedAt: new(int64(1)),
+				AddTracks:   []Track{{Packaging: PackagingLOC}}, // missing name
 			},
-			errorMessage: "addTracks[0]: name is required",
+			errorMessage: "add[0]: name is required",
 		},
 		"remove track invalid": {
 			delta: CatalogDelta{
+				GeneratedAt:  new(int64(1)),
 				RemoveTracks: []TrackRef{{Namespace: "ns"}}, // missing name
 			},
-			errorMessage: "removeTracks[0]: name is required",
+			errorMessage: "remove[0]: name is required",
 		},
 		"clone track invalid": {
 			delta: CatalogDelta{
+				GeneratedAt: new(int64(1)),
 				CloneTracks: []TrackClone{{Name: "video"}}, // missing parentName
 			},
-			errorMessage: "cloneTracks[0]: parentName is required for clone tracks",
+			errorMessage: "clone[0]: parentName is required for clone tracks",
 		},
 		"multiple invalid": {
 			delta: CatalogDelta{
+				GeneratedAt:  new(int64(1)),
 				AddTracks:    []Track{{Packaging: PackagingLOC}}, // missing name
 				RemoveTracks: []TrackRef{{Namespace: "ns"}},      // missing name
 			},
-			errorMessage: "addTracks[0]: name is required",
+			errorMessage: "add[0]: name is required",
 		},
 	}
 
@@ -1385,7 +1388,7 @@ func TestCatalogDelta_UnmarshalJSON(t *testing.T) {
 		check       func(*testing.T, CatalogDelta)
 	}{
 		"valid base delta": {
-			input:   `{"deltaUpdate": [{"op":"add","tracks":[{"name": "video", "packaging": "loc", "isLive": true}]}]}`,
+			input:   `{"generatedAt": 1, "deltaUpdate": [{"op":"add","tracks":[{"name": "video", "packaging": "loc", "isLive": true}]}]}`,
 			wantErr: false,
 			check: func(t *testing.T, d CatalogDelta) {
 				require.Len(t, d.AddTracks, 1)
@@ -1394,7 +1397,7 @@ func TestCatalogDelta_UnmarshalJSON(t *testing.T) {
 			},
 		},
 		"valid delta with extra fields": {
-			input:   `{"deltaUpdate": [{"op":"add","tracks":[{"name": "video", "packaging": "loc", "isLive": true}]}], "custom_field": "custom_value", "another_field": 123}`,
+			input:   `{"generatedAt": 1, "deltaUpdate": [{"op":"add","tracks":[{"name": "video", "packaging": "loc", "isLive": true}]}], "custom_field": "custom_value", "another_field": 123}`,
 			wantErr: false,
 			check: func(t *testing.T, d CatalogDelta) {
 				require.Len(t, d.AddTracks, 1)
@@ -1440,7 +1443,7 @@ func TestCatalogDelta_UnmarshalJSON_DeltaUpdateFalse(t *testing.T) {
 
 func TestCatalogDelta_UnmarshalJSON_CloneTracks(t *testing.T) {
 	input := `{
-		"deltaUpdate": [
+		"generatedAt": 1, "deltaUpdate": [
 			{"op": "clone", "tracks": [{"name": "video-720", "parentName": "video-1080", "width": 1280}]}
 		]
 	}`
@@ -1456,7 +1459,7 @@ func TestCatalogDelta_UnmarshalJSON_CloneTracks(t *testing.T) {
 
 func TestCatalogDelta_UnmarshalJSON_ExtraFields(t *testing.T) {
 	input := `{
-		"deltaUpdate": [
+		"generatedAt": 1, "deltaUpdate": [
 			{"op": "add", "tracks": [{"name": "video", "packaging": "loc", "isLive": true}]}
 		],
 		"com.example.ext": 42
@@ -1516,7 +1519,8 @@ func TestTrackRef_Clone_NilExtraFields(t *testing.T) {
 
 func TestCatalogDelta_Clone_NilSlices(t *testing.T) {
 	delta := CatalogDelta{
-		AddTracks: nil, RemoveTracks: nil, CloneTracks: nil,
+		GeneratedAt: new(int64(1)),
+		AddTracks:   nil, RemoveTracks: nil, CloneTracks: nil,
 	}
 	clone := delta.Clone()
 	assert.Nil(t, clone.AddTracks)
@@ -1578,10 +1582,10 @@ func TestCatalogUnmarshalJSON_FieldErrors(t *testing.T) {
 	tests := map[string]struct {
 		input string
 	}{
-		"bad version":     {`{"version": "not-a-number"}`},
-		"bad generatedAt": {`{"version": 1, "generatedAt": "not-a-number"}`},
-		"bad isComplete":  {`{"version": 1, "isComplete": "not-a-bool"}`},
-		"bad tracks":      {`{"version": 1, "tracks": "not-an-array"}`},
+		"bad version":     {`{"version": 2}`},
+		"bad generatedAt": {`{"version": "draft-02", "generatedAt": "not-a-number"}`},
+		"bad isComplete":  {`{"version": "draft-02", "isComplete": "not-a-bool"}`},
+		"bad tracks":      {`{"version": "draft-02", "tracks": "not-an-array"}`},
 	}
 
 	for name, tt := range tests {
@@ -1608,7 +1612,7 @@ func TestDecodeOrderedObject_TruncatedBeforeClosingBrace(t *testing.T) {
 
 func TestDecodeOrderedObject_TrailingGarbage(t *testing.T) {
 	// Non-JSON trailing bytes cause a non-EOF error on the second token read.
-	_, err := decodeOrderedObject([]byte(`{"version":1}abc`))
+	_, err := decodeOrderedObject([]byte(`{"version": "draft-02"}abc`))
 	require.Error(t, err)
 }
 
@@ -1618,15 +1622,15 @@ func TestCatalogDelta_UnmarshalJSON_IndependentFields(t *testing.T) {
 	tests := map[string]struct {
 		input string
 	}{
-		"version field": {`{"deltaUpdate": [{"op":"add","tracks":[]}], "version": 1}`},
-		"tracks field":  {`{"deltaUpdate": [{"op":"add","tracks":[]}], "tracks": []}`},
+		"version field": {`{"generatedAt": 1, "deltaUpdate": [{"op":"add","tracks":[]}], "version": "draft-02"}`},
+		"tracks field":  {`{"generatedAt": 1, "deltaUpdate": [{"op":"add","tracks":[]}], "tracks": []}`},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			_, err := ParseCatalogDeltaString(tt.input)
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "independent catalog fields are not allowed")
+			assert.Contains(t, err.Error(), "is not allowed in a delta catalog")
 		})
 	}
 }
@@ -1636,11 +1640,11 @@ func TestCatalogDelta_UnmarshalJSON_FieldErrors(t *testing.T) {
 		input string
 	}{
 		"bad deltaUpdate":  {`{"deltaUpdate": "not-an-array"}`},
-		"bad generatedAt":  {`{"deltaUpdate": [{"op":"add","tracks":[]}], "generatedAt": "not-a-number"}`},
-		"bad isComplete":   {`{"deltaUpdate": [{"op":"add","tracks":[]}], "isComplete": "not-a-bool"}`},
-		"bad addTracks":    {`{"deltaUpdate": [{"op":"add","tracks":"not-an-array"}]}`},
-		"bad removeTracks": {`{"deltaUpdate": [{"op":"remove","tracks":"not-an-array"}]}`},
-		"bad cloneTracks":  {`{"deltaUpdate": [{"op":"clone","tracks":"not-an-array"}]}`},
+		"bad generatedAt":  {`{"generatedAt": 1, "deltaUpdate": [{"op":"add","tracks":[]}], "generatedAt": "not-a-number"}`},
+		"bad isComplete":   {`{"generatedAt": 1, "deltaUpdate": [{"op":"add","tracks":[]}], "isComplete": "not-a-bool"}`},
+		"bad addTracks":    {`{"generatedAt": 1, "deltaUpdate": [{"op":"add","tracks":"not-an-array"}]}`},
+		"bad removeTracks": {`{"generatedAt": 1, "deltaUpdate": [{"op":"remove","tracks":"not-an-array"}]}`},
+		"bad cloneTracks":  {`{"generatedAt": 1, "deltaUpdate": [{"op":"clone","tracks":"not-an-array"}]}`},
 	}
 
 	for name, tt := range tests {
@@ -1783,10 +1787,11 @@ func TestTrackClone_UnmarshalJSON_FieldErrors(t *testing.T) {
 
 func TestCatalogApplyDelta_UnknownParentTrack(t *testing.T) {
 	base := Catalog{
-		Version: 1,
+		Version: CurrentVersion,
 		Tracks:  []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}},
 	}
 	delta := CatalogDelta{
+		GeneratedAt: new(int64(1)),
 		CloneTracks: []TrackClone{{
 			Name:       "copy",
 			ParentName: "nonexistent",
@@ -1801,7 +1806,7 @@ func TestCatalogApplyDelta_UnknownParentTrack(t *testing.T) {
 // --- RegisterTrack replace existing track ---
 
 func TestBroadcast_RegisterTrack_ReplacesExisting(t *testing.T) {
-	b, err := NewBroadcast(Catalog{Version: 1})
+	b, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	handler1 := &fakeTrackHandler{}
@@ -1821,7 +1826,7 @@ func TestBroadcast_RegisterTrack_ReplacesExisting(t *testing.T) {
 // --- staleTrackNamesLocked continue branch ---
 
 func TestBroadcast_SetCatalog_KeepsActiveRemovesStale(t *testing.T) {
-	b, err := NewBroadcast(Catalog{Version: 1})
+	b, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	require.NoError(t, b.RegisterTrack(Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}, &fakeTrackHandler{}))
@@ -1829,7 +1834,7 @@ func TestBroadcast_SetCatalog_KeepsActiveRemovesStale(t *testing.T) {
 
 	// New catalog keeps "video", drops "audio" → staleTrackNamesLocked hits continue for "video", appends "audio".
 	newCatalog := Catalog{
-		Version: 1,
+		Version: CurrentVersion,
 		Tracks:  []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}},
 	}
 	require.NoError(t, b.SetCatalog(newCatalog))
@@ -1841,7 +1846,7 @@ func TestBroadcast_SetCatalog_KeepsActiveRemovesStale(t *testing.T) {
 
 func TestParseCatalogDeltaString(t *testing.T) {
 	input := `{
-		"deltaUpdate": [
+		"generatedAt": 1, "deltaUpdate": [
 			{"op": "add", "tracks": [
 				{"name": "video", "packaging": "loc", "isLive": true}
 			]}
@@ -1930,19 +1935,25 @@ func TestTrackRoundTrip_NewFields(t *testing.T) {
 		AvgBitrate:       new(int64(2500000)),
 		MaxGopDuration:   new(int64(1000)),
 		MaxGroupDuration: new(int64(2000)),
-		ParentNamespace:  "live/parent",
 		ConnectionURI:    "moqt://example.com/live",
-		Token:            "tok",
 		EncryptionScheme: "cenc",
 		CipherSuite:      "AES_256_GCM",
 		KeyID:            "k1",
 		TrackBaseKey:     "base64key",
 		AuthInfo:         map[string]json.RawMessage{"bearer": json.RawMessage(`"xyz"`)},
 		Accessibility:    []AccessibilityDescriptor{{Scheme: "cea", Value: "608"}},
+
+		PackagingMetadata:    "streamMapping=object",
+		AccessibleWindowTime: new(int64(30000)),
+		KeyframeSpacing:      new(int64(60)),
 	}
 
 	data, err := json.Marshal(track)
 	require.NoError(t, err)
+	assert.Contains(t, string(data), `"connectionURI":"moqt://example.com/live"`)
+	assert.Contains(t, string(data), `"packagingMetadata":"streamMapping=object"`)
+	assert.Contains(t, string(data), `"accessibleWindowTime":30000`)
+	assert.Contains(t, string(data), `"keyframeSpacing":60`)
 
 	var decoded Track
 	require.NoError(t, json.Unmarshal(data, &decoded))
@@ -1956,7 +1967,12 @@ func TestTrackRoundTrip_NewFields(t *testing.T) {
 	assert.Equal(t, "k1", decoded.KeyID)
 	assert.Equal(t, "base64key", decoded.TrackBaseKey)
 	assert.Equal(t, "moqt://example.com/live", decoded.ConnectionURI)
-	assert.Equal(t, "tok", decoded.Token)
+	assert.Equal(t, "streamMapping=object", decoded.PackagingMetadata)
+	assert.Equal(t, StreamMappingObject, decoded.StreamMapping())
+	require.NotNil(t, decoded.AccessibleWindowTime)
+	assert.Equal(t, int64(30000), *decoded.AccessibleWindowTime)
+	require.NotNil(t, decoded.KeyframeSpacing)
+	assert.Equal(t, int64(60), *decoded.KeyframeSpacing)
 	require.Len(t, decoded.Accessibility, 1)
 	assert.Equal(t, "cea", decoded.Accessibility[0].Scheme)
 	assert.Equal(t, "608", decoded.Accessibility[0].Value)
@@ -1978,10 +1994,12 @@ func TestCatalog_NewPackagingAndRoleConstants(t *testing.T) {
 func TestCatalog_PublishTracksAndInitDataList_RoundTrip(t *testing.T) {
 	target := int64(100)
 	catalog := Catalog{
-		Version: 1,
+		Version: CurrentVersion,
 		PublishTracks: []Track{{
-			Name:          "logs",
+			Namespace:     "moq-syslog.arpa/logs-v1/r1",
+			Name:          "6",
 			Packaging:     PackagingMoqLog,
+			Role:          RoleLog,
 			IsLive:        new(true),
 			ConnectionURI: "moqt://example.com/log",
 		}},
@@ -2003,7 +2021,9 @@ func TestCatalog_PublishTracksAndInitDataList_RoundTrip(t *testing.T) {
 	var decoded Catalog
 	require.NoError(t, json.Unmarshal(data, &decoded))
 	require.Len(t, decoded.PublishTracks, 1)
-	assert.Equal(t, "logs", decoded.PublishTracks[0].Name)
+	assert.Equal(t, "6", decoded.PublishTracks[0].Name)
+	// initDataList is encoded after tracks (§5.1.7).
+	assert.Greater(t, strings.Index(string(data), `"initDataList"`), strings.Index(string(data), `"tracks"`))
 	assert.Equal(t, PackagingMoqLog, decoded.PublishTracks[0].Packaging)
 	require.Len(t, decoded.InitDataList, 1)
 	assert.Equal(t, "init1", decoded.InitDataList[0].ID)
@@ -2013,26 +2033,41 @@ func TestCatalog_PublishTracksAndInitDataList_RoundTrip(t *testing.T) {
 	require.NoError(t, decoded.Validate())
 }
 
-func TestCatalogValidate_CipherSuiteRequiredWithEncryptionScheme(t *testing.T) {
-	catalog := Catalog{
-		Version: 1,
-		Tracks: []Track{{
-			Name:             "video",
-			Packaging:        PackagingLOC,
-			IsLive:           new(true),
-			EncryptionScheme: "cenc",
-			CipherSuite:      "", // missing
-		}},
+func TestCatalogValidate_CipherSuiteRequiredForMoQSecureObjects(t *testing.T) {
+	tests := map[string]struct {
+		scheme  string
+		wantErr bool
+	}{
+		"moq-secure-objects without cipherSuite": {scheme: EncryptionSchemeMoQSecureObjects, wantErr: true},
+		"custom scheme without cipherSuite":      {scheme: "com.example.custom-encryption", wantErr: false},
 	}
 
-	err := catalog.Validate()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cipherSuite is required when encryptionScheme is set")
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			catalog := Catalog{
+				Version: CurrentVersion,
+				Tracks: []Track{{
+					Name:             "video",
+					Packaging:        PackagingLOC,
+					IsLive:           new(true),
+					EncryptionScheme: tt.scheme,
+				}},
+			}
+
+			err := catalog.Validate()
+			if !tt.wantErr {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "cipherSuite is required when encryptionScheme is moq-secure-objects")
+		})
+	}
 }
 
 func TestCatalogValidate_EncryptionWithCipherSuiteIsValid(t *testing.T) {
 	catalog := Catalog{
-		Version: 1,
+		Version: CurrentVersion,
 		Tracks: []Track{{
 			Name:             "video",
 			Packaging:        PackagingLOC,
@@ -2047,7 +2082,7 @@ func TestCatalogValidate_EncryptionWithCipherSuiteIsValid(t *testing.T) {
 
 func TestCatalogValidate_DanglingInitRef(t *testing.T) {
 	catalog := Catalog{
-		Version: 1,
+		Version: CurrentVersion,
 		InitDataList: []InitDataRef{
 			{ID: "init1", Type: "inline", Data: "AAAA"},
 		},
@@ -2065,9 +2100,22 @@ func TestCatalogValidate_DanglingInitRef(t *testing.T) {
 	assert.Contains(t, err.Error(), "does not match any initDataList id")
 }
 
+// TestCatalogValidate_DanglingInitRefWithoutInitDataList checks that an
+// initRef must resolve even when the catalog declares no initDataList.
+func TestCatalogValidate_DanglingInitRefWithoutInitDataList(t *testing.T) {
+	catalog := Catalog{
+		Version: CurrentVersion,
+		Tracks:  []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(true), InitRef: "init1"}},
+	}
+
+	err := catalog.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `initRef "init1" does not match any initDataList id`)
+}
+
 func TestCatalogValidate_ValidInitRef(t *testing.T) {
 	catalog := Catalog{
-		Version: 1,
+		Version: CurrentVersion,
 		InitDataList: []InitDataRef{
 			{ID: "init1", Type: "inline", Data: "AAAA"},
 		},
@@ -2084,7 +2132,7 @@ func TestCatalogValidate_ValidInitRef(t *testing.T) {
 
 func TestCatalogValidate_DuplicateInitDataListIDs(t *testing.T) {
 	catalog := Catalog{
-		Version: 1,
+		Version: CurrentVersion,
 		InitDataList: []InitDataRef{
 			{ID: "init1", Type: "inline", Data: "AAAA"},
 			{ID: "init1", Type: "inline", Data: "BBBB"},
@@ -2104,7 +2152,7 @@ func TestCatalogValidate_DuplicateInitDataListIDs(t *testing.T) {
 
 func TestCatalogValidate_BadInitDataListType(t *testing.T) {
 	catalog := Catalog{
-		Version: 1,
+		Version: CurrentVersion,
 		InitDataList: []InitDataRef{
 			{ID: "init1", Type: "url", Data: "x"},
 		},
@@ -2112,12 +2160,12 @@ func TestCatalogValidate_BadInitDataListType(t *testing.T) {
 
 	err := catalog.Validate()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `type must be "inline"`)
+	assert.Contains(t, err.Error(), `must be "inline", "track-property" or "object-property"`)
 }
 
 func TestCatalogValidate_InitDataListMissingID(t *testing.T) {
 	catalog := Catalog{
-		Version: 1,
+		Version: CurrentVersion,
 		InitDataList: []InitDataRef{
 			{Type: "inline", Data: "x"},
 		},
@@ -2198,4 +2246,442 @@ func TestAccessibilityDescriptor_RoundTrip(t *testing.T) {
 	assert.Equal(t, "cea", decoded.Scheme)
 	assert.Equal(t, "708", decoded.Value)
 	assert.Contains(t, decoded.ExtraFields, "channel")
+}
+
+// --- draft-02 validation rules ----------------------------------------------
+
+func TestCatalogValidate_Version(t *testing.T) {
+	tests := map[string]struct {
+		version  string
+		errMatch string
+	}{
+		"current":        {version: CurrentVersion},
+		"missing":        {version: "", errMatch: "catalog version is required"},
+		"previous draft": {version: "draft-01", errMatch: `unsupported catalog version "draft-01"`},
+		"numeric":        {version: "1", errMatch: "unsupported catalog version"},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := Catalog{Version: tt.version}.Validate()
+			if tt.errMatch == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errMatch)
+		})
+	}
+}
+
+func TestCatalogValidate_RequiredFieldsPerPackagingAndRole(t *testing.T) {
+	tests := map[string]struct {
+		track   Track
+		missing []string
+	}{
+		"loc audio":            {track: Track{Packaging: PackagingLOC, Role: RoleAudio}, missing: []string{"codec", "bitrate", "samplerate", "channelConfig"}},
+		"loc video":            {track: Track{Packaging: PackagingLOC, Role: RoleVideo}, missing: []string{"codec", "bitrate", "framerate"}},
+		"loc audiodescription": {track: Track{Packaging: PackagingLOC, Role: RoleAudioDescription}, missing: []string{"codec", "samplerate", "channelConfig", "lang"}},
+		"loc signlanguage":     {track: Track{Packaging: PackagingLOC, Role: RoleSignLanguage}, missing: []string{"codec", "framerate"}},
+		"loc without role":     {track: Track{Packaging: PackagingLOC}},
+		"loc caption":          {track: Track{Packaging: PackagingLOC, Role: RoleCaption}},
+		"loc data":             {track: Track{Packaging: PackagingLOC, Role: RoleData}},
+		"complete loc audio": {
+			track: Track{Packaging: PackagingLOC, Role: RoleAudio, Codec: "opus", Bitrate: new(int64(32000)), SampleRate: new(int64(48000)), ChannelConfig: "2"},
+		},
+		"catalog reference": {track: Track{Packaging: PackagingCatalog}},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			track := tt.track
+			track.Name = "track"
+			track.IsLive = new(true)
+
+			var want []string
+			for _, field := range tt.missing {
+				want = append(want, field+" is required for loc tracks with role "+string(track.Role))
+			}
+			assert.Equal(t, want, track.validate(trackListTracks))
+		})
+	}
+}
+
+func TestTrackValidate_Draft02Rules(t *testing.T) {
+	tests := map[string]struct {
+		track    Track
+		list     trackList
+		errMatch string
+	}{
+		"empty namespace field": {
+			track:    Track{Namespace: "live//demo", Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+			errMatch: "contains an empty field",
+		},
+		"NUL in name": {
+			track:    Track{Name: "vi\x00deo", Packaging: PackagingLOC, IsLive: new(true)},
+			errMatch: "contains a NUL character",
+		},
+		"targetLatency with buffers": {
+			track:    Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true), TargetLatency: new(int64(1)), Buffers: &Buffers{}},
+			errMatch: "targetLatency and buffers must not both be present",
+		},
+		"bad packagingMetadata": {
+			track:    Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true), PackagingMetadata: "streamMapping=frame"},
+			errMatch: "streamMapping",
+		},
+		"empty depends entry": {
+			track:    Track{Name: "timeline", Packaging: PackagingMediaTimeline, IsLive: new(true), Depends: []Dependency{{}}},
+			errMatch: "depends[0]: depends entry must not be an empty track name",
+		},
+		"mediatimeline with template": {
+			track:    Track{Name: "timeline", Packaging: PackagingMediaTimeline, IsLive: new(true), Depends: []Dependency{DependsOnTrack("v")}, Template: &Template{}},
+			errMatch: "mediatimeline tracks must not also carry a template",
+		},
+		"moqlog in tracks": {
+			track:    Track{Name: "6", Packaging: PackagingMoqLog, Role: RoleLog, IsLive: new(true)},
+			list:     trackListTracks,
+			errMatch: "moqlog tracks must be declared in publishTracks",
+		},
+		"moqlog without role": {
+			track:    Track{Name: "6", Packaging: PackagingMoqLog, IsLive: new(true)},
+			list:     trackListPublishTracks,
+			errMatch: "moqlog tracks must have role log",
+		},
+		"moqmetrics binary level name": {
+			track:    Track{Name: "\x04", Packaging: PackagingMoqMetrics, Role: RoleMetrics, IsLive: new(true)},
+			list:     trackListPublishTracks,
+			errMatch: `moqmetrics track name must be a level from "0" to "7"`,
+		},
+		"moqmetrics level out of range": {
+			track:    Track{Name: "8", Packaging: PackagingMoqMetrics, Role: RoleMetrics, IsLive: new(true)},
+			list:     trackListPublishTracks,
+			errMatch: "moqmetrics track name must be a level",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			problems := tt.track.validate(tt.list)
+			require.NotEmpty(t, problems)
+			assert.Contains(t, strings.Join(problems, "; "), tt.errMatch)
+		})
+	}
+}
+
+func TestTrackUnmarshalJSON_ExplicitEmptyNamespaceIsInvalid(t *testing.T) {
+	tests := map[string]struct {
+		input  string
+		decode func([]byte) error
+	}{
+		"track": {
+			input:  `{"namespace":"","name":"video","packaging":"loc","isLive":true}`,
+			decode: func(b []byte) error { var v Track; return json.Unmarshal(b, &v) },
+		},
+		"remove entry": {
+			input:  `{"namespace":"","name":"video"}`,
+			decode: func(b []byte) error { var v TrackRef; return json.Unmarshal(b, &v) },
+		},
+		"clone parentNamespace": {
+			input:  `{"parentName":"video","parentNamespace":"","name":"v2"}`,
+			decode: func(b []byte) error { var v TrackClone; return json.Unmarshal(b, &v) },
+		},
+		"update parentNamespace": {
+			input:  `{"parentName":"video","parentNamespace":""}`,
+			decode: func(b []byte) error { var v TrackUpdate; return json.Unmarshal(b, &v) },
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := tt.decode([]byte(tt.input))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "must not be empty")
+		})
+	}
+}
+
+// TestTrackValidate_PresenceComesFromValues checks that whether a field is
+// present is read from its value alone: a JSON null is absent, and a decoded
+// field that code clears is absent too.
+func TestTrackValidate_PresenceComesFromValues(t *testing.T) {
+	const video = `{"name":"video","namespace":"live/demo","packaging":"loc","role":"video","isLive":true,` +
+		`"codec":"av01","bitrate":1000,"framerate":30,"packagingMetadata":"streamMapping=object"}`
+
+	tests := map[string]struct {
+		input  string
+		mutate func(*Track)
+		want   []string
+	}{
+		"decoded track is valid": {input: video},
+		"null namespace inherits": {
+			input: `{"name":"v","namespace":null,"packaging":"loc","isLive":true}`,
+		},
+		"null required isLive is absent": {
+			input: `{"name":"v","packaging":"loc","isLive":null}`,
+			want:  []string{"isLive is required"},
+		},
+		"null required bitrate is absent": {
+			input: `{"name":"v","packaging":"loc","role":"video","isLive":true,"codec":"av01","bitrate":null,"framerate":30}`,
+			want:  []string{"bitrate is required for loc tracks with role video"},
+		},
+		"null buffers is absent": {
+			input: `{"name":"v","packaging":"loc","isLive":true,"targetLatency":100,"buffers":null}`,
+		},
+		"cleared namespace inherits": {
+			input:  video,
+			mutate: func(t *Track) { t.Namespace = "" },
+		},
+		"cleared packagingMetadata is absent": {
+			input:  video,
+			mutate: func(t *Track) { t.PackagingMetadata = "" },
+		},
+		"cleared required bitrate is missing": {
+			input:  video,
+			mutate: func(t *Track) { t.Bitrate = nil },
+			want:   []string{"bitrate is required for loc tracks with role video"},
+		},
+		"cleared required codec is missing": {
+			input:  video,
+			mutate: func(t *Track) { t.Codec = "" },
+			want:   []string{"codec is required for loc tracks with role video"},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			var track Track
+			require.NoError(t, json.Unmarshal([]byte(tt.input), &track))
+			if tt.mutate != nil {
+				tt.mutate(&track)
+			}
+			assert.Equal(t, tt.want, track.validate(trackListTracks))
+		})
+	}
+}
+
+func TestTrackUnmarshalJSON_NullUnknownFieldRoundTrips(t *testing.T) {
+	var track Track
+	require.NoError(t, json.Unmarshal([]byte(`{"name":"v","com.example":null}`), &track))
+	assert.JSONEq(t, `null`, string(track.ExtraFields["com.example"]))
+}
+
+func TestParseCatalog_NullGeneratedAtIsAbsent(t *testing.T) {
+	catalog, err := ParseCatalogString(`{"version":"draft-02","generatedAt":null,"tracks":[]}`)
+	require.NoError(t, err)
+	assert.Nil(t, catalog.GeneratedAt)
+
+	delta, err := ParseCatalogDeltaString(`{"generatedAt":null,"deltaUpdate":[]}`)
+	require.NoError(t, err)
+	assert.Nil(t, delta.GeneratedAt)
+}
+
+// TestTrack_applyOverrides_ClearedFieldDoesNotOverride checks that an override
+// decoded with a field which code then clears no longer overrides it.
+func TestTrack_applyOverrides_ClearedFieldDoesNotOverride(t *testing.T) {
+	var update TrackUpdate
+	require.NoError(t, json.Unmarshal([]byte(`{"parentName":"v","bitrate":5,"label":"x"}`), &update))
+	update.Bitrate = nil
+
+	base := Track{Name: "v", Bitrate: new(int64(1))}
+	base.applyOverrides(update.Track)
+	assert.Equal(t, int64(1), *base.Bitrate)
+	assert.Equal(t, "x", base.Label)
+}
+
+func TestTrackValidate_ParentFieldsOnlyInCloneOrUpdate(t *testing.T) {
+	catalog, err := ParseCatalogString(`{"version":"draft-02","tracks":[
+		{"name":"video","packaging":"loc","isLive":true,"parentName":"x","parentNamespace":"y"}]}`)
+	require.NoError(t, err)
+
+	err = catalog.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parentName must only appear in a clone or update operation")
+	assert.Contains(t, err.Error(), "parentNamespace must only appear in a clone or update operation")
+}
+
+// TestCatalogValidate_PublishTracksSpecExample uses the catalog of
+// draft-ietf-moq-msf-02 §5.6.17, after variable substitution.
+func TestCatalogValidate_PublishTracksSpecExample(t *testing.T) {
+	catalog, err := ParseCatalogString(`{
+		"version": "draft-02",
+		"generatedAt": 1746104606044,
+		"tracks": [{
+			"name": "video", "namespace": "broadcast.example.com/live/stream1", "packaging": "loc",
+			"isLive": true, "targetLatency": 2000, "role": "video", "renderGroup": 1,
+			"codec": "av01.0.08M.10.0.110.09", "width": 1920, "height": 1080, "framerate": 30, "bitrate": 1500000
+		}],
+		"publishTracks": [
+			{"namespace": "metrics.moq.arpa/metrics-v1/r1", "name": "4", "isLive": true,
+			 "packaging": "moqmetrics", "role": "metrics", "authInfo": {"cat": "eyJ"}},
+			{"namespace": "moq-syslog.arpa/logs-v1/r1", "name": "6", "isLive": true, "packaging": "moqlog",
+			 "role": "log", "connectionURI": "moqt://logs.example.com:4443", "authInfo": {"cat": "eyJ"}}
+		]
+	}`)
+	require.NoError(t, err)
+	require.NoError(t, catalog.Validate())
+	assert.Equal(t, "moqt://logs.example.com:4443", catalog.PublishTracks[1].ConnectionURI)
+	assert.Contains(t, catalog.PublishTracks[0].AuthInfo, "cat")
+}
+
+func TestCatalogValidate_Dependencies(t *testing.T) {
+	video := Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true), RenderGroup: new(int64(1))}
+	timeline := func(deps ...Dependency) Track {
+		return Track{Name: "timeline", Packaging: PackagingMediaTimeline, IsLive: new(true), Depends: deps}
+	}
+
+	tests := map[string]struct {
+		tracks        []Track
+		publishTracks []Track
+		errMatch      string
+	}{
+		"track name resolves":   {tracks: []Track{video, timeline(DependsOnTrack("video"))}},
+		"render group resolves": {tracks: []Track{video, timeline(DependsOnRenderGroup(1))}},
+		"publish track depends on a media track": {
+			tracks:        []Track{video},
+			publishTracks: []Track{{Name: "events", Packaging: PackagingEventTimeline, EventType: "com.example.e", IsLive: new(true), Depends: []Dependency{DependsOnTrack("video")}}},
+		},
+		"unknown track name": {
+			tracks:   []Track{video, timeline(DependsOnTrack("audio"))},
+			errMatch: `tracks[1]: depends[0]: track name "audio" does not match any other track`,
+		},
+		"self reference": {
+			tracks:   []Track{video, timeline(DependsOnTrack("timeline"))},
+			errMatch: `track name "timeline" does not match any other track`,
+		},
+		"ambiguous track name": {
+			tracks: []Track{
+				video,
+				{Namespace: "other/ns", Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+				timeline(DependsOnTrack("video")),
+			},
+			errMatch: `track name "video" matches 2 tracks; it must match exactly one`,
+		},
+		"unknown render group": {
+			tracks:   []Track{video, timeline(DependsOnRenderGroup(2))},
+			errMatch: "tracks[1]: depends[0]: renderGroup 2 does not match any track",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := Catalog{Version: CurrentVersion, Tracks: tt.tracks, PublishTracks: tt.publishTracks}.Validate()
+			if tt.errMatch == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errMatch)
+		})
+	}
+}
+
+func TestCatalogValidate_AccessibleWindowTimeMatchesAcrossAltGroup(t *testing.T) {
+	track := func(name string, altGroup int64, window *int64) Track {
+		return Track{Name: name, Packaging: PackagingLOC, IsLive: new(true), AltGroup: new(altGroup), AccessibleWindowTime: window}
+	}
+
+	tests := map[string]struct {
+		tracks  []Track
+		wantErr bool
+	}{
+		"same window":              {tracks: []Track{track("a", 1, new(int64(30000))), track("b", 1, new(int64(30000)))}},
+		"different alt groups":     {tracks: []Track{track("a", 1, new(int64(30000))), track("b", 2, new(int64(60000)))}},
+		"both absent":              {tracks: []Track{track("a", 1, nil), track("b", 1, nil)}},
+		"different windows":        {tracks: []Track{track("a", 1, new(int64(30000))), track("b", 1, new(int64(60000)))}, wantErr: true},
+		"one absent and one set":   {tracks: []Track{track("a", 1, nil), track("b", 1, new(int64(60000)))}, wantErr: true},
+		"third track of the group": {tracks: []Track{track("a", 1, new(int64(1))), track("b", 1, new(int64(1))), track("c", 1, new(int64(2)))}, wantErr: true},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := Catalog{Version: CurrentVersion, Tracks: tt.tracks}.Validate()
+			if !tt.wantErr {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "accessibleWindowTime must match the other tracks of altGroup 1")
+		})
+	}
+}
+
+func TestCatalogValidate_InitDataListTypes(t *testing.T) {
+	tests := map[string]struct {
+		ref      InitDataRef
+		errMatch string
+	}{
+		"inline":                    {ref: InitDataRef{ID: "i", Type: InitDataTypeInline, Data: "AAAA"}},
+		"track property":            {ref: InitDataRef{ID: "i", Type: InitDataTypeTrackProperty, Data: "0x0D"}},
+		"object property":           {ref: InitDataRef{ID: "i", Type: InitDataTypeObjectProperty, Data: "0F"}},
+		"property type not hex":     {ref: InitDataRef{ID: "i", Type: InitDataTypeTrackProperty, Data: "video"}, errMatch: `initDataList[0]: data "video" must be a property type in hex notation`},
+		"unknown type":              {ref: InitDataRef{ID: "i", Type: "url", Data: "x"}, errMatch: `initDataList[0]: type "url" must be`},
+		"empty type stays accepted": {ref: InitDataRef{ID: "i", Data: "AAAA"}},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			catalog := Catalog{
+				Version:      CurrentVersion,
+				Tracks:       []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(true), InitRef: "i"}},
+				InitDataList: []InitDataRef{tt.ref},
+			}
+			err := catalog.Validate()
+			if tt.errMatch == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errMatch)
+		})
+	}
+}
+
+func TestCatalogValidate_FullTrackNameUniqueness(t *testing.T) {
+	tests := map[string]struct {
+		tracks  []Track
+		wantErr bool
+	}{
+		"same name in different namespaces": {
+			tracks: []Track{
+				{Namespace: "a/b", Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+				{Namespace: "a/c", Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+			},
+		},
+		"declared namespace replaces the inherited one": {
+			tracks: []Track{
+				{Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+				{Namespace: "live", Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+			},
+		},
+		"declared namespace equal to the inherited one": {
+			tracks: []Track{
+				{Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+				{Namespace: "catalog-ns", Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+			},
+			wantErr: true,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := Catalog{Version: CurrentVersion, DefaultNamespace: "catalog-ns", Tracks: tt.tracks}.Validate()
+			if !tt.wantErr {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "duplicate track identity")
+		})
+	}
+}
+
+// TestCatalogMarshalJSON_EmptyTracksIsAnArray uses the terminating catalog of
+// draft-ietf-moq-msf-02 §5.6.13.
+func TestCatalogMarshalJSON_EmptyTracksIsAnArray(t *testing.T) {
+	generatedAt := int64(1746104606044)
+	catalog := Catalog{Version: CurrentVersion, GeneratedAt: &generatedAt, IsComplete: true}
+
+	data, err := json.Marshal(catalog)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"version":"draft-02","generatedAt":1746104606044,"isComplete":true,"tracks":[]}`, string(data))
 }

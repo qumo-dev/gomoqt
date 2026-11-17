@@ -2,23 +2,32 @@
 title: "Broadcast"
 ---
 
-`msf.Broadcast` is an optional helper that integrates an MSF catalog with `moqt.TrackHandler` routing. It manages the catalog snapshot and per-track handlers together, automatically serving the catalog track and dispatching subscriptions to the appropriate handler.
+`msf.Broadcast` is an optional helper that integrates an MSF catalog with `moqt.TrackHandler` routing. It manages the catalog snapshot and per-track handlers together, automatically serving the catalog track and dispatching subscriptions to the appropriate handler. Its catalog is valid at all times: every change is validated, and a change that would make it invalid is refused.
 
 ## Create a Broadcast
 
 ```go
-    catalog := msf.Catalog{
-        Version: 1,
-        Tracks: []msf.Track{
-            {Name: "video", Packaging: msf.PackagingLOC, Role: msf.RoleVideo},
-            {Name: "audio", Packaging: msf.PackagingLOC, Role: msf.RoleAudio},
+// Example: ExampleNewBroadcast
+catalog := msf.Catalog{
+    Version: msf.CurrentVersion,
+    Tracks: []msf.Track{
+        {
+            Name: "video", Packaging: msf.PackagingLOC, Role: msf.RoleVideo, IsLive: new(true),
+            Codec: "av01.0.08M.10.0.110.09", Bitrate: new(int64(5000000)), Framerate: new(int64(30)),
         },
-    }
+        {
+            Name: "audio", Packaging: msf.PackagingLOC, Role: msf.RoleAudio, IsLive: new(true),
+            Codec: "opus", Bitrate: new(int64(32000)), SampleRate: new(int64(48000)), ChannelConfig: "2",
+        },
+    },
+}
 
-    broadcast, err := msf.NewBroadcast(catalog)
-    if err != nil {
-        // handle error
-    }
+broadcast, err := msf.NewBroadcast(catalog)
+if err != nil {
+    fmt.Println(err)
+    return
+}
+fmt.Println(broadcast.CatalogTrackName(), len(broadcast.Catalog().Tracks))
 ```
 
 The catalog is validated before the broadcast is created. You can also start with a zero-value `Broadcast` and call `SetCatalog` later.
@@ -32,57 +41,91 @@ func (b *Broadcast) CatalogBytes() ([]byte, error)
 func (b *Broadcast) CatalogTrackName() moqt.TrackName
 func (b *Broadcast) SetCatalog(catalog Catalog) error
 func (b *Broadcast) RegisterTrack(track Track, handler moqt.TrackHandler) error
-func (b *Broadcast) RemoveTrack(name moqt.TrackName) bool
+func (b *Broadcast) RemoveTrack(name moqt.TrackName) error
 func (b *Broadcast) Handler(name moqt.TrackName) moqt.TrackHandler
 func (b *Broadcast) ServeTrack(tw *moqt.TrackWriter)
+func (b *Broadcast) Close()
 ```
 
 ## Register Tracks
 
 ```go
-    err := broadcast.RegisterTrack(
-        msf.Track{Name: "video", Packaging: msf.PackagingLOC, Role: msf.RoleVideo},
-        videoHandler,
-    )
+// Example: ExampleBroadcast_RegisterTrack
+broadcast, err := msf.NewBroadcast(msf.Catalog{Version: msf.CurrentVersion})
+if err != nil {
+    fmt.Println(err)
+    return
+}
+serveVideo := moqt.TrackHandlerFunc(func(tw *moqt.TrackWriter) { /* write groups to tw */ })
+
+// Register a track before any track that depends on it.
+err = broadcast.RegisterTrack(msf.Track{
+    Name: "video", Packaging: msf.PackagingLOC, Role: msf.RoleVideo, IsLive: new(true),
+    Codec: "av01.0.08M.10.0.110.09", Bitrate: new(int64(5000000)), Framerate: new(int64(30)),
+}, serveVideo)
+if err != nil {
+    fmt.Println(err)
+    return
+}
+err = broadcast.RegisterTrack(msf.Track{
+    Name: "timeline", Packaging: msf.PackagingMediaTimeline, IsLive: new(true),
+    Depends: []msf.Dependency{msf.DependsOnTrack("video")},
+}, serveVideo)
+fmt.Println(err, len(broadcast.Catalog().Tracks))
 ```
 
-`RegisterTrack` adds a track to the catalog and associates a `moqt.TrackHandler` with it. If a track with the same name already exists, it is replaced. The catalog is validated after modification.
+`RegisterTrack` adds a track to the catalog and associates a `moqt.TrackHandler` with it. If a track with the same name already exists, it is replaced. The catalog is validated after the change, so tracks register in dependency order: a track whose `depends` names a track or render group registers after it. To add tracks that reference each other at once, use `SetCatalog`.
 
-The reserved catalog track name (`"catalog"` by default) cannot be used.
+The catalog track name (`"catalog"` by default) cannot be used, and track names must be unique across namespaces, since subscriptions are routed by name.
 
 ## Remove Tracks
 
 ```go
-    removed := broadcast.RemoveTrack("old-video")
+// Example: ExampleBroadcast_RemoveTrack
+broadcast, err := msf.NewBroadcast(msf.Catalog{
+    Version: msf.CurrentVersion,
+    Tracks: []msf.Track{
+        {Name: "video", Packaging: msf.PackagingLOC, IsLive: new(true)},
+        {Name: "timeline", Packaging: msf.PackagingMediaTimeline, IsLive: new(true),
+            Depends: []msf.Dependency{msf.DependsOnTrack("video")}},
+    },
+})
+if err != nil {
+    fmt.Println(err)
+    return
+}
+
+// "timeline" depends on "video", so removing "video" first is refused
+// and the catalog stays as it was.
+err = broadcast.RemoveTrack("video")
+var validationErr *msf.ValidationError
+fmt.Println(errors.As(err, &validationErr), len(broadcast.Catalog().Tracks))
+
+fmt.Println(broadcast.RemoveTrack("timeline"), broadcast.RemoveTrack("video"))
+fmt.Println(errors.Is(broadcast.RemoveTrack("video"), msf.ErrTrackNotFound))
 ```
 
-`RemoveTrack` removes the named track and its handler from the broadcast. Returns `true` if the track was present.
+`RemoveTrack` removes the named track and its handler. It refuses a removal that would leave a dangling reference, returning the `*msf.ValidationError` and changing nothing; remove the dependent tracks first. It returns `msf.ErrTrackNotFound` when there is no such track.
 
 ## Use as TrackHandler
 
 `msf.Broadcast` implements `moqt.TrackHandler`, so it can be published directly:
 
 ```go
-    mux := moqt.NewTrackMux(0)
-    mux.Publish(ctx, "/live", broadcast)
+mux := moqt.NewTrackMux(0)
+mux.Publish(ctx, "/live", broadcast)
 ```
 
-Subscriptions to the catalog track name are served automatically with the current catalog snapshot serialized as JSON. All other subscriptions are routed to the registered per-track handler.
+Subscriptions to the catalog track name are served with the current catalog serialized as JSON. All other subscriptions are routed to the registered per-track handler.
 
 ## Update Catalog
 
 ```go
-    err := broadcast.SetCatalog(newCatalog)
+err := broadcast.SetCatalog(newCatalog)
 ```
 
-`SetCatalog` replaces the catalog snapshot atomically. Tracks present in the old catalog but absent in the new one are automatically removed along with their handlers.
+`SetCatalog` validates and replaces the catalog snapshot atomically. Tracks present in the old catalog but absent in the new one are removed along with their handlers.
 
 ## Catalog Track
 
-The catalog is served as a special track (default name: `"catalog"`). When a subscriber requests this track, the current catalog snapshot is serialized as JSON and written as a single group with one frame.
-
-```go
-    name := broadcast.CatalogTrackName() // "catalog"
-```
-
-The default catalog track name is `msf.DefaultCatalogTrackName`.
+The catalog is served as a special track (default name: `"catalog"`, `msf.DefaultCatalogTrackName`). A catalog subscription stays open: it receives the current catalog as its first group, then a new group with the whole catalog each time it changes.

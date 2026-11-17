@@ -2,7 +2,7 @@
 title: "MSF"
 ---
 
-MSF (MOQT Streaming Format, [draft-ietf-moq-msf-01](https://datatracker.ietf.org/doc/html/draft-ietf-moq-msf-01)) defines how media content is organized, described, and delivered over the MoQ transport protocol.
+MSF (MOQT Streaming Format, [draft-ietf-moq-msf-02](https://datatracker.ietf.org/doc/html/draft-ietf-moq-msf-02)) defines how media content is organized, described, and delivered over the MoQ transport protocol.
 
 While MoQ itself provides the transport primitives — broadcasts, tracks, groups, and frames — MSF defines the standard format for describing what media is available and how to consume it.
 
@@ -15,13 +15,14 @@ import "github.com/qumo-dev/gomoqt/msf"
 A **catalog** is a JSON document that describes the complete set of tracks available in a broadcast. Subscribers read the catalog to discover available media before opening individual subscriptions.
 
 A catalog describes:
-- **Track identities** — namespace and name for each track
-- **Media parameters** — codec, bitrate, resolution, sample rate, etc.
-- **Packaging mode** — how media data is packed into MoQ groups and frames (LOC, CMAF, media timeline, event timeline)
-- **Content roles** — video, audio, caption, subtitle, etc.
-- **Dependencies** — which tracks depend on other tracks (e.g., enhancement layers)
+- **Track identities** — namespace and name for each track; the Full Track Name (namespace and name) is unique
+- **Media parameters** — codec, bitrate, resolution, sample rate, etc., with the fields each (packaging, role) pair requires
+- **Packaging mode** — how media data is packed into MoQ groups and objects (LOC, media timeline, event timeline, log, metrics, or a reference to another catalog)
+- **Content roles** — video, audio, caption, subtitle, data, etc.
+- **Dependencies** — which tracks or render groups a track depends on (e.g., the tracks a media timeline describes)
+- **Publish tracks** — tracks the subscriber publishes back, such as logs and metrics
 
-Catalogs are delivered as a reserved track (typically named `"catalog"`) within the broadcast, so they can be subscribed to like any other track.
+The top-level catalog is delivered as a track named `"catalog"` within the broadcast, so it can be subscribed to like any other track. It may reference further catalogs.
 
 <Columns cols={2}>
     <Card title="Catalog" icon="file-lines" href="/msf/catalog">Parse, validate, and inspect catalog snapshots</Card>
@@ -32,8 +33,8 @@ Catalogs are delivered as a reserved track (typically named `"catalog"`) within 
 
 MSF defines **timeline records** that map media timestamps to MoQ group/object locations:
 
-- **Media Timeline** — maps media presentation timestamps to `[groupID, objectID]` locations with wallclock times
-- **Event Timeline** — records events indexed by wallclock time, object location, or media time, carrying arbitrary JSON payloads
+- **Media Timeline** — maps media presentation timestamps to `[groupID, objectID]` locations with wallclock times, or a fixed-interval template
+- **Event Timeline** — records events indexed by wallclock time (`T`), object location (`L`), or media time (`M`), carrying arbitrary JSON payloads
 
 <Columns cols={2}>
     <Card title="Timeline" icon="clock" href="/msf/timeline">Location, media timeline, and event timeline records</Card>

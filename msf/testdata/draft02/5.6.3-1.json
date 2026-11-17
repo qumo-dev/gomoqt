@@ -1,0 +1,99 @@
+{
+     "version": "draft-02",
+     "generatedAt": 1746104606044,
+     "tracks":[
+       {
+         "name": "480p15",
+         "namespace": "conference.example.com/conference123/alice",
+         "renderGroup": 1,
+         "packaging": "loc",
+         "isLive": true,
+         "buffers": {"target":2000},
+         "role": "video",
+         "codec":"av01.0.01M.10.0.110.09",
+
+
+
+
+
+
+         "width":640,
+         "height":480,
+         "bitrate":3000000,
+         "spatialId": 0,
+         "temporalId": 0,
+         "framerate":15
+       },
+       {
+         "name": "480p30",
+         "namespace": "conference.example.com/conference123/alice",
+         "renderGroup": 1,
+         "packaging": "loc",
+         "isLive": true,
+         "buffers": {"target":2000},
+         "role": "video",
+         "codec":"av01.0.04M.10.0.110.09",
+         "width":640,
+         "height":480,
+         "bitrate":3800000,
+         "spatialId": 0,
+         "temporalId": 1,
+         "framerate":30,
+         "depends": ["480p15"]
+       },
+       {
+         "name": "1080p15",
+         "namespace": "conference.example.com/conference123/alice",
+         "renderGroup": 1,
+         "packaging": "loc",
+         "isLive": true,
+         "buffers": {"target":2000},
+         "role": "video",
+         "codec":"av01.0.05M.10.0.110.09",
+         "width":1920,
+         "height":1080,
+         "bitrate":6000000,
+         "spatialId": 1,
+         "temporalId": 0,
+         "framerate":15,
+         "depends":["480p15"]
+       },
+
+       {
+         "name": "1080p30",
+         "namespace": "conference.example.com/conference123/alice",
+         "renderGroup": 1,
+         "packaging": "loc",
+         "isLive": true,
+
+
+
+
+
+
+         "buffers": {"target":2000},
+         "role": "video",
+         "codec":"av01.0.08M.10.0.110.09",
+         "width":1920,
+         "height":1080,
+         "bitrate":5000000,
+         "spatialId": 1,
+         "temporalId": 1,
+         "framerate":30,
+         "depends": ["480p30", "1080p15"]
+       },
+       {
+         "name": "audio",
+         "namespace": "conference.example.com/conference123/alice",
+         "renderGroup": 1,
+         "packaging": "loc",
+         "isLive": true,
+         "buffers": {"target":2000},
+         "role": "audio",
+         "codec":"opus",
+         "samplerate":48000,
+         "channelConfig":"2",
+         "bitrate":32000
+       }
+      ]
+   }

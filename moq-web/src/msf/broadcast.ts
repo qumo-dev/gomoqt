@@ -25,12 +25,21 @@ export const DefaultCatalogTrackName = "catalog";
  * subscriber leaves, the track writer is closed, or {@link Broadcast.close}
  * is called, which sends any pending change first.
  *
+ * Because tracks are routed by name alone, track names must be unique
+ * across namespaces within the catalog. This is stricter than the MSF rule,
+ * which {@link validateCatalog} enforces, that only Full Track Names
+ * (namespace and name) be unique. No catalog track may use the catalog
+ * track's own name.
+ *
  * @example
  * ```ts
  * import { Broadcast } from "@qumo/moq/msf";
  * import type { Catalog } from "@qumo/moq/msf";
  *
- * const catalog: Catalog = { tracks: [{ name: "audio", packaging: "cmaf" }] };
+ * const catalog: Catalog = {
+ *   version: "draft-02",
+ *   tracks: [{ name: "audio", packaging: "cmaf", isLive: true }],
+ * };
  * const broadcast = new Broadcast(catalog);
  * ```
  */
@@ -100,6 +109,17 @@ export class Broadcast implements TrackHandler {
 		this.#catalogChanged();
 	}
 
+	/**
+	 * Removes the named track and its handler. Returns false when neither the
+	 * catalog nor the handler table holds the name, or for an empty name or
+	 * the catalog track's name.
+	 *
+	 * The catalog stays valid: if another track still references the track (a
+	 * depends entry naming it, or the last track of a render group a depends
+	 * entry names), it throws the {@link ValidationError} and changes
+	 * nothing, handler included. Remove the dependent tracks first, or
+	 * replace the catalog with {@link Broadcast.setCatalog}.
+	 */
 	async removeTrack(name: string): Promise<boolean> {
 		if (name === "" || name === this.#catalogTrackName) {
 			return false;
@@ -110,6 +130,7 @@ export class Broadcast implements TrackHandler {
 		updated.tracks = updated.tracks.filter((track) => track.name !== name);
 		const removedFromCatalog = updated.tracks.length !== beforeLength;
 		if (removedFromCatalog) {
+			validateCatalog(updated);
 			this.#catalog = updated;
 			this.#catalogChanged();
 		}

@@ -21,7 +21,7 @@ const testBroadcastPath moqt.BroadcastPath = "/msf/catalog"
 func TestBroadcast_ServeCatalogTrack_SendsEachChange(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 	catalog, _ := subscribeTestCatalog(t, ctx, broadcast)
 
@@ -33,21 +33,21 @@ func TestBroadcast_ServeCatalogTrack_SendsEachChange(t *testing.T) {
 	require.NoError(t, broadcast.RegisterTrack(Track{Name: "audio", Packaging: PackagingLOC, IsLive: new(true)}, &fakeTrackHandler{}))
 	assert.Equal(t, []string{"video", "audio"}, testTrackNames(readTestCatalog(t, ctx, catalog)))
 
-	assert.True(t, broadcast.RemoveTrack("video"))
+	assert.NoError(t, broadcast.RemoveTrack("video"))
 	assert.Equal(t, []string{"audio"}, testTrackNames(readTestCatalog(t, ctx, catalog)))
 }
 
 func TestBroadcast_ServeCatalogTrack_SkipsUnchangedCatalog(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 	catalog, _ := subscribeTestCatalog(t, ctx, broadcast)
 	readTestCatalog(t, ctx, catalog)
 
 	// Setting the same catalog sends nothing, so the next group is the
 	// change that follows it.
-	require.NoError(t, broadcast.SetCatalog(Catalog{Version: 1}))
+	require.NoError(t, broadcast.SetCatalog(Catalog{Version: CurrentVersion}))
 	require.NoError(t, broadcast.RegisterTrack(Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}, &fakeTrackHandler{}))
 
 	assert.Equal(t, []string{"video"}, testTrackNames(readTestCatalog(t, ctx, catalog)))
@@ -56,7 +56,7 @@ func TestBroadcast_ServeCatalogTrack_SkipsUnchangedCatalog(t *testing.T) {
 func TestBroadcast_Close_EndsCatalogSubscription(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 	catalog, _ := subscribeTestCatalog(t, ctx, broadcast)
 	readTestCatalog(t, ctx, catalog)
@@ -72,7 +72,7 @@ func TestBroadcast_Close_EndsCatalogSubscription(t *testing.T) {
 func TestBroadcast_Close_LaterSubscriptionGetsOneGroup(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 	require.NoError(t, broadcast.RegisterTrack(Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true)}, &fakeTrackHandler{}))
 	broadcast.Close()
@@ -87,7 +87,7 @@ func TestBroadcast_Close_LaterSubscriptionGetsOneGroup(t *testing.T) {
 func TestBroadcast_ServeCatalogTrack_EndsWithAnnouncement(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 	catalog, endAnnouncement := subscribeTestCatalog(t, ctx, broadcast)
 	readTestCatalog(t, ctx, catalog)

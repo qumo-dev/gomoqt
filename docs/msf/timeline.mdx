@@ -17,7 +17,7 @@ A `Location` identifies a specific object within a broadcast by group and object
 
 ## Media Timeline Entry
 
-A media timeline track (`packaging: "mediatimeline"`) contains records that map media presentation timestamps to object locations and wallclock times.
+A media timeline track (`packaging: "mediatimeline"`) contains records that map media presentation timestamps to object locations and wallclock times. The track's catalog entry must list, in `depends`, the tracks or render groups it describes.
 
 ```go
 type MediaTimelineEntry struct {
@@ -25,19 +25,38 @@ type MediaTimelineEntry struct {
     Location  Location
     Wallclock int64
 }
+
+func ValidateMediaTimeline(entries []MediaTimelineEntry) error
 ```
 
-| Field       | Type       | Description                                          |
-|-------------|------------|------------------------------------------------------|
-| `MediaTime` | `int64`    | Media presentation timestamp                         |
-| `Location`  | `Location` | The group and object where this timestamp's data lives |
-| `Wallclock` | `int64`    | Wallclock time when the data was produced            |
+| Field       | Type       | Description                                              |
+|-------------|------------|----------------------------------------------------------|
+| `MediaTime` | `int64`    | Media presentation timestamp, in milliseconds            |
+| `Location`  | `Location` | The group and object where this timestamp's data lives   |
+| `Wallclock` | `int64`    | Wallclock time the content entered the encoder; 0 if VOD |
 
-JSON encoding: `[mediaTime, [groupID, objectID], wallclock]`.
+JSON encoding: `[mediaTime, [groupID, objectID], wallclock]`. Entries are ordered by media time, which `ValidateMediaTimeline` checks; group IDs need not be sequential.
+
+## Media Timeline Template
+
+For fixed-duration segments, a track may instead carry a `template`, so no media timeline track is needed. A media timeline track itself must not carry a template.
+
+```go
+// Example: ExampleTemplate_Entry
+template := msf.Template{
+    DeltaMediaTime: 2002,
+    DeltaLocation:  msf.Location{GroupID: 1},
+    StartWallclock: 1759924158381,
+    DeltaWallclock: 2002,
+}
+
+entry := template.Entry(3)
+fmt.Println(entry.MediaTime, entry.Location.GroupID, entry.Wallclock)
+```
 
 ## Event Timeline Record
 
-An event timeline track (`packaging: "eventtimeline"`) contains records for application-defined events. Each record is indexed by exactly one of three selectors and carries a JSON data payload.
+An event timeline track (`packaging: "eventtimeline"`, with an `eventType`) contains records for application-defined events. Each record is indexed by exactly one of three selectors and carries a JSON data payload.
 
 ```go
 type EventTimelineRecord struct {
@@ -50,28 +69,32 @@ type EventTimelineRecord struct {
 func (r EventTimelineRecord) Validate() error
 ```
 
-| Field       | Type              | Description                                    |
-|-------------|-------------------|------------------------------------------------|
-| `Wallclock` | `*int64`          | Wallclock time index (`"t"` in JSON)           |
-| `Location`  | `*Location`       | Object location index (`"l"` in JSON)          |
-| `MediaTime` | `*int64`          | Media time index (`"m"` in JSON)               |
-| `Data`      | `json.RawMessage` | Event payload (`"data"` in JSON)               |
+| Field       | Type              | Description                                 |
+|-------------|-------------------|---------------------------------------------|
+| `Wallclock` | `*int64`          | Wallclock time index (`"T"` in JSON)        |
+| `Location`  | `*Location`       | Object location index (`"L"` in JSON)       |
+| `MediaTime` | `*int64`          | Media time index (`"M"` in JSON)            |
+| `Data`      | `json.RawMessage` | Event payload, any JSON value (`"data"`)    |
 
-Exactly one of `Wallclock`, `Location`, or `MediaTime` must be set. `Validate()` checks this constraint.
+Exactly one of `Wallclock`, `Location`, or `MediaTime` must be set, and `data` must be present. `Validate()` checks both.
 
 ### Example
 
 ```go
-    // Event indexed by wallclock time
-    record := msf.EventTimelineRecord{
-        Wallclock: ptr(int64(1700000000000)),
-        Data:      json.RawMessage(`{"type":"ad","duration":30}`),
-    }
+// Example: ExampleEventTimelineRecord
+record := msf.EventTimelineRecord{
+    Wallclock: new(int64(1756885678361)),
+    Data:      json.RawMessage(`{"homeScore":2,"awayScore":0}`),
+}
+if err := record.Validate(); err != nil {
+    fmt.Println(err)
+    return
+}
 
-    if err := record.Validate(); err != nil {
-        // handle error
-    }
-
-    data, _ := json.Marshal(record)
-    // {"t":1700000000000,"data":{"type":"ad","duration":30}}
+data, err := json.Marshal(record)
+if err != nil {
+    fmt.Println(err)
+    return
+}
+fmt.Println(string(data))
 ```

@@ -1,0 +1,32 @@
+{
+     "version": "draft-02",
+     "tracks": [
+       {
+         "name": "video",
+         "namespace": "movies.example.com/assets/boy-meets-girl-season3/episode5",
+         "packaging": "loc",
+         "isLive": false,
+         "trackDuration": 8072340,
+         "renderGroup": 1,
+         "codec":"av01.0.08M.10.0.110.09",
+         "role": "video",
+         "width":1920,
+         "height":1080,
+         "framerate":30,
+         "bitrate":1500000
+       },
+       {
+         "name": "audio",
+         "namespace": "movies.example.com/assets/boy-meets-girl-season3/episode5",
+         "packaging": "loc",
+         "isLive": false,
+         "trackDuration": 8072340,
+         "renderGroup": 1,
+         "codec":"opus",
+         "role": "audio",
+         "samplerate":48000,
+         "channelConfig":"2",
+         "bitrate":32000
+       }
+      ]
+   }

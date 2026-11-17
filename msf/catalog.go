@@ -3,12 +3,17 @@ package msf
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
-	"slices"
+	"strconv"
 	"strings"
 )
+
+// CurrentVersion is the MSF version string of the catalogs this package
+// produces and accepts (draft-ietf-moq-msf-02 §5.1.1).
+const CurrentVersion = "draft-02"
 
 const (
 	// PackagingLOC identifies LOC-packaged media content.
@@ -17,10 +22,13 @@ const (
 	PackagingMediaTimeline Packaging = "mediatimeline"
 	// PackagingEventTimeline identifies an event timeline track.
 	PackagingEventTimeline Packaging = "eventtimeline"
-	// PackagingMoqLog identifies a MoQ log publish track (draft-ietf-moq-msf-01, [MOQLOG]).
+	// PackagingMoqLog identifies a MoQ log publish track ([MOQLOG]).
 	PackagingMoqLog Packaging = "moqlog"
-	// PackagingMoqMetrics identifies a MoQ metrics publish track (draft-ietf-moq-msf-01, [MOQMETRICS]).
+	// PackagingMoqMetrics identifies a MoQ metrics publish track ([MOQMETRICS]).
 	PackagingMoqMetrics Packaging = "moqmetrics"
+	// PackagingCatalog identifies a track that is itself an MSF catalog,
+	// referenced from another catalog (draft-ietf-moq-msf-02 §5).
+	PackagingCatalog Packaging = "catalog"
 	// PackagingCMAF identifies CMAF-packaged media content.
 	// Non-spec extension retained for backward compatibility.
 	PackagingCMAF Packaging = "cmaf"
@@ -37,6 +45,24 @@ const (
 	deltaOperationAdd    deltaOperationKind = "add"
 	deltaOperationRemove deltaOperationKind = "remove"
 	deltaOperationClone  deltaOperationKind = "clone"
+	deltaOperationUpdate deltaOperationKind = "update"
+)
+
+// EncryptionSchemeMoQSecureObjects is the encryptionScheme value for MoQ
+// Secure Objects, the scheme for which cipherSuite is required
+// (draft-ietf-moq-msf-02 §5.2.38, §5.2.39).
+const EncryptionSchemeMoQSecureObjects = "moq-secure-objects"
+
+const (
+	// InitDataTypeInline marks Initialization Data List data as base64
+	// encoded initialization data.
+	InitDataTypeInline = "inline"
+	// InitDataTypeTrackProperty marks Initialization Data List data as the
+	// hex type of the Track property that carries the initialization data.
+	InitDataTypeTrackProperty = "track-property"
+	// InitDataTypeObjectProperty marks Initialization Data List data as the
+	// hex type of the Object property that carries the initialization data.
+	InitDataTypeObjectProperty = "object-property"
 )
 
 // ValidationError contains one or more validation problems.
@@ -55,7 +81,7 @@ func (p Packaging) String() string {
 // IsKnown reports whether the packaging value is one of the package constants.
 func (p Packaging) IsKnown() bool {
 	switch p {
-	case PackagingLOC, PackagingMediaTimeline, PackagingEventTimeline, PackagingMoqLog, PackagingMoqMetrics, PackagingCMAF, PackagingLegacy:
+	case PackagingLOC, PackagingMediaTimeline, PackagingEventTimeline, PackagingMoqLog, PackagingMoqMetrics, PackagingCatalog, PackagingCMAF, PackagingLegacy:
 		return true
 	default:
 		return false
@@ -78,10 +104,17 @@ const (
 	RoleSubtitle Role = "subtitle"
 	// RoleSignLanguage identifies a sign-language video track.
 	RoleSignLanguage Role = "signlanguage"
-	// RoleLog identifies a log publishing track (draft-ietf-moq-msf-01, [MOQLOG]).
+	// RoleMediaTimeline identifies an MSF media timeline track.
+	RoleMediaTimeline Role = "mediatimeline"
+	// RoleEventTimeline identifies an MSF event timeline track.
+	RoleEventTimeline Role = "eventtimeline"
+	// RoleLog identifies a log publishing track ([MOQLOG]).
 	RoleLog Role = "log"
-	// RoleMetrics identifies a metrics publishing track (draft-ietf-moq-msf-01, [MOQMETRICS]).
+	// RoleMetrics identifies a metrics publishing track ([MOQMETRICS]).
 	RoleMetrics Role = "metrics"
+	// RoleData identifies a track carrying application-defined data
+	// (draft-ietf-moq-msf-02 §5.2.7).
+	RoleData Role = "data"
 )
 
 // String returns the role value as it should appear in JSON.
@@ -92,7 +125,7 @@ func (r Role) String() string {
 // IsKnown reports whether the role value is one of the package constants.
 func (r Role) IsKnown() bool {
 	switch r {
-	case RoleVideo, RoleAudio, RoleAudioDescription, RoleCaption, RoleSubtitle, RoleSignLanguage, RoleLog, RoleMetrics:
+	case RoleVideo, RoleAudio, RoleAudioDescription, RoleCaption, RoleSubtitle, RoleSignLanguage, RoleMediaTimeline, RoleEventTimeline, RoleLog, RoleMetrics, RoleData:
 		return true
 	default:
 		return false
@@ -100,15 +133,17 @@ func (r Role) IsKnown() bool {
 }
 
 // InitDataRef represents a single entry in the catalog's Initialization Data
-// List (draft-ietf-moq-msf-01 §5.1.7). Tracks reference an entry by its ID via
-// the initRef track attribute. This version of the specification defines a
-// single allowed Type, "inline", whose Data is base64-encoded init data.
+// List (draft-ietf-moq-msf-02 §5.1.7). Tracks reference an entry by its ID via
+// the initRef track attribute. Type is InitDataTypeInline (Data is base64
+// encoded init data), InitDataTypeTrackProperty or InitDataTypeObjectProperty
+// (Data is the hex type of the property that carries the init data as raw
+// bytes, §12.2).
 type InitDataRef struct {
 	// ID is the unique-within-catalog reference for this init data.
 	ID string `json:"-"`
-	// Type identifies how Data is interpreted; only "inline" is defined.
+	// Type identifies how Data is interpreted.
 	Type string `json:"-"`
-	// Data holds the init payload (base64 when Type == "inline").
+	// Data holds the init payload as defined by Type.
 	Data string `json:"-"`
 
 	// ExtraFields stores unknown JSON properties for round-tripping.
@@ -116,7 +151,7 @@ type InitDataRef struct {
 }
 
 // Buffers represents a track's target jitter-buffer configuration
-// (draft-ietf-moq-msf-01 §5.2.9) in integer milliseconds. Keys are optional;
+// (draft-ietf-moq-msf-02 §5.2.10) in integer milliseconds. Keys are optional;
 // unknown keys are preserved in ExtraFields per the spec's "MUST be ignored".
 type Buffers struct {
 	// Target is the target buffer in milliseconds.
@@ -131,7 +166,7 @@ type Buffers struct {
 }
 
 // AccessibilityDescriptor describes an embedded accessibility feature of a
-// track (draft-ietf-moq-msf-01 §5.2.44), such as CEA-608/CEA-708 captions.
+// track (draft-ietf-moq-msf-02 §5.2.44), such as CEA-608/CEA-708 captions.
 type AccessibilityDescriptor struct {
 	// Scheme identifies the accessibility scheme (e.g. a URN).
 	Scheme string `json:"-"`
@@ -161,18 +196,21 @@ func newValidationError(problems []string) error {
 }
 
 // Catalog represents an independent MSF catalog object as defined in
-// draft-ietf-moq-msf-01.
+// draft-ietf-moq-msf-02.
 //
 // Delta updates are modeled separately by CatalogDelta so that the type system
 // can distinguish a complete catalog snapshot from a set of incremental
 // catalog operations. DefaultNamespace is not serialized; it represents the
-// namespace implied by the catalog track itself and is used to resolve track
-// namespace inheritance.
+// namespace implied by the catalog track itself (the Track Namespace under
+// which the catalog was subscribed) and is used to resolve track namespace
+// inheritance. A track that declares a namespace replaces, rather than
+// extends, DefaultNamespace.
 type Catalog struct {
 	DefaultNamespace string `json:"-"`
 
-	// Version is the MSF version number for the independent catalog.
-	Version int `json:"-"`
+	// Version is the MSF version string, CurrentVersion for catalogs this
+	// package accepts (draft-ietf-moq-msf-02 §5.1.1).
+	Version string `json:"-"`
 	// GeneratedAt, if non-nil, records the catalog's generatedAt timestamp.
 	GeneratedAt *int64 `json:"-"`
 	// IsComplete reports whether the catalog has been explicitly marked as complete.
@@ -181,10 +219,10 @@ type Catalog struct {
 	// Tracks holds the complete set of track descriptions in the catalog.
 	Tracks []Track `json:"-"`
 	// PublishTracks holds tracks to which subscribers may publish data, such as
-	// logs or metrics (draft-ietf-moq-msf-01 §5.1.5).
+	// logs or metrics (draft-ietf-moq-msf-02 §5.1.5).
 	PublishTracks []Track `json:"-"`
 	// InitDataList holds referenced initialization data entries; tracks point
-	// at an entry by ID via the initRef attribute (draft-ietf-moq-msf-01 §5.1.7).
+	// at an entry by ID via the initRef attribute (draft-ietf-moq-msf-02 §5.1.7).
 	InitDataList []InitDataRef `json:"-"`
 
 	// ExtraFields stores any JSON properties that don't correspond to the
@@ -192,26 +230,40 @@ type Catalog struct {
 	ExtraFields map[string]json.RawMessage `json:"-"`
 }
 
-// Track represents a catalog track description.  Many of the numeric and
-// boolean fields use pointers so that the presence or absence of the field can
-// be distinguished when decoding JSON; this is required both for correct
-// `omitempty` behavior and for the delta/clone machinery which needs to know
-// which values were explicitly provided by the user.
+// Track represents a catalog track description. Numeric and boolean fields are
+// pointers so that an absent field (nil) differs from one set to zero or
+// false.
 //
-// Fields that are always required by the draft (namespace, name, packaging,
-// etc.) are plain strings, whereas optional parameters are pointer-typed.
+// A field is present exactly when it holds a value: a non-nil pointer, slice
+// or map, or a non-empty string. Validation, encoding and the clone and
+// update overrides all read presence from the values themselves, so code that
+// clears a decoded field (sets Namespace to "" to inherit, Bitrate to nil)
+// makes it absent everywhere. Decoding follows the same rule: a JSON null
+// for a known field leaves it absent, and an explicitly empty namespace or
+// parentNamespace, which draft-ietf-moq-msf-02 §5.2.2 makes the catalog
+// invalid, is a decoding error. As a consequence a clone or update entry
+// cannot set a string field to empty or a pointer field to absent.
 //
-// ExtraFields and presentFields are helpers used by the custom JSON
-// marshaling/unmarshaling logic for round‑tripping unknown keys and tracking
-// which fields were declared.
+// Naming fields (Namespace, Name, Depends track names, and the parent fields
+// of clone and update operations) map to MOQT bytes as the UTF-8 encoding of
+// the string, with no normalization or case folding, and compare byte for
+// byte (draft-ietf-moq-msf-02 §11.2).
+//
+// ExtraFields round-trips unknown keys through the custom JSON marshaling.
 type Track struct {
-	// Namespace of the track.  If empty, the catalog's DefaultNamespace
-	// (and, transitively, the namespace of the catalog track itself) is used.
+	// Namespace of the track as a '/'-delimited string of 1 to 32 non-empty
+	// Track Namespace Fields (see SplitNamespace). If empty, the catalog's
+	// DefaultNamespace is inherited; a declared namespace replaces it.
 	Namespace string `json:"-"`
-	// Name of the track; unique within its namespace.
+	// Name of the track; non-empty, and the Full Track Name (namespace and
+	// name) is unique within the catalog.
 	Name string `json:"-"`
 	// Packaging mode string such as "loc" or "mediatimeline".
 	Packaging Packaging `json:"-"`
+	// PackagingMetadata holds additional parameters for the packaging as a
+	// semicolon-separated list of key=value pairs (draft-ietf-moq-msf-02
+	// §5.2.5). See PackagingMetadataValue and StreamMapping.
+	PackagingMetadata string `json:"-"`
 	// For eventtimeline tracks, the event type identifier.
 	EventType string `json:"-"`
 	// Optional content role ("video", "audio", etc.).
@@ -229,15 +281,17 @@ type Track struct {
 	// Alternate group for quality switching.
 	AltGroup *int64 `json:"-"`
 	// InitRef points at the id of an entry in the catalog InitDataList
-	// (draft-ietf-moq-msf-01 §5.2.13). Replaces the draft-00 inline initData.
+	// (draft-ietf-moq-msf-02 §5.2.14).
 	InitRef string `json:"-"`
 	// Buffers is the optional target jitter-buffer configuration.
 	Buffers *Buffers `json:"-"`
 	// Template is the optional media-timeline template for fixed-duration
-	// segments (draft-ietf-moq-msf-01 §5.2.15 / §7.4).
+	// segments (draft-ietf-moq-msf-02 §5.2.16 / §7.4).
 	Template *Template `json:"-"`
-	// List of track names this track depends on.
-	Depends []string
+	// Depends lists the track names and render groups this track depends on
+	// (draft-ietf-moq-msf-02 §5.2.15). Every entry must resolve within the
+	// catalog.
+	Depends []Dependency `json:"-"`
 	// Temporal and spatial identifiers for H.264/AV1 layers, optional.
 	TemporalID *int64 `json:"-"`
 	SpatialID  *int64 `json:"-"`
@@ -248,13 +302,13 @@ type Track struct {
 	// Frame rate, timescale, and bitrate all optional and pointer-typed.
 	Framerate *int64 `json:"-"`
 	Timescale *int64 `json:"-"`
-	// Bitrate is the maximum bitrate in bits per second (draft-ietf-moq-msf-01 §5.2.22).
+	// Bitrate is the maximum bitrate in bits per second (draft-ietf-moq-msf-02 §5.2.23).
 	Bitrate *int64 `json:"-"`
-	// AvgBitrate is the average bitrate over the track lifetime (§5.2.23).
+	// AvgBitrate is the average bitrate over the track lifetime (§5.2.24).
 	AvgBitrate *int64 `json:"-"`
-	// MaxGopDuration is the maximum duration between random access points, in ms (§5.2.24).
+	// MaxGopDuration is the maximum duration between random access points, in ms (§5.2.25).
 	MaxGopDuration *int64 `json:"-"`
-	// MaxGroupDuration is the maximum duration of any MOQT Group, in ms (§5.2.25).
+	// MaxGroupDuration is the maximum duration of any MOQT Group, in ms (§5.2.26).
 	MaxGroupDuration *int64 `json:"-"`
 	// Spatial dimensions; pointers so zero width/height can be distinguished
 	// from the field being absent.
@@ -268,34 +322,33 @@ type Track struct {
 	DisplayHeight *int64 `json:"-"`
 	// Language tag, optional.
 	Language string `json:"-"`
-	// ParentNamespace names the source track namespace for clone operations
-	// (draft-ietf-moq-msf-01 §5.2.34).
-	ParentNamespace string `json:"-"`
 	// TrackDuration in milliseconds; must not be set when IsLive is true.
 	TrackDuration *int64 `json:"-"`
-	// ConnectionURI is the MOQT endpoint URI for a publish track (§5.2.36).
+	// ConnectionURI is the MOQT endpoint URI for a publish track (§5.2.37),
+	// encoded under the JSON key "connectionURI".
 	ConnectionURI string `json:"-"`
-	// Token is an auth/credential token for the track, e.g. for publish tracks (§5.2.37).
-	Token string `json:"-"`
 	// EncryptionScheme identifies the encryption scheme protecting the track (§5.2.38).
 	EncryptionScheme string `json:"-"`
-	// CipherSuite identifies the AEAD cipher suite; required when EncryptionScheme is set (§5.2.39).
+	// CipherSuite identifies the AEAD cipher suite; required when
+	// EncryptionScheme is EncryptionSchemeMoQSecureObjects (§5.2.39).
 	CipherSuite string `json:"-"`
 	// KeyID identifies the key material used for encryption (§5.2.40).
 	KeyID string `json:"-"`
 	// TrackBaseKey is the base64-encoded base key material for the track (§5.2.41).
 	TrackBaseKey string `json:"-"`
-	// AuthInfo signals that authorization is required, keyed by scheme (§5.2.42).
+	// AuthInfo signals that authorization is required, keyed by scheme
+	// (§5.2.42). Publish tracks also use it for publish authorization.
 	AuthInfo map[string]json.RawMessage `json:"-"`
 	// Accessibility lists embedded accessibility features (§5.2.44).
 	Accessibility []AccessibilityDescriptor `json:"-"`
+	// AccessibleWindowTime is how far behind the live edge, in wallclock
+	// milliseconds, the track's content remains accessible (§5.2.45).
+	AccessibleWindowTime *int64 `json:"-"`
+	// KeyframeSpacing is the number of objects per keyframe interval (§5.2.46).
+	KeyframeSpacing *int64 `json:"-"`
 
 	// ExtraFields stores unknown JSON key/values for round-tripping.
 	ExtraFields map[string]json.RawMessage `json:"-"`
-
-	// presentFields tracks which top-level fields were explicitly present in
-	// the original JSON, used during validation and cloning operations.
-	presentFields map[string]struct{}
 }
 
 // TrackID uniquely identifies a track by namespace and name.
@@ -326,15 +379,31 @@ func (c Catalog) Clone() Catalog {
 	return clone
 }
 
-// Validate checks whether the catalog satisfies the package's MSF draft-01 rules.
+// Validate checks whether the catalog satisfies the package's MSF draft-02
+// rules: the version, the per-track rules including the required fields per
+// (packaging, role) of §5.2.4.1, unique Full Track Names, the Initialization
+// Data List, that every depends entry resolves (§5.2.15), and that tracks of
+// an alternate group share accessibleWindowTime (§5.2.45).
+//
+// A catalog that uses variable substitution must be validated after
+// substitution (§5.4.1, §13.5); Catalog.ResolveVariables does so.
 func (c Catalog) Validate() error {
 	var problems []string
 
-	if c.Version == 0 {
+	switch c.Version {
+	case CurrentVersion:
+	case "":
 		problems = append(problems, "catalog version is required")
+	default:
+		problems = append(problems, fmt.Sprintf("unsupported catalog version %q; want %q", c.Version, CurrentVersion))
 	}
+	// The cross-track checks below run only when some track needs them.
+	hasDepends, hasAltGroup := false, false
 	for i := range c.Tracks {
-		if errs := c.Tracks[i].validate(""); len(errs) > 0 {
+		track := &c.Tracks[i]
+		hasDepends = hasDepends || len(track.Depends) > 0
+		hasAltGroup = hasAltGroup || track.AltGroup != nil
+		if errs := track.validate(trackListTracks); len(errs) > 0 {
 			prefix := "tracks[" + itoa(i) + "]: "
 			for _, err := range errs {
 				problems = append(problems, prefix+err)
@@ -342,53 +411,63 @@ func (c Catalog) Validate() error {
 		}
 	}
 	for i := range c.PublishTracks {
-		if errs := c.PublishTracks[i].validate(""); len(errs) > 0 {
+		hasDepends = hasDepends || len(c.PublishTracks[i].Depends) > 0
+		if errs := c.PublishTracks[i].validate(trackListPublishTracks); len(errs) > 0 {
 			prefix := "publishTracks[" + itoa(i) + "]: "
 			for _, err := range errs {
 				problems = append(problems, prefix+err)
 			}
 		}
 	}
-	// Validate unique track identities.
+	// Validate unique Full Track Names across tracks and publishTracks.
 	// For small catalogs (N<=16), O(N^2) loop is faster and avoids map allocations on the happy path.
 	// For larger catalogs, we fallback to a map to avoid O(N^2) performance degradation.
-	if len(c.Tracks) > 16 {
-		seen := make(map[TrackID]struct{}, len(c.Tracks))
-		for i := range c.Tracks {
-			id := c.Tracks[i].ID(c.DefaultNamespace)
-			if _, ok := seen[id]; ok {
-				problems = append(problems, fmt.Sprintf("tracks[%d]: duplicate track identity %q", i, id.String()))
-				continue
-			}
-			seen[id] = struct{}{}
-		}
-	} else if len(c.Tracks) > 1 {
-		var seen [16]TrackID
-		seen[0] = c.Tracks[0].ID(c.DefaultNamespace)
-		numSeen := 1
-		for i := 1; i < len(c.Tracks); i++ {
-			id := c.Tracks[i].ID(c.DefaultNamespace)
-			isDuplicate := false
-			for j := 0; j < numSeen; j++ {
-				if seen[j] == id {
-					problems = append(problems, fmt.Sprintf("tracks[%d]: duplicate track identity %q", i, id.String()))
-					isDuplicate = true
-					break
+	if total := len(c.Tracks) + len(c.PublishTracks); total > 16 {
+		seen := make(map[TrackID]struct{}, total)
+		for _, list := range [2]struct {
+			field  string
+			tracks []Track
+		}{{"tracks", c.Tracks}, {"publishTracks", c.PublishTracks}} {
+			for i := range list.tracks {
+				id := list.tracks[i].ID(c.DefaultNamespace)
+				if _, ok := seen[id]; ok {
+					problems = append(problems, fmt.Sprintf("%s[%d]: duplicate track identity %q", list.field, i, id.String()))
+					continue
 				}
+				seen[id] = struct{}{}
 			}
-			if !isDuplicate {
-				seen[numSeen] = id
-				numSeen++
+		}
+	} else if total > 1 {
+		var seen [16]TrackID
+		numSeen := 0
+		for _, list := range [2]struct {
+			field  string
+			tracks []Track
+		}{{"tracks", c.Tracks}, {"publishTracks", c.PublishTracks}} {
+			for i := range list.tracks {
+				id := list.tracks[i].ID(c.DefaultNamespace)
+				isDuplicate := false
+				for j := 0; j < numSeen; j++ {
+					if seen[j] == id {
+						problems = append(problems, fmt.Sprintf("%s[%d]: duplicate track identity %q", list.field, i, id.String()))
+						isDuplicate = true
+						break
+					}
+				}
+				if !isDuplicate {
+					seen[numSeen] = id
+					numSeen++
+				}
 			}
 		}
 	}
 
 	// Validate the Initialization Data List: unique ids, known type, and that
-	// every track initRef resolves to a declared entry (draft-ietf-moq-msf-01 §5.1.7/§5.2.13).
+	// every track initRef resolves to a declared entry (draft-ietf-moq-msf-02 §5.1.7/§5.2.14).
 	initIDs := make(map[string]struct{}, len(c.InitDataList))
 	for i, ref := range c.InitDataList {
-		if ref.Type != "" && ref.Type != "inline" {
-			problems = append(problems, "initDataList["+itoa(i)+"]: type must be \"inline\"")
+		if err := ref.validate(); err != nil {
+			problems = append(problems, "initDataList["+itoa(i)+"]: "+err.Error())
 		}
 		if ref.ID == "" {
 			problems = append(problems, "initDataList["+itoa(i)+"]: id is required")
@@ -400,28 +479,129 @@ func (c Catalog) Validate() error {
 		}
 		initIDs[ref.ID] = struct{}{}
 	}
-	if len(initIDs) > 0 {
-		checkRef := func(prefix, ref string) {
-			if ref == "" {
-				return
-			}
-			if _, ok := initIDs[ref]; !ok {
-				problems = append(problems, fmt.Sprintf("%s: initRef %q does not match any initDataList id", prefix, ref))
-			}
+	// An initRef must resolve even when the catalog declares no
+	// initDataList at all.
+	// The list and index are formatted only for a problem, so a catalog
+	// without one allocates nothing here.
+	checkRef := func(list string, i int, ref string) {
+		if ref == "" {
+			return
 		}
-		for i := range c.Tracks {
-			checkRef("tracks["+itoa(i)+"]", c.Tracks[i].InitRef)
+		if _, ok := initIDs[ref]; !ok {
+			problems = append(problems, fmt.Sprintf("%s[%d]: initRef %q does not match any initDataList id", list, i, ref))
 		}
-		for i := range c.PublishTracks {
-			checkRef("publishTracks["+itoa(i)+"]", c.PublishTracks[i].InitRef)
-		}
+	}
+	for i := range c.Tracks {
+		checkRef("tracks", i, c.Tracks[i].InitRef)
+	}
+	for i := range c.PublishTracks {
+		checkRef("publishTracks", i, c.PublishTracks[i].InitRef)
+	}
+
+	if hasDepends {
+		problems = c.appendDependencyProblems(problems)
+	}
+	if hasAltGroup {
+		problems = c.appendAltGroupProblems(problems)
 	}
 
 	return newValidationError(problems)
 }
 
-// ApplyDelta applies a catalog delta to the receiver and returns the updated catalog.
+// appendDependencyProblems checks that every depends entry resolves
+// (draft-ietf-moq-msf-02 §5.2.15): a track name must match the Track Name of
+// exactly one other track, and a renderGroup must match the renderGroup of
+// some track. Both tracks and publishTracks are searched, since event
+// timeline publish tracks depend on media tracks.
+func (c Catalog) appendDependencyProblems(problems []string) []string {
+	names := make(map[string]int, len(c.Tracks)+len(c.PublishTracks))
+	groups := make(map[int64]struct{})
+	for _, list := range [2][]Track{c.Tracks, c.PublishTracks} {
+		for i := range list {
+			names[list[i].Name]++
+			if list[i].RenderGroup != nil {
+				groups[*list[i].RenderGroup] = struct{}{}
+			}
+		}
+	}
+
+	check := func(field string, list []Track) {
+		for i := range list {
+			track := &list[i]
+			for j, dep := range track.Depends {
+				if (dep.RenderGroup != nil) == (dep.TrackName != "") {
+					continue // neither or both set: reported by Track.validate
+				}
+				if dep.RenderGroup != nil {
+					if _, ok := groups[*dep.RenderGroup]; !ok {
+						problems = append(problems, fmt.Sprintf("%s[%d]: depends[%d]: renderGroup %d does not match any track", field, i, j, *dep.RenderGroup))
+					}
+					continue
+				}
+				others := names[dep.TrackName]
+				if dep.TrackName == track.Name {
+					others--
+				}
+				switch {
+				case others == 0:
+					problems = append(problems, fmt.Sprintf("%s[%d]: depends[%d]: track name %q does not match any other track", field, i, j, dep.TrackName))
+				case others > 1:
+					problems = append(problems, fmt.Sprintf("%s[%d]: depends[%d]: track name %q matches %d tracks; it must match exactly one", field, i, j, dep.TrackName, others))
+				}
+			}
+		}
+	}
+	check("tracks", c.Tracks)
+	check("publishTracks", c.PublishTracks)
+	return problems
+}
+
+// appendAltGroupProblems checks that tracks of the same alternate group carry
+// the same accessibleWindowTime (draft-ietf-moq-msf-02 §5.2.45).
+func (c Catalog) appendAltGroupProblems(problems []string) []string {
+	type window struct {
+		set   bool
+		value int64
+	}
+	var windows map[int64]window
+	for i := range c.Tracks {
+		track := &c.Tracks[i]
+		if track.AltGroup == nil {
+			continue
+		}
+		if windows == nil {
+			windows = make(map[int64]window)
+		}
+		current := window{set: track.AccessibleWindowTime != nil}
+		if current.set {
+			current.value = *track.AccessibleWindowTime
+		}
+		first, seen := windows[*track.AltGroup]
+		if !seen {
+			windows[*track.AltGroup] = current
+			continue
+		}
+		if first != current {
+			problems = append(problems, fmt.Sprintf("tracks[%d]: accessibleWindowTime must match the other tracks of altGroup %d", i, *track.AltGroup))
+		}
+	}
+	return problems
+}
+
+// ApplyDelta applies a catalog delta to the receiver and returns the updated
+// catalog (draft-ietf-moq-msf-02 §5.3). Operations apply in order, each to the
+// result of the previous one. An illogical operation (adding or cloning to an
+// existing Full Track Name, removing or updating an unknown track) rejects the
+// whole delta, as does a result that fails Validate.
+//
+// A catalog with IsComplete set rejects every delta with ErrCatalogComplete:
+// isComplete commits that no tracks will be added and no content published
+// (§5.1.3), a delta cannot carry isComplete itself (§5.3), so a delta after
+// it could only change a finished broadcast.
 func (c Catalog) ApplyDelta(delta CatalogDelta) (Catalog, error) {
+	if c.IsComplete {
+		return Catalog{}, ErrCatalogComplete
+	}
 	if err := c.Validate(); err != nil {
 		return Catalog{}, err
 	}
@@ -439,9 +619,6 @@ func (c Catalog) ApplyDelta(delta CatalogDelta) (Catalog, error) {
 	if delta.GeneratedAt != nil {
 		value := *delta.GeneratedAt
 		result.GeneratedAt = &value
-	}
-	if delta.IsComplete {
-		result.IsComplete = true
 	}
 	maps.Copy(result.ExtraFields, cloneRawMessages(delta.ExtraFields))
 
@@ -465,6 +642,12 @@ func (c Catalog) ApplyDelta(delta CatalogDelta) (Catalog, error) {
 					return Catalog{}, err
 				}
 			}
+		case deltaOperationUpdate:
+			for _, track := range delta.UpdateTracks[op.lo:op.hi] {
+				if err := result.updateTrack(track); err != nil {
+					return Catalog{}, err
+				}
+			}
 		}
 	}
 	if err := result.Validate(); err != nil {
@@ -476,18 +659,27 @@ func (c Catalog) ApplyDelta(delta CatalogDelta) (Catalog, error) {
 
 // hasInheritedNamespaceTracks reports whether any track currently relies on DefaultNamespace.
 func (c Catalog) hasInheritedNamespaceTracks() bool {
-	for _, track := range c.Tracks {
-		if track.Namespace == "" {
-			return true
+	for _, list := range [2][]Track{c.Tracks, c.PublishTracks} {
+		for i := range list {
+			if list[i].Namespace == "" {
+				return true
+			}
 		}
 	}
 	return false
 }
 
 // ParseCatalog decodes an independent MSF catalog from JSON bytes. It rejects
-// delta-only fields such as deltaUpdate and addTracks. Validation must be
-// performed separately if desired.
+// the delta-only deltaUpdate field, and documents that begin with a byte order
+// mark, are not UTF-8, or contain an unpaired surrogate escape
+// (draft-ietf-moq-msf-02 §11.2.1). Validation must be performed separately if
+// desired.
 func ParseCatalog(data []byte) (Catalog, error) {
+	// The JSON decoder rejects a leading BOM before UnmarshalJSON runs, with
+	// a less helpful message.
+	if err := checkNoBOM(data); err != nil {
+		return Catalog{}, err
+	}
 	var catalog Catalog
 	if err := json.Unmarshal(data, &catalog); err != nil {
 		return Catalog{}, err
@@ -526,7 +718,7 @@ func (c *Catalog) removeTrack(track TrackRef) error {
 
 // cloneTrack creates a new track by cloning an existing parent and applying overrides.
 func (c *Catalog) cloneTrack(track TrackClone) error {
-	parentID := TrackID{Namespace: track.parentEffectiveNamespace(c.DefaultNamespace), Name: track.ParentName}
+	parentID := TrackID{Namespace: parentEffectiveNamespace(track.ParentNamespace, c.DefaultNamespace), Name: track.ParentName}
 	parent, _, ok := c.findTrack(parentID)
 	if !ok {
 		return fmt.Errorf("msf: cannot clone unknown parent track %q", parentID.String())
@@ -535,16 +727,39 @@ func (c *Catalog) cloneTrack(track TrackClone) error {
 	cloned := parent.Clone()
 	cloned.applyOverrides(track.Track)
 
-	if cloned.Name == "" {
-		return fmt.Errorf("msf: cloned track derived from %q is missing name", parentID.String())
-	}
-
 	newID := cloned.ID(c.DefaultNamespace)
 	if _, idx, exists := c.findTrack(newID); exists {
 		return fmt.Errorf("msf: cannot clone into duplicate track %q at index %d", newID.String(), idx)
 	}
 
 	c.Tracks = append(c.Tracks, cloned)
+	return nil
+}
+
+// updateTrack overrides the declared fields of an existing track
+// (draft-ietf-moq-msf-02 §5.1.6 "update"). An update that renames the track
+// must not collide with another track, and isLive must not go from false back
+// to true (§5.2.8).
+func (c *Catalog) updateTrack(update TrackUpdate) error {
+	targetID := TrackID{Namespace: parentEffectiveNamespace(update.ParentNamespace, c.DefaultNamespace), Name: update.ParentName}
+	target, idx, ok := c.findTrack(targetID)
+	if !ok {
+		return fmt.Errorf("msf: cannot update unknown track %q", targetID.String())
+	}
+	if target.IsLive != nil && !*target.IsLive && update.IsLive != nil && *update.IsLive {
+		return fmt.Errorf("msf: cannot update track %q: isLive must not change from false to true", targetID.String())
+	}
+
+	updated := target.Clone()
+	updated.applyOverrides(update.Track)
+
+	if newID := updated.ID(c.DefaultNamespace); newID != targetID {
+		if _, other, exists := c.findTrack(newID); exists {
+			return fmt.Errorf("msf: cannot update track %q into duplicate track %q at index %d", targetID.String(), newID.String(), other)
+		}
+	}
+
+	c.Tracks[idx] = updated
 	return nil
 }
 
@@ -563,13 +778,14 @@ var (
 	_ json.Unmarshaler = (*Catalog)(nil)
 )
 
-// MarshalJSON encodes the independent catalog in the draft-01 JSON shape.
+// MarshalJSON encodes the independent catalog in the draft-02 JSON shape.
+// initDataList is emitted last, after tracks, as §5.1.7 recommends.
 func (c Catalog) MarshalJSON() ([]byte, error) {
 	obj := make(map[string]any, len(c.ExtraFields)+2)
 	for key, raw := range c.ExtraFields {
 		obj[key] = cloneRawMessage(raw)
 	}
-	if c.Version != 0 {
+	if c.Version != "" {
 		obj["version"] = c.Version
 	}
 	if c.GeneratedAt != nil {
@@ -578,16 +794,28 @@ func (c Catalog) MarshalJSON() ([]byte, error) {
 	if c.IsComplete {
 		obj["isComplete"] = true
 	}
-	if len(c.Tracks) > 0 {
+	// tracks is a required field (§5.1.4), so an empty list encodes as [].
+	if c.Tracks != nil {
 		obj["tracks"] = c.Tracks
+	} else {
+		obj["tracks"] = []Track{}
 	}
 	if len(c.PublishTracks) > 0 {
 		obj["publishTracks"] = c.PublishTracks
 	}
-	if len(c.InitDataList) > 0 {
-		obj["initDataList"] = c.InitDataList
+	delete(obj, "initDataList")
+	encoded, err := json.Marshal(obj)
+	if err != nil || len(c.InitDataList) == 0 {
+		return encoded, err
 	}
-	return json.Marshal(obj)
+	initData, err := json.Marshal(c.InitDataList)
+	if err != nil {
+		return nil, err
+	}
+	// Splice initDataList in as the last member of the object.
+	encoded = append(encoded[:len(encoded)-1], `,"initDataList":`...)
+	encoded = append(encoded, initData...)
+	return append(encoded, '}'), nil
 }
 
 // UnmarshalJSON decodes the independent catalog shape and rejects delta-only fields.
@@ -595,6 +823,9 @@ func (c *Catalog) UnmarshalJSON(data []byte) error {
 	*c = Catalog{}
 	c.ExtraFields = make(map[string]json.RawMessage)
 
+	if err := checkCatalogText(data); err != nil {
+		return err
+	}
 	ordered, err := decodeOrderedObject(data)
 	if err != nil {
 		return err
@@ -607,11 +838,10 @@ func (c *Catalog) UnmarshalJSON(data []byte) error {
 				return err
 			}
 		case "generatedAt":
-			var value int64
-			if err := json.Unmarshal(entry.Value, &value); err != nil {
+			// Into the pointer, so that null leaves the field absent.
+			if err := json.Unmarshal(entry.Value, &c.GeneratedAt); err != nil {
 				return err
 			}
-			c.GeneratedAt = &value
 		case "isComplete":
 			if err := json.Unmarshal(entry.Value, &c.IsComplete); err != nil {
 				return err
@@ -641,9 +871,8 @@ func (c *Catalog) UnmarshalJSON(data []byte) error {
 // Clone returns a deep copy of the track and its JSON extension fields.
 func (t Track) Clone() Track {
 	clone := t
-	clone.Depends = slices.Clone(t.Depends)
+	clone.Depends = cloneDependencies(t.Depends)
 	clone.ExtraFields = cloneRawMessages(t.ExtraFields)
-	clone.presentFields = maps.Clone(t.presentFields)
 	if t.IsLive != nil {
 		value := *t.IsLive
 		clone.IsLive = &value
@@ -667,6 +896,8 @@ func (t Track) Clone() Track {
 	clone.DisplayWidth = cloneInt64Ptr(t.DisplayWidth)
 	clone.DisplayHeight = cloneInt64Ptr(t.DisplayHeight)
 	clone.TrackDuration = cloneInt64Ptr(t.TrackDuration)
+	clone.AccessibleWindowTime = cloneInt64Ptr(t.AccessibleWindowTime)
+	clone.KeyframeSpacing = cloneInt64Ptr(t.KeyframeSpacing)
 	if t.AuthInfo != nil {
 		clone.AuthInfo = cloneRawMessages(t.AuthInfo)
 	}
@@ -696,68 +927,142 @@ func (t Track) effectiveNamespace(defaultNamespace string) string {
 	return inheritedNamespaceSentinel
 }
 
-// validate checks track-level constraints for either an independent catalog or addTracks entry.
-func (t Track) validate(path string) []string {
-	var problems []string
-	prefix := ""
-	if path != "" {
-		prefix = path + ": "
-	}
-	if t.Name == "" {
-		problems = append(problems, prefix+"name is required")
-	}
+// trackList identifies the catalog array a track is declared in, since some
+// packaging values are only valid in one of them.
+type trackList uint8
 
+const (
+	// trackListTracks is the tracks array, also used for delta add and clone
+	// results.
+	trackListTracks trackList = iota
+	// trackListPublishTracks is the publishTracks array.
+	trackListPublishTracks
+)
+
+// requiredLOCFields returns the fields a loc track with role must also carry
+// (draft-ietf-moq-msf-02 §5.2.4.1, Table 6). Roles not listed have no
+// requirement beyond the fields every track carries.
+func requiredLOCFields(role Role) []string {
+	switch role {
+	case RoleAudio:
+		return requiredLOCAudioFields[:]
+	case RoleVideo:
+		return requiredLOCVideoFields[:]
+	case RoleAudioDescription:
+		return requiredLOCAudioDescriptionFields[:]
+	case RoleSignLanguage:
+		return requiredLOCSignLanguageFields[:]
+	default:
+		return nil
+	}
+}
+
+// The rows of Table 6 for loc packaging; read-only.
+var (
+	requiredLOCAudioFields            = [...]string{"codec", "bitrate", "samplerate", "channelConfig"}
+	requiredLOCVideoFields            = [...]string{"codec", "bitrate", "framerate"}
+	requiredLOCAudioDescriptionFields = [...]string{"codec", "samplerate", "channelConfig", "lang"}
+	requiredLOCSignLanguageFields     = [...]string{"codec", "framerate"}
+)
+
+// validate checks track-level constraints of draft-ietf-moq-msf-02 for a
+// track declared in list. Cross-track constraints, such as unique Full Track
+// Names and depends resolution, are checked by Catalog.Validate.
+func (t *Track) validate(list trackList) []string {
+	var problems []string
+	if t.Name == "" {
+		problems = append(problems, "name is required and must not be empty")
+	} else if err := validateNameText(t.Name); err != nil {
+		problems = append(problems, "name: "+err.Error())
+	}
+	if t.Namespace != "" {
+		if err := validateNamespace(t.Namespace); err != nil {
+			problems = append(problems, err.Error())
+		}
+	}
 	if t.Packaging == "" {
-		problems = append(problems, prefix+"packaging is required")
+		problems = append(problems, "packaging is required")
+	}
+	if t.IsLive == nil {
+		problems = append(problems, "isLive is required")
 	}
 	if t.TrackDuration != nil && t.IsLive != nil && *t.IsLive {
-		problems = append(problems, prefix+"trackDuration must not be present when isLive is true")
+		problems = append(problems, "trackDuration must not be present when isLive is true")
+	}
+	if t.TargetLatency != nil && t.Buffers != nil {
+		problems = append(problems, "targetLatency and buffers must not both be present")
+	}
+	if t.PackagingMetadata != "" {
+		if err := validatePackagingMetadata(t.PackagingMetadata, t.Packaging); err != nil {
+			problems = append(problems, err.Error())
+		}
+	}
+	for i, dep := range t.Depends {
+		if err := dep.validate(); err != nil {
+			problems = append(problems, "depends["+itoa(i)+"]: "+err.Error())
+		}
+	}
+	if _, ok := t.ExtraFields["parentName"]; ok {
+		problems = append(problems, "parentName must only appear in a clone or update operation")
+	}
+	if _, ok := t.ExtraFields["parentNamespace"]; ok {
+		problems = append(problems, "parentNamespace must only appear in a clone or update operation")
+	}
+
+	// eventType is required for, and only allowed on, eventtimeline tracks (§5.2.6).
+	if t.Packaging == PackagingEventTimeline {
+		if t.EventType == "" {
+			problems = append(problems, "eventType is required for eventtimeline tracks")
+		}
+	} else if t.EventType != "" {
+		problems = append(problems, "eventType must only be set for eventtimeline tracks")
 	}
 
 	switch t.Packaging {
-	case PackagingEventTimeline:
-		if t.EventType == "" {
-			problems = append(problems, prefix+"eventType is required for eventtimeline tracks")
-		}
-		if t.MimeType != "application/json" {
-			problems = append(problems, prefix+"eventtimeline tracks must use mimeType application/json")
-		}
-		if len(t.Depends) == 0 {
-			problems = append(problems, prefix+"eventtimeline tracks must declare depends")
+	case PackagingLOC:
+		for _, field := range requiredLOCFields(t.Role) {
+			if !t.hasField(field) {
+				problems = append(problems, field+" is required for loc tracks with role "+string(t.Role))
+			}
 		}
 	case PackagingMediaTimeline:
-		if t.EventType != "" {
-			problems = append(problems, prefix+"eventType must not be set for mediatimeline tracks")
-		}
-		if t.MimeType != "application/json" {
-			problems = append(problems, prefix+"mediatimeline tracks must use mimeType application/json")
-		}
+		// §7.2: depends lists the tracks and render groups the timeline
+		// applies to. §7.1: a media timeline track uses either the explicit
+		// format (its payload) or the template format, never both.
 		if len(t.Depends) == 0 {
-			problems = append(problems, prefix+"mediatimeline tracks must declare depends")
+			problems = append(problems, "mediatimeline tracks must declare depends")
 		}
-	case PackagingLOC:
-		if t.EventType != "" {
-			problems = append(problems, prefix+"eventType must not be set for loc tracks")
+		if t.Template != nil {
+			problems = append(problems, "mediatimeline tracks must not also carry a template")
 		}
-		if t.IsLive == nil {
-			problems = append(problems, prefix+"isLive is required for loc tracks")
-		}
-	case PackagingMoqLog, PackagingMoqMetrics:
-		if t.EventType != "" {
-			problems = append(problems, prefix+"eventType must not be set for "+string(t.Packaging)+" tracks")
-		}
-	default:
-		if t.EventType != "" {
-			problems = append(problems, prefix+"eventType must only be set for eventtimeline tracks")
-		}
+	case PackagingMoqLog:
+		problems = t.appendPublishOnlyProblems(problems, list, RoleLog)
+	case PackagingMoqMetrics:
+		problems = t.appendPublishOnlyProblems(problems, list, RoleMetrics)
 	}
 
-	// Encryption: cipherSuite MUST be present when encryptionScheme is specified
-	// (draft-ietf-moq-msf-01 §5.2.39).
-	if t.EncryptionScheme != "" && t.CipherSuite == "" {
-		problems = append(problems, prefix+"cipherSuite is required when encryptionScheme is set")
+	// cipherSuite is required only for moq-secure-objects (§5.2.39).
+	if t.EncryptionScheme == EncryptionSchemeMoQSecureObjects && t.CipherSuite == "" {
+		problems = append(problems, "cipherSuite is required when encryptionScheme is "+EncryptionSchemeMoQSecureObjects)
 	}
 
+	return problems
+}
+
+// appendPublishOnlyProblems checks the catalog requirements shared by log and
+// metrics tracks (draft-ietf-moq-msf-02 §9.2, §9.4, §10.2, §10.4): declared in
+// publishTracks, with the matching role, and named by the ASCII decimal
+// priority or granularity level "0" to "7".
+func (t *Track) appendPublishOnlyProblems(problems []string, list trackList, role Role) []string {
+	if list != trackListPublishTracks {
+		problems = append(problems, string(t.Packaging)+" tracks must be declared in publishTracks")
+	}
+	if t.Role != role {
+		problems = append(problems, string(t.Packaging)+" tracks must have role "+string(role))
+	}
+	if len(t.Name) != 1 || t.Name[0] < '0' || t.Name[0] > '7' {
+		problems = append(problems, string(t.Packaging)+" track name must be a level from \"0\" to \"7\"")
+	}
 	return problems
 }
 
@@ -771,6 +1076,9 @@ func (t *Track) applyOverrides(override Track) {
 	}
 	if override.hasField("packaging") {
 		t.Packaging = override.Packaging
+	}
+	if override.hasField("packagingMetadata") {
+		t.PackagingMetadata = override.PackagingMetadata
 	}
 	if override.hasField("eventType") {
 		t.EventType = override.EventType
@@ -803,7 +1111,7 @@ func (t *Track) applyOverrides(override Track) {
 		t.Template = override.Template.Clone()
 	}
 	if override.hasField("depends") {
-		t.Depends = slices.Clone(override.Depends)
+		t.Depends = cloneDependencies(override.Depends)
 	}
 	if override.hasField("temporalId") {
 		t.TemporalID = cloneInt64Ptr(override.TemporalID)
@@ -856,17 +1164,11 @@ func (t *Track) applyOverrides(override Track) {
 	if override.hasField("lang") {
 		t.Language = override.Language
 	}
-	if override.hasField("parentNamespace") {
-		t.ParentNamespace = override.ParentNamespace
-	}
 	if override.hasField("trackDuration") {
 		t.TrackDuration = cloneInt64Ptr(override.TrackDuration)
 	}
-	if override.hasField("connectionUri") {
+	if override.hasField("connectionURI") {
 		t.ConnectionURI = override.ConnectionURI
-	}
-	if override.hasField("token") {
-		t.Token = override.Token
 	}
 	if override.hasField("encryptionScheme") {
 		t.EncryptionScheme = override.EncryptionScheme
@@ -886,11 +1188,11 @@ func (t *Track) applyOverrides(override Track) {
 	if override.hasField("accessibility") {
 		t.Accessibility = cloneAccessibility(override.Accessibility)
 	}
-	if t.presentFields == nil {
-		t.presentFields = make(map[string]struct{})
+	if override.hasField("accessibleWindowTime") {
+		t.AccessibleWindowTime = cloneInt64Ptr(override.AccessibleWindowTime)
 	}
-	for field := range override.presentFields {
-		t.presentFields[field] = struct{}{}
+	if override.hasField("keyframeSpacing") {
+		t.KeyframeSpacing = cloneInt64Ptr(override.KeyframeSpacing)
 	}
 	if t.ExtraFields == nil {
 		t.ExtraFields = make(map[string]json.RawMessage)
@@ -919,6 +1221,9 @@ func (t Track) marshalObject() map[string]any {
 	}
 	if t.Packaging != "" {
 		obj["packaging"] = t.Packaging
+	}
+	if t.PackagingMetadata != "" {
+		obj["packagingMetadata"] = t.PackagingMetadata
 	}
 	if t.EventType != "" {
 		obj["eventType"] = t.EventType
@@ -1004,17 +1309,11 @@ func (t Track) marshalObject() map[string]any {
 	if t.Language != "" {
 		obj["lang"] = t.Language
 	}
-	if t.ParentNamespace != "" {
-		obj["parentNamespace"] = t.ParentNamespace
-	}
 	if t.TrackDuration != nil {
 		obj["trackDuration"] = *t.TrackDuration
 	}
 	if t.ConnectionURI != "" {
-		obj["connectionUri"] = t.ConnectionURI
-	}
-	if t.Token != "" {
-		obj["token"] = t.Token
+		obj["connectionURI"] = t.ConnectionURI
 	}
 	if t.EncryptionScheme != "" {
 		obj["encryptionScheme"] = t.EncryptionScheme
@@ -1034,10 +1333,16 @@ func (t Track) marshalObject() map[string]any {
 	if t.Accessibility != nil {
 		obj["accessibility"] = t.Accessibility
 	}
+	if t.AccessibleWindowTime != nil {
+		obj["accessibleWindowTime"] = *t.AccessibleWindowTime
+	}
+	if t.KeyframeSpacing != nil {
+		obj["keyframeSpacing"] = *t.KeyframeSpacing
+	}
 	return obj
 }
 
-// MarshalJSON encodes the track using the draft-01 object form.
+// MarshalJSON encodes the track using the draft-02 object form.
 func (t Track) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t.marshalObject())
 }
@@ -1046,14 +1351,19 @@ func (t Track) MarshalJSON() ([]byte, error) {
 func (t *Track) unmarshalObject(raw map[string]json.RawMessage) error {
 	*t = Track{}
 	t.ExtraFields = make(map[string]json.RawMessage)
-	t.presentFields = make(map[string]struct{})
 
 	for key, value := range raw {
-		t.presentFields[key] = struct{}{}
+		// A null known field is absent; an unknown one round-trips as is.
+		if isJSONNull(value) && isTrackFieldKey(key) {
+			continue
+		}
 		switch key {
 		case "namespace":
 			if err := json.Unmarshal(value, &t.Namespace); err != nil {
 				return err
+			}
+			if t.Namespace == "" {
+				return errEmptyNamespace
 			}
 		case "name":
 			if err := json.Unmarshal(value, &t.Name); err != nil {
@@ -1061,6 +1371,10 @@ func (t *Track) unmarshalObject(raw map[string]json.RawMessage) error {
 			}
 		case "packaging":
 			if err := json.Unmarshal(value, &t.Packaging); err != nil {
+				return err
+			}
+		case "packagingMetadata":
+			if err := json.Unmarshal(value, &t.PackagingMetadata); err != nil {
 				return err
 			}
 		case "eventType":
@@ -1183,20 +1497,12 @@ func (t *Track) unmarshalObject(raw map[string]json.RawMessage) error {
 			if err := json.Unmarshal(value, &t.Language); err != nil {
 				return err
 			}
-		case "parentNamespace":
-			if err := json.Unmarshal(value, &t.ParentNamespace); err != nil {
-				return err
-			}
 		case "trackDuration":
 			if err := json.Unmarshal(value, &t.TrackDuration); err != nil {
 				return err
 			}
-		case "connectionUri":
+		case "connectionURI":
 			if err := json.Unmarshal(value, &t.ConnectionURI); err != nil {
-				return err
-			}
-		case "token":
-			if err := json.Unmarshal(value, &t.Token); err != nil {
 				return err
 			}
 		case "encryptionScheme":
@@ -1224,6 +1530,14 @@ func (t *Track) unmarshalObject(raw map[string]json.RawMessage) error {
 			if err := json.Unmarshal(value, &t.Accessibility); err != nil {
 				return err
 			}
+		case "accessibleWindowTime":
+			if err := json.Unmarshal(value, &t.AccessibleWindowTime); err != nil {
+				return err
+			}
+		case "keyframeSpacing":
+			if err := json.Unmarshal(value, &t.KeyframeSpacing); err != nil {
+				return err
+			}
 		default:
 			t.ExtraFields[key] = cloneRawMessage(value)
 		}
@@ -1241,96 +1555,124 @@ func (t *Track) UnmarshalJSON(data []byte) error {
 	return t.unmarshalObject(raw)
 }
 
-// hasField reports whether field was explicitly present or is materially set on the track.
-func (t Track) hasField(field string) bool {
-	if _, ok := t.presentFields[field]; ok {
-		return true
-	}
+// ErrCatalogComplete reports a delta applied to a catalog marked isComplete.
+var ErrCatalogComplete = errors.New("msf: cannot apply a delta to a complete catalog")
+
+// errEmptyNamespace reports an explicitly empty namespace, which makes the
+// catalog invalid (draft-ietf-moq-msf-02 §5.2.2); an absent one is inherited.
+var errEmptyNamespace = errors.New("msf: namespace must not be empty; omit it to inherit the catalog namespace")
+
+// isJSONNull reports whether raw is the JSON literal null.
+func isJSONNull(raw json.RawMessage) bool {
+	return string(bytes.TrimSpace(raw)) == "null"
+}
+
+// zeroTrack is the Track isTrackFieldKey probes; read-only.
+var zeroTrack Track
+
+// isTrackFieldKey reports whether key names a field Track models.
+func isTrackFieldKey(key string) bool {
+	_, known := trackFieldState(&zeroTrack, key)
+	return known
+}
+
+// hasField reports whether the track holds a value for the JSON field.
+func (t *Track) hasField(field string) bool {
+	present, _ := trackFieldState(t, field)
+	return present
+}
+
+// trackFieldState reports whether t holds a value for the JSON field and
+// whether Track models that field at all. Presence is read from the value
+// alone, so it cannot disagree with what Validate and MarshalJSON see.
+func trackFieldState(t *Track, field string) (present, known bool) {
 	switch field {
 	case "namespace":
-		return t.Namespace != ""
+		return t.Namespace != "", true
 	case "name":
-		return t.Name != ""
+		return t.Name != "", true
 	case "packaging":
-		return t.Packaging != ""
+		return t.Packaging != "", true
+	case "packagingMetadata":
+		return t.PackagingMetadata != "", true
 	case "eventType":
-		return t.EventType != ""
+		return t.EventType != "", true
 	case "role":
-		return t.Role != ""
+		return t.Role != "", true
 	case "isLive":
-		return t.IsLive != nil
+		return t.IsLive != nil, true
 	case "targetLatency":
-		return t.TargetLatency != nil
+		return t.TargetLatency != nil, true
 	case "label":
-		return t.Label != ""
+		return t.Label != "", true
 	case "renderGroup":
-		return t.RenderGroup != nil
+		return t.RenderGroup != nil, true
 	case "altGroup":
-		return t.AltGroup != nil
+		return t.AltGroup != nil, true
 	case "initRef":
-		return t.InitRef != ""
+		return t.InitRef != "", true
 	case "buffers":
-		return t.Buffers != nil
+		return t.Buffers != nil, true
 	case "template":
-		return t.Template != nil
+		return t.Template != nil, true
 	case "depends":
-		return t.Depends != nil
+		return t.Depends != nil, true
 	case "temporalId":
-		return t.TemporalID != nil
+		return t.TemporalID != nil, true
 	case "spatialId":
-		return t.SpatialID != nil
+		return t.SpatialID != nil, true
 	case "codec":
-		return t.Codec != ""
+		return t.Codec != "", true
 	case "mimeType":
-		return t.MimeType != ""
+		return t.MimeType != "", true
 	case "framerate":
-		return t.Framerate != nil
+		return t.Framerate != nil, true
 	case "timescale":
-		return t.Timescale != nil
+		return t.Timescale != nil, true
 	case "bitrate":
-		return t.Bitrate != nil
+		return t.Bitrate != nil, true
 	case "avgBitrate":
-		return t.AvgBitrate != nil
+		return t.AvgBitrate != nil, true
 	case "maxGopDuration":
-		return t.MaxGopDuration != nil
+		return t.MaxGopDuration != nil, true
 	case "maxGroupDuration":
-		return t.MaxGroupDuration != nil
+		return t.MaxGroupDuration != nil, true
 	case "width":
-		return t.Width != nil
+		return t.Width != nil, true
 	case "height":
-		return t.Height != nil
+		return t.Height != nil, true
 	case "samplerate":
-		return t.SampleRate != nil
+		return t.SampleRate != nil, true
 	case "channelConfig":
-		return t.ChannelConfig != ""
+		return t.ChannelConfig != "", true
 	case "displayWidth":
-		return t.DisplayWidth != nil
+		return t.DisplayWidth != nil, true
 	case "displayHeight":
-		return t.DisplayHeight != nil
+		return t.DisplayHeight != nil, true
 	case "lang":
-		return t.Language != ""
-	case "parentNamespace":
-		return t.ParentNamespace != ""
+		return t.Language != "", true
 	case "trackDuration":
-		return t.TrackDuration != nil
-	case "connectionUri":
-		return t.ConnectionURI != ""
-	case "token":
-		return t.Token != ""
+		return t.TrackDuration != nil, true
+	case "connectionURI":
+		return t.ConnectionURI != "", true
 	case "encryptionScheme":
-		return t.EncryptionScheme != ""
+		return t.EncryptionScheme != "", true
 	case "cipherSuite":
-		return t.CipherSuite != ""
+		return t.CipherSuite != "", true
 	case "keyId":
-		return t.KeyID != ""
+		return t.KeyID != "", true
 	case "trackBaseKey":
-		return t.TrackBaseKey != ""
+		return t.TrackBaseKey != "", true
 	case "authInfo":
-		return t.AuthInfo != nil
+		return t.AuthInfo != nil, true
 	case "accessibility":
-		return t.Accessibility != nil
+		return t.Accessibility != nil, true
+	case "accessibleWindowTime":
+		return t.AccessibleWindowTime != nil, true
+	case "keyframeSpacing":
+		return t.KeyframeSpacing != nil, true
 	default:
-		return false
+		return false, false
 	}
 }
 
@@ -1447,7 +1789,44 @@ func (r InitDataRef) Clone() InitDataRef {
 	return clone
 }
 
-// MarshalJSON encodes the init-data reference as the draft-01 object form.
+// PropertyType returns the property type named by Data for the
+// InitDataTypeTrackProperty and InitDataTypeObjectProperty types. Data is
+// hex notation, with or without a "0x" prefix.
+func (r InitDataRef) PropertyType() (uint64, error) {
+	if r.Type != InitDataTypeTrackProperty && r.Type != InitDataTypeObjectProperty {
+		return 0, fmt.Errorf("msf: init data type %q does not name a property", r.Type)
+	}
+	digits := r.Data
+	if len(digits) >= 2 && digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X') {
+		digits = digits[2:]
+	}
+	if digits == "" {
+		return 0, fmt.Errorf("msf: init data property type %q is not hex notation", r.Data)
+	}
+	value, err := strconv.ParseUint(digits, 16, 64)
+	if err != nil {
+		return 0, fmt.Errorf("msf: init data property type %q is not hex notation: %w", r.Data, err)
+	}
+	return value, nil
+}
+
+// validate checks the entry's type, and for the property types that Data is
+// a hex property type. An empty type is accepted as before draft-02.
+func (r InitDataRef) validate() error {
+	switch r.Type {
+	case "", InitDataTypeInline:
+		return nil
+	case InitDataTypeTrackProperty, InitDataTypeObjectProperty:
+		if _, err := r.PropertyType(); err != nil {
+			return fmt.Errorf("data %q must be a property type in hex notation", r.Data)
+		}
+		return nil
+	default:
+		return fmt.Errorf("type %q must be %q, %q or %q", r.Type, InitDataTypeInline, InitDataTypeTrackProperty, InitDataTypeObjectProperty)
+	}
+}
+
+// MarshalJSON encodes the init-data reference as the draft-02 object form.
 func (r InitDataRef) MarshalJSON() ([]byte, error) {
 	obj := make(map[string]any, len(r.ExtraFields)+3)
 	for key, raw := range r.ExtraFields {

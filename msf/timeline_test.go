@@ -89,7 +89,7 @@ func TestEventTimelineRecordJSONAndValidation(t *testing.T) {
 	require.NoError(t, record.Validate())
 	data, err := json.Marshal(record)
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"t":1756885678361,"data":{"status":"in_progress"}}`, string(data))
+	assert.JSONEq(t, `{"T":1756885678361,"data":{"status":"in_progress"}}`, string(data))
 
 	var decoded EventTimelineRecord
 	require.NoError(t, json.Unmarshal(data, &decoded))
@@ -110,7 +110,7 @@ func TestEventTimelineRecordValidate_RejectsMultipleIndexes(t *testing.T) {
 
 	err := record.Validate()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "exactly one of t, l, or m")
+	assert.Contains(t, err.Error(), "exactly one of T, L, or M")
 }
 
 func TestEventTimelineRecordValidate_Errors(t *testing.T) {
@@ -120,7 +120,7 @@ func TestEventTimelineRecordValidate_Errors(t *testing.T) {
 	}{
 		"missing selector": {
 			record:       EventTimelineRecord{Data: json.RawMessage(`{}`)},
-			errorMessage: "exactly one of t, l, or m",
+			errorMessage: "exactly one of T, L, or M",
 		},
 		"missing data": {
 			record:       EventTimelineRecord{Wallclock: new(int64(1))},
@@ -165,7 +165,7 @@ func TestEventTimelineRecord_LocationSelector(t *testing.T) {
 
 	data, err := json.Marshal(record)
 	require.NoError(t, err)
-	assert.Contains(t, string(data), `"l":[5,2]`)
+	assert.Contains(t, string(data), `"L":[5,2]`)
 	assert.Contains(t, string(data), `"data":`)
 
 	var decoded EventTimelineRecord
@@ -189,7 +189,7 @@ func TestEventTimelineRecord_MediaTimeSelector(t *testing.T) {
 
 	data, err := json.Marshal(record)
 	require.NoError(t, err)
-	assert.Contains(t, string(data), `"m":90000`)
+	assert.Contains(t, string(data), `"M":90000`)
 	assert.Contains(t, string(data), `"data":`)
 
 	var decoded EventTimelineRecord
@@ -211,7 +211,7 @@ func TestEventTimelineRecord_AllThreeSelectorsInvalid(t *testing.T) {
 
 	err := record.Validate()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "exactly one of t, l, or m")
+	assert.Contains(t, err.Error(), "exactly one of T, L, or M")
 }
 
 func TestLocationJSON_InvalidTypes(t *testing.T) {
@@ -244,9 +244,9 @@ func TestEventTimelineRecord_UnmarshalJSON_FieldErrors(t *testing.T) {
 	tests := map[string]struct {
 		input string
 	}{
-		"bad t": {`{"t": "not-a-number", "data": {}}`},
-		"bad l": {`{"l": "not-an-array", "data": {}}`},
-		"bad m": {`{"m": "not-a-number", "data": {}}`},
+		"bad t": {`{"T": "not-a-number", "data": {}}`},
+		"bad l": {`{"L": "not-an-array", "data": {}}`},
+		"bad m": {`{"M": "not-a-number", "data": {}}`},
 	}
 
 	for name, tt := range tests {
@@ -303,21 +303,21 @@ func TestEventTimelineRecord_MarshalJSON(t *testing.T) {
 				Wallclock: func() *int64 { v := int64(100); return &v }(),
 				Data:      json.RawMessage(`{"a":1}`),
 			},
-			want: `{"t":100,"data":{"a":1}}`,
+			want: `{"T":100,"data":{"a":1}}`,
 		},
 		"location": {
 			record: EventTimelineRecord{
 				Location: &Location{GroupID: 1, ObjectID: 2},
 				Data:     json.RawMessage(`{"a":1}`),
 			},
-			want: `{"l":[1,2],"data":{"a":1}}`,
+			want: `{"L":[1,2],"data":{"a":1}}`,
 		},
 		"media_time": {
 			record: EventTimelineRecord{
 				MediaTime: func() *int64 { v := int64(200); return &v }(),
 				Data:      json.RawMessage(`{"a":1}`),
 			},
-			want: `{"m":200,"data":{"a":1}}`,
+			want: `{"M":200,"data":{"a":1}}`,
 		},
 		"extra_fields": {
 			record: EventTimelineRecord{
@@ -325,13 +325,13 @@ func TestEventTimelineRecord_MarshalJSON(t *testing.T) {
 				Data:        json.RawMessage(`{"a":1}`),
 				ExtraFields: map[string]json.RawMessage{"ext": json.RawMessage(`42`)},
 			},
-			want: `{"t":100,"data":{"a":1},"ext":42}`,
+			want: `{"T":100,"data":{"a":1},"ext":42}`,
 		},
 		"no_data": {
 			record: EventTimelineRecord{
 				Wallclock: func() *int64 { v := int64(100); return &v }(),
 			},
-			want: `{"t":100}`,
+			want: `{"T":100}`,
 		},
 	}
 
@@ -433,4 +433,64 @@ func TestTemplate_Clone_RoundTrip(t *testing.T) {
 	assert.Equal(t, *tmpl, *clone)
 	clone.DeltaMediaTime = 999
 	assert.Equal(t, int64(2), tmpl.DeltaMediaTime, "original must not be mutated")
+}
+
+func TestValidateMediaTimeline(t *testing.T) {
+	entry := func(mediaTime int64, group uint64) MediaTimelineEntry {
+		return MediaTimelineEntry{MediaTime: mediaTime, Location: Location{GroupID: group}}
+	}
+
+	tests := map[string]struct {
+		entries []MediaTimelineEntry
+		wantErr bool
+	}{
+		"empty":                        {},
+		"ordered":                      {entries: []MediaTimelineEntry{entry(0, 0), entry(2002, 1), entry(4004, 2)}},
+		"sparse non-sequential groups": {entries: []MediaTimelineEntry{entry(0, 7), entry(2002, 3), entry(9000, 40)}},
+		"equal media times":            {entries: []MediaTimelineEntry{entry(0, 0), entry(0, 1)}},
+		"out of order":                 {entries: []MediaTimelineEntry{entry(2002, 1), entry(0, 0)}, wantErr: true},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := ValidateMediaTimeline(tt.entries)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestEventTimelineRecord_Draft02Keys(t *testing.T) {
+	tests := map[string]struct {
+		input   string
+		wantErr bool
+	}{
+		"wallclock index":         {input: `{"T":1756885678361,"data":{"homeScore":2}}`},
+		"location index":          {input: `{"L":[1,0],"data":[47.1662,8.5155]}`},
+		"media time index":        {input: `{"M":23051,"data":"text"}`},
+		"null data":               {input: `{"M":1,"data":null}`},
+		"number data":             {input: `{"M":1,"data":42}`},
+		"lowercase key is legacy": {input: `{"t":1,"data":{}}`, wantErr: true},
+		"missing data":            {input: `{"T":1}`, wantErr: true},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			var record EventTimelineRecord
+			require.NoError(t, json.Unmarshal([]byte(tt.input), &record))
+			err := record.Validate()
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+
+			data, err := json.Marshal(record)
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.input, string(data))
+		})
+	}
 }
