@@ -1,0 +1,41 @@
+{
+     "version": "draft-02",
+     "generatedAt": 1746104606044,
+     "tracks": [
+       {
+         "name": "1080p-video",
+         "namespace": "conference.example.com/conference123/alice",
+         "packaging": "loc",
+         "isLive": true,
+         "targetLatency": 2000,
+         "role": "video",
+         "renderGroup": 1,
+         "codec": "av01.0.08M.10.0.110.09",
+         "width": 1920,
+         "height": 1080,
+         "framerate": 30,
+         "bitrate": 1500000,
+         "encryptionScheme": "moq-secure-objects",
+         "cipherSuite": "aes-128-gcm-sha256",
+         "keyId": "key-2024-q1-premium",
+         "trackBaseKey": "MTIzNDU2Nzg5MDEyMzQ1Ng=="
+       },
+       {
+         "name": "audio",
+         "namespace": "conference.example.com/conference123/alice",
+         "packaging": "loc",
+         "isLive": true,
+         "targetLatency": 2000,
+         "role": "audio",
+         "renderGroup": 1,
+         "codec": "opus",
+         "samplerate": 48000,
+         "channelConfig": "2",
+         "bitrate": 32000,
+         "encryptionScheme": "moq-secure-objects",
+         "cipherSuite": "aes-128-gcm-sha256",
+         "keyId": "key-2024-q1-premium",
+         "trackBaseKey": "MTIzNDU2Nzg5MDEyMzQ1Ng=="
+       }
+     ]
+   }

@@ -1,0 +1,23 @@
+{
+     "version": "draft-02",
+     "generatedAt": 1746104606044,
+     "tracks": [
+       {
+         "name": "premium-catalog",
+         "isLive": true,
+         "packaging": "catalog"
+       },
+       {
+         "name": "free-catalog",
+         "isLive": true,
+         "packaging": "catalog"
+       },
+       {
+         "name": "camera33-catalog",
+         "namespace": "example.com/blimps-R-us",
+         "packaging": "catalog",
+         "isLive": true,
+         "label": "Eye From the Sky video feeds"
+       }
+      ]
+   }

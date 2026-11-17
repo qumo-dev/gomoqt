@@ -1,0 +1,25 @@
+{
+     "version": "draft-02",
+     "tracks": [
+       {
+         "name": "video",
+         "codec": "av01.0.08M.10.0.110.09",
+         "bitrate": 5000000,
+         "framerate": 30,
+         "packaging": "loc",
+         "isLive": true,
+         "role": "video",
+         "renderGroup": 1
+       },
+       {
+         "name": "tracking-c3e5s7w",
+         "namespace": "advertising-decisions/live-sports/xyz",
+         "packaging": "eventtimeline",
+         "isLive": true,
+         "eventType": "com.example.iab.vast",
+         "authInfo": {
+             "cat": "1234"
+         }
+       }
+     ]
+   }

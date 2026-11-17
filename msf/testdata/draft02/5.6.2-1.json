@@ -1,0 +1,72 @@
+{
+     "version": "draft-02",
+     "generatedAt": 1746104606044,
+     "tracks":[
+       {
+         "name": "hd",
+
+
+
+
+
+
+         "renderGroup": 1,
+         "packaging": "loc",
+         "isLive": true,
+         "targetLatency": 1500,
+         "role": "video",
+         "codec":"av01.0.05M.08",
+         "width":1920,
+         "height":1080,
+         "bitrate":5000000,
+         "framerate":30,
+         "altGroup":1
+       },
+       {
+         "name": "md",
+         "renderGroup": 1,
+         "packaging": "loc",
+         "isLive": true,
+         "targetLatency": 1500,
+         "role": "video",
+         "codec":"av01.0.05M.08",
+         "width":1280,
+         "height":720,
+         "bitrate":3000000,
+         "framerate":30,
+         "altGroup":1
+       },
+       {
+         "name": "sd",
+         "renderGroup": 1,
+         "packaging": "loc",
+         "isLive": true,
+         "targetLatency": 1500,
+         "role": "video",
+         "codec":"av01.0.05M.08",
+         "width":192,
+         "height":144,
+         "bitrate":500000,
+         "framerate":30,
+         "altGroup":1
+       },
+       {
+         "name": "audio",
+         "renderGroup": 1,
+         "packaging": "loc",
+         "isLive": true,
+         "targetLatency": 1500,
+         "role": "audio",
+         "codec":"opus",
+
+
+
+
+
+
+         "samplerate":48000,
+         "channelConfig":"2",
+         "bitrate":32000
+       }
+      ]
+   }

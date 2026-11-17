@@ -1,0 +1,44 @@
+{
+     "generatedAt": 1746104606044,
+     "deltaUpdate": [
+        {
+         "op": "update",
+         "tracks": [
+           {
+             "parentName": "video-1080",
+             "bitrate": 4000000
+           }
+         ]
+        },
+        {
+         "op": "add",
+         "tracks": [
+           {
+             "name": "slides",
+             "packaging": "loc",
+             "isLive": true,
+             "role": "video",
+             "codec": "av01.0.08M.10.0.110.09",
+             "width": 1920,
+             "height": 1080,
+             "framerate": 15,
+             "bitrate": 750000,
+             "renderGroup": 1
+           }
+         ]
+       },
+       {
+         "op": "clone",
+         "tracks": [
+           {
+             "parentName": "video-1080",
+             "parentNamespace": "example.com/custom",
+             "name": "video-720",
+             "width": 1280,
+             "height": 720,
+             "bitrate": 600000
+           }
+         ]
+       }
+     ]
+   }

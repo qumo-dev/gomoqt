@@ -2,6 +2,7 @@ package msf
 
 import (
 	"encoding/json"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -346,4 +347,77 @@ func TestParseCatalog_RepeatedTracksLastWins(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, catalog.Tracks, 1)
 	assert.Equal(t, "b", catalog.Tracks[0].Name)
+}
+
+// randomTrack returns a loc or mediatimeline track named from a small pool,
+// with random render group, depends and isLive, so that random deltas often
+// collide, dangle, or break references.
+func randomTrack(rng *rand.Rand, names []string) Track {
+	track := Track{Name: names[rng.IntN(len(names))], Packaging: PackagingLOC, IsLive: new(rng.IntN(2) == 0)}
+	if rng.IntN(3) == 0 {
+		track.Namespace = "other/ns"
+	}
+	if rng.IntN(2) == 0 {
+		track.RenderGroup = new(int64(rng.IntN(2)))
+	}
+	if rng.IntN(3) == 0 {
+		track.Packaging = PackagingMediaTimeline
+		track.Depends = []Dependency{DependsOnTrack(names[rng.IntN(len(names))])}
+		if rng.IntN(2) == 0 {
+			track.Depends = []Dependency{DependsOnRenderGroup(int64(rng.IntN(2)))}
+		}
+	}
+	return track
+}
+
+// TestCatalogApplyDelta_RandomDeltasKeepCatalogValid is a property test:
+// over many random base catalogs and deltas, ApplyDelta either fails or
+// returns a catalog that validates, and never changes its receiver.
+func TestCatalogApplyDelta_RandomDeltasKeepCatalogValid(t *testing.T) {
+	rng := rand.New(rand.NewPCG(529, 2))
+	names := []string{"a", "b", "c", "d"}
+	applied, valid := 0, 0
+
+	for range 5000 {
+		base := Catalog{Version: CurrentVersion, DefaultNamespace: "live/demo"}
+		for range rng.IntN(5) {
+			base.Tracks = append(base.Tracks, randomTrack(rng, names))
+		}
+		if base.Validate() != nil {
+			continue
+		}
+		valid++
+
+		delta := CatalogDelta{GeneratedAt: new(int64(1))}
+		for range 1 + rng.IntN(3) {
+			name := names[rng.IntN(len(names))]
+			switch rng.IntN(4) {
+			case 0:
+				delta.AddTracks = append(delta.AddTracks, randomTrack(rng, names))
+			case 1:
+				delta.RemoveTracks = append(delta.RemoveTracks, TrackRef{Name: name})
+			case 2:
+				clone := TrackClone{ParentName: name, Track: Track{Name: names[rng.IntN(len(names))]}}
+				if rng.IntN(2) == 0 {
+					clone.Depends = []Dependency{DependsOnTrack(names[rng.IntN(len(names))])}
+				}
+				delta.CloneTracks = append(delta.CloneTracks, clone)
+			default:
+				update := TrackUpdate{ParentName: name, Track: Track{IsLive: new(rng.IntN(2) == 0)}}
+				if rng.IntN(2) == 0 {
+					update.RenderGroup = new(int64(rng.IntN(3)))
+				}
+				delta.UpdateTracks = append(delta.UpdateTracks, update)
+			}
+		}
+
+		if _, err := base.Clone().ApplyDelta(delta); err == nil {
+			applied++
+		}
+		assertApplyDeltaProperty(t, base, delta)
+	}
+
+	// Guard against a generator that never exercises the success path.
+	assert.Greater(t, valid, 1000)
+	assert.Greater(t, applied, 100)
 }
