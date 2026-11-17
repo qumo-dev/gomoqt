@@ -397,8 +397,13 @@ func (c Catalog) Validate() error {
 	default:
 		problems = append(problems, fmt.Sprintf("unsupported catalog version %q; want %q", c.Version, CurrentVersion))
 	}
+	// The cross-track checks below run only when some track needs them.
+	hasDepends, hasAltGroup := false, false
 	for i := range c.Tracks {
-		if errs := c.Tracks[i].validate(trackListTracks); len(errs) > 0 {
+		track := &c.Tracks[i]
+		hasDepends = hasDepends || len(track.Depends) > 0
+		hasAltGroup = hasAltGroup || track.AltGroup != nil
+		if errs := track.validate(trackListTracks); len(errs) > 0 {
 			prefix := "tracks[" + itoa(i) + "]: "
 			for _, err := range errs {
 				problems = append(problems, prefix+err)
@@ -406,6 +411,7 @@ func (c Catalog) Validate() error {
 		}
 	}
 	for i := range c.PublishTracks {
+		hasDepends = hasDepends || len(c.PublishTracks[i].Depends) > 0
 		if errs := c.PublishTracks[i].validate(trackListPublishTracks); len(errs) > 0 {
 			prefix := "publishTracks[" + itoa(i) + "]: "
 			for _, err := range errs {
@@ -481,8 +487,12 @@ func (c Catalog) Validate() error {
 		}
 	}
 
-	problems = c.appendDependencyProblems(problems)
-	problems = c.appendAltGroupProblems(problems)
+	if hasDepends {
+		problems = c.appendDependencyProblems(problems)
+	}
+	if hasAltGroup {
+		problems = c.appendAltGroupProblems(problems)
+	}
 
 	return newValidationError(problems)
 }
@@ -493,10 +503,6 @@ func (c Catalog) Validate() error {
 // some track. Both tracks and publishTracks are searched, since event
 // timeline publish tracks depend on media tracks.
 func (c Catalog) appendDependencyProblems(problems []string) []string {
-	if !hasDependencies(c.Tracks) && !hasDependencies(c.PublishTracks) {
-		return problems
-	}
-
 	names := make(map[string]int, len(c.Tracks)+len(c.PublishTracks))
 	groups := make(map[int64]struct{})
 	for _, list := range [2][]Track{c.Tracks, c.PublishTracks} {
@@ -537,16 +543,6 @@ func (c Catalog) appendDependencyProblems(problems []string) []string {
 	check("tracks", c.Tracks)
 	check("publishTracks", c.PublishTracks)
 	return problems
-}
-
-// hasDependencies reports whether any track declares depends entries.
-func hasDependencies(tracks []Track) bool {
-	for i := range tracks {
-		if len(tracks[i].Depends) > 0 {
-			return true
-		}
-	}
-	return false
 }
 
 // appendAltGroupProblems checks that tracks of the same alternate group carry
@@ -957,7 +953,7 @@ var (
 // validate checks track-level constraints of draft-ietf-moq-msf-02 for a
 // track declared in list. Cross-track constraints, such as unique Full Track
 // Names and depends resolution, are checked by Catalog.Validate.
-func (t Track) validate(list trackList) []string {
+func (t *Track) validate(list trackList) []string {
 	var problems []string
 	if t.Name == "" {
 		problems = append(problems, "name is required and must not be empty")
@@ -1042,7 +1038,7 @@ func (t Track) validate(list trackList) []string {
 // metrics tracks (draft-ietf-moq-msf-02 §9.2, §9.4, §10.2, §10.4): declared in
 // publishTracks, with the matching role, and named by the ASCII decimal
 // priority or granularity level "0" to "7".
-func (t Track) appendPublishOnlyProblems(problems []string, list trackList, role Role) []string {
+func (t *Track) appendPublishOnlyProblems(problems []string, list trackList, role Role) []string {
 	if list != trackListPublishTracks {
 		problems = append(problems, string(t.Packaging)+" tracks must be declared in publishTracks")
 	}
@@ -1057,7 +1053,7 @@ func (t Track) appendPublishOnlyProblems(problems []string, list trackList, role
 
 // hasPresentField reports whether field was explicitly present in the decoded
 // JSON, even with an empty value.
-func (t Track) hasPresentField(field string) bool {
+func (t *Track) hasPresentField(field string) bool {
 	_, ok := t.presentFields[field]
 	return ok
 }
@@ -1553,7 +1549,7 @@ func (t *Track) UnmarshalJSON(data []byte) error {
 }
 
 // hasField reports whether field was explicitly present or is materially set on the track.
-func (t Track) hasField(field string) bool {
+func (t *Track) hasField(field string) bool {
 	if _, ok := t.presentFields[field]; ok {
 		return true
 	}

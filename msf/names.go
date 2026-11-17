@@ -40,8 +40,12 @@ func validateNamespace(namespace string) error {
 	}
 	fields := 1
 	start := 0
+	plainASCII := true
 	for i := 0; i < len(namespace); i++ {
-		if namespace[i] != '/' {
+		if b := namespace[i]; b != '/' {
+			if b == 0 || b >= utf8.RuneSelf {
+				plainASCII = false
+			}
 			continue
 		}
 		if i == start {
@@ -56,6 +60,9 @@ func validateNamespace(namespace string) error {
 	if fields > maxNamespaceFields {
 		return fmt.Errorf("namespace %q has %d fields; at most %d are allowed", namespace, fields, maxNamespaceFields)
 	}
+	if plainASCII {
+		return nil
+	}
 	return validateNameText(namespace)
 }
 
@@ -64,11 +71,20 @@ func validateNamespace(namespace string) error {
 // parentNamespace): the value must be valid UTF-8, which also excludes
 // surrogate code points, and must not contain U+0000.
 func validateNameText(s string) error {
-	if !utf8.ValidString(s) {
-		return fmt.Errorf("%q is not valid UTF-8", s)
-	}
-	if strings.IndexByte(s, 0) >= 0 {
-		return fmt.Errorf("%q contains a NUL character", s)
+	// Fast path: names are almost always ASCII, checked in one pass.
+	for i := 0; i < len(s); i++ {
+		switch b := s[i]; {
+		case b == 0:
+			return fmt.Errorf("%q contains a NUL character", s)
+		case b >= utf8.RuneSelf:
+			if !utf8.ValidString(s[i:]) {
+				return fmt.Errorf("%q is not valid UTF-8", s)
+			}
+			if strings.IndexByte(s[i:], 0) >= 0 {
+				return fmt.Errorf("%q contains a NUL character", s)
+			}
+			return nil
+		}
 	}
 	return nil
 }

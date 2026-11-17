@@ -26,6 +26,8 @@ func BenchmarkCatalog_Validate(b *testing.B) {
 // CatalogDelta.Validate (deferred per-entry prefix formatting).
 func BenchmarkCatalogDelta_Validate(b *testing.B) {
 	delta := CatalogDelta{
+		// draft-02 requires generatedAt; without it this would time the error path.
+		GeneratedAt: new(int64(1746104606044)),
 		AddTracks: []Track{
 			{Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
 			{Name: "audio", Packaging: PackagingLOC, IsLive: new(false)},
