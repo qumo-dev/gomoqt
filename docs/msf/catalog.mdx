@@ -7,26 +7,62 @@ A `Catalog` represents an independent MSF catalog snapshot — the complete desc
 ## Parse and Validate
 
 ```go
-    catalog, err := msf.ParseCatalog(rawJSON)
-    if err != nil {
-        // invalid JSON or wrong catalog shape
-    }
-    if err := catalog.Validate(); err != nil {
-        // syntactically valid, but violates MSF rules
-    }
+// Example: ExampleParseCatalog
+raw := []byte(`{
+    "version": "draft-02",
+    "generatedAt": 1746104606044,
+    "tracks": [
+        {"name": "video", "packaging": "loc", "isLive": true, "role": "video",
+         "codec": "av01.0.08M.10.0.110.09", "bitrate": 5000000, "framerate": 30,
+         "width": 1920, "height": 1080, "renderGroup": 1},
+        {"name": "audio", "packaging": "loc", "isLive": true, "role": "audio",
+         "codec": "opus", "bitrate": 32000, "samplerate": 48000, "channelConfig": "2",
+         "renderGroup": 1}
+    ]
+}`)
+
+catalog, err := msf.ParseCatalog(raw)
+if err != nil {
+    fmt.Println("invalid JSON or catalog shape:", err)
+    return
+}
+if err := catalog.Validate(); err != nil {
+    fmt.Println("violates MSF rules:", err)
+    return
+}
+for _, track := range catalog.Tracks {
+    fmt.Println(track.Name, track.Role, track.Codec)
+}
 ```
 
-`ParseCatalog` decodes an independent MSF catalog from JSON. `Validate` checks that the catalog satisfies draft-00 constraints (required fields, unique track identities, etc.).
+`ParseCatalog` decodes an independent MSF catalog from JSON. It rejects a document that begins with a byte order mark, is not UTF-8, or contains an unpaired `\u` surrogate escape, and an explicitly empty `namespace`.
+
+`Validate` checks the draft-02 rules:
+
+- `version` is `"draft-02"` (`msf.CurrentVersion`).
+- Every track has a non-empty `name`, a `packaging` and `isLive`.
+- The fields each (packaging, role) pair requires are present (see below).
+- A `namespace` is a `/`-separated string of 1 to 32 non-empty fields; names are UTF-8 without NUL.
+- Full Track Names (namespace and name) are unique across `tracks` and `publishTracks`.
+- Every `depends` entry resolves: a track name to exactly one other track, a number to a track's `renderGroup`.
+- Every `initRef` names an `initDataList` entry.
+- `cipherSuite` is present when `encryptionScheme` is `"moq-secure-objects"`.
+- `moqlog` and `moqmetrics` tracks are publish tracks with role `log` or `metrics` and a level `"0"` to `"7"` as name.
+
+A field is present when it holds a value: a non-nil pointer, slice or map, or a non-empty string. A JSON `null` counts as absent.
 
 ## `msf.Catalog`
 
 ```go
 type Catalog struct {
     DefaultNamespace string
-    Version          int
+    Version          string
     GeneratedAt      *int64
     IsComplete       bool
     Tracks           []Track
+    PublishTracks    []Track
+    InitDataList     []InitDataRef
+    ExtraFields      map[string]json.RawMessage
 }
 
 func ParseCatalog(data []byte) (Catalog, error)
@@ -34,78 +70,143 @@ func ParseCatalogString(s string) (Catalog, error)
 func (c Catalog) Validate() error
 func (c Catalog) Clone() Catalog
 func (c Catalog) ApplyDelta(delta CatalogDelta) (Catalog, error)
+func (c Catalog) ResolveVariables(vars map[string]string) (Catalog, error)
+func (c Catalog) CatalogRefs() []TrackID
 ```
 
-| Field              | Type       | Description                                                    |
-|--------------------|------------|----------------------------------------------------------------|
-| `DefaultNamespace` | `string`   | Namespace implied by the catalog track (not serialized in JSON)|
-| `Version`          | `int`      | MSF version number                                             |
-| `GeneratedAt`      | `*int64`   | Catalog generation timestamp (optional)                        |
-| `IsComplete`       | `bool`     | Whether the catalog is marked as complete                      |
-| `Tracks`           | `[]Track`  | Complete set of track descriptions                             |
+| Field              | Type            | Description                                                          |
+|--------------------|-----------------|----------------------------------------------------------------------|
+| `DefaultNamespace` | `string`        | Namespace the catalog track was subscribed under (not serialized)    |
+| `Version`          | `string`        | MSF version, `"draft-02"`                                            |
+| `GeneratedAt`      | `*int64`        | Wallclock time the catalog was generated (optional)                  |
+| `IsComplete`       | `bool`          | The broadcast is complete; no delta applies afterwards               |
+| `Tracks`           | `[]Track`       | Complete set of track descriptions                                   |
+| `PublishTracks`    | `[]Track`       | Tracks the subscriber publishes to, such as logs and metrics         |
+| `InitDataList`     | `[]InitDataRef` | Initialization data referenced by track `initRef`                    |
 
 ## Track Description
 
-Each track in the catalog is described by an `msf.Track`:
+Each track in the catalog is described by an `msf.Track`. The most used fields:
 
-| Field           | Type        | Description                                        |
-|-----------------|-------------|----------------------------------------------------|
-| `Namespace`     | `string`    | Track namespace (inherited from catalog if empty)  |
-| `Name`          | `string`    | Track name, unique within its namespace            |
-| `Packaging`     | `Packaging` | Packaging mode (see below)                         |
-| `Role`          | `Role`      | Content role: `video`, `audio`, `caption`, etc.    |
-| `Codec`         | `string`    | Codec string (e.g. `"avc1.64001f"`)               |
-| `MimeType`      | `string`    | MIME type for the track's data payload             |
-| `Bitrate`       | `*int64`    | Bitrate in bps (optional)                          |
-| `Width`         | `*int64`    | Video width (optional)                             |
-| `Height`        | `*int64`    | Video height (optional)                            |
-| `Framerate`     | `*int64`    | Frame rate (optional)                              |
-| `SampleRate`    | `*int64`    | Audio sample rate (optional)                       |
-| `ChannelConfig` | `string`    | Audio channel configuration (optional)             |
-| `Label`         | `string`    | Human-readable label (optional)                    |
-| `Language`      | `string`    | Language tag (optional)                            |
-| `Depends`       | `[]string`  | Track names this track depends on (optional)       |
-| `IsLive`        | `*bool`     | Whether the track is live (optional)               |
-| `TargetLatency` | `*int64`    | Target latency in milliseconds (optional)          |
-| `RenderGroup`   | `*int64`    | Render group for synchronized playback (optional)  |
-| `AltGroup`      | `*int64`    | Alternate group for quality switching (optional)   |
-| `InitData`      | `string`    | Base64-encoded initialization data (optional)      |
-| `TrackDuration` | `*int64`    | Duration in milliseconds (optional, not for live)  |
+| Field                  | Type           | Description                                                     |
+|------------------------|----------------|-----------------------------------------------------------------|
+| `Namespace`            | `string`       | `/`-separated namespace; empty inherits the catalog's           |
+| `Name`                 | `string`       | Track name, non-empty                                           |
+| `Packaging`            | `Packaging`    | Packaging mode (see below)                                      |
+| `PackagingMetadata`    | `string`       | `key=value;...` parameters, e.g. `streamMapping=object` for LOC |
+| `Role`                 | `Role`         | Content role: `video`, `audio`, `caption`, `data`, etc.         |
+| `IsLive`               | `*bool`        | Whether new objects will be added (required)                    |
+| `Codec`                | `string`       | Codec string (e.g. `"av01.0.08M.10.0.110.09"`)                  |
+| `Bitrate`              | `*int64`       | Maximum bitrate in bps                                          |
+| `Framerate`            | `*int64`       | Frames per second                                               |
+| `SampleRate`           | `*int64`       | Audio sample rate                                               |
+| `ChannelConfig`        | `string`       | Audio channel configuration                                     |
+| `Language`             | `string`       | Language tag                                                    |
+| `Depends`              | `[]Dependency` | Track names or render groups this track depends on              |
+| `RenderGroup`          | `*int64`       | Render group for synchronized playback                          |
+| `AltGroup`             | `*int64`       | Alternate group for quality switching                           |
+| `InitRef`              | `string`       | Id of an `InitDataList` entry                                   |
+| `AccessibleWindowTime` | `*int64`       | DVR window behind the live edge, in milliseconds                |
+| `KeyframeSpacing`      | `*int64`       | Objects per keyframe interval                                   |
+| `AuthInfo`             | `map[string]json.RawMessage` | Authorization schemes, e.g. `cat`, `privacy-pass` |
 
-Many optional fields use pointer types (`*int64`, `*bool`) to distinguish "absent" from "zero value".
+### Required fields per packaging and role
+
+| Packaging       | Role               | Also required                                   |
+|-----------------|--------------------|-------------------------------------------------|
+| `loc`           | `audio`            | `codec`, `bitrate`, `samplerate`, `channelConfig` |
+| `loc`           | `video`            | `codec`, `bitrate`, `framerate`                 |
+| `loc`           | `audiodescription` | `codec`, `samplerate`, `channelConfig`, `lang`  |
+| `loc`           | `signlanguage`     | `codec`, `framerate`                            |
+| `eventtimeline` | any                | `eventType`                                     |
+| `mediatimeline` | any                | `depends`                                       |
 
 ### Packaging Modes
 
-| Constant                      | Value              | Description                        |
-|-------------------------------|--------------------|------------------------------------|
-| `msf.PackagingLOC`           | `"loc"`            | LOC-packaged media content         |
-| `msf.PackagingMediaTimeline` | `"mediatimeline"`  | Media timeline track               |
-| `msf.PackagingEventTimeline` | `"eventtimeline"`  | Event timeline track               |
-| `msf.PackagingCMAF`          | `"cmaf"`           | CMAF-packaged media content        |
-| `msf.PackagingLegacy`        | `"legacy"`         | Legacy timestamp+payload packaging |
+| Constant                     | Value             | Description                                  |
+|------------------------------|-------------------|----------------------------------------------|
+| `msf.PackagingLOC`           | `"loc"`           | LOC-packaged media content                   |
+| `msf.PackagingMediaTimeline` | `"mediatimeline"` | Media timeline track                         |
+| `msf.PackagingEventTimeline` | `"eventtimeline"` | Event timeline track                         |
+| `msf.PackagingMoqLog`        | `"moqlog"`        | Log publish track                            |
+| `msf.PackagingMoqMetrics`    | `"moqmetrics"`    | Metrics publish track                        |
+| `msf.PackagingCatalog`       | `"catalog"`       | A reference to another catalog               |
+| `msf.PackagingCMAF`          | `"cmaf"`          | CMAF-packaged media content (non-spec)       |
+| `msf.PackagingLegacy`        | `"legacy"`        | Legacy timestamp+payload packaging (non-spec)|
 
 ### Roles
 
-| Constant                      | Value                | Description                 |
-|-------------------------------|----------------------|-----------------------------|
-| `msf.RoleVideo`              | `"video"`            | Video track                 |
-| `msf.RoleAudio`              | `"audio"`            | Audio track                 |
-| `msf.RoleAudioDescription`   | `"audiodescription"` | Audio description track     |
-| `msf.RoleCaption`            | `"caption"`          | Caption track               |
-| `msf.RoleSubtitle`           | `"subtitle"`         | Subtitle track              |
-| `msf.RoleSignLanguage`       | `"signlanguage"`     | Sign language video track   |
+`msf.RoleVideo`, `RoleAudio`, `RoleAudioDescription`, `RoleCaption`, `RoleSubtitle`, `RoleSignLanguage`, `RoleMediaTimeline`, `RoleEventTimeline`, `RoleLog`, `RoleMetrics` and `RoleData`. Custom roles may be used.
+
+## A complete catalog
+
+```json
+{
+    "version": "draft-02",
+    "generatedAt": 1746104606044,
+    "tracks": [
+        {"name": "video", "packaging": "loc", "isLive": true, "role": "video",
+         "codec": "av01.0.08M.10.0.110.09", "bitrate": 5000000, "framerate": 30,
+         "renderGroup": 1, "initRef": "video-init", "packagingMetadata": "streamMapping=group"},
+        {"name": "timeline", "packaging": "mediatimeline", "isLive": true, "depends": [1]}
+    ],
+    "publishTracks": [
+        {"name": "6", "namespace": "moq-syslog.arpa/logs-v1/r1", "packaging": "moqlog",
+         "role": "log", "isLive": true}
+    ],
+    "initDataList": [
+        {"id": "video-init", "type": "inline", "data": "AAAAIGZ0eXBpc29t"}
+    ]
+}
+```
 
 ## Validation
 
 `Validate()` returns `*msf.ValidationError` containing a list of problems:
 
 ```go
-    if err := catalog.Validate(); err != nil {
-        var ve *msf.ValidationError
-        if errors.As(err, &ve) {
-            for _, problem := range ve.Problems {
-                fmt.Println(problem)
-            }
-        }
+// Example: ExampleValidationError
+catalog := msf.Catalog{
+    Version: msf.CurrentVersion,
+    Tracks: []msf.Track{
+        {Name: "video", Packaging: msf.PackagingLOC, Role: msf.RoleVideo, IsLive: new(true)},
+    },
+}
+
+var validationErr *msf.ValidationError
+if errors.As(catalog.Validate(), &validationErr) {
+    for _, problem := range validationErr.Problems {
+        fmt.Println(problem)
     }
+}
 ```
+
+## Variable Substitution
+
+Catalog values may hold `%name%` variables, resolved from the fragment of the catalog URI. `ResolveVariables` substitutes every string value except `connectionURI`, then validates the result:
+
+```go
+// Example: ExampleCatalog_ResolveVariables
+catalog := msf.Catalog{
+    Version: msf.CurrentVersion,
+    Tracks: []msf.Track{{
+        Name:      "tracking-%id%",
+        Namespace: "advertising/%event%",
+        Packaging: msf.PackagingEventTimeline,
+        EventType: "com.example.iab.vast",
+        IsLive:    new(true),
+    }},
+}
+
+vars := msf.ParseFragmentVariables("msf:live-demo--catalog&id=c3e5s7w&event=xyz")
+resolved, err := catalog.ResolveVariables(vars)
+if err != nil {
+    fmt.Println(err)
+    return
+}
+fmt.Println(resolved.Tracks[0].Namespace, resolved.Tracks[0].Name)
+```
+
+## Catalog References
+
+A track with packaging `"catalog"` references another catalog. `msf.WalkCatalogRefs` loads and visits a catalog and every catalog it references, each once, and stops with `msf.ErrCatalogCycle` on a cycle, or with `msf.ErrCatalogDepth`, `msf.ErrTooManyCatalogs` or `msf.ErrTooManyCatalogRefs` past the `msf.CatalogWalkLimits` (8 levels, 64 catalogs and 32 references per catalog by default).

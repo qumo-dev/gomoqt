@@ -96,6 +96,7 @@ if err != nil {
 - A delta must carry `generatedAt`. Every catalog operation is checked against the base: adding or cloning to an existing track, and removing or updating an unknown one, rejects the delta.
 - Variable substitution is opt-in: `ParseFragmentVariables` reads the variables of the catalog URI fragment, and `Catalog.ResolveVariables` substitutes them and validates the result, as draft-02 requires. It does not substitute into `connectionURI`.
 - `WalkCatalogRefs` follows catalog references with cycle detection and `CatalogWalkLimits` on depth, catalog count and references per catalog.
+- A `Broadcast` keeps its catalog valid: `RegisterTrack` and `RemoveTrack` refuse a change that would break a `depends` reference, so tracks register in dependency order and dependents are removed first.
 - `Broadcast` routes non-catalog tracks by `Track.Name`, so it rejects catalogs that reuse the same name in multiple namespaces, even though MSF only requires Full Track Names to be unique.
 - `PackagingCMAF` and `PackagingLegacy` are non-spec packaging values kept for compatibility.
 - A `Broadcast` catalog subscription stays open: it gets the current catalog as its first group, then a new group with the whole catalog each time `SetCatalog`, `RegisterTrack` or `RemoveTrack` changes it. `Close` ends the catalog subscriptions and closes the registered tracks' writers.
