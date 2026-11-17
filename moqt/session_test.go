@@ -3156,7 +3156,7 @@ func TestSession_Fetch_AsksForWholeGroup(t *testing.T) {
 
 	group, err := session.Fetch(&FetchRequest{BroadcastPath: "/live", TrackName: "video", GroupSequence: 7})
 	require.NoError(t, err)
-	assert.Zero(t, group.frameStart)
+	require.NotNil(t, group)
 
 	r := bytes.NewReader(stream.Written())
 	var st message.StreamType

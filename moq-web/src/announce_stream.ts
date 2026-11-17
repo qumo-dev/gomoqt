@@ -138,6 +138,16 @@ export class AnnouncementWriter {
 	 * @param anns - Initial announcements to send.
 	 */
 	async init(anns: Announcement[]): Promise<Error | undefined> {
+		// send() waits on #ready, so it is released whether or not init
+		// succeeds; a failed init fails every later send() with the same error.
+		this.#initErr = await this.#initAll(anns);
+		this.#resolveInit?.();
+		this.#resolveInit = undefined;
+		return this.#initErr;
+	}
+	#initErr: Error | undefined;
+
+	async #initAll(anns: Announcement[]): Promise<Error | undefined> {
 		for (const announcement of anns) {
 			const path = announcement.broadcastPath;
 			const sfx = routeSuffix(path, this.prefix);
@@ -180,9 +190,6 @@ export class AnnouncementWriter {
 			}
 			this.#watch(sfx, active);
 		}
-
-		this.#resolveInit?.();
-		this.#resolveInit = undefined;
 
 		return undefined;
 	}
@@ -242,8 +249,7 @@ export class AnnouncementWriter {
 		if (this.context.err()) {
 			return;
 		}
-		while (active.standby.length > 0) {
-			const next = active.standby.pop()!;
+		for (let next = active.standby.pop(); next !== undefined; next = active.standby.pop()) {
 			if (!next.isActive() || this.#excluded(next)) continue;
 			active.announcement = next;
 			this.#watch(sfx, active);
@@ -266,6 +272,9 @@ export class AnnouncementWriter {
 	 */
 	async send(announcement: Announcement): Promise<Error | undefined> {
 		await this.#ready; // Wait for initialization to complete
+		if (this.#initErr) {
+			return this.#initErr;
+		}
 		if (this.context.err()) {
 			return undefined;
 		}
@@ -290,11 +299,12 @@ export class AnnouncementWriter {
 			const i = active.standby.indexOf(announcement);
 			if (i !== -1) {
 				active.standby.splice(i, 1);
-				return undefined;
 			}
-			// End the announcement the route advertises; its watch sends the
-			// ANNOUNCE_UPDATE or ANNOUNCE_END.
-			active.announcement.end();
+			// The advertised announcement's own watch sends the ANNOUNCE_UPDATE
+			// or ANNOUNCE_END. Several routes share a suffix once clamped, so
+			// one that is neither advertised nor a standby is not this
+			// stream's to end: ending the advertised one would end another
+			// broadcast everywhere.
 			return undefined;
 		}
 

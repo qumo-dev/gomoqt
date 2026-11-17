@@ -39,11 +39,7 @@ type SubscribeConfig struct {
 	// first frame to deliver within StartGroup, and endFrame the exclusive
 	// end within EndGroup (0 for the whole group, and always 0 when EndGroup
 	// is 0). They are set only from a peer's SUBSCRIBE or SUBSCRIBE_UPDATE;
-	// a subscription this endpoint makes sends both as 0. A future resume
-	// partway into a group (after a redirect or a GOAWAY reconnect) would set
-	// them on the config it re-subscribes with: two subscriptions abut when
-	// the first ends at EndGroup = G, endFrame = N and the second starts at
-	// StartGroup = G, startFrame = N.
+	// a subscription this endpoint makes sends both as 0.
 	startFrame uint64
 	endFrame   uint64
 }
@@ -57,8 +53,8 @@ func (sc SubscribeConfig) String() string {
 // Group End, which moq-lite-06 §3.6 makes a protocol violation.
 var errFrameEndWithoutGroupEnd = errors.New("moqt: Frame End requires Group End")
 
-// validate checks the rule of moq-lite-06 §3.6 that a range can break on its
-// own: a Frame End without a Group End.
+// validate checks a peer's range against the rule of moq-lite-06 §3.6 that a
+// range can break on its own: a Frame End without a Group End.
 func (sc SubscribeConfig) validate() error {
 	if sc.endFrame != 0 && sc.EndGroup == MinGroupSequence {
 		return errFrameEndWithoutGroupEnd

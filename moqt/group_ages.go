@@ -30,6 +30,8 @@ type groupAges struct {
 	// groups holds, in ascending sequence, the groups still open and the
 	// closed ones still needed as the reach of an open one.
 	groups []groupAge
+	// open counts the groups in groups whose writer is set.
+	open int
 	// latest is the highest sequence that has presented a frame, and newest
 	// the timestamp of its most recent frame.
 	latest    GroupSequence
@@ -53,10 +55,14 @@ func (a *groupAges) add(w *GroupWriter) {
 	defer a.mu.Unlock()
 	i, found := a.find(w.sequence)
 	if found {
+		if a.groups[i].writer == nil {
+			a.open++
+		}
 		a.groups[i].writer = w
 		return
 	}
 	a.groups = slices.Insert(a.groups, i, groupAge{seq: w.sequence, writer: w})
+	a.open++
 }
 
 // closed records that w's stream has ended. Its first timestamp stays, as
@@ -66,6 +72,7 @@ func (a *groupAges) closed(w *GroupWriter) {
 	defer a.mu.Unlock()
 	if i, found := a.find(w.sequence); found && a.groups[i].writer == w {
 		a.groups[i].writer = nil
+		a.open--
 	}
 	a.prune()
 }
@@ -90,10 +97,17 @@ func (a *groupAges) observe(w *GroupWriter, ts uint64) {
 		a.latest, a.newest, a.hasLatest = w.sequence, ts, true
 	}
 
+	if a.open < 2 {
+		// Only the group writing this frame is open: nothing else can expire.
+		a.mu.Unlock()
+		return
+	}
+
 	maxAge := a.config().MaxAge
 	reach, hasReach := uint64(0), false
 	// Walk down from the newest group, carrying the first timestamp of the
-	// group above as the reach of the one below.
+	// group above, its successor, as the reach of the one below. A successor
+	// with no frame yet leaves the group without a reach.
 	for j := len(a.groups) - 1; j >= 0; j-- {
 		g := &a.groups[j]
 		if g.writer != nil && g.seq < a.latest && hasReach && n < len(expired) &&
@@ -101,10 +115,9 @@ func (a *groupAges) observe(w *GroupWriter, ts uint64) {
 			expired[n] = g.writer
 			n++
 			g.writer = nil
+			a.open--
 		}
-		if g.hasFirst {
-			reach, hasReach = g.first, true
-		}
+		reach, hasReach = g.first, g.hasFirst
 	}
 	if n > 0 {
 		a.prune()
@@ -146,14 +159,18 @@ func (a *groupAges) find(seq GroupSequence) (int, bool) {
 	})
 }
 
-// prune drops the closed groups below the oldest open one: nothing left
-// needs them as a reach. Caller MUST hold a.mu.
+// prune drops the closed groups that are not the successor of an open one:
+// only an open group needs a reach. Caller MUST hold a.mu.
 func (a *groupAges) prune() {
-	i := 0
-	for i < len(a.groups)-1 && a.groups[i].writer == nil {
-		i++
+	kept := a.groups[:0]
+	prevOpen := false
+	for _, g := range a.groups {
+		open := g.writer != nil
+		if open || prevOpen {
+			kept = append(kept, g)
+		}
+		prevOpen = open
 	}
-	if i > 0 {
-		a.groups = slices.Delete(a.groups, 0, i)
-	}
+	clear(a.groups[len(kept):])
+	a.groups = kept
 }

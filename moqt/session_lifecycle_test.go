@@ -278,3 +278,18 @@ func TestSession_handleGoawayStream_ServerAcceptsEmptyURI(t *testing.T) {
 
 	assert.NoError(t, conn.Context().Err(), "a client's GOAWAY carries no URI and is fine")
 }
+
+func TestSession_handleGoawayStream_ResetStreamDoesNotCount(t *testing.T) {
+	conn := &fakeStreamConn{}
+	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
+	defer sess.CloseWithError(NoError, "")
+	reset := &transport.StreamError{ErrorCode: 1, Remote: true}
+	require.ErrorIs(t, sess.handleGoawayStream(&fakeQUICStream{reads: []streamResult{{Err: reset}}}), reset)
+	var goaway bytes.Buffer
+	require.NoError(t, message.GoawayMessage{}.Encode(&goaway))
+
+	err := sess.handleGoawayStream(&fakeQUICStream{reads: []streamResult{{Data: goaway.Bytes()}, {Err: io.EOF}}})
+
+	require.NoError(t, err)
+	assert.NoError(t, conn.Context().Err(), "the reset stream carried no GOAWAY")
+}

@@ -591,9 +591,6 @@ func (sess *Session) subscribe(ctx context.Context, path BroadcastPath, name Tra
 	if config == nil {
 		config = &SubscribeConfig{}
 	}
-	if err := config.validate(); err != nil {
-		return nil, err
-	}
 
 	id := sess.nextSubscribeID()
 
@@ -818,8 +815,6 @@ func (sess *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
 	}
 
 	group := newGroupReader(req.GroupSequence, stream, nil)
-	// The first returned frame is implicit from the request.
-	group.frameStart = req.frameStart
 
 	// Cancel the stream when the request's context ends first. Once the group
 	// has ended, stop watching, so a long-lived context does not keep every
@@ -1441,7 +1436,7 @@ func (sess *Session) processUniStream(stream transport.ReceiveStream) {
 		}
 
 		// Enqueue the receiver — ownership of the stream transfers to the TrackReader.
-		track.enqueueGroup(GroupSequence(gm.GroupSequence), gm.FrameStart, stream)
+		track.enqueueGroup(GroupSequence(gm.GroupSequence), stream)
 	default:
 		// Unknown stream types are stream-local and non-fatal for extension probing.
 		sess.logError("unknown uni stream type", fmt.Errorf("stream type %d", streamType))
@@ -1766,12 +1761,6 @@ func hasDelta(oldVal, newVal uint64, maxDelta float64) bool {
 }
 
 func (sess *Session) handleGoawayStream(stream transport.Stream) error {
-	// moq-lite-06 §7.18: more than one GOAWAY is a protocol violation.
-	if !sess.goawayReceived.CompareAndSwap(false, true) {
-		sess.terminateProtocolViolation("duplicate GOAWAY")
-		return nil
-	}
-
 	var gm message.GoawayMessage
 	err := gm.Decode(stream)
 	if err != nil {
@@ -1779,6 +1768,13 @@ func (sess *Session) handleGoawayStream(stream transport.Stream) error {
 			sess.terminateProtocolViolation("GOAWAY new session URI too long")
 		}
 		return err
+	}
+	// moq-lite-06 §7.18: more than one GOAWAY is a protocol violation. Only a
+	// GOAWAY that decoded counts, so a stream reset mid-message does not use
+	// up the one the peer may send.
+	if !sess.goawayReceived.CompareAndSwap(false, true) {
+		sess.terminateProtocolViolation("duplicate GOAWAY")
+		return nil
 	}
 	// Only a server may redirect: a client cannot tell a server where to
 	// connect.

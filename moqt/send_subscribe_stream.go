@@ -207,9 +207,6 @@ func (substr *sendSubscribeStream) updateSubscribe(newConfig *SubscribeConfig) e
 	if newConfig == nil {
 		return nil
 	}
-	if err := newConfig.validate(); err != nil {
-		return err
-	}
 
 	// Send the message first before updating config
 	groupStart, groupEnd, frameStart, frameEnd := subscribeRangeToWire(newConfig)

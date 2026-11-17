@@ -33,7 +33,7 @@ func BenchmarkTrackReader_EnqueueDequeue(b *testing.B) {
 				idx := i % size
 
 				// Enqueue
-				reader.enqueueGroup(GroupSequence(idx), 0, streams[idx])
+				reader.enqueueGroup(GroupSequence(idx), streams[idx])
 
 				// Accept and immediately cancel to keep the queue flowing
 				group, err := reader.AcceptGroup(context.Background())
@@ -57,7 +57,7 @@ func BenchmarkTrackReader_AcceptGroup(b *testing.B) {
 	for i := 0; b.Loop(); i++ {
 		// Enqueue a group for this iteration
 		mockRecvStream := &fakeQUICReceiveStream{}
-		reader.enqueueGroup(GroupSequence(i), 0, mockRecvStream)
+		reader.enqueueGroup(GroupSequence(i), mockRecvStream)
 
 		// Accept it immediately (non-blocking since queue has data)
 		group, err := reader.AcceptGroup(ctx)
@@ -81,7 +81,7 @@ func BenchmarkTrackReader_ConcurrentAccess(b *testing.B) {
 			// Pre-populate queue
 			for i := range 100 {
 				mockRecvStream := &fakeQUICReceiveStream{}
-				reader.enqueueGroup(GroupSequence(i), 0, mockRecvStream)
+				reader.enqueueGroup(GroupSequence(i), mockRecvStream)
 			}
 
 			b.ReportAllocs()
@@ -98,7 +98,7 @@ func BenchmarkTrackReader_ConcurrentAccess(b *testing.B) {
 							// Enqueue
 							mockRecvStream := &fakeQUICReceiveStream{}
 
-							reader.enqueueGroup(GroupSequence(i+id*1000), 0, mockRecvStream)
+							reader.enqueueGroup(GroupSequence(i+id*1000), mockRecvStream)
 						} else {
 							// Accept and immediately cancel
 							group, err := reader.AcceptGroup(ctx)
@@ -281,7 +281,7 @@ func BenchmarkTrackReader_MemoryAllocation(b *testing.B) {
 
 		// Enqueue and dequeue a group
 		mockRecvStream := &fakeQUICReceiveStream{}
-		reader.enqueueGroup(GroupSequence(1), 0, mockRecvStream)
+		reader.enqueueGroup(GroupSequence(1), mockRecvStream)
 
 		group, err := reader.AcceptGroup(context.Background())
 		if err == nil && group != nil {

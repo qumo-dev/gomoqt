@@ -28,12 +28,6 @@ func newGroupReader(sequence GroupSequence, stream transport.ReceiveStream, grou
 type GroupReader struct {
 	sequence GroupSequence
 
-	// frameStart is the index within the group of the stream's first frame:
-	// the GROUP message's Frame Start, or a fetch's requested start. It is 0
-	// unless a peer served part of the group; kept so a future mid-group
-	// resume can number the frames this stream delivered.
-	frameStart uint64
-
 	stream     transport.ReceiveStream
 	frameCount int64
 

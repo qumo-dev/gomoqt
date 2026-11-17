@@ -104,7 +104,7 @@ func TestTrackReader_EnqueueGroup(t *testing.T) {
 	mockReceiveStream := &fakeQUICReceiveStream{}
 
 	// Enqueue a group
-	receiver.enqueueGroup(GroupSequence(1), 0, mockReceiveStream)
+	receiver.enqueueGroup(GroupSequence(1), mockReceiveStream)
 
 	// Test that we can accept the enqueued group
 	testCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -328,7 +328,7 @@ func TestTrackReader_AcceptGroup_EndsAfterSubscribeEnd(t *testing.T) {
 					substr.setResolvedStart(1) // SUBSCRIBE_OK: the subscription starts at group 1
 				}
 				for _, seq := range tt.queued {
-					receiver.enqueueGroup(seq, 0, &fakeQUICReceiveStream{})
+					receiver.enqueueGroup(seq, &fakeQUICReceiveStream{})
 				}
 				ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 				defer cancel()
@@ -352,7 +352,7 @@ func TestTrackReader_AcceptGroup_EndsAfterSubscribeEnd(t *testing.T) {
 
 				substr.setEnd(tt.end)
 				for _, seq := range tt.late {
-					receiver.enqueueGroup(seq, 0, &fakeQUICReceiveStream{})
+					receiver.enqueueGroup(seq, &fakeQUICReceiveStream{})
 				}
 				if tt.dropped != nil {
 					substr.appendDrop(*tt.dropped)
@@ -361,7 +361,7 @@ func TestTrackReader_AcceptGroup_EndsAfterSubscribeEnd(t *testing.T) {
 					close(gate)
 					synctest.Wait() // the close is seen before any group after it
 					for _, seq := range tt.afterFIN {
-						receiver.enqueueGroup(seq, 0, &fakeQUICReceiveStream{})
+						receiver.enqueueGroup(seq, &fakeQUICReceiveStream{})
 					}
 				} else {
 					defer close(gate)
@@ -417,7 +417,7 @@ func TestTrackReader_AcceptGroup_EOFIsSticky(t *testing.T) {
 	substr := newTestSendSubscribeStreamFromStream(stream, &SubscribeConfig{})
 	receiver := newTrackReader("/test", "video", substr, func() {})
 	substr.setResolvedStart(1)
-	receiver.enqueueGroup(1, 0, &fakeQUICReceiveStream{})
+	receiver.enqueueGroup(1, &fakeQUICReceiveStream{})
 	substr.setEnd(1)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -427,7 +427,7 @@ func TestTrackReader_AcceptGroup_EOFIsSticky(t *testing.T) {
 	require.ErrorIs(t, err, io.EOF)
 	late := &fakeQUICReceiveStream{}
 
-	receiver.enqueueGroup(2, 0, late)
+	receiver.enqueueGroup(2, late)
 
 	_, err = receiver.AcceptGroup(ctx)
 	assert.ErrorIs(t, err, io.EOF, "EOF again, not the late group")

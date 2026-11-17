@@ -194,7 +194,6 @@ func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 			r.queueing = r.queueing[1:]
 
 			group := newGroupReader(next.sequence, next.stream, r.groupManager)
-			group.frameStart = next.frameStart
 
 			r.trackMu.Unlock()
 			return group, nil
@@ -336,13 +335,10 @@ func (r *TrackReader) Update(config *SubscribeConfig) error {
 // queuedGroup is a group stream waiting for AcceptGroup.
 type queuedGroup struct {
 	sequence GroupSequence
-	// frameStart is the GROUP message's Frame Start: the index within the
-	// group of the stream's first frame.
-	frameStart uint64
-	stream     transport.ReceiveStream
+	stream   transport.ReceiveStream
 }
 
-func (r *TrackReader) enqueueGroup(sequence GroupSequence, frameStart uint64, stream transport.ReceiveStream) {
+func (r *TrackReader) enqueueGroup(sequence GroupSequence, stream transport.ReceiveStream) {
 	if stream == nil {
 		return
 	}
@@ -356,7 +352,7 @@ func (r *TrackReader) enqueueGroup(sequence GroupSequence, frameStart uint64, st
 	}
 	r.settled.add(sequence, sequence)
 
-	r.queueing = append(r.queueing, queuedGroup{sequence: sequence, frameStart: frameStart, stream: stream})
+	r.queueing = append(r.queueing, queuedGroup{sequence: sequence, stream: stream})
 
 	select {
 	case r.queuedCh <- struct{}{}:

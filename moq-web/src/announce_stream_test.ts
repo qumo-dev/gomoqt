@@ -1,4 +1,4 @@
-import { assertEquals, assertExists, assertInstanceOf } from "@std/assert";
+import { assertEquals, assertExists, assertInstanceOf, assertStrictEquals } from "@std/assert";
 import {
 	Announcement,
 	AnnouncementReader,
@@ -232,6 +232,31 @@ Deno.test("AnnouncementWriter", async (t) => {
 
 		assertInstanceOf(err, Error);
 	});
+
+	await t.step("send after a failed init returns init's error instead of waiting", async () => {
+		const { writer, ctx } = writerFor("/test/");
+		const initErr = await writer.init([new Announcement("/wrong/abc", ctx.done())]);
+
+		const err = await writer.send(new Announcement("/test/a", ctx.done()));
+
+		assertStrictEquals(err, initErr);
+	});
+
+	await t.step(
+		"ending an announcement that shares a clamped route leaves the advertised one active",
+		async () => {
+			const { writer, ctx } = writerFor("/live/");
+			const root = new Announcement("/", ctx.done());
+			await writer.init([root]);
+			const other = new Announcement("/live", ctx.done());
+			other.end();
+
+			const err = await writer.send(other);
+
+			assertEquals(err, undefined);
+			assertEquals(root.isActive(), true);
+		},
+	);
 
 	await t.step("close does nothing when context already has error", async () => {
 		const [ctx, cancelFunc] = withCancelCause(background());

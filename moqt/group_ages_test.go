@@ -139,7 +139,37 @@ func TestGroupAges_PrunesClosedGroups(t *testing.T) {
 
 	ages.mu.Lock()
 	defer ages.mu.Unlock()
-	assert.Len(t, ages.groups, 1, "sequential groups keep only the newest")
+	assert.Empty(t, ages.groups, "no open group needs a reach")
+}
+
+func TestGroupAges_PrunesClosedGroupsBehindAnOpenOne(t *testing.T) {
+	config := &SubscribeConfig{MaxAge: 1 << 40}
+	ages := &groupAges{config: func() *SubscribeConfig { return config }, timescale: 1000}
+	held, _ := agedGroup(t, ages, 1)
+	writeAt(t, held, 1)
+
+	for seq := GroupSequence(2); seq <= 100; seq++ {
+		gw, _ := agedGroup(t, ages, seq)
+		writeAt(t, gw, uint64(seq))
+		require.NoError(t, gw.Close())
+	}
+
+	ages.mu.Lock()
+	defer ages.mu.Unlock()
+	assert.Len(t, ages.groups, 2, "the open group and its successor, its reach")
+}
+
+func TestGroupAges_SuccessorWithoutFrameKeepsGroup(t *testing.T) {
+	config := &SubscribeConfig{}
+	ages := &groupAges{config: func() *SubscribeConfig { return config }, timescale: 1000}
+	g1, s1 := agedGroup(t, ages, 1)
+	writeAt(t, g1, 0)
+	agedGroup(t, ages, 2) // open, no frame yet
+	g3, _ := agedGroup(t, ages, 3)
+
+	writeAt(t, g3, 5000)
+
+	assert.Empty(t, s1.CancelWriteCodes(), "group 1's successor has presented nothing")
 }
 
 func TestGroupWriter_FrameRange(t *testing.T) {
