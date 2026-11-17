@@ -125,6 +125,13 @@ Deno.test("routeSuffix", () => {
 		{ name: "path under prefix", path: "/live/alice", prefix: "/live/", want: "alice" },
 		{ name: "route above prefix clamps", path: "/live", prefix: "/live/alice/", want: "" },
 		{ name: "root route clamps", path: "/", prefix: "/live/", want: "" },
+		{ name: "route ending in / clamps", path: "/live/", prefix: "/live/alice/", want: "" },
+		{
+			name: "half a segment ending in /",
+			path: "/li/",
+			prefix: "/live/alice/",
+			want: undefined,
+		},
 		{ name: "half a segment", path: "/li", prefix: "/live/", want: undefined },
 		{ name: "unrelated path", path: "/other", prefix: "/live/", want: undefined },
 	];
@@ -257,6 +264,38 @@ Deno.test("AnnouncementWriter", async (t) => {
 			assertEquals(root.isActive(), true);
 		},
 	);
+
+	await t.step("a route whose ANNOUNCE_START failed starts again on the next send", async () => {
+		const written = Buffer.make(1024);
+		let fail = false;
+		const [ctx] = withCancelCause(background());
+		const writer = new AnnouncementWriter(
+			ctx,
+			new MockStream({
+				writable: new MockSendStream({
+					write: (p) =>
+						fail
+							? Promise.resolve<[number, Error | undefined]>([
+								0,
+								new Error("write failed"),
+							])
+							: written.write(p),
+				}),
+			}),
+			new AnnounceRequestMessage({ prefix: "/p/" }),
+			0,
+		);
+		await writer.init([]);
+		fail = true;
+		await writer.send(new Announcement("/p/a", ctx.done()));
+		fail = false;
+
+		const err = await writer.send(new Announcement("/p/a", ctx.done()));
+
+		assertEquals(err, undefined);
+		const msgs = await decodeAnnouncements(written.bytes());
+		assertInstanceOf(msgs[msgs.length - 1], AnnounceStartMessage);
+	});
 
 	await t.step("close does nothing when context already has error", async () => {
 		const [ctx, cancelFunc] = withCancelCause(background());

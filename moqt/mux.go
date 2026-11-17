@@ -186,15 +186,15 @@ func (mux *TrackMux) Announce(announcement *Announcement, handler TrackHandler) 
 	// The announcement is a route covering every path beneath it, so a
 	// request for a prefix below it sees it too, clamped to that prefix
 	// (moq-lite-06 §5.1.1). Those requests sit in the subtree under the
-	// announced path. A broadcast path rarely has one, so this is usually a
-	// single map miss.
+	// announced path: below the node named by its last segment, or, for a
+	// path ending in "/", below the node the loop above ended at, whose own
+	// requests it has already notified. A broadcast path rarely has a
+	// subtree, so this is usually a single map miss.
 	dir := current
 	if last != "" {
 		current.mu.RLock()
 		dir = current.children[last]
 		current.mu.RUnlock()
-	} else if len(prefixSegments) > 0 {
-		dir = nil // a path ending in "/" names no directory of its own
 	}
 	if dir != nil {
 		dir.walkDescendants(func(node *announcingNode) {
@@ -341,20 +341,21 @@ func (mux *TrackMux) serveAnnouncements(aw *AnnouncementWriter) {
 }
 
 // coveringAnnouncements adds to dst the active announcements whose path is at
-// or above pfx: the root, then pfx's leading segments. pfx ends in "/".
+// or above pfx: the root, then each of pfx's leading segments, both without
+// and with its trailing "/" ("/a" and "/a/" for "/a/b/"). pfx ends in "/".
 func (mux *TrackMux) coveringAnnouncements(pfx prefix, dst map[*Announcement]struct{}) {
 	mux.mu.RLock()
 	defer mux.mu.RUnlock()
-	for i := 0; i < len(pfx); i++ {
-		if pfx[i] != '/' {
-			continue
-		}
-		path := pfx[:i]
-		if i == 0 {
-			path = "/"
-		}
+	add := func(path string) {
 		if ath := mux.trackHandlerIndex[BroadcastPath(path)]; ath != nil && ath.IsActive() {
 			dst[ath.Announcement] = struct{}{}
+		}
+	}
+	add("/")
+	for i := 1; i < len(pfx); i++ {
+		if pfx[i] == '/' {
+			add(pfx[:i])
+			add(pfx[:i+1])
 		}
 	}
 }

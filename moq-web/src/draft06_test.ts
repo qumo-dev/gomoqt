@@ -286,6 +286,39 @@ Deno.test("draft-06 Max Age expiry", async (t) => {
 		assertEquals(g1.expired, false);
 	});
 
+	await t.step("a later group's frames do not expire a group whose successor has none", () => {
+		const ages = new GroupAges(() => 0, 1000);
+		const g1 = new FakeAgedGroup(1);
+		const g3 = new FakeAgedGroup(3);
+		ages.add(g1);
+		ages.add(new FakeAgedGroup(2)); // open, no frame yet
+		ages.add(g3);
+		ages.observe(g1, 0);
+
+		ages.observe(g3, 5000);
+
+		assertEquals(g1.expired, false);
+	});
+
+	await t.step("closed groups after a held group do not change its reach", () => {
+		const ages = new GroupAges(() => 1000, 1000);
+		const held = new FakeAgedGroup(1);
+		ages.add(held);
+		ages.observe(held, 0);
+		for (let seq = 2; seq <= 50; seq++) {
+			const g = new FakeAgedGroup(seq);
+			ages.add(g);
+			ages.observe(g, 10 * seq);
+			ages.closed(g);
+		}
+		const last = new FakeAgedGroup(51);
+		ages.add(last);
+
+		ages.observe(last, 20 + 999); // just under Max Age past the reach, group 2's first frame
+
+		assertEquals(held.expired, false);
+	});
+
 	await t.step("an age equal to Max Age expires the group", () => {
 		const ages = new GroupAges(() => 100, 1000);
 		const g1 = new FakeAgedGroup(1);

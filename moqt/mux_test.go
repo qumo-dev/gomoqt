@@ -2237,10 +2237,14 @@ func TestMux_ServeAnnouncements_AncestorAndDescendantReceive(t *testing.T) {
 // whether it was announced before the request or after.
 func TestMux_ServeAnnouncements_ClampsCoveringRoutes(t *testing.T) {
 	tests := map[string]struct {
+		route         BroadcastPath
 		announceFirst bool
 	}{
-		"announced before the request": {announceFirst: true},
-		"announced after the request":  {announceFirst: false},
+		"announced before the request":           {route: "/live", announceFirst: true},
+		"announced after the request":            {route: "/live", announceFirst: false},
+		"a route ending in / before the request": {route: "/live/", announceFirst: true},
+		"a route ending in / after the request":  {route: "/live/", announceFirst: false},
+		"the root after the request":             {route: "/", announceFirst: false},
 	}
 
 	for name, tt := range tests {
@@ -2249,7 +2253,7 @@ func TestMux_ServeAnnouncements_ClampsCoveringRoutes(t *testing.T) {
 				mux := NewTrackMux(0)
 				announce := func() {
 					mux.Announce(func() *Announcement {
-						ann, _ := NewAnnouncement(t.Context(), "/live")
+						ann, _ := NewAnnouncement(t.Context(), tt.route)
 						return ann
 					}(), TrackHandlerFunc(func(*TrackWriter) {}))
 				}
@@ -2286,7 +2290,7 @@ func TestMux_ServeAnnouncements_ClampsCoveringRoutes(t *testing.T) {
 
 func TestMux_CoveringAnnouncements(t *testing.T) {
 	mux := NewTrackMux(0)
-	paths := []BroadcastPath{"/", "/a", "/a/b", "/a/bc", "/a/b/c/d"}
+	paths := []BroadcastPath{"/", "/a", "/a/", "/a/b", "/a/bc", "/a/bc/", "/a/b/c/d"}
 	anns := make(map[BroadcastPath]*Announcement, len(paths))
 	for _, p := range paths {
 		ann, end := NewAnnouncement(t.Context(), p)
@@ -2298,8 +2302,8 @@ func TestMux_CoveringAnnouncements(t *testing.T) {
 	got := make(map[*Announcement]struct{})
 	mux.coveringAnnouncements("/a/b/c/", got)
 
-	assert.Len(t, got, 3)
-	for _, p := range []BroadcastPath{"/", "/a", "/a/b"} {
+	assert.Len(t, got, 4)
+	for _, p := range []BroadcastPath{"/", "/a", "/a/", "/a/b"} {
 		assert.Contains(t, got, anns[p], "%s covers /a/b/c/", p)
 	}
 }

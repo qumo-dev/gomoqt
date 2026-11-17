@@ -1317,14 +1317,16 @@ func TestRouteSuffix(t *testing.T) {
 		want   string
 		wantOK bool
 	}{
-		"beneath the prefix":    {path: "/live/a", prefix: "/live/", want: "a", wantOK: true},
-		"deep beneath":          {path: "/live/a/b", prefix: "/live/", want: "a/b", wantOK: true},
-		"the prefix's own path": {path: "/live", prefix: "/live/", want: "", wantOK: true},
-		"above the prefix":      {path: "/live", prefix: "/live/a/", want: "", wantOK: true},
-		"the root":              {path: "/", prefix: "/live/a/", want: "", wantOK: true},
-		"half a segment":        {path: "/li", prefix: "/live/", wantOK: false},
-		"a sibling":             {path: "/other", prefix: "/live/", wantOK: false},
-		"a longer sibling":      {path: "/livex/a", prefix: "/live/", wantOK: false},
+		"beneath the prefix":                   {path: "/live/a", prefix: "/live/", want: "a", wantOK: true},
+		"deep beneath":                         {path: "/live/a/b", prefix: "/live/", want: "a/b", wantOK: true},
+		"the prefix's own path":                {path: "/live", prefix: "/live/", want: "", wantOK: true},
+		"above the prefix":                     {path: "/live", prefix: "/live/a/", want: "", wantOK: true},
+		"the root":                             {path: "/", prefix: "/live/a/", want: "", wantOK: true},
+		"a route ending in / above the prefix": {path: "/live/", prefix: "/live/a/", want: "", wantOK: true},
+		"half a segment ending in /":           {path: "/li/", prefix: "/live/a/", wantOK: false},
+		"half a segment":                       {path: "/li", prefix: "/live/", wantOK: false},
+		"a sibling":                            {path: "/other", prefix: "/live/", wantOK: false},
+		"a longer sibling":                     {path: "/livex/a", prefix: "/live/", wantOK: false},
 	}
 
 	for name, tt := range tests {

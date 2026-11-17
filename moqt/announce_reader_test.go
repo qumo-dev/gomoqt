@@ -507,6 +507,15 @@ func TestAnnouncementReader_RouteOutsideScopeIsKeptLive(t *testing.T) {
 	assert.Empty(t, violations.wait(20*time.Millisecond))
 }
 
+// hopRange returns the Hop IDs from through to.
+func hopRange(from, to uint64) []uint64 {
+	ids := make([]uint64, 0, to-from+1)
+	for id := from; id <= to; id++ {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 func TestCheckHopIDs(t *testing.T) {
 	tests := map[string]struct {
 		ids     []uint64
@@ -517,6 +526,12 @@ func TestCheckHopIDs(t *testing.T) {
 		"repeated zeros":         {ids: []uint64{0, 4, 0, 0}},
 		"repeated non-zero":      {ids: []uint64{5, 6, 5}, wantErr: errDuplicateHopID},
 		"adjacent repeated hops": {ids: []uint64{0, 8, 8}, wantErr: errDuplicateHopID},
+		"long distinct list":     {ids: hopRange(1, 1000)},
+		"long list, zeros":       {ids: append(hopRange(1, 100), make([]uint64, 100)...)},
+		"long list, last repeats first": {
+			ids:     append(hopRange(1, 1000), 1),
+			wantErr: errDuplicateHopID,
+		},
 	}
 
 	for name, tc := range tests {
@@ -529,4 +544,21 @@ func TestCheckHopIDs(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	}
+}
+
+func TestAnnouncementReader_WiderScopeRestoresHiddenRoute(t *testing.T) {
+	scope := newAuthScope(func() {})
+	require.NoError(t, (&AuthWriter{scope: scope}).Grant(Grant{Root: "/room/1/", Publish: []string{"/"}}))
+	data := announceWire(t, 0,
+		message.AnnounceStartMessage{RoutePrefixSuffix: "2/bob"},   // outside the scope
+		message.AnnounceStartMessage{RoutePrefixSuffix: "1/alice"}, // inside
+	)
+	ar := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}, "/room/", scope, announceReaderConfig{})
+	defer func() { _ = ar.Close() }() // not actionable: the test is over
+	require.Equal(t, BroadcastPath("/room/1/alice"), receiveN(t, ar, 1)[0].BroadcastPath())
+	require.NoError(t, (&AuthWriter{scope: scope}).Grant(Grant{Root: "/room/2/", Publish: []string{"/"}}))
+
+	ar.rescope()
+
+	assert.Equal(t, BroadcastPath("/room/2/bob"), receiveN(t, ar, 1)[0].BroadcastPath())
 }

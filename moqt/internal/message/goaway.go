@@ -52,7 +52,9 @@ func (gm *GoawayMessage) Decode(src io.Reader) error {
 	if err != nil {
 		return err
 	}
-	if num > uint64(MaxNewSessionURILen+VarintLen(MaxNewSessionURILen)) {
+	// The URI's length varint may use any of its encodings, up to 8 bytes,
+	// so the body bound allows the longest; the URI itself is checked below.
+	if num > MaxNewSessionURILen+8 {
 		return ErrNewSessionURITooLong
 	}
 
@@ -61,11 +63,12 @@ func (gm *GoawayMessage) Decode(src io.Reader) error {
 		return err
 	}
 
-	// The length check above already bounds the URI: one longer than
-	// MaxNewSessionURILen needs a body of at least MaxNewSessionURILen+3.
 	str, n, err := ReadString(b)
 	if err != nil {
 		return err
+	}
+	if len(str) > MaxNewSessionURILen {
+		return ErrNewSessionURITooLong
 	}
 	gm.NewSessionURI = str
 	b = b[n:]

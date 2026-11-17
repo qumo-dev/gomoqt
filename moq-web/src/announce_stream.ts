@@ -63,7 +63,10 @@ export function routeSuffix(path: string, prefix: string): suffix | undefined {
 	if (path.startsWith(prefix)) {
 		return path.substring(prefix.length);
 	}
-	if (path === "/" || (prefix.startsWith(path) && prefix[path.length] === "/")) {
+	// A prefix ends in "/", so path covers it when path leads the prefix and
+	// ends a segment there: path itself ends in "/" (the root included), or
+	// the prefix continues with "/".
+	if (prefix.startsWith(path) && (path.endsWith("/") || prefix[path.length] === "/")) {
 		return "";
 	}
 	return undefined;
@@ -335,6 +338,11 @@ export class AnnouncementWriter {
 		this.#actives.set(sfx, adv);
 		const err = await this.#start(sfx, announcement);
 		if (err) {
+			// The peer never got this Announce ID: a later send() for the route
+			// must start it again, not update an ID the peer does not know.
+			if (this.#actives.get(sfx) === adv) {
+				this.#actives.delete(sfx);
+			}
 			if (err instanceof WebTransportStreamError) {
 				return new AnnounceError(err.code, err.remote);
 			}
@@ -418,8 +426,13 @@ function truncated(err: Error): Error {
  * identifies nothing (moq-lite-06 §7.6).
  */
 function duplicateHopID(ids: readonly number[]): number | undefined {
-	for (const [i, id] of ids.entries()) {
-		if (id !== 0 && ids.indexOf(id, i + 1) !== -1) return id;
+	// A set, not a scan per entry: the list comes from the peer, and one
+	// message can carry thousands of Hop IDs.
+	const seen = new Set<number>();
+	for (const id of ids) {
+		if (id === 0) continue;
+		if (seen.has(id)) return id;
+		seen.add(id);
 	}
 	return undefined;
 }

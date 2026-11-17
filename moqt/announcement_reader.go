@@ -46,7 +46,7 @@ func newAnnouncementReader(stream transport.Stream, prefix prefix, scope *authSc
 		stream:      stream,
 		prefix:      prefix,
 		routes:      make(map[uint64]suffix),
-		advertised:  make(map[suffix]*Announcement),
+		advertised:  make(map[suffix]*advertisedRoute),
 		pendings:    make([]*Announcement, 0),
 		announcedCh: make(chan struct{}, 1),
 		cancelCause: cancelCause,
@@ -81,13 +81,9 @@ type AnnouncementReader struct {
 	nextID uint64
 	// routes maps each live Announce ID to the route suffix it advertises.
 	routes map[uint64]suffix
-	// advertised holds, for each route suffix the peer advertises, the
-	// announcement handed to the application. Each suffix has at most one
-	// advertisement per stream. The value is nil while the advertisement is
-	// discarded: it looped back through this endpoint, or lies outside the
-	// scope. The peer still advertises it, so its Announce ID stays live and
-	// an ANNOUNCE_UPDATE may bring it back.
-	advertised map[suffix]*Announcement
+	// advertised holds the peer's current advertisement for each route
+	// suffix. Each suffix has at most one per stream.
+	advertised map[suffix]*advertisedRoute
 
 	pendings    []*Announcement
 	announcedCh chan struct{} // notify when new announcement is available
@@ -99,6 +95,20 @@ type AnnouncementReader struct {
 	// cancelCause cancels readerCtx (and thus ar.ctx) when the announce
 	// goroutine hits a fatal decode error, so ReceiveAnnouncement unblocks.
 	cancelCause context.CancelCauseFunc
+}
+
+// advertisedRoute is the peer's current advertisement of one route on the
+// stream.
+type advertisedRoute struct {
+	// route is its latest routing metadata, kept while it is discarded so a
+	// scope that widens again can bring it back.
+	route announceRoute
+	// ann is the announcement handed to the application, or nil while the
+	// advertisement is discarded: it loops back through this endpoint, or
+	// lies outside the scope. The peer still advertises it, so its Announce
+	// ID stays live, and an ANNOUNCE_UPDATE or a wider scope may bring it
+	// back.
+	ann *Announcement
 }
 
 // errAnnounceViolation marks an Announce Stream message that breaks
@@ -191,9 +201,23 @@ func (ar *AnnouncementReader) run() {
 var errDuplicateHopID = errors.New("duplicate non-zero hop id")
 
 // checkHopIDs returns errDuplicateHopID when a non-zero Hop ID appears twice
-// in ids. Lists are short, so a quadratic scan beats a set and allocates
-// nothing.
+// in ids. A real hop path is short, and a quadratic scan of it allocates
+// nothing; the list comes from the peer, though, and one message can carry
+// thousands of entries, so a long one is checked with a set instead.
 func checkHopIDs(ids []uint64) error {
+	if len(ids) > shortHopList {
+		seen := make(map[uint64]struct{}, len(ids))
+		for _, id := range ids {
+			if id == 0 {
+				continue
+			}
+			if _, dup := seen[id]; dup {
+				return errDuplicateHopID
+			}
+			seen[id] = struct{}{}
+		}
+		return nil
+	}
 	for i, id := range ids {
 		if id == 0 {
 			continue
@@ -204,6 +228,9 @@ func checkHopIDs(ids []uint64) error {
 	}
 	return nil
 }
+
+// shortHopList is the longest Hop ID list checkHopIDs scans quadratically.
+const shortHopList = 32
 
 // receivedRoute reconstructs an advertisement's routing metadata: its Hop ID
 // list plus the peer's implicit ANNOUNCE_OK Hop ID, and both route costs plus
@@ -250,11 +277,11 @@ func (ar *AnnouncementReader) start(sfx suffix, route announceRoute) error {
 		return fmt.Errorf("%w: ANNOUNCE_START for an already advertised route %q", errAnnounceViolation, sfx)
 	}
 	ar.routes[id] = sfx
-	var ann *Announcement
+	adv := &advertisedRoute{route: route}
 	if ar.admits(sfx, route) {
-		ann = ar.activateLocked(sfx, route)
+		adv.ann = ar.activateLocked(sfx, route)
 	}
-	ar.advertised[sfx] = ann
+	ar.advertised[sfx] = adv
 	return nil
 }
 
@@ -269,10 +296,10 @@ func (ar *AnnouncementReader) retract(id uint64) error {
 		return fmt.Errorf("%w: ANNOUNCE_END for unknown or retired Announce ID %d", errAnnounceViolation, id)
 	}
 	delete(ar.routes, id)
-	ann := ar.advertised[sfx]
+	adv := ar.advertised[sfx]
 	delete(ar.advertised, sfx)
-	if ann != nil {
-		ann.end()
+	if adv.ann != nil {
+		adv.ann.end()
 	}
 	return nil
 }
@@ -289,16 +316,17 @@ func (ar *AnnouncementReader) update(id uint64, route announceRoute) error {
 	if !ok {
 		return fmt.Errorf("%w: ANNOUNCE_UPDATE for unknown or retired Announce ID %d", errAnnounceViolation, id)
 	}
-	ann := ar.advertised[sfx]
+	adv := ar.advertised[sfx]
+	adv.route = route
 
 	switch admitted := ar.admits(sfx, route); {
-	case admitted && ann != nil:
-		ann.setRoute(route)
+	case admitted && adv.ann != nil:
+		adv.ann.setRoute(route)
 	case admitted:
-		ar.advertised[sfx] = ar.activateLocked(sfx, route)
-	case ann != nil:
-		ann.end()
-		ar.advertised[sfx] = nil
+		adv.ann = ar.activateLocked(sfx, route)
+	case adv.ann != nil:
+		adv.ann.end()
+		adv.ann = nil
 	}
 	return nil
 }
@@ -371,9 +399,10 @@ func (ar *AnnouncementReader) activateLocked(sfx suffix, route announceRoute) *A
 	return ann
 }
 
-// rescope re-applies the scope after it changed: it ends each active announcement
-// the peer may no longer publish. One the peer announced while it was refused
-// stays dropped until the peer updates or announces it again.
+// rescope re-applies the scope after it changed: it ends each active
+// announcement the peer may no longer publish, and announces again each route
+// the peer still advertises that the scope now allows. A route that loops
+// stays discarded.
 func (ar *AnnouncementReader) rescope() {
 	if ar.scope == nil {
 		return
@@ -385,12 +414,14 @@ func (ar *AnnouncementReader) rescope() {
 		return
 	}
 
-	for sfx, ann := range ar.advertised {
-		if ann == nil || ar.scope.canPublish(ann.BroadcastPath()) {
-			continue
+	for sfx, adv := range ar.advertised {
+		switch admitted := ar.admits(sfx, adv.route); {
+		case admitted && adv.ann == nil:
+			adv.ann = ar.activateLocked(sfx, adv.route)
+		case !admitted && adv.ann != nil:
+			adv.ann.end()
+			adv.ann = nil
 		}
-		ann.end()
-		ar.advertised[sfx] = nil
 	}
 }
 

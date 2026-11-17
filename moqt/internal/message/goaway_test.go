@@ -107,4 +107,18 @@ func TestGoawayMessage_URILengthLimit(t *testing.T) {
 		var decoded message.GoawayMessage
 		assert.ErrorIs(t, decoded.Decode(bytes.NewReader(full)), message.ErrNewSessionURITooLong)
 	})
+
+	t.Run("decode accepts a uri whose length uses a longer varint", func(t *testing.T) {
+		uri := strings.Repeat("a", message.MaxNewSessionURILen-1)
+		// 8191 in the 4-byte varint form, then the URI.
+		body := append([]byte{0x80, 0x00, 0x1f, 0xff}, uri...)
+		full, _ := message.WriteMessageLength(nil, uint64(len(body)))
+		full = append(full, body...)
+		var decoded message.GoawayMessage
+
+		err := decoded.Decode(bytes.NewReader(full))
+
+		require.NoError(t, err)
+		assert.Equal(t, uri, decoded.NewSessionURI)
+	})
 }

@@ -28,6 +28,8 @@ export class GroupAges {
 	// Ascending by sequence: open groups and the closed ones still needed as
 	// the reach of an open one.
 	#groups: GroupAge[] = [];
+	// The number of entries in #groups whose writer is set.
+	#open = 0;
 	#latest = -1;
 	#newest = 0;
 
@@ -42,49 +44,56 @@ export class GroupAges {
 
 	/** Registers a newly opened group. */
 	add(w: AgedGroup): void {
-		const [i, found] = this.#find(w.sequence);
-		if (found) {
-			this.#groups[i]!.writer = w;
+		const [i, g] = this.#find(w.sequence);
+		if (g) {
+			if (g.writer === undefined) this.#open++;
+			g.writer = w;
 			return;
 		}
 		this.#groups.splice(i, 0, { seq: w.sequence, writer: w });
+		this.#open++;
 	}
 
 	/** Records that w's stream ended; its first timestamp stays as a reach. */
 	closed(w: AgedGroup): void {
-		const [i, found] = this.#find(w.sequence);
-		if (found && this.#groups[i]!.writer === w) {
-			this.#groups[i]!.writer = undefined;
+		const [, g] = this.#find(w.sequence);
+		if (g?.writer === w) {
+			g.writer = undefined;
+			this.#open--;
 		}
 		this.#prune();
 	}
 
 	/** Records a frame w writes at ts, and expires the groups it leaves behind. */
 	observe(w: AgedGroup, ts: number): void {
-		const [i, found] = this.#find(w.sequence);
-		if (!found) return;
-		const g = this.#groups[i]!;
+		const [, g] = this.#find(w.sequence);
+		if (!g) return;
 		if (g.first === undefined) g.first = ts;
 		if (w.sequence >= this.#latest) {
 			this.#latest = w.sequence;
 			this.#newest = ts;
 		}
+		// Only the group writing this frame is open: nothing else can expire.
+		if (this.#open < 2) return;
 
 		const maxAge = this.#maxAge();
 		let reach: number | undefined;
 		const expired: AgedGroup[] = [];
 		// Walk down from the newest group, carrying the first timestamp of the
-		// group above as the reach of the one below.
+		// group above, its successor, as the reach of the one below. A
+		// successor with no frame yet leaves the group without a reach.
 		for (let j = this.#groups.length - 1; j >= 0; j--) {
-			const e = this.#groups[j]!;
+			const e = this.#groups[j];
+			if (e === undefined) continue;
 			if (
 				e.writer !== undefined && e.seq < this.#latest && reach !== undefined &&
 				this.#expired(reach, maxAge)
 			) {
 				expired.push(e.writer);
 				e.writer = undefined;
+				this.#open--;
 			}
-			if (e.first !== undefined) reach = e.first;
+			reach = e.first;
 		}
 		if (expired.length > 0) {
 			this.#prune();
@@ -117,23 +126,30 @@ export class GroupAges {
 		return BigInt(age) * 1000n >= BigInt(maxAge) * BigInt(this.#timescale);
 	}
 
-	#find(seq: number): [number, boolean] {
+	// Returns where seq is in #groups, or would be inserted, and its entry.
+	#find(seq: number): [number, GroupAge | undefined] {
 		let lo = 0;
 		let hi = this.#groups.length;
 		while (lo < hi) {
 			const mid = (lo + hi) >>> 1;
-			const s = this.#groups[mid]!.seq;
+			const s = this.#groups[mid]?.seq ?? seq;
 			if (s < seq) lo = mid + 1;
 			else hi = mid;
 		}
-		return [lo, this.#groups[lo]?.seq === seq];
+		const g = this.#groups[lo];
+		return [lo, g?.seq === seq ? g : undefined];
 	}
 
-	// Drops the closed groups below the oldest open one.
+	// Drops the closed groups that are not the successor of an open one: only
+	// an open group needs a reach.
 	#prune(): void {
-		let i = 0;
-		while (i < this.#groups.length - 1 && this.#groups[i]!.writer === undefined) i++;
-		if (i > 0) this.#groups.splice(0, i);
+		let prevOpen = false;
+		this.#groups = this.#groups.filter((g) => {
+			const open = g.writer !== undefined;
+			const keep = open || prevOpen;
+			prevOpen = open;
+			return keep;
+		});
 	}
 }
 

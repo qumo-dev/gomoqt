@@ -1,6 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
 import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
-import { varintLen } from "../webtransport/len.ts";
 
 /** The longest GOAWAY New Session URI, in bytes (moq-lite-06 §7.18). */
 const MAX_NEW_SESSION_URI_LEN = 8192;
@@ -50,7 +49,9 @@ export class GoawayMessage {
 	async decode(r: Reader): Promise<Error | undefined> {
 		const [msgLen, , err1] = await readVarint(r);
 		if (err1) return err1;
-		if (msgLen > MAX_NEW_SESSION_URI_LEN + varintLen(MAX_NEW_SESSION_URI_LEN)) {
+		// The URI's length varint may use any of its encodings, up to 8 bytes;
+		// the URI itself is checked below.
+		if (msgLen > MAX_NEW_SESSION_URI_LEN + 8) {
 			return new NewSessionURITooLongError();
 		}
 

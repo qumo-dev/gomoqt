@@ -130,10 +130,14 @@ func routeSuffix(path BroadcastPath, pfx prefix) (suffix, bool) {
 	if sfx, ok := path.GetSuffix(pfx); ok {
 		return sfx, true
 	}
-	// A prefix ends in "/", so path covers it when path is the root or path
-	// followed by "/" leads the prefix.
+	// A prefix ends in "/", so path covers it when path leads the prefix and
+	// ends a segment there: path itself ends in "/" (the root included), or
+	// the prefix continues with "/".
 	p := string(path)
-	if p == "/" || (strings.HasPrefix(pfx, p) && pfx[len(p)] == '/') {
+	if !strings.HasPrefix(pfx, p) {
+		return "", false
+	}
+	if strings.HasSuffix(p, "/") || pfx[len(p)] == '/' {
 		return "", true
 	}
 	return "", false
