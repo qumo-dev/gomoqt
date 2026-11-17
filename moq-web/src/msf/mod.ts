@@ -5,7 +5,9 @@
  * Provides parsing and validation for MSF catalogs
  * ({@link parseCatalog}, {@link validateCatalog}),
  * delta updates ({@link parseCatalogDelta}, {@link applyCatalogDelta}),
- * media/event timeline decoding, and a catalog-aware {@link Broadcast}.
+ * variable substitution ({@link resolveCatalogVariables}), catalog
+ * references ({@link walkCatalogRefs}), media/event timeline decoding, and
+ * a catalog-aware {@link Broadcast}.
  *
  * @example
  * ```ts
@@ -54,8 +56,26 @@ export {
 	type TrackUpdate,
 	validateCatalogDelta,
 } from "./catalog_delta.ts";
+export {
+	catalogRefs,
+	CatalogWalkError,
+	type CatalogWalkErrorKind,
+	type CatalogWalkLimits,
+	DefaultMaxCatalogDepth,
+	DefaultMaxCatalogRefs,
+	DefaultMaxCatalogs,
+	type FullTrackName,
+	walkCatalogRefs,
+	type WalkCatalogRefsOptions,
+} from "./catalog_ref.ts";
 export { splitNamespace } from "./names.ts";
 export { packagingMetadataValue, type StreamMapping, streamMapping } from "./track_fields.ts";
+export {
+	parseFragmentVariables,
+	resolveCatalogVariables,
+	resolveVariables,
+	validateVariableSyntax,
+} from "./variable.ts";
 export {
 	decodeLocation,
 	decodeMediaTimelineEntry,
