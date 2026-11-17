@@ -93,17 +93,23 @@ export class SubscribeMessage {
 		if (err) return err;
 
 		// Parse fields from the buffer
+		// Every field comes from the peer: a truncated one is an error, never a
+		// NaN that reaches the publisher (Max Age feeds group expiry).
 		const d = new MessageDecoder(buf);
-
-		this.subscribeId = d.varint();
-		this.broadcastPath = d.string();
-		this.trackName = d.string();
-		this.subscriberPriority = d.uint8();
-		this.subscriberMaxAge = d.varint();
-		this.groupStart = d.varint();
-		this.groupEnd = d.varint();
-		this.frameStart = d.varint();
-		this.frameEnd = d.varint();
+		try {
+			this.subscribeId = d.strictVarint();
+			this.broadcastPath = d.strictString();
+			this.trackName = d.strictString();
+			this.subscriberPriority = d.strictUint8();
+			this.subscriberMaxAge = d.strictVarint();
+			this.groupStart = d.strictVarint();
+			this.groupEnd = d.strictVarint();
+			this.frameStart = d.strictVarint();
+			this.frameEnd = d.strictVarint();
+			d.finish();
+		} catch (e) {
+			return e instanceof Error ? e : new Error(String(e));
+		}
 
 		return undefined;
 	}

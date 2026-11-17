@@ -68,15 +68,16 @@ export class FetchMessage {
 
 		const d = new MessageDecoder(buf);
 
-		this.broadcastPath = d.string();
-		this.trackName = d.string();
-		this.priority = d.uint8();
-		this.groupSequence = d.varint();
-		this.frameStart = d.varint();
-		this.frameEnd = d.varint();
-
-		if (!d.eof()) {
-			return new Error("message length mismatch");
+		try {
+			this.broadcastPath = d.strictString();
+			this.trackName = d.strictString();
+			this.priority = d.strictUint8();
+			this.groupSequence = d.strictVarint();
+			this.frameStart = d.strictVarint();
+			this.frameEnd = d.strictVarint();
+			d.finish();
+		} catch (e) {
+			return e instanceof Error ? e : new Error(String(e));
 		}
 
 		return undefined;

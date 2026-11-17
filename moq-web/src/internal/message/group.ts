@@ -57,9 +57,14 @@ export class GroupMessage {
 		if (err2) return err2;
 
 		const d = new MessageDecoder(buf);
-		this.subscribeId = d.varint();
-		this.sequence = d.varint();
-		this.frameStart = d.varint();
+		try {
+			this.subscribeId = d.strictVarint();
+			this.sequence = d.strictVarint();
+			this.frameStart = d.strictVarint();
+			d.finish();
+		} catch (e) {
+			return e instanceof Error ? e : new Error(String(e));
+		}
 
 		return undefined;
 	}

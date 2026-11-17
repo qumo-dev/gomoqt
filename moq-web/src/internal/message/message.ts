@@ -505,6 +505,17 @@ export class MessageEncoder {
 }
 
 /**
+ * A message body that does not parse: a field that runs past the body, or
+ * bytes left after the last field.
+ */
+export class MessageDecodeError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "MessageDecodeError";
+	}
+}
+
+/**
  * Reads a message body sequentially from a buffer, owning the current offset so
  * callers read fields in order without threading it by hand. The synchronous
  * mirror of {@link MessageEncoder}: a message `decode` does the async work
@@ -518,6 +529,48 @@ export class MessageDecoder {
 
 	constructor(buf: Uint8Array) {
 		this.#buf = buf;
+	}
+
+	/**
+	 * Reads a varint, throwing {@link MessageDecodeError} when it runs past the
+	 * body instead of yielding NaN. Use it for a field read from the peer.
+	 */
+	strictVarint(): number {
+		if (this.remaining() < 1) {
+			throw new MessageDecodeError("message too short");
+		}
+		const len = 1 << (this.#buf[this.#offset]! >> 6);
+		if (this.remaining() < len) {
+			throw new MessageDecodeError("message too short");
+		}
+		return this.varint();
+	}
+
+	/** Reads one byte, throwing {@link MessageDecodeError} past the body. */
+	strictUint8(): number {
+		if (this.remaining() < 1) {
+			throw new MessageDecodeError("message too short");
+		}
+		return this.uint8();
+	}
+
+	/**
+	 * Reads a length-prefixed string, throwing {@link MessageDecodeError} when
+	 * its length runs past the body.
+	 */
+	strictString(): string {
+		const len = this.strictVarint();
+		if (len > this.remaining()) {
+			throw new MessageDecodeError("message too short");
+		}
+		return utf8Decoder.decode(this.bytes(len));
+	}
+
+	/** Throws {@link MessageDecodeError} unless the whole body was read. */
+	finish(): void {
+		if (this.remaining() !== 0) {
+			throw new MessageDecodeError("message length mismatch");
+		}
 	}
 
 	varint(): number {

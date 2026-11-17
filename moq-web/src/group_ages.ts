@@ -93,6 +93,15 @@ export class GroupAges {
 	}
 
 	#expired(reach: number, maxAge: number): boolean {
+		// Every input is a non-negative integer from a varint or a frame
+		// timestamp. Anything else (NaN, Infinity, a fraction) proves nothing,
+		// and must never reach BigInt, which throws on it.
+		if (
+			!isWholeNumber(this.#newest) || !isWholeNumber(reach) ||
+			!isWholeNumber(maxAge) || !isWholeNumber(this.#timescale)
+		) {
+			return false;
+		}
 		if (this.#newest < reach) {
 			// Timestamps went backwards; nothing proves the group is behind.
 			return false;
@@ -126,4 +135,9 @@ export class GroupAges {
 		while (i < this.#groups.length - 1 && this.#groups[i]!.writer === undefined) i++;
 		if (i > 0) this.#groups.splice(0, i);
 	}
+}
+
+/** Reports whether v is a finite, non-negative integer. */
+function isWholeNumber(v: number): boolean {
+	return Number.isInteger(v) && v >= 0;
 }

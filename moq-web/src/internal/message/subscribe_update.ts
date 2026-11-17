@@ -72,13 +72,17 @@ export class SubscribeUpdateMessage {
 		if (err) return err;
 
 		const d = new MessageDecoder(buf);
-
-		this.subscriberPriority = d.uint8();
-		this.subscriberMaxAge = d.varint();
-		this.groupStart = d.varint();
-		this.groupEnd = d.varint();
-		this.frameStart = d.varint();
-		this.frameEnd = d.varint();
+		try {
+			this.subscriberPriority = d.strictUint8();
+			this.subscriberMaxAge = d.strictVarint();
+			this.groupStart = d.strictVarint();
+			this.groupEnd = d.strictVarint();
+			this.frameStart = d.strictVarint();
+			this.frameEnd = d.strictVarint();
+			d.finish();
+		} catch (e) {
+			return e instanceof Error ? e : new Error(String(e));
+		}
 
 		return undefined;
 	}

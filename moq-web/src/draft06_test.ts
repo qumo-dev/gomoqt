@@ -372,6 +372,23 @@ Deno.test("draft-06 Max Age expiry", async (t) => {
 
 		assertEquals([g1.expired, g2.expired], [true, false]);
 	});
+
+	await t.step("a Max Age that is not a whole number expires nothing and does not throw", () => {
+		for (const maxAge of [Number.NaN, Number.POSITIVE_INFINITY, 1.5, -1]) {
+			// A large timescale forces the exact (BigInt) comparison path.
+			const ages = new GroupAges(() => maxAge, 1e15);
+			const g1 = new FakeAgedGroup(1);
+			const g2 = new FakeAgedGroup(2);
+			ages.add(g1);
+			ages.add(g2);
+			ages.observe(g1, 0);
+			ages.observe(g2, 10);
+
+			ages.observe(g2, Number.MAX_SAFE_INTEGER);
+
+			assertEquals(g1.expired, false, `maxAge ${maxAge}`);
+		}
+	});
 });
 
 Deno.test("draft-06 GOAWAY: a second GOAWAY is a protocol violation", async () => {
