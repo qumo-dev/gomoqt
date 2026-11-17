@@ -177,3 +177,34 @@ func manyPatterns(n int) []string {
 	}
 	return patterns
 }
+
+func TestPathPattern_CoversBeneath(t *testing.T) {
+	tests := map[string]struct {
+		pattern string
+		route   BroadcastPath
+		want    bool
+	}{
+		"prefix leading the route":            {pattern: "/live/", route: "/live", want: true},
+		"prefix leading a deeper route":       {pattern: "/live/", route: "/live/alice", want: true},
+		"prefix below the route":              {pattern: "/live/alice/", route: "/live", want: false},
+		"exact path":                          {pattern: "/live", route: "/live", want: false},
+		"prefix of another segment":           {pattern: "/live/", route: "/livex", want: false},
+		"root prefix":                         {pattern: "/", route: "/live", want: true},
+		"wildcard prefix":                     {pattern: "/room/{id}/", route: "/room/1", want: true},
+		"wildcard prefix, route too short":    {pattern: "/room/{id}/", route: "/room", want: false},
+		"rest wildcard":                       {pattern: "/room/{rest...}", route: "/room", want: true},
+		"rest wildcard after a wildcard":      {pattern: "/room/{id}/{rest...}", route: "/room/1", want: true},
+		"wildcard exact path":                 {pattern: "/room/{id}", route: "/room/1", want: false},
+		"anchor":                              {pattern: "/room/{$}", route: "/room", want: false},
+		"wildcard does not match empty field": {pattern: "/room/{id}/", route: "/room/", want: false},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			p, err := ParsePathPattern(tt.pattern)
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.want, p.coversBeneath(tt.route))
+		})
+	}
+}

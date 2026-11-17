@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -85,6 +86,12 @@ type TrackMux struct {
 
 	mu                sync.RWMutex
 	trackHandlerIndex map[BroadcastPath]*announcedTrackHandler
+	// routeLens counts the paths in trackHandlerIndex by length, and
+	// routeLensDesc lists those lengths, longest first. findTrackHandler
+	// tries only prefixes of those lengths, so its cost does not grow with
+	// the path, which is peer input and may hold thousands of segments.
+	routeLens     map[int]int
+	routeLensDesc []int
 
 	announcementTree announcingNode
 }
@@ -97,6 +104,12 @@ func (mux *TrackMux) PublishFunc(ctx context.Context, path BroadcastPath, f func
 
 // Publish registers the handler for the given track path on the TrackMux.
 // The handler remains active until the provided context is canceled.
+//
+// The path is announced as a route (moq-lite-06 §5.1.1): the handler also
+// serves subscriptions to paths beneath it that no more specific published
+// path covers, and reads the requested path from TrackWriter.BroadcastPath.
+// An Announcement received from a peer whose Auth grant does not cover the
+// paths beneath it, passed to Announce, serves only its own path.
 func (mux *TrackMux) Publish(ctx context.Context, path BroadcastPath, handler TrackHandler) {
 	if ctx == nil {
 		panic("[TrackMux] nil context")
@@ -121,6 +134,9 @@ func (mux *TrackMux) registerHandler(ann *Announcement, handler TrackHandler) *a
 	mux.mu.Lock()
 	announced, ok := mux.trackHandlerIndex[path]
 	mux.trackHandlerIndex[path] = newHandler
+	if !ok {
+		mux.addRouteLenLocked(len(path))
+	}
 	mux.mu.Unlock()
 
 	// Cleanup old handler outside lock
@@ -131,12 +147,37 @@ func (mux *TrackMux) registerHandler(ann *Announcement, handler TrackHandler) *a
 	return newHandler
 }
 
+// addRouteLenLocked counts a newly published path of length n. Caller MUST
+// hold mux.mu.
+func (mux *TrackMux) addRouteLenLocked(n int) {
+	if mux.routeLens == nil {
+		mux.routeLens = make(map[int]int)
+	}
+	if mux.routeLens[n]++; mux.routeLens[n] == 1 {
+		i, _ := slices.BinarySearchFunc(mux.routeLensDesc, n, func(e, t int) int { return t - e })
+		mux.routeLensDesc = slices.Insert(mux.routeLensDesc, i, n)
+	}
+}
+
+// removeRouteLenLocked uncounts a removed path of length n. Caller MUST hold
+// mux.mu.
+func (mux *TrackMux) removeRouteLenLocked(n int) {
+	if mux.routeLens[n]--; mux.routeLens[n] > 0 {
+		return
+	}
+	delete(mux.routeLens, n)
+	if i, found := slices.BinarySearchFunc(mux.routeLensDesc, n, func(e, t int) int { return t - e }); found {
+		mux.routeLensDesc = slices.Delete(mux.routeLensDesc, i, i+1)
+	}
+}
+
 func (mux *TrackMux) removeHandler(handler *announcedTrackHandler) {
 	path := handler.BroadcastPath()
 	mux.mu.Lock()
 	defer mux.mu.Unlock()
 	if ath, ok := mux.trackHandlerIndex[path]; ok && ath == handler {
 		delete(mux.trackHandlerIndex, path)
+		mux.removeRouteLenLocked(len(path))
 	}
 }
 
@@ -211,8 +252,11 @@ func (mux *TrackMux) Announce(announcement *Announcement, handler TrackHandler) 
 	})
 }
 
-// TrackHandler returns the Announcement and associated TrackHandler for the specified
-// broadcast path. If no handler is found, it returns nil and NotFoundTrackHandler.
+// TrackHandler returns the Announcement and TrackHandler that serve path: the
+// announcement of path itself, or else of the longest announced route that
+// covers it (moq-lite-06 §5.1.1), so an announcement of "/live" serves
+// "/live/alice/cam1" unless "/live/alice" or "/live/alice/cam1" is announced.
+// If no announcement covers path, it returns nil and NotFoundTrackHandler.
 func (mux *TrackMux) TrackHandler(path BroadcastPath) (*Announcement, TrackHandler) {
 	ath := mux.findTrackHandler(path)
 	if ath == nil {
@@ -221,28 +265,46 @@ func (mux *TrackMux) TrackHandler(path BroadcastPath) (*Announcement, TrackHandl
 	return ath.Announcement, ath.TrackHandler
 }
 
+// findTrackHandler returns the handler of the most specific announced route
+// covering path: path itself, then the longest published route that is a
+// leading run of its segments ("/a/b", "/a/", "/a", "/"). It tries only the
+// lengths a published path has, so it allocates nothing and its cost does
+// not grow with path.
 func (mux *TrackMux) findTrackHandler(path BroadcastPath) *announcedTrackHandler {
-	// Fast path: single RLock with minimal work under lock
+	if len(path) == 0 || path[0] != '/' {
+		return nil
+	}
+
 	mux.mu.RLock()
-	ath := mux.trackHandlerIndex[path]
-	mux.mu.RUnlock()
+	defer mux.mu.RUnlock()
 
-	// Quick validation: check if path is valid and handler exists
-	// Combine nil check with length check to reduce branches
-	if ath == nil || len(path) == 0 || path[0] != '/' {
+	if ath := usableHandler(mux.trackHandlerIndex[path]); ath != nil {
+		return ath
+	}
+	for _, n := range mux.routeLensDesc {
+		// path[:n] covers path when it ends a segment there: it ends in "/"
+		// itself, or path continues with "/".
+		if n >= len(path) || (path[n-1] != '/' && path[n] != '/') {
+			continue
+		}
+		// A route whose publisher may not publish beneath it serves only its
+		// own path.
+		if ath := usableHandler(mux.trackHandlerIndex[path[:n]]); ath != nil && !ath.exactOnly.Load() {
+			return ath
+		}
+	}
+	return nil
+}
+
+// usableHandler returns ath, or nil when it cannot serve: nil, or without an
+// announcement or a handler, or a typed-nil handler function.
+func usableHandler(ath *announcedTrackHandler) *announcedTrackHandler {
+	if ath == nil || ath.Announcement == nil || ath.TrackHandler == nil {
 		return nil
 	}
-
-	// Validate handler is usable
-	if ath.Announcement == nil || ath.TrackHandler == nil {
-		return nil
-	}
-
-	// Rare case: treat typed-nil handler functions as absent
 	if hf, ok := ath.TrackHandler.(TrackHandlerFunc); ok && hf == nil {
 		return nil
 	}
-
 	return ath
 }
 

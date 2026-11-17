@@ -20,6 +20,12 @@ type AnnouncedTrackHandler = {
  */
 export class TrackMux {
 	#handlers: Map<BroadcastPath, AnnouncedTrackHandler> = new Map();
+	// Counts the paths in #handlers by length; #routeLensDesc lists those
+	// lengths, longest first. #route tries only prefixes of those lengths, so
+	// its cost does not grow with the path, which is peer input and may hold
+	// thousands of segments.
+	#routeLens: Map<number, number> = new Map();
+	#routeLensDesc: number[] = [];
 	#announcers: Map<TrackPrefix, Set<AnnouncementWriter>> = new Map();
 
 	constructor() {}
@@ -49,6 +55,9 @@ export class TrackMux {
 		}
 
 		// Register the new announcement and handler
+		if (existing === undefined) {
+			this.#addRouteLen(path.length);
+		}
 		this.#handlers.set(path, { announcement, handler });
 
 		const completePromises: Promise<void>[] = [];
@@ -98,6 +107,7 @@ export class TrackMux {
 			const current = this.#handlers.get(path);
 			if (current && current.announcement === announcement) {
 				this.#handlers.delete(path);
+				this.#removeRouteLen(path.length);
 			}
 		}).catch(() => {});
 	}
@@ -127,14 +137,52 @@ export class TrackMux {
 		await this.publish(ctx, path, { serveTrack: handler });
 	}
 
+	#addRouteLen(n: number): void {
+		const count = (this.#routeLens.get(n) ?? 0) + 1;
+		this.#routeLens.set(n, count);
+		if (count === 1) {
+			const i = this.#routeLensDesc.findIndex((e) => e < n);
+			this.#routeLensDesc.splice(i === -1 ? this.#routeLensDesc.length : i, 0, n);
+		}
+	}
+
+	#removeRouteLen(n: number): void {
+		const count = (this.#routeLens.get(n) ?? 0) - 1;
+		if (count > 0) {
+			this.#routeLens.set(n, count);
+			return;
+		}
+		this.#routeLens.delete(n);
+		this.#routeLensDesc = this.#routeLensDesc.filter((e) => e !== n);
+	}
+
+	// Returns the handler of the most specific announced route covering
+	// path: path itself, then the longest published route that is a leading
+	// run of its segments ("/a/b", "/a/", "/a", "/"). Only lengths a published
+	// path has are tried. A candidate is a leading part of path, so it starts
+	// with "/"; it is spelled as a template so it types as a BroadcastPath.
+	#route(path: BroadcastPath): AnnouncedTrackHandler | undefined {
+		const exact = this.#handlers.get(path);
+		if (exact) return exact;
+		for (const n of this.#routeLensDesc) {
+			// path[:n] covers path when it ends a segment there: it ends in
+			// "/" itself, or path continues with "/".
+			if (n >= path.length || (path[n - 1] !== "/" && path[n] !== "/")) continue;
+			const route = this.#handlers.get(`/${path.substring(1, n)}`);
+			if (route) return route;
+		}
+		return undefined;
+	}
+
 	/**
 	 * Look up the immutable publisher properties for a track, used to answer
-	 * TRACK_INFO requests. Returns `undefined` when the broadcast path is not
-	 * announced or the handler reports the track as unknown. Handlers that do
+	 * TRACK_INFO requests. The path resolves as in {@link serveTrack}. Returns
+	 * `undefined` when no announced route covers the path or the handler
+	 * reports the track as unknown. Handlers that do
 	 * not implement {@link TrackInfoProvider} are served with defaults.
 	 */
 	trackInfo(path: BroadcastPath, name: string): Info | undefined {
-		const announced = this.#handlers.get(path);
+		const announced = this.#route(path);
 		if (!announced) {
 			return undefined;
 		}
@@ -147,12 +195,16 @@ export class TrackMux {
 	}
 
 	/**
-	 * Dispatch an incoming subscription to the matching handler.
-	 * If no handler is found, responds with {@link NotFoundTrackHandler}.
+	 * Dispatch an incoming subscription to the handler of the most specific
+	 * announced route covering its path (moq-lite-06 §5.1.1): the path itself,
+	 * or else the longest announced route above it, so a handler published at
+	 * `/live` also serves `/live/alice/cam1` and reads the full path from
+	 * `track.broadcastPath`. If no route covers the path, responds with
+	 * {@link NotFoundTrackHandler}.
 	 */
 	async serveTrack(track: TrackWriter): Promise<void> {
 		const path = track.broadcastPath;
-		const announced = this.#handlers.get(path);
+		const announced = this.#route(path);
 		if (!announced) {
 			console.warn(`[TrackMux] no handler for track for path: ${path}`);
 			await NotFoundTrackHandler.serveTrack(track);
@@ -220,6 +272,8 @@ export class TrackMux {
 		await Promise.allSettled(closePromises);
 		this.#announcers.clear();
 		this.#handlers.clear();
+		this.#routeLens.clear();
+		this.#routeLensDesc = [];
 	}
 }
 

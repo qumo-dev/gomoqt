@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -2305,5 +2306,87 @@ func TestMux_CoveringAnnouncements(t *testing.T) {
 	assert.Len(t, got, 4)
 	for _, p := range []BroadcastPath{"/", "/a", "/a/", "/a/b"} {
 		assert.Contains(t, got, anns[p], "%s covers /a/b/c/", p)
+	}
+}
+
+func TestMux_TrackHandler_ResolvesTheMostSpecificRoute(t *testing.T) {
+	tests := map[string]struct {
+		published []BroadcastPath
+		path      BroadcastPath
+		want      BroadcastPath // "" for not found
+	}{
+		"exact path":                       {published: []BroadcastPath{"/live", "/live/alice"}, path: "/live/alice", want: "/live/alice"},
+		"route above serves a deeper path": {published: []BroadcastPath{"/live"}, path: "/live/alice/cam1", want: "/live"},
+		"the longest route wins":           {published: []BroadcastPath{"/live", "/live/alice"}, path: "/live/alice/cam1", want: "/live/alice"},
+		"a route ending in /":              {published: []BroadcastPath{"/live", "/live/"}, path: "/live/alice", want: "/live/"},
+		"the root covers everything":       {published: []BroadcastPath{"/"}, path: "/live/alice", want: "/"},
+		"a clamped prefix path":            {published: []BroadcastPath{"/live"}, path: "/live/alice/", want: "/live"},
+		"half a segment is not covered":    {published: []BroadcastPath{"/li"}, path: "/live/alice", want: ""},
+		"a sibling is not covered":         {published: []BroadcastPath{"/live/bob"}, path: "/live/alice", want: ""},
+		"a deeper route does not cover":    {published: []BroadcastPath{"/live/alice/cam1"}, path: "/live/alice", want: ""},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			mux := NewTrackMux(0)
+			for _, p := range tt.published {
+				mux.PublishFunc(t.Context(), p, func(*TrackWriter) {})
+			}
+
+			ann, _ := mux.TrackHandler(tt.path)
+
+			if tt.want == "" {
+				assert.Nil(t, ann)
+				return
+			}
+			require.NotNil(t, ann)
+			assert.Equal(t, tt.want, ann.BroadcastPath())
+		})
+	}
+}
+
+func TestMux_ServeTrack_RouteServesTheRequestedPath(t *testing.T) {
+	mux := NewTrackMux(0)
+	served := make(chan BroadcastPath, 1)
+	mux.PublishFunc(t.Context(), "/live", func(tw *TrackWriter) { served <- tw.BroadcastPath })
+	tw := &TrackWriter{BroadcastPath: "/live/alice", TrackName: "video"}
+
+	mux.serveTrack(tw)
+
+	assert.Equal(t, BroadcastPath("/live/alice"), <-served)
+}
+
+func TestMux_TrackHandler_LongPeerPathResolves(t *testing.T) {
+	mux := NewTrackMux(0)
+	mux.PublishFunc(t.Context(), "/live", func(*TrackWriter) {})
+	// A path within the message size limit, nearly all separators.
+	path := BroadcastPath("/live/" + strings.Repeat("/", 60_000))
+
+	ann, _ := mux.TrackHandler(path)
+
+	require.NotNil(t, ann)
+	assert.Equal(t, BroadcastPath("/live"), ann.BroadcastPath())
+}
+
+func TestMux_TrackHandler_RouteSurvivesReplacementAndEnd(t *testing.T) {
+	mux := NewTrackMux(0)
+	ctx, cancel := context.WithCancel(t.Context())
+	mux.PublishFunc(ctx, "/live", func(*TrackWriter) {})
+	mux.PublishFunc(t.Context(), "/live", func(*TrackWriter) {}) // replaces the first
+	cancel()                                                     // the replaced one ends
+
+	ann, _ := mux.TrackHandler("/live/alice")
+
+	require.NotNil(t, ann, "the replacing route still serves beneath it")
+	assert.Equal(t, BroadcastPath("/live"), ann.BroadcastPath())
+}
+
+func BenchmarkMux_TrackHandler_LongPeerPath(b *testing.B) {
+	mux := NewTrackMux(0)
+	mux.PublishFunc(b.Context(), "/live", func(*TrackWriter) {})
+	path := BroadcastPath("/live/" + strings.Repeat("/", 60_000))
+	b.ReportAllocs()
+	for b.Loop() {
+		mux.TrackHandler(path)
 	}
 }

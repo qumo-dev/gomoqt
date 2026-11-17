@@ -68,6 +68,12 @@ type Announcement struct {
 	// already producing).
 	routeMu sync.Mutex
 	route   announceRoute
+
+	// exactOnly limits the announcement to its own path: it was received
+	// from a peer whose grant lets it publish the path but not every path
+	// beneath it, so a TrackMux re-serving it does not use it as a route for
+	// deeper paths.
+	exactOnly atomic.Bool
 }
 
 // announceRoute is an advertisement's routing metadata (moq-lite-06 §7.6).
