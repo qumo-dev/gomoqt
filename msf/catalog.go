@@ -150,7 +150,7 @@ type InitDataRef struct {
 }
 
 // Buffers represents a track's target jitter-buffer configuration
-// (draft-ietf-moq-msf-01 §5.2.9) in integer milliseconds. Keys are optional;
+// (draft-ietf-moq-msf-02 §5.2.10) in integer milliseconds. Keys are optional;
 // unknown keys are preserved in ExtraFields per the spec's "MUST be ignored".
 type Buffers struct {
 	// Target is the target buffer in milliseconds.
@@ -165,7 +165,7 @@ type Buffers struct {
 }
 
 // AccessibilityDescriptor describes an embedded accessibility feature of a
-// track (draft-ietf-moq-msf-01 §5.2.44), such as CEA-608/CEA-708 captions.
+// track (draft-ietf-moq-msf-02 §5.2.44), such as CEA-608/CEA-708 captions.
 type AccessibilityDescriptor struct {
 	// Scheme identifies the accessibility scheme (e.g. a URN).
 	Scheme string `json:"-"`

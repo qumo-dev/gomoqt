@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: `msf` follows draft-ietf-moq-msf-02 instead of -01.** Catalogs written for -01 do not validate, and the Go API changes:
+  - `Catalog.Version` is a `string`; this package writes and accepts `"draft-02"` (`msf.CurrentVersion`), and `Validate` rejects any other version.
+  - `Track.Depends` is `[]msf.Dependency`: an entry names a track (a JSON string, `DependsOnTrack`) or a render group (a JSON number, `DependsOnRenderGroup`). `Validate` now requires every entry to resolve: a name to exactly one other track, a number to a track's `renderGroup`.
+  - `Track.Token` is removed (publish tracks use `authInfo`), and so is `Track.ParentNamespace`, which only clone entries carry (`TrackClone.ParentNamespace`). A `parentName` or `parentNamespace` on a plain track fails `Validate`.
+  - The connection URI is encoded under `"connectionURI"` (was `"connectionUri"`).
+  - `CatalogDelta.IsComplete` is removed: a delta must carry `generatedAt` (`Validate` requires `CatalogDelta.GeneratedAt`) and no other root field, so decoding a delta with `version`, `isComplete`, `tracks`, `publishTracks` or `initDataList` fails.
+  - Event timeline records use the index keys `"T"`, `"L"` and `"M"` (were lowercase); `data` may be any JSON value.
+  - Variable names may contain any character but `%`, and values may also contain `+`, `/`, `=` and `.`. `Catalog.ResolveVariables` now substitutes every string in the catalog, including `authInfo` and extension fields, validates the result, returns the zero `Catalog` on error, and refuses to substitute into `connectionURI`.
+  - `WalkCatalogRefs` is new; see Added.
+- **`msf` validation follows draft-02.** `isLive` is required on every track; loc tracks with role `audio`, `video`, `audiodescription` or `signlanguage` must carry the fields of the §5.2.4.1 table; mediatimeline tracks need `depends` and must not carry a `template`; event and media timelines no longer need `mimeType`, and event timelines no longer need `depends`; `moqlog` and `moqmetrics` tracks must be in `publishTracks`, with role `log` or `metrics` and an ASCII level `"0"` to `"7"` as name; `cipherSuite` is required only when `encryptionScheme` is `"moq-secure-objects"`; `targetLatency` and `buffers` are exclusive; tracks of an alternate group share `accessibleWindowTime`. A namespace is a `/`-separated string of 1 to 32 non-empty fields, and names must be UTF-8 without NUL. `ParseCatalog` and `ParseCatalogDelta` reject a leading byte order mark, invalid UTF-8 and unpaired `\u` surrogates. A declared namespace replaces the inherited one, and uniqueness is per Full Track Name.
+- **`msf` catalogs always encode `tracks`** (as `[]` when empty), since it is required, and put `initDataList` last.
+
+### Added
+
+- **`msf`: the draft-02 `"update"` delta operation, as `CatalogDelta.UpdateTracks` and `TrackUpdate`.** An update names an existing track by `parentName` (and `parentNamespace`) and overrides the fields it declares. `ApplyDelta` rejects an update of an unknown track, one that renames onto another track, and one that sets `isLive` back to `true`. Operations built in code apply in add, remove, clone, update order.
+- **`msf`: draft-02 track fields and values.** `Track.PackagingMetadata` with `PackagingMetadataValue` and `StreamMapping` (`StreamMappingGroup`, the default, and `StreamMappingObject`), `Track.AccessibleWindowTime`, `Track.KeyframeSpacing`, `RoleData`, `RoleMediaTimeline`, `RoleEventTimeline`, `PackagingCatalog`, `EncryptionSchemeMoQSecureObjects`, and the init data types `InitDataTypeInline`, `InitDataTypeTrackProperty` and `InitDataTypeObjectProperty` with `InitDataRef.PropertyType`.
+- **`msf`: catalog references.** `Catalog.CatalogRefs` lists the packaging `catalog` tracks, and `WalkCatalogRefs` loads and visits a catalog and every catalog it references, each once, stopping with `ErrCatalogCycle` on a cycle and with `ErrCatalogDepth`, `ErrTooManyCatalogs` or `ErrTooManyCatalogRefs` past the `CatalogWalkLimits` (8 levels, 64 catalogs, 32 references per catalog by default).
+- **`msf`: `SplitNamespace`, `ParseFragmentVariables` and `ValidateMediaTimeline`.** They split a catalog namespace into its MOQT Track Namespace Fields, read the variables of a catalog URI fragment (each pair split at its first `=`), and check that a media timeline is ordered by media time.
+
 ## [v0.29.1] - 2026-11-17
 
 > **Go module only.** `@qumo/moq` is unchanged from `0.29.0` and goes to `0.29.1`, so both stay on the same version. A stream whose type byte arrives in the same read as the stream's end is now decoded instead of dropped.
