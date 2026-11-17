@@ -97,6 +97,10 @@ func (mux *TrackMux) PublishFunc(ctx context.Context, path BroadcastPath, f func
 
 // Publish registers the handler for the given track path on the TrackMux.
 // The handler remains active until the provided context is canceled.
+//
+// The path is announced as a route (moq-lite-06 §5.1.1): the handler also
+// serves subscriptions to paths beneath it that no more specific published
+// path covers, and reads the requested path from TrackWriter.BroadcastPath.
 func (mux *TrackMux) Publish(ctx context.Context, path BroadcastPath, handler TrackHandler) {
 	if ctx == nil {
 		panic("[TrackMux] nil context")
@@ -211,8 +215,11 @@ func (mux *TrackMux) Announce(announcement *Announcement, handler TrackHandler) 
 	})
 }
 
-// TrackHandler returns the Announcement and associated TrackHandler for the specified
-// broadcast path. If no handler is found, it returns nil and NotFoundTrackHandler.
+// TrackHandler returns the Announcement and TrackHandler that serve path: the
+// announcement of path itself, or else of the longest announced route that
+// covers it (moq-lite-06 §5.1.1), so an announcement of "/live" serves
+// "/live/alice/cam1" unless "/live/alice" or "/live/alice/cam1" is announced.
+// If no announcement covers path, it returns nil and NotFoundTrackHandler.
 func (mux *TrackMux) TrackHandler(path BroadcastPath) (*Announcement, TrackHandler) {
 	ath := mux.findTrackHandler(path)
 	if ath == nil {
@@ -221,28 +228,47 @@ func (mux *TrackMux) TrackHandler(path BroadcastPath) (*Announcement, TrackHandl
 	return ath.Announcement, ath.TrackHandler
 }
 
+// findTrackHandler returns the handler of the most specific announced route
+// covering path, trying path itself and then each shorter route by segment:
+// for "/a/b" that is "/a/b", "/a/", "/a", "/". It allocates nothing.
 func (mux *TrackMux) findTrackHandler(path BroadcastPath) *announcedTrackHandler {
-	// Fast path: single RLock with minimal work under lock
+	if len(path) == 0 || path[0] != '/' {
+		return nil
+	}
+
 	mux.mu.RLock()
-	ath := mux.trackHandlerIndex[path]
-	mux.mu.RUnlock()
+	defer mux.mu.RUnlock()
 
-	// Quick validation: check if path is valid and handler exists
-	// Combine nil check with length check to reduce branches
-	if ath == nil || len(path) == 0 || path[0] != '/' {
+	if ath := usableHandler(mux.trackHandlerIndex[path]); ath != nil {
+		return ath
+	}
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] != '/' {
+			continue
+		}
+		if i+1 < len(path) {
+			if ath := usableHandler(mux.trackHandlerIndex[path[:i+1]]); ath != nil {
+				return ath
+			}
+		}
+		if i > 0 {
+			if ath := usableHandler(mux.trackHandlerIndex[path[:i]]); ath != nil {
+				return ath
+			}
+		}
+	}
+	return nil
+}
+
+// usableHandler returns ath, or nil when it cannot serve: nil, or without an
+// announcement or a handler, or a typed-nil handler function.
+func usableHandler(ath *announcedTrackHandler) *announcedTrackHandler {
+	if ath == nil || ath.Announcement == nil || ath.TrackHandler == nil {
 		return nil
 	}
-
-	// Validate handler is usable
-	if ath.Announcement == nil || ath.TrackHandler == nil {
-		return nil
-	}
-
-	// Rare case: treat typed-nil handler functions as absent
 	if hf, ok := ath.TrackHandler.(TrackHandlerFunc); ok && hf == nil {
 		return nil
 	}
-
 	return ath
 }
 

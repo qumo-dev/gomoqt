@@ -834,3 +834,75 @@ Deno.test("TrackMux - Additional Coverage", async (t) => {
 		},
 	);
 });
+
+Deno.test("TrackMux resolves a path to the most specific announced route", async (t) => {
+	const cases: { name: string; published: `/${string}`[]; path: `/${string}`; want?: string }[] =
+		[
+			{
+				name: "exact path",
+				published: ["/live", "/live/alice"],
+				path: "/live/alice",
+				want: "/live/alice",
+			},
+			{
+				name: "route above serves a deeper path",
+				published: ["/live"],
+				path: "/live/alice/cam1",
+				want: "/live",
+			},
+			{
+				name: "the longest route wins",
+				published: ["/live", "/live/alice"],
+				path: "/live/alice/cam1",
+				want: "/live/alice",
+			},
+			{
+				name: "a route ending in /",
+				published: ["/live", "/live/"],
+				path: "/live/alice",
+				want: "/live/",
+			},
+			{
+				name: "the root covers everything",
+				published: ["/"],
+				path: "/live/alice",
+				want: "/",
+			},
+			{
+				name: "a clamped prefix path",
+				published: ["/live"],
+				path: "/live/alice/",
+				want: "/live",
+			},
+			{ name: "half a segment is not covered", published: ["/li"], path: "/live/alice" },
+			{ name: "a sibling is not covered", published: ["/live/bob"], path: "/live/alice" },
+			{
+				name: "a deeper route does not cover",
+				published: ["/live/alice/cam1"],
+				path: "/live/alice",
+			},
+		];
+	for (const c of cases) {
+		await t.step(c.name, async () => {
+			const mux = new TrackMux();
+			const [ctx, cancel] = withCancelCause(background());
+			for (const p of c.published) {
+				// Each route reports its own path as the track's priority marker.
+				const handler = {
+					serveTrack: () => {},
+					trackInfo: () => ({
+						priority: c.published.indexOf(p),
+						maxAge: 0,
+						timescale: 1000,
+					}),
+				};
+				await mux.publish(ctx.done(), p, handler);
+			}
+
+			const info = mux.trackInfo(c.path, "video");
+
+			assertEquals(info === undefined ? undefined : c.published[info.priority], c.want);
+			cancel(undefined);
+		});
+	}
+});

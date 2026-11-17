@@ -127,14 +127,36 @@ export class TrackMux {
 		await this.publish(ctx, path, { serveTrack: handler });
 	}
 
+	// Returns the handler of the most specific announced route covering
+	// path: path itself, then each shorter route by segment ("/a/b", "/a/",
+	// "/a", "/"). Every candidate is a leading part of path, so it starts with
+	// "/"; it is spelled as a template so it types as a BroadcastPath.
+	#route(path: BroadcastPath): AnnouncedTrackHandler | undefined {
+		const exact = this.#handlers.get(path);
+		if (exact) return exact;
+		for (let i = path.lastIndexOf("/"); i >= 0; i = path.lastIndexOf("/", i - 1)) {
+			if (i + 1 < path.length) {
+				const withSlash = this.#handlers.get(`/${path.substring(1, i + 1)}`);
+				if (withSlash) return withSlash;
+			}
+			if (i > 0) {
+				const without = this.#handlers.get(`/${path.substring(1, i)}`);
+				if (without) return without;
+			}
+			if (i === 0) break;
+		}
+		return undefined;
+	}
+
 	/**
 	 * Look up the immutable publisher properties for a track, used to answer
-	 * TRACK_INFO requests. Returns `undefined` when the broadcast path is not
-	 * announced or the handler reports the track as unknown. Handlers that do
+	 * TRACK_INFO requests. The path resolves as in {@link serveTrack}. Returns
+	 * `undefined` when no announced route covers the path or the handler
+	 * reports the track as unknown. Handlers that do
 	 * not implement {@link TrackInfoProvider} are served with defaults.
 	 */
 	trackInfo(path: BroadcastPath, name: string): Info | undefined {
-		const announced = this.#handlers.get(path);
+		const announced = this.#route(path);
 		if (!announced) {
 			return undefined;
 		}
@@ -147,12 +169,16 @@ export class TrackMux {
 	}
 
 	/**
-	 * Dispatch an incoming subscription to the matching handler.
-	 * If no handler is found, responds with {@link NotFoundTrackHandler}.
+	 * Dispatch an incoming subscription to the handler of the most specific
+	 * announced route covering its path (moq-lite-06 §5.1.1): the path itself,
+	 * or else the longest announced route above it, so a handler published at
+	 * `/live` also serves `/live/alice/cam1` and reads the full path from
+	 * `track.broadcastPath`. If no route covers the path, responds with
+	 * {@link NotFoundTrackHandler}.
 	 */
 	async serveTrack(track: TrackWriter): Promise<void> {
 		const path = track.broadcastPath;
-		const announced = this.#handlers.get(path);
+		const announced = this.#route(path);
 		if (!announced) {
 			console.warn(`[TrackMux] no handler for track for path: ${path}`);
 			await NotFoundTrackHandler.serveTrack(track);

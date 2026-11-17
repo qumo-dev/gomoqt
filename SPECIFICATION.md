@@ -25,10 +25,11 @@ sends neutral defaults and leaves route selection to the relay.
   ID the subscriber declared in SETUP.
 - Route selection, cost ranking and splicing across routes are left to the
   relay.
-- A TrackMux serves exact broadcast paths. It advertises each published path
-  as a route, presents a route above a requested prefix clamped to it, and
-  refuses a request for a covered path it does not publish (NOT_FOUND), which
-  section 3.2 allows.
+- A TrackMux advertises each published path as a route and presents a route
+  above a requested prefix clamped to it. It serves a subscription from the
+  most specific route covering its path: the path itself if published, else
+  the longest published route above it, matched per segment. A path no route
+  covers is refused with NOT_FOUND.
 
 Frame positions (Section 3.6) are handled internally, with no public API.
 gomoqt always requests whole groups: it sends Frame Start and Frame End as 0
