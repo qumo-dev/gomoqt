@@ -567,10 +567,6 @@ func (sess *Session) CloseWithError(code SessionErrorCode, msg string) error {
 // with ErrStopRedirect, returns a *RedirectError; any other refusal returns
 // CheckRedirect's error, or ErrTooManyRedirects, joined with one.
 func (sess *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackName, config *SubscribeConfig) (*TrackReader, error) {
-	if config != nil {
-		// gomoqt subscribes to whole groups (see SubscribeConfig).
-		config = config.wholeGroups()
-	}
 	return sess.subscribe(ctx, path, name, config, nil)
 }
 
@@ -611,7 +607,7 @@ func (sess *Session) subscribe(ctx context.Context, path BroadcastPath, name Tra
 		return nil, fmt.Errorf("failed to encode stream type message: %w", err)
 	}
 
-	groupStart, groupEnd, frameStart, frameEnd := subscribeRangeToWire(config)
+	groupStart, groupEnd := subscribeRangeToWire(config)
 	err = message.SubscribeMessage{
 		SubscribeID:        uint64(id),
 		BroadcastPath:      string(path),
@@ -620,8 +616,6 @@ func (sess *Session) subscribe(ctx context.Context, path BroadcastPath, name Tra
 		SubscriberMaxAge:   config.MaxAge,
 		GroupStart:         groupStart,
 		GroupEnd:           groupEnd,
-		FrameStart:         frameStart,
-		FrameEnd:           frameEnd,
 	}.Encode(stream)
 	if err != nil {
 		if strErr, ok := errors.AsType[*transport.StreamError](err); ok && strErr.Remote {

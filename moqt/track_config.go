@@ -61,13 +61,3 @@ func (sc SubscribeConfig) validate() error {
 	}
 	return nil
 }
-
-// wholeGroups returns a copy of sc that asks for whole groups. The public
-// entry points send it, so a config taken from a peer's subscription (as a
-// relay forwarding TrackWriter.TrackConfig upstream would) never carries the
-// peer's frame bounds along.
-func (sc *SubscribeConfig) wholeGroups() *SubscribeConfig {
-	c := *sc
-	c.startFrame, c.endFrame = 0, 0
-	return &c
-}

@@ -209,14 +209,12 @@ func (substr *sendSubscribeStream) updateSubscribe(newConfig *SubscribeConfig) e
 	}
 
 	// Send the message first before updating config
-	groupStart, groupEnd, frameStart, frameEnd := subscribeRangeToWire(newConfig)
+	groupStart, groupEnd := subscribeRangeToWire(newConfig)
 	sum := message.SubscribeUpdateMessage{
 		SubscriberPriority: uint8(newConfig.Priority),
 		SubscriberMaxAge:   newConfig.MaxAge,
 		GroupStart:         groupStart,
 		GroupEnd:           groupEnd,
-		FrameStart:         frameStart,
-		FrameEnd:           frameEnd,
 	}
 	err := sum.Encode(substr.stream)
 	if err != nil {

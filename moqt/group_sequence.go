@@ -53,11 +53,13 @@ func groupSequenceFromWire(v uint64) GroupSequence {
 	return GroupSequence(v - 1)
 }
 
-// subscribeRangeToWire encodes a config's range as SUBSCRIBE and
-// SUBSCRIBE_UPDATE carry it: Group Start and Frame Start plain, Group End
-// +1, and Frame End as held (already its exclusive wire form).
-func subscribeRangeToWire(c *SubscribeConfig) (groupStart, groupEnd, frameStart, frameEnd uint64) {
-	return uint64(c.StartGroup), groupSequenceToWire(c.EndGroup), c.startFrame, c.endFrame
+// subscribeRangeToWire encodes a config's group range as SUBSCRIBE and
+// SUBSCRIBE_UPDATE carry it: Group Start plain, Group End +1. Frame Start and
+// Frame End are left 0: gomoqt asks for whole groups, even with a config
+// taken from a peer's subscription (as a relay forwarding
+// TrackWriter.TrackConfig upstream passes one).
+func subscribeRangeToWire(c *SubscribeConfig) (groupStart, groupEnd uint64) {
+	return uint64(c.StartGroup), groupSequenceToWire(c.EndGroup)
 }
 
 // subscribeConfigFromWire builds the config a SUBSCRIBE or SUBSCRIBE_UPDATE
