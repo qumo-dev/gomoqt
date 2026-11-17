@@ -33,7 +33,7 @@ func TestBroadcast_ServeCatalogTrack_SendsEachChange(t *testing.T) {
 	require.NoError(t, broadcast.RegisterTrack(Track{Name: "audio", Packaging: PackagingLOC, IsLive: new(true)}, &fakeTrackHandler{}))
 	assert.Equal(t, []string{"video", "audio"}, testTrackNames(readTestCatalog(t, ctx, catalog)))
 
-	assert.True(t, broadcast.RemoveTrack("video"))
+	assert.NoError(t, broadcast.RemoveTrack("video"))
 	assert.Equal(t, []string{"audio"}, testTrackNames(readTestCatalog(t, ctx, catalog)))
 }
 

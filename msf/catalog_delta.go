@@ -292,11 +292,10 @@ func (d *CatalogDelta) UnmarshalJSON(data []byte) error {
 		case "version", "isComplete", "tracks", "publishTracks", "initDataList":
 			return fmt.Errorf("msf: root catalog field %q is not allowed in a delta catalog", entry.Key)
 		case "generatedAt":
-			var value int64
-			if err := json.Unmarshal(entry.Value, &value); err != nil {
+			// Into the pointer, so that null leaves the field absent.
+			if err := json.Unmarshal(entry.Value, &d.GeneratedAt); err != nil {
 				return err
 			}
-			d.GeneratedAt = &value
 		default:
 			d.ExtraFields[entry.Key] = cloneRawMessage(entry.Value)
 		}
@@ -309,8 +308,11 @@ func (d *CatalogDelta) UnmarshalJSON(data []byte) error {
 }
 
 // decodeDeltaOps decodes the deltaUpdate array of {op, tracks} objects into
-// the grouped slices, recording each operation in order.
+// the grouped slices, recording each operation in order. It replaces any
+// operations decoded before, so with a repeated deltaUpdate key the last one
+// wins, as encoding/json does for repeated keys.
 func (d *CatalogDelta) decodeDeltaOps(data []byte) error {
+	d.AddTracks, d.RemoveTracks, d.CloneTracks, d.UpdateTracks, d.ops = nil, nil, nil, nil, nil
 	var ops []map[string]json.RawMessage
 	if err := json.Unmarshal(data, &ops); err != nil {
 		return fmt.Errorf("msf: deltaUpdate must be an array of operation objects: %w", err)
@@ -441,8 +443,14 @@ func (r *TrackRef) UnmarshalJSON(data []byte) error {
 	for key, value := range raw {
 		switch key {
 		case "namespace":
+			if isJSONNull(value) {
+				continue
+			}
 			if err := json.Unmarshal(value, &r.Namespace); err != nil {
 				return err
+			}
+			if r.Namespace == "" {
+				return errEmptyNamespace
 			}
 		case "name":
 			if err := json.Unmarshal(value, &r.Name); err != nil {
@@ -578,8 +586,14 @@ func unmarshalParentEntry(data []byte, track *Track, parentName, parentNamespace
 				return err
 			}
 		case "parentNamespace":
+			if isJSONNull(value) {
+				continue
+			}
 			if err := json.Unmarshal(value, parentNamespace); err != nil {
 				return err
+			}
+			if *parentNamespace == "" {
+				return fmt.Errorf("msf: parentNamespace must not be empty; omit it to use the catalog namespace")
 			}
 		default:
 			trackRaw[key] = value

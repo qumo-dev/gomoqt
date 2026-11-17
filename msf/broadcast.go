@@ -2,6 +2,7 @@ package msf
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -12,6 +13,10 @@ import (
 // MUST have (draft-ietf-moq-msf-02 §5). Catalogs referenced from it through
 // packaging "catalog" tracks may use other names.
 const DefaultCatalogTrackName moqt.TrackName = "catalog"
+
+// ErrTrackNotFound reports that Broadcast.RemoveTrack found no track or
+// handler with the given name.
+var ErrTrackNotFound = errors.New("msf: track not found")
 
 // Broadcast is an MSF-aware moqt.TrackHandler that serves the catalog track and
 // routes other track subscriptions to registered per-track handlers.
@@ -154,6 +159,12 @@ func (b *Broadcast) SetCatalog(catalog Catalog) error {
 // replaced.  The catalog is validated after modification; the update is
 // rejected if validation fails.  The reserved catalog track name may not be
 // used, and handler must be non-nil.
+//
+// Because the catalog must be valid after every change, tracks register in
+// dependency order: a track whose depends names another track or a render
+// group, or whose initRef names an initDataList entry, registers after what
+// it references exists (initDataList entries come from SetCatalog). To add
+// tracks that reference each other at once, use SetCatalog.
 func (b *Broadcast) RegisterTrack(track Track, handler moqt.TrackHandler) error {
 	if b == nil {
 		return fmt.Errorf("msf: nil broadcast")
@@ -205,12 +216,25 @@ func (b *Broadcast) RegisterTrack(track Track, handler moqt.TrackHandler) error 
 	return nil
 }
 
-// RemoveTrack removes the named track (and its handler) from the broadcast.
-// It returns true if the track was present.  Attempts to remove the catalog
-// track or an empty name have no effect and return false.
-func (b *Broadcast) RemoveTrack(name moqt.TrackName) bool {
-	if b == nil || name == "" || name == b.CatalogTrackName() {
-		return false
+// RemoveTrack removes the named track and its handler from the broadcast.
+//
+// The broadcast's catalog stays valid: if another track still references the
+// track (a depends entry naming it, or the last track of a render group that
+// a depends entry names), RemoveTrack returns the *ValidationError and
+// changes nothing, track and handler included. Remove the dependent tracks
+// first, or replace the catalog with SetCatalog.
+//
+// It returns ErrTrackNotFound when neither the catalog nor the handler table
+// holds the name, and an error for an empty name or the catalog track's name.
+func (b *Broadcast) RemoveTrack(name moqt.TrackName) error {
+	if b == nil {
+		return fmt.Errorf("msf: nil broadcast")
+	}
+	if name == "" {
+		return fmt.Errorf("msf: track name is required")
+	}
+	if name == b.CatalogTrackName() {
+		return fmt.Errorf("msf: %q is reserved for the catalog track", name)
 	}
 
 	b.mu.Lock()
@@ -228,12 +252,16 @@ func (b *Broadcast) RemoveTrack(name moqt.TrackName) bool {
 	}
 
 	if removed {
+		if err := updated.Validate(); err != nil {
+			return fmt.Errorf("msf: cannot remove track %q: %w", name, err)
+		}
 		b.catalog = updated
 		b.catalogChangedLocked()
 	}
-	removedFromTracks := b.tracks.Remove(name)
-
-	return removed || removedFromTracks
+	if !b.tracks.Remove(name) && !removed {
+		return fmt.Errorf("%w: %q", ErrTrackNotFound, name)
+	}
+	return nil
 }
 
 // Close ends every catalog subscription and closes the TrackWriter values the

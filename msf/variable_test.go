@@ -334,3 +334,53 @@ func TestCatalog_ResolveVariables_NoPercent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "live/demo", resolved.Tracks[0].Namespace)
 }
+
+// TestCatalog_ResolveVariables_AgreesWithValidate checks that the resolver's
+// JSON round trip cannot hide a validation problem: with nothing to
+// substitute, ResolveVariables fails exactly when Validate does.
+func TestCatalog_ResolveVariables_AgreesWithValidate(t *testing.T) {
+	tests := map[string]Catalog{
+		"valid": {Version: CurrentVersion, Tracks: []Track{{Name: "v", Packaging: PackagingLOC, IsLive: new(true)}}},
+		"missing isLive": {
+			Version: CurrentVersion, Tracks: []Track{{Name: "v", Packaging: PackagingLOC}},
+		},
+		"loc video missing required fields": {
+			Version: CurrentVersion, Tracks: []Track{{Name: "v", Packaging: PackagingLOC, Role: RoleVideo, IsLive: new(true)}},
+		},
+		"bad packagingMetadata": {
+			Version: CurrentVersion, Tracks: []Track{{Name: "v", Packaging: PackagingLOC, IsLive: new(true), PackagingMetadata: "a=1;"}},
+		},
+		"parentName on a plain track": {
+			Version: CurrentVersion,
+			Tracks: []Track{{Name: "v", Packaging: PackagingLOC, IsLive: new(true),
+				ExtraFields: map[string]json.RawMessage{"parentName": json.RawMessage(`"x"`)}}},
+		},
+		"duplicate across tracks and publishTracks": {
+			Version:       CurrentVersion,
+			Tracks:        []Track{{Name: "v", Packaging: PackagingLOC, IsLive: new(true)}},
+			PublishTracks: []Track{{Name: "v", Packaging: PackagingLOC, IsLive: new(true)}},
+		},
+	}
+
+	for name, catalog := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := catalog.ResolveVariables(nil)
+			if catalog.Validate() == nil {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+			}
+		})
+	}
+}
+
+func TestCatalog_ResolveVariables_SubstitutedEmptyNamespaceIsInvalid(t *testing.T) {
+	catalog := Catalog{
+		Version: CurrentVersion,
+		Tracks:  []Track{{Namespace: "%ns%", Name: "v", Packaging: PackagingLOC, IsLive: new(true)}},
+	}
+
+	_, err := catalog.ResolveVariables(map[string]string{"ns": ""})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "namespace must not be empty")
+}

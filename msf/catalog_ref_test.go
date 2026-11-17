@@ -207,6 +207,48 @@ func TestWalkCatalogRefs_StopsOnCancelledContext(t *testing.T) {
 	load := func(context.Context, TrackID) (Catalog, error) { return Catalog{}, nil }
 	visit := func(TrackID, Catalog) error { return nil }
 
-	err := WalkCatalogRefs(ctx, TrackID{Name: "catalog"}, CatalogWalkLimits{}, load, visit)
+	err := WalkCatalogRefs(ctx, TrackID{Namespace: "live", Name: "catalog"}, CatalogWalkLimits{}, load, visit)
 	assert.ErrorIs(t, err, context.Canceled)
+}
+
+// TestWalkCatalogRefs_RejectsUnusableRoot checks that a root without a usable
+// namespace or name is refused before load runs, so load never sees the
+// internal inherited-namespace marker.
+func TestWalkCatalogRefs_RejectsUnusableRoot(t *testing.T) {
+	tests := map[string]struct {
+		root     TrackID
+		errMatch string
+	}{
+		"no namespace":          {root: TrackID{Name: "catalog"}, errMatch: "needs the Track Namespace"},
+		"inherited marker":      {root: Track{Name: "catalog"}.ID(""), errMatch: "needs the Track Namespace"},
+		"malformed namespace":   {root: TrackID{Namespace: "a//b", Name: "catalog"}, errMatch: "needs the Track Namespace"},
+		"no name":               {root: TrackID{Namespace: "live"}, errMatch: "valid Track Name"},
+		"NUL in name":           {root: TrackID{Namespace: "live", Name: "cat\x00alog"}, errMatch: "valid Track Name"},
+		"usable root is walked": {root: TrackID{Namespace: "live", Name: "catalog"}},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			var loaded []TrackID
+			load := func(_ context.Context, id TrackID) (Catalog, error) {
+				loaded = append(loaded, id)
+				return Catalog{Version: CurrentVersion, Tracks: []Track{catalogRefTrack("", "child")}}, nil
+			}
+			visit := func(TrackID, Catalog) error { return nil }
+
+			err := WalkCatalogRefs(ctx, tt.root, CatalogWalkLimits{MaxDepth: 1}, load, visit)
+			if tt.errMatch != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errMatch)
+				assert.Empty(t, loaded)
+				return
+			}
+			assert.ErrorIs(t, err, ErrCatalogCycle, "the child references itself")
+			for _, id := range loaded {
+				assert.Equal(t, "live", id.Namespace, "load only sees real namespaces")
+			}
+		})
+	}
 }

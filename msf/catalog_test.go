@@ -723,15 +723,6 @@ func TestTrack_applyOverrides_AllFields(t *testing.T) {
 	}
 
 	override := Track{
-		presentFields: map[string]struct{}{
-			"namespace": {}, "name": {}, "packaging": {}, "eventType": {},
-			"role": {}, "isLive": {}, "targetLatency": {}, "label": {},
-			"renderGroup": {}, "altGroup": {}, "initRef": {}, "depends": {},
-			"temporalId": {}, "spatialId": {}, "codec": {}, "mimeType": {},
-			"framerate": {}, "timescale": {}, "bitrate": {}, "width": {},
-			"height": {}, "samplerate": {}, "channelConfig": {}, "displayWidth": {},
-			"displayHeight": {}, "lang": {}, "trackDuration": {},
-		},
 		Namespace:     "live/new",
 		Name:          "audio",
 		Packaging:     PackagingCMAF,
@@ -2364,11 +2355,124 @@ func TestTrackValidate_Draft02Rules(t *testing.T) {
 	}
 }
 
-func TestTrackValidate_ExplicitEmptyNamespace(t *testing.T) {
-	var track Track
-	require.NoError(t, json.Unmarshal([]byte(`{"namespace":"","name":"video","packaging":"loc","isLive":true}`), &track))
+func TestTrackUnmarshalJSON_ExplicitEmptyNamespaceIsInvalid(t *testing.T) {
+	tests := map[string]struct {
+		input  string
+		decode func([]byte) error
+	}{
+		"track": {
+			input:  `{"namespace":"","name":"video","packaging":"loc","isLive":true}`,
+			decode: func(b []byte) error { var v Track; return json.Unmarshal(b, &v) },
+		},
+		"remove entry": {
+			input:  `{"namespace":"","name":"video"}`,
+			decode: func(b []byte) error { var v TrackRef; return json.Unmarshal(b, &v) },
+		},
+		"clone parentNamespace": {
+			input:  `{"parentName":"video","parentNamespace":"","name":"v2"}`,
+			decode: func(b []byte) error { var v TrackClone; return json.Unmarshal(b, &v) },
+		},
+		"update parentNamespace": {
+			input:  `{"parentName":"video","parentNamespace":""}`,
+			decode: func(b []byte) error { var v TrackUpdate; return json.Unmarshal(b, &v) },
+		},
+	}
 
-	assert.Equal(t, []string{"namespace must not be empty"}, track.validate(trackListTracks))
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := tt.decode([]byte(tt.input))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "must not be empty")
+		})
+	}
+}
+
+// TestTrackValidate_PresenceComesFromValues checks that whether a field is
+// present is read from its value alone: a JSON null is absent, and a decoded
+// field that code clears is absent too.
+func TestTrackValidate_PresenceComesFromValues(t *testing.T) {
+	const video = `{"name":"video","namespace":"live/demo","packaging":"loc","role":"video","isLive":true,` +
+		`"codec":"av01","bitrate":1000,"framerate":30,"packagingMetadata":"streamMapping=object"}`
+
+	tests := map[string]struct {
+		input  string
+		mutate func(*Track)
+		want   []string
+	}{
+		"decoded track is valid": {input: video},
+		"null namespace inherits": {
+			input: `{"name":"v","namespace":null,"packaging":"loc","isLive":true}`,
+		},
+		"null required isLive is absent": {
+			input: `{"name":"v","packaging":"loc","isLive":null}`,
+			want:  []string{"isLive is required"},
+		},
+		"null required bitrate is absent": {
+			input: `{"name":"v","packaging":"loc","role":"video","isLive":true,"codec":"av01","bitrate":null,"framerate":30}`,
+			want:  []string{"bitrate is required for loc tracks with role video"},
+		},
+		"null buffers is absent": {
+			input: `{"name":"v","packaging":"loc","isLive":true,"targetLatency":100,"buffers":null}`,
+		},
+		"cleared namespace inherits": {
+			input:  video,
+			mutate: func(t *Track) { t.Namespace = "" },
+		},
+		"cleared packagingMetadata is absent": {
+			input:  video,
+			mutate: func(t *Track) { t.PackagingMetadata = "" },
+		},
+		"cleared required bitrate is missing": {
+			input:  video,
+			mutate: func(t *Track) { t.Bitrate = nil },
+			want:   []string{"bitrate is required for loc tracks with role video"},
+		},
+		"cleared required codec is missing": {
+			input:  video,
+			mutate: func(t *Track) { t.Codec = "" },
+			want:   []string{"codec is required for loc tracks with role video"},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			var track Track
+			require.NoError(t, json.Unmarshal([]byte(tt.input), &track))
+			if tt.mutate != nil {
+				tt.mutate(&track)
+			}
+			assert.Equal(t, tt.want, track.validate(trackListTracks))
+		})
+	}
+}
+
+func TestTrackUnmarshalJSON_NullUnknownFieldRoundTrips(t *testing.T) {
+	var track Track
+	require.NoError(t, json.Unmarshal([]byte(`{"name":"v","com.example":null}`), &track))
+	assert.JSONEq(t, `null`, string(track.ExtraFields["com.example"]))
+}
+
+func TestParseCatalog_NullGeneratedAtIsAbsent(t *testing.T) {
+	catalog, err := ParseCatalogString(`{"version":"draft-02","generatedAt":null,"tracks":[]}`)
+	require.NoError(t, err)
+	assert.Nil(t, catalog.GeneratedAt)
+
+	delta, err := ParseCatalogDeltaString(`{"generatedAt":null,"deltaUpdate":[]}`)
+	require.NoError(t, err)
+	assert.Nil(t, delta.GeneratedAt)
+}
+
+// TestTrack_applyOverrides_ClearedFieldDoesNotOverride checks that an override
+// decoded with a field which code then clears no longer overrides it.
+func TestTrack_applyOverrides_ClearedFieldDoesNotOverride(t *testing.T) {
+	var update TrackUpdate
+	require.NoError(t, json.Unmarshal([]byte(`{"parentName":"v","bitrate":5,"label":"x"}`), &update))
+	update.Bitrate = nil
+
+	base := Track{Name: "v", Bitrate: new(int64(1))}
+	base.applyOverrides(update.Track)
+	assert.Equal(t, int64(1), *base.Bitrate)
+	assert.Equal(t, "x", base.Label)
 }
 
 func TestTrackValidate_ParentFieldsOnlyInCloneOrUpdate(t *testing.T) {

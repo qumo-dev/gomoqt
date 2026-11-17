@@ -117,16 +117,21 @@ func TestValidatePackagingMetadata(t *testing.T) {
 		packaging Packaging
 		errMatch  string
 	}{
-		"valid loc":                       {metadata: "streamMapping=object;x=1", packaging: PackagingLOC},
-		"unknown key ignored":             {metadata: "com.example=v", packaging: PackagingLOC},
-		"other packaging any value":       {metadata: "streamMapping=whatever", packaging: PackagingEventTimeline},
-		"bad loc streamMapping":           {metadata: "streamMapping=frame", packaging: PackagingLOC, errMatch: "streamMapping"},
-		"missing equals":                  {metadata: "streamMapping", packaging: PackagingLOC, errMatch: "key=value"},
-		"empty key":                       {metadata: "=object", packaging: PackagingLOC, errMatch: "key=value"},
-		"whitespace":                      {metadata: "a=b c", packaging: PackagingLOC, errMatch: "whitespace"},
-		"second equals":                   {metadata: "a=b=c", packaging: PackagingLOC, errMatch: "'='"},
-		"empty entry between semicolons":  {metadata: "a=1;;b=2", packaging: PackagingLOC, errMatch: "key=value"},
-		"present but empty metadata pair": {metadata: "", packaging: PackagingLOC, errMatch: "key=value"},
+		"valid loc":                      {metadata: "streamMapping=object;x=1", packaging: PackagingLOC},
+		"unknown key ignored":            {metadata: "com.example=v", packaging: PackagingLOC},
+		"other packaging any value":      {metadata: "streamMapping=whatever", packaging: PackagingEventTimeline},
+		"bad loc streamMapping":          {metadata: "streamMapping=frame", packaging: PackagingLOC, errMatch: "streamMapping"},
+		"missing equals":                 {metadata: "streamMapping", packaging: PackagingLOC, errMatch: "key=value"},
+		"empty key":                      {metadata: "=object", packaging: PackagingLOC, errMatch: "key=value"},
+		"whitespace":                     {metadata: "a=b c", packaging: PackagingLOC, errMatch: "whitespace"},
+		"second equals":                  {metadata: "a=b=c", packaging: PackagingLOC, errMatch: "'='"},
+		"empty entry between semicolons": {metadata: "a=1;;b=2", packaging: PackagingLOC, errMatch: "key=value"},
+		"empty metadata is no pairs":     {metadata: "", packaging: PackagingLOC},
+		"trailing semicolon":             {metadata: "a=1;", packaging: PackagingLOC, errMatch: "key=value"},
+		"leading semicolon":              {metadata: ";a=1", packaging: PackagingLOC, errMatch: "key=value"},
+		"non-ASCII whitespace":           {metadata: "a=b c", packaging: PackagingLOC, errMatch: "whitespace"},
+		"ideographic space in key":       {metadata: "a　=b", packaging: PackagingLOC, errMatch: "whitespace"},
+		"empty value allowed":            {metadata: "a=", packaging: PackagingLOC},
 	}
 
 	for name, tt := range tests {

@@ -134,7 +134,9 @@ func BenchmarkBroadcastRegisterTrack(b *testing.B) {
 					b.Fatal(err)
 				}
 				b.StopTimer()
-				broadcast.RemoveTrack(moqt.TrackName(newTrack.Name))
+				if err := broadcast.RemoveTrack(moqt.TrackName(newTrack.Name)); err != nil {
+					b.Fatal(err)
+				}
 				b.StartTimer()
 			}
 		})

@@ -267,3 +267,83 @@ func TestTrackUpdate_UnmarshalJSON_Errors(t *testing.T) {
 		})
 	}
 }
+
+func TestCatalogApplyDelta_DefaultNamespaceChangeChecksPublishTracks(t *testing.T) {
+	tests := map[string]struct {
+		base     Catalog
+		errMatch string
+	}{
+		"publish track inherits": {
+			base: Catalog{
+				Version:          CurrentVersion,
+				DefaultNamespace: "live/demo",
+				PublishTracks:    []Track{{Name: "events", Packaging: PackagingEventTimeline, EventType: "com.example.e", IsLive: new(true)}},
+			},
+			errMatch: "cannot change default namespace",
+		},
+		"every track declares a namespace": {
+			base: Catalog{
+				Version:          CurrentVersion,
+				DefaultNamespace: "live/demo",
+				Tracks:           []Track{{Namespace: "live/demo", Name: "video", Packaging: PackagingLOC, IsLive: new(true)}},
+				PublishTracks:    []Track{{Namespace: "live/demo", Name: "events", Packaging: PackagingEventTimeline, EventType: "com.example.e", IsLive: new(true)}},
+			},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			delta := CatalogDelta{
+				GeneratedAt:      new(int64(1)),
+				DefaultNamespace: "live/updated",
+				AddTracks:        []Track{{Name: "audio", Packaging: PackagingLOC, IsLive: new(true)}},
+			}
+			updated, err := tt.base.ApplyDelta(delta)
+			if tt.errMatch != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errMatch)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, "live/updated", updated.DefaultNamespace)
+		})
+	}
+}
+
+func TestCatalogApplyDelta_RejectsCompleteCatalog(t *testing.T) {
+	base := Catalog{Version: CurrentVersion, IsComplete: true, Tracks: []Track{testVideoTrack(t, "", "video")}}
+	deltas := map[string]CatalogDelta{
+		"add":    {GeneratedAt: new(int64(1)), AddTracks: []Track{testVideoTrack(t, "", "slides")}},
+		"remove": {GeneratedAt: new(int64(1)), RemoveTracks: []TrackRef{{Name: "video"}}},
+		"update": {GeneratedAt: new(int64(1)), UpdateTracks: []TrackUpdate{{ParentName: "video", Track: Track{IsLive: new(false)}}}},
+	}
+
+	for name, delta := range deltas {
+		t.Run(name, func(t *testing.T) {
+			_, err := base.ApplyDelta(delta)
+			assert.ErrorIs(t, err, ErrCatalogComplete)
+		})
+	}
+}
+
+func TestParseCatalogDelta_RepeatedDeltaUpdateLastWins(t *testing.T) {
+	delta, err := ParseCatalogDeltaString(`{"generatedAt":1,
+		"deltaUpdate":[{"op":"add","tracks":[{"name":"a","packaging":"loc","isLive":true}]}],
+		"deltaUpdate":[{"op":"remove","tracks":[{"name":"b"}]}]}`)
+	require.NoError(t, err)
+
+	assert.Empty(t, delta.AddTracks)
+	assert.Equal(t, []TrackRef{{Name: "b", ExtraFields: map[string]json.RawMessage{}}}, delta.RemoveTracks)
+	data, err := json.Marshal(delta)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"generatedAt":1,"deltaUpdate":[{"op":"remove","tracks":[{"name":"b"}]}]}`, string(data))
+}
+
+func TestParseCatalog_RepeatedTracksLastWins(t *testing.T) {
+	catalog, err := ParseCatalogString(`{"version":"draft-02",
+		"tracks":[{"name":"a","packaging":"loc","isLive":true}],
+		"tracks":[{"name":"b","packaging":"loc","isLive":true}]}`)
+	require.NoError(t, err)
+	require.Len(t, catalog.Tracks, 1)
+	assert.Equal(t, "b", catalog.Tracks[0].Name)
+}

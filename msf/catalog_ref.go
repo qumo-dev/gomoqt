@@ -94,6 +94,18 @@ func (c Catalog) CatalogRefs() []TrackID {
 // ErrTooManyCatalogs or ErrTooManyCatalogRefs. Errors from load and visit are
 // returned wrapped.
 func WalkCatalogRefs(ctx context.Context, root TrackID, limits CatalogWalkLimits, load func(context.Context, TrackID) (Catalog, error), visit func(TrackID, Catalog) error) error {
+	// The root's namespace is what the root catalog's tracks inherit, so the
+	// walk cannot resolve references without it. Rejecting it here also keeps
+	// the internal inherited-namespace marker away from load.
+	if root.Namespace == inheritedNamespaceSentinel {
+		root.Namespace = ""
+	}
+	if err := validateNamespace(root.Namespace); err != nil {
+		return fmt.Errorf("msf: root catalog %q needs the Track Namespace it is published under: %w", root.Name, err)
+	}
+	if err := validateNameText(root.Name); err != nil || root.Name == "" {
+		return fmt.Errorf("msf: root catalog needs a valid Track Name, got %q", root.Name)
+	}
 	w := catalogWalk{
 		load:    load,
 		visit:   visit,
@@ -136,7 +148,7 @@ func (w *catalogWalk) walk(ctx context.Context, id TrackID, depth int) error {
 	if err != nil {
 		return fmt.Errorf("msf: load catalog %q: %w", id.String(), err)
 	}
-	if catalog.DefaultNamespace == "" && id.Namespace != inheritedNamespaceSentinel {
+	if catalog.DefaultNamespace == "" {
 		catalog.DefaultNamespace = id.Namespace
 	}
 	w.visited[id] = struct{}{}

@@ -3,6 +3,7 @@ package msf
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -229,23 +230,26 @@ type Catalog struct {
 	ExtraFields map[string]json.RawMessage `json:"-"`
 }
 
-// Track represents a catalog track description.  Many of the numeric and
-// boolean fields use pointers so that the presence or absence of the field can
-// be distinguished when decoding JSON; this is required both for correct
-// `omitempty` behavior and for the delta/clone machinery which needs to know
-// which values were explicitly provided by the user.
+// Track represents a catalog track description. Numeric and boolean fields are
+// pointers so that an absent field (nil) differs from one set to zero or
+// false.
 //
-// String fields are plain strings, whereas optional numeric and boolean
-// parameters are pointer-typed.
+// A field is present exactly when it holds a value: a non-nil pointer, slice
+// or map, or a non-empty string. Validation, encoding and the clone and
+// update overrides all read presence from the values themselves, so code that
+// clears a decoded field (sets Namespace to "" to inherit, Bitrate to nil)
+// makes it absent everywhere. Decoding follows the same rule: a JSON null
+// for a known field leaves it absent, and an explicitly empty namespace or
+// parentNamespace, which draft-ietf-moq-msf-02 §5.2.2 makes the catalog
+// invalid, is a decoding error. As a consequence a clone or update entry
+// cannot set a string field to empty or a pointer field to absent.
 //
 // Naming fields (Namespace, Name, Depends track names, and the parent fields
 // of clone and update operations) map to MOQT bytes as the UTF-8 encoding of
 // the string, with no normalization or case folding, and compare byte for
 // byte (draft-ietf-moq-msf-02 §11.2).
 //
-// ExtraFields and presentFields are helpers used by the custom JSON
-// marshaling/unmarshaling logic for round‑tripping unknown keys and tracking
-// which fields were declared.
+// ExtraFields round-trips unknown keys through the custom JSON marshaling.
 type Track struct {
 	// Namespace of the track as a '/'-delimited string of 1 to 32 non-empty
 	// Track Namespace Fields (see SplitNamespace). If empty, the catalog's
@@ -345,10 +349,6 @@ type Track struct {
 
 	// ExtraFields stores unknown JSON key/values for round-tripping.
 	ExtraFields map[string]json.RawMessage `json:"-"`
-
-	// presentFields tracks which top-level fields were explicitly present in
-	// the original JSON, used during validation and cloning operations.
-	presentFields map[string]struct{}
 }
 
 // TrackID uniquely identifies a track by namespace and name.
@@ -527,8 +527,8 @@ func (c Catalog) appendDependencyProblems(problems []string) []string {
 		for i := range list {
 			track := &list[i]
 			for j, dep := range track.Depends {
-				if dep.validate() != nil {
-					continue // reported by Track.validate
+				if (dep.RenderGroup != nil) == (dep.TrackName != "") {
+					continue // neither or both set: reported by Track.validate
 				}
 				if dep.RenderGroup != nil {
 					if _, ok := groups[*dep.RenderGroup]; !ok {
@@ -591,7 +591,15 @@ func (c Catalog) appendAltGroupProblems(problems []string) []string {
 // result of the previous one. An illogical operation (adding or cloning to an
 // existing Full Track Name, removing or updating an unknown track) rejects the
 // whole delta, as does a result that fails Validate.
+//
+// A catalog with IsComplete set rejects every delta with ErrCatalogComplete:
+// isComplete commits that no tracks will be added and no content published
+// (§5.1.3), a delta cannot carry isComplete itself (§5.3), so a delta after
+// it could only change a finished broadcast.
 func (c Catalog) ApplyDelta(delta CatalogDelta) (Catalog, error) {
+	if c.IsComplete {
+		return Catalog{}, ErrCatalogComplete
+	}
 	if err := c.Validate(); err != nil {
 		return Catalog{}, err
 	}
@@ -649,9 +657,11 @@ func (c Catalog) ApplyDelta(delta CatalogDelta) (Catalog, error) {
 
 // hasInheritedNamespaceTracks reports whether any track currently relies on DefaultNamespace.
 func (c Catalog) hasInheritedNamespaceTracks() bool {
-	for _, track := range c.Tracks {
-		if track.Namespace == "" {
-			return true
+	for _, list := range [2][]Track{c.Tracks, c.PublishTracks} {
+		for i := range list {
+			if list[i].Namespace == "" {
+				return true
+			}
 		}
 	}
 	return false
@@ -830,11 +840,10 @@ func (c *Catalog) UnmarshalJSON(data []byte) error {
 				return err
 			}
 		case "generatedAt":
-			var value int64
-			if err := json.Unmarshal(entry.Value, &value); err != nil {
+			// Into the pointer, so that null leaves the field absent.
+			if err := json.Unmarshal(entry.Value, &c.GeneratedAt); err != nil {
 				return err
 			}
-			c.GeneratedAt = &value
 		case "isComplete":
 			if err := json.Unmarshal(entry.Value, &c.IsComplete); err != nil {
 				return err
@@ -866,7 +875,6 @@ func (t Track) Clone() Track {
 	clone := t
 	clone.Depends = cloneDependencies(t.Depends)
 	clone.ExtraFields = cloneRawMessages(t.ExtraFields)
-	clone.presentFields = maps.Clone(t.presentFields)
 	if t.IsLive != nil {
 		value := *t.IsLive
 		clone.IsLive = &value
@@ -969,7 +977,7 @@ func (t *Track) validate(list trackList) []string {
 	} else if err := validateNameText(t.Name); err != nil {
 		problems = append(problems, "name: "+err.Error())
 	}
-	if t.Namespace != "" || t.hasPresentField("namespace") {
+	if t.Namespace != "" {
 		if err := validateNamespace(t.Namespace); err != nil {
 			problems = append(problems, err.Error())
 		}
@@ -986,7 +994,7 @@ func (t *Track) validate(list trackList) []string {
 	if t.TargetLatency != nil && t.Buffers != nil {
 		problems = append(problems, "targetLatency and buffers must not both be present")
 	}
-	if t.PackagingMetadata != "" || t.hasPresentField("packagingMetadata") {
+	if t.PackagingMetadata != "" {
 		if err := validatePackagingMetadata(t.PackagingMetadata, t.Packaging); err != nil {
 			problems = append(problems, err.Error())
 		}
@@ -1058,13 +1066,6 @@ func (t *Track) appendPublishOnlyProblems(problems []string, list trackList, rol
 		problems = append(problems, string(t.Packaging)+" track name must be a level from \"0\" to \"7\"")
 	}
 	return problems
-}
-
-// hasPresentField reports whether field was explicitly present in the decoded
-// JSON, even with an empty value.
-func (t *Track) hasPresentField(field string) bool {
-	_, ok := t.presentFields[field]
-	return ok
 }
 
 // applyOverrides copies explicitly declared fields from override onto the receiver.
@@ -1194,12 +1195,6 @@ func (t *Track) applyOverrides(override Track) {
 	}
 	if override.hasField("keyframeSpacing") {
 		t.KeyframeSpacing = cloneInt64Ptr(override.KeyframeSpacing)
-	}
-	if t.presentFields == nil {
-		t.presentFields = make(map[string]struct{})
-	}
-	for field := range override.presentFields {
-		t.presentFields[field] = struct{}{}
 	}
 	if t.ExtraFields == nil {
 		t.ExtraFields = make(map[string]json.RawMessage)
@@ -1358,14 +1353,19 @@ func (t Track) MarshalJSON() ([]byte, error) {
 func (t *Track) unmarshalObject(raw map[string]json.RawMessage) error {
 	*t = Track{}
 	t.ExtraFields = make(map[string]json.RawMessage)
-	t.presentFields = make(map[string]struct{})
 
 	for key, value := range raw {
-		t.presentFields[key] = struct{}{}
+		// A null known field is absent; an unknown one round-trips as is.
+		if isJSONNull(value) && isTrackFieldKey(key) {
+			continue
+		}
 		switch key {
 		case "namespace":
 			if err := json.Unmarshal(value, &t.Namespace); err != nil {
 				return err
+			}
+			if t.Namespace == "" {
+				return errEmptyNamespace
 			}
 		case "name":
 			if err := json.Unmarshal(value, &t.Name); err != nil {
@@ -1557,98 +1557,121 @@ func (t *Track) UnmarshalJSON(data []byte) error {
 	return t.unmarshalObject(raw)
 }
 
-// hasField reports whether field was explicitly present or is materially set on the track.
+// ErrCatalogComplete reports a delta applied to a catalog marked isComplete.
+var ErrCatalogComplete = errors.New("msf: cannot apply a delta to a complete catalog")
+
+// errEmptyNamespace reports an explicitly empty namespace, which makes the
+// catalog invalid (draft-ietf-moq-msf-02 §5.2.2); an absent one is inherited.
+var errEmptyNamespace = errors.New("msf: namespace must not be empty; omit it to inherit the catalog namespace")
+
+// isJSONNull reports whether raw is the JSON literal null.
+func isJSONNull(raw json.RawMessage) bool {
+	return string(bytes.TrimSpace(raw)) == "null"
+}
+
+// isTrackFieldKey reports whether key names a field Track models.
+func isTrackFieldKey(key string) bool {
+	_, known := trackFieldState(&Track{}, key)
+	return known
+}
+
+// hasField reports whether the track holds a value for the JSON field.
 func (t *Track) hasField(field string) bool {
-	if _, ok := t.presentFields[field]; ok {
-		return true
-	}
+	present, _ := trackFieldState(t, field)
+	return present
+}
+
+// trackFieldState reports whether t holds a value for the JSON field and
+// whether Track models that field at all. Presence is read from the value
+// alone, so it cannot disagree with what Validate and MarshalJSON see.
+func trackFieldState(t *Track, field string) (present, known bool) {
 	switch field {
 	case "namespace":
-		return t.Namespace != ""
+		return t.Namespace != "", true
 	case "name":
-		return t.Name != ""
+		return t.Name != "", true
 	case "packaging":
-		return t.Packaging != ""
+		return t.Packaging != "", true
 	case "packagingMetadata":
-		return t.PackagingMetadata != ""
+		return t.PackagingMetadata != "", true
 	case "eventType":
-		return t.EventType != ""
+		return t.EventType != "", true
 	case "role":
-		return t.Role != ""
+		return t.Role != "", true
 	case "isLive":
-		return t.IsLive != nil
+		return t.IsLive != nil, true
 	case "targetLatency":
-		return t.TargetLatency != nil
+		return t.TargetLatency != nil, true
 	case "label":
-		return t.Label != ""
+		return t.Label != "", true
 	case "renderGroup":
-		return t.RenderGroup != nil
+		return t.RenderGroup != nil, true
 	case "altGroup":
-		return t.AltGroup != nil
+		return t.AltGroup != nil, true
 	case "initRef":
-		return t.InitRef != ""
+		return t.InitRef != "", true
 	case "buffers":
-		return t.Buffers != nil
+		return t.Buffers != nil, true
 	case "template":
-		return t.Template != nil
+		return t.Template != nil, true
 	case "depends":
-		return t.Depends != nil
+		return t.Depends != nil, true
 	case "temporalId":
-		return t.TemporalID != nil
+		return t.TemporalID != nil, true
 	case "spatialId":
-		return t.SpatialID != nil
+		return t.SpatialID != nil, true
 	case "codec":
-		return t.Codec != ""
+		return t.Codec != "", true
 	case "mimeType":
-		return t.MimeType != ""
+		return t.MimeType != "", true
 	case "framerate":
-		return t.Framerate != nil
+		return t.Framerate != nil, true
 	case "timescale":
-		return t.Timescale != nil
+		return t.Timescale != nil, true
 	case "bitrate":
-		return t.Bitrate != nil
+		return t.Bitrate != nil, true
 	case "avgBitrate":
-		return t.AvgBitrate != nil
+		return t.AvgBitrate != nil, true
 	case "maxGopDuration":
-		return t.MaxGopDuration != nil
+		return t.MaxGopDuration != nil, true
 	case "maxGroupDuration":
-		return t.MaxGroupDuration != nil
+		return t.MaxGroupDuration != nil, true
 	case "width":
-		return t.Width != nil
+		return t.Width != nil, true
 	case "height":
-		return t.Height != nil
+		return t.Height != nil, true
 	case "samplerate":
-		return t.SampleRate != nil
+		return t.SampleRate != nil, true
 	case "channelConfig":
-		return t.ChannelConfig != ""
+		return t.ChannelConfig != "", true
 	case "displayWidth":
-		return t.DisplayWidth != nil
+		return t.DisplayWidth != nil, true
 	case "displayHeight":
-		return t.DisplayHeight != nil
+		return t.DisplayHeight != nil, true
 	case "lang":
-		return t.Language != ""
+		return t.Language != "", true
 	case "trackDuration":
-		return t.TrackDuration != nil
+		return t.TrackDuration != nil, true
 	case "connectionURI":
-		return t.ConnectionURI != ""
+		return t.ConnectionURI != "", true
 	case "encryptionScheme":
-		return t.EncryptionScheme != ""
+		return t.EncryptionScheme != "", true
 	case "cipherSuite":
-		return t.CipherSuite != ""
+		return t.CipherSuite != "", true
 	case "keyId":
-		return t.KeyID != ""
+		return t.KeyID != "", true
 	case "trackBaseKey":
-		return t.TrackBaseKey != ""
+		return t.TrackBaseKey != "", true
 	case "authInfo":
-		return t.AuthInfo != nil
+		return t.AuthInfo != nil, true
 	case "accessibility":
-		return t.Accessibility != nil
+		return t.Accessibility != nil, true
 	case "accessibleWindowTime":
-		return t.AccessibleWindowTime != nil
+		return t.AccessibleWindowTime != nil, true
 	case "keyframeSpacing":
-		return t.KeyframeSpacing != nil
+		return t.KeyframeSpacing != nil, true
 	default:
-		return false
+		return false, false
 	}
 }
 

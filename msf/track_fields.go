@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // Dependency is one entry of a track's depends array (draft-ietf-moq-msf-02
@@ -127,7 +128,15 @@ const packagingMetadataStreamMapping = "streamMapping"
 // list of key=value pairs. If key appears more than once the first
 // occurrence is used. Keys are case-sensitive.
 func (t Track) PackagingMetadataValue(key string) (string, bool) {
-	for pair := range strings.SplitSeq(t.PackagingMetadata, ";") {
+	return packagingMetadataValue(t.PackagingMetadata, key)
+}
+
+// packagingMetadataValue returns the first value of key in metadata.
+func packagingMetadataValue(metadata, key string) (string, bool) {
+	if metadata == "" {
+		return "", false
+	}
+	for pair := range strings.SplitSeq(metadata, ";") {
 		k, v, ok := strings.Cut(pair, "=")
 		if ok && k == key {
 			return v, true
@@ -146,25 +155,34 @@ func (t Track) StreamMapping() StreamMapping {
 	return StreamMappingGroup
 }
 
-// validatePackagingMetadata checks the key=value list syntax of
-// draft-ietf-moq-msf-02 §5.2.5: keys and values must not contain whitespace,
-// '=' or ';', and keys must be non-empty. For loc packaging, the
-// streamMapping value must be one of the defined modes.
+// validatePackagingMetadata checks the list syntax of draft-ietf-moq-msf-02
+// §5.2.5, "a semicolon-separated list of key=value pairs" whose keys and
+// values "MUST NOT contain whitespace, = or ;":
+//   - an empty string is a list of no pairs;
+//   - every item between semicolons must be a pair, so an empty item, as a
+//     leading, trailing or doubled ';' produces, is rejected;
+//   - keys must be non-empty; an empty value is allowed, as the text does not
+//     forbid it;
+//   - whitespace is any Unicode space (unicode.IsSpace).
+//
+// For loc packaging, a streamMapping value must be one of the defined modes.
 func validatePackagingMetadata(metadata string, packaging Packaging) error {
+	if metadata == "" {
+		return nil
+	}
 	for pair := range strings.SplitSeq(metadata, ";") {
 		k, v, ok := strings.Cut(pair, "=")
 		if !ok || k == "" {
 			return fmt.Errorf("packagingMetadata entry %q must be a key=value pair", pair)
 		}
-		if strings.ContainsAny(k, "= \t\r\n\v\f") || strings.ContainsAny(v, "= \t\r\n\v\f") {
-			return fmt.Errorf("packagingMetadata entry %q must not contain whitespace or '='", pair)
+		if strings.ContainsRune(v, '=') || strings.IndexFunc(pair, unicode.IsSpace) >= 0 {
+			return fmt.Errorf("packagingMetadata entry %q must not contain whitespace or a second '='", pair)
 		}
 	}
 	if packaging != PackagingLOC {
 		return nil
 	}
-	t := Track{PackagingMetadata: metadata}
-	if v, ok := t.PackagingMetadataValue(packagingMetadataStreamMapping); ok {
+	if v, ok := packagingMetadataValue(metadata, packagingMetadataStreamMapping); ok {
 		switch StreamMapping(v) {
 		case StreamMappingGroup, StreamMappingObject:
 		default:
