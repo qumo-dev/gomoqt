@@ -1,6 +1,12 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { background, withCancelCause } from "@okdaichi/golikejs/context";
-import { Broadcast, DefaultCatalogTrackName, parseCatalog } from "./mod.ts";
+import {
+	Broadcast,
+	DefaultCatalogTrackName,
+	parseCatalog,
+	type Track,
+	ValidationError,
+} from "./mod.ts";
 import { SubscribeErrorCode } from "../error.ts";
 import type { TrackHandler } from "../track_mux.ts";
 import type { TrackWriter } from "../track_writer.ts";
@@ -111,7 +117,7 @@ const video = { name: "video", packaging: "loc", isLive: false } as const;
 const audio = { name: "audio", packaging: "loc", isLive: false } as const;
 
 Deno.test("msf Broadcast registerTrack updates catalog and handler", async () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [] });
+	const broadcast = new Broadcast({ version: "draft-02", tracks: [] });
 	const handler = new MockTrackHandler();
 
 	await broadcast.registerTrack(video, handler);
@@ -126,7 +132,7 @@ Deno.test("msf Broadcast registerTrack updates catalog and handler", async () =>
 });
 
 Deno.test("msf Broadcast registerTrack keeps tracks registered concurrently", async () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [] });
+	const broadcast = new Broadcast({ version: "draft-02", tracks: [] });
 
 	await Promise.all([
 		broadcast.registerTrack(video, new MockTrackHandler()),
@@ -137,7 +143,7 @@ Deno.test("msf Broadcast registerTrack keeps tracks registered concurrently", as
 });
 
 Deno.test("msf Broadcast serveCatalogTrack sends the catalog, then each change", async () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [video] });
+	const broadcast = new Broadcast({ version: "draft-02", tracks: [video] });
 	const writer = newCatalogTrackWriter(DefaultCatalogTrackName);
 	const served = broadcast.serveTrack(writer.trackWriter);
 
@@ -146,7 +152,7 @@ Deno.test("msf Broadcast serveCatalogTrack sends the catalog, then each change",
 	await writer.waitForGroups(2);
 	await broadcast.removeTrack("video");
 	await writer.waitForGroups(3);
-	await broadcast.setCatalog({ version: 1, tracks: [{ ...video, name: "text" }] });
+	await broadcast.setCatalog({ version: "draft-02", tracks: [{ ...video, name: "text" }] });
 	await writer.waitForGroups(4);
 
 	assertEquals(groupTrackNames(writer.groups), [["video"], ["video", "audio"], ["audio"], [
@@ -157,13 +163,13 @@ Deno.test("msf Broadcast serveCatalogTrack sends the catalog, then each change",
 });
 
 Deno.test("msf Broadcast serveCatalogTrack skips an unchanged catalog", async () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [video] });
+	const broadcast = new Broadcast({ version: "draft-02", tracks: [video] });
 	const writer = newCatalogTrackWriter(DefaultCatalogTrackName);
 	const served = broadcast.serveTrack(writer.trackWriter);
 	await writer.waitForGroups(1);
 
 	// Neither changes the catalog, so the next group is the change after them.
-	await broadcast.setCatalog({ version: 1, tracks: [video] });
+	await broadcast.setCatalog({ version: "draft-02", tracks: [video] });
 	await broadcast.removeTrack("missing");
 	await broadcast.registerTrack(audio, new MockTrackHandler());
 	await writer.waitForGroups(2);
@@ -179,7 +185,7 @@ Deno.test("msf Broadcast serveCatalogTrack ends when the subscriber leaves", asy
 		"stream reset": { leaveThrows: true },
 	};
 	for (const [name, options] of Object.entries(tests)) {
-		const broadcast = new Broadcast({ version: 1, tracks: [] });
+		const broadcast = new Broadcast({ version: "draft-02", tracks: [] });
 		const writer = newCatalogTrackWriter(DefaultCatalogTrackName, options);
 		const served = broadcast.serveTrack(writer.trackWriter);
 		await writer.waitForGroups(1);
@@ -196,7 +202,7 @@ Deno.test("msf Broadcast serveCatalogTrack ends when the subscriber leaves", asy
 Deno.test("msf Broadcast serveCatalogTrack ends when its context ends", async () => {
 	// The mux closes the writer when the announcement ends, which ends its
 	// context; so does the session ending.
-	const broadcast = new Broadcast({ version: 1, tracks: [] });
+	const broadcast = new Broadcast({ version: "draft-02", tracks: [] });
 	const writer = newCatalogTrackWriter(DefaultCatalogTrackName);
 	const served = broadcast.serveTrack(writer.trackWriter);
 	await writer.waitForGroups(1);
@@ -209,7 +215,7 @@ Deno.test("msf Broadcast serveCatalogTrack ends when its context ends", async ()
 });
 
 Deno.test("msf Broadcast close ends catalog subscriptions after the pending change", async () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [] });
+	const broadcast = new Broadcast({ version: "draft-02", tracks: [] });
 	const writer = newCatalogTrackWriter(DefaultCatalogTrackName);
 	const served = broadcast.serveTrack(writer.trackWriter);
 	await writer.waitForGroups(1);
@@ -223,14 +229,14 @@ Deno.test("msf Broadcast close ends catalog subscriptions after the pending chan
 });
 
 Deno.test("msf Broadcast close is idempotent", async () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [] });
+	const broadcast = new Broadcast({ version: "draft-02", tracks: [] });
 	await broadcast.close();
 
 	await broadcast.close();
 });
 
 Deno.test("msf Broadcast close gives a later catalog subscription one group", async () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [video] });
+	const broadcast = new Broadcast({ version: "draft-02", tracks: [video] });
 	await broadcast.close();
 	const writer = newCatalogTrackWriter(DefaultCatalogTrackName);
 
@@ -241,7 +247,7 @@ Deno.test("msf Broadcast close gives a later catalog subscription one group", as
 });
 
 Deno.test("msf Broadcast catalogBytes returns a copy", () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [video] });
+	const broadcast = new Broadcast({ version: "draft-02", tracks: [video] });
 	broadcast.catalogBytes().fill(0);
 
 	const bytes = broadcast.catalogBytes();
@@ -253,7 +259,7 @@ Deno.test("msf Broadcast rejects duplicate track names across namespaces", () =>
 	assertThrows(
 		() =>
 			new Broadcast({
-				version: 1,
+				version: "draft-02",
 				defaultNamespace: "live/main",
 				tracks: [
 					{ name: "video", packaging: "loc", isLive: false },
@@ -271,16 +277,16 @@ Deno.test("msf Broadcast rejects duplicate track names across namespaces", () =>
 });
 
 Deno.test("msf Broadcast catalogTrackName returns custom name", () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [] }, "meta");
+	const broadcast = new Broadcast({ version: "draft-02", tracks: [] }, "meta");
 	assertEquals(broadcast.catalogTrackName, "meta");
 });
 
 Deno.test("msf Broadcast registerTrack rejects nil handler", async () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [] });
+	const broadcast = new Broadcast({ version: "draft-02", tracks: [] });
 	await assertRejects(
 		() =>
 			broadcast.registerTrack(
-				{ name: "video", packaging: "cmaf" },
+				{ name: "video", packaging: "cmaf", isLive: true },
 				null as unknown as TrackHandler,
 			),
 		Error,
@@ -289,54 +295,76 @@ Deno.test("msf Broadcast registerTrack rejects nil handler", async () => {
 });
 
 Deno.test("msf Broadcast registerTrack rejects missing track name", async () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [] });
+	const broadcast = new Broadcast({ version: "draft-02", tracks: [] });
 	const handler = new MockTrackHandler();
 	await assertRejects(
-		() => broadcast.registerTrack({ name: "", packaging: "cmaf" }, handler),
+		() => broadcast.registerTrack({ name: "", packaging: "cmaf", isLive: true }, handler),
 		Error,
 		"track name is required",
 	);
 });
 
 Deno.test("msf Broadcast registerTrack rejects catalog track name", async () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [] });
+	const broadcast = new Broadcast({ version: "draft-02", tracks: [] });
 	const handler = new MockTrackHandler();
 	await assertRejects(
 		() =>
-			broadcast.registerTrack({ name: DefaultCatalogTrackName, packaging: "cmaf" }, handler),
+			broadcast.registerTrack({
+				name: DefaultCatalogTrackName,
+				packaging: "cmaf",
+				isLive: true,
+			}, handler),
 		Error,
 		"reserved for the catalog track",
 	);
 });
 
 Deno.test("msf Broadcast registerTrack replaces existing track", async () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [{ name: "audio", packaging: "cmaf" }] });
+	const broadcast = new Broadcast({
+		version: "draft-02",
+		tracks: [{ name: "audio", packaging: "cmaf", isLive: true }],
+	});
 	const handler1 = new MockTrackHandler();
-	await broadcast.registerTrack({ name: "audio", packaging: "cmaf", bitrate: 128 }, handler1);
+	await broadcast.registerTrack(
+		{ name: "audio", packaging: "cmaf", isLive: true, bitrate: 128 },
+		handler1,
+	);
 	assertEquals(broadcast.catalog().tracks.length, 1);
 	assertEquals(broadcast.catalog().tracks[0]?.bitrate, 128);
 });
 
 Deno.test("msf Broadcast setCatalog removes stale tracks", async () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [{ name: "video", packaging: "cmaf" }] });
+	const broadcast = new Broadcast({
+		version: "draft-02",
+		tracks: [{ name: "video", packaging: "cmaf", isLive: true }],
+	});
 	const handler = new MockTrackHandler();
-	await broadcast.registerTrack({ name: "video", packaging: "cmaf" }, handler);
+	await broadcast.registerTrack({ name: "video", packaging: "cmaf", isLive: true }, handler);
 
-	await broadcast.setCatalog({ version: 1, tracks: [{ name: "audio", packaging: "cmaf" }] });
+	await broadcast.setCatalog({
+		version: "draft-02",
+		tracks: [{ name: "audio", packaging: "cmaf", isLive: true }],
+	});
 	assertEquals(broadcast.catalog().tracks.length, 1);
 	assertEquals(broadcast.catalog().tracks[0]?.name, "audio");
 });
 
 Deno.test("msf Broadcast setCatalog with empty previous tracks", async () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [] });
-	await broadcast.setCatalog({ version: 1, tracks: [{ name: "video", packaging: "cmaf" }] });
+	const broadcast = new Broadcast({ version: "draft-02", tracks: [] });
+	await broadcast.setCatalog({
+		version: "draft-02",
+		tracks: [{ name: "video", packaging: "cmaf", isLive: true }],
+	});
 	assertEquals(broadcast.catalog().tracks.length, 1);
 });
 
 Deno.test("msf Broadcast removeTrack removes registered track", async () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [{ name: "video", packaging: "cmaf" }] });
+	const broadcast = new Broadcast({
+		version: "draft-02",
+		tracks: [{ name: "video", packaging: "cmaf", isLive: true }],
+	});
 	const handler = new MockTrackHandler();
-	await broadcast.registerTrack({ name: "video", packaging: "cmaf" }, handler);
+	await broadcast.registerTrack({ name: "video", packaging: "cmaf", isLive: true }, handler);
 
 	const removed = await broadcast.removeTrack("video");
 	assertEquals(removed, true);
@@ -344,21 +372,21 @@ Deno.test("msf Broadcast removeTrack removes registered track", async () => {
 });
 
 Deno.test("msf Broadcast removeTrack returns false for empty name", async () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [] });
+	const broadcast = new Broadcast({ version: "draft-02", tracks: [] });
 	const removed = await broadcast.removeTrack("");
 	assertEquals(removed, false);
 });
 
 Deno.test("msf Broadcast removeTrack returns false for catalog track name", async () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [] });
+	const broadcast = new Broadcast({ version: "draft-02", tracks: [] });
 	const removed = await broadcast.removeTrack(DefaultCatalogTrackName);
 	assertEquals(removed, false);
 });
 
 Deno.test("msf Broadcast removeTrack returns true when track not in catalog but was registered", async () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [] });
+	const broadcast = new Broadcast({ version: "draft-02", tracks: [] });
 	const handler = new MockTrackHandler();
-	await broadcast.registerTrack({ name: "audio", packaging: "cmaf" }, handler);
+	await broadcast.registerTrack({ name: "audio", packaging: "cmaf", isLive: true }, handler);
 
 	// Remove from catalog first via setCatalog, then removeTrack
 	const removed = await broadcast.removeTrack("nonexistent");
@@ -372,8 +400,8 @@ Deno.test("msf Broadcast serveCatalogTrack closes with an error when a group can
 	};
 	for (const [name, options] of Object.entries(tests)) {
 		const broadcast = new Broadcast({
-			version: 1,
-			tracks: [{ name: "video", packaging: "cmaf" }],
+			version: "draft-02",
+			tracks: [{ name: "video", packaging: "cmaf", isLive: true }],
 		});
 		const writer = newCatalogTrackWriter(DefaultCatalogTrackName, options);
 
@@ -385,7 +413,7 @@ Deno.test("msf Broadcast serveCatalogTrack closes with an error when a group can
 });
 
 Deno.test("msf Broadcast serveCatalogTrack returns quietly when the subscriber left mid-write", async () => {
-	const broadcast = new Broadcast({ version: 1, tracks: [] });
+	const broadcast = new Broadcast({ version: "draft-02", tracks: [] });
 	const writer = newCatalogTrackWriter(DefaultCatalogTrackName, {
 		writeErr: new Error("stream reset"),
 	});
@@ -394,4 +422,18 @@ Deno.test("msf Broadcast serveCatalogTrack returns quietly when the subscriber l
 	await broadcast.serveTrack(writer.trackWriter);
 
 	assertEquals(writer.closeWithErrorCalls, []);
+});
+
+Deno.test("msf Broadcast removeTrack refuses a track another track depends on", async () => {
+	const timeline: Track = {
+		name: "timeline",
+		packaging: "mediatimeline",
+		isLive: true,
+		depends: ["video"],
+	};
+	const broadcast = new Broadcast({ version: "draft-02", tracks: [video, timeline] });
+
+	await assertRejects(() => broadcast.removeTrack("video"), ValidationError);
+
+	assertEquals(broadcast.catalog().tracks.map((t) => t.name), ["video", "timeline"]);
 });

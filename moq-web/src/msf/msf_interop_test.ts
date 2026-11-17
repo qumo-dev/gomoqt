@@ -1,4 +1,4 @@
-import { assertEquals, assertNotEquals, assertThrows } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import {
 	applyCatalogDelta,
 	type Catalog,
@@ -8,357 +8,133 @@ import {
 	stringifyCatalog,
 	stringifyCatalogDelta,
 	validateCatalog,
-	ValidationError,
+	validateCatalogDelta,
 } from "./mod.ts";
 
-// Emitted verbatim by the Go msf package (json.Marshal of msf.Catalog and
-// msf.CatalogDelta at v0.19.0), so these tests pin interop with the Go
-// implementation rather than this package's reading of draft-ietf-moq-msf-01.
+// Emitted verbatim by the Go msf package on this branch (MarshalJSON of
+// msf.Catalog and msf.CatalogDelta, and of the catalog Catalog.ApplyDelta
+// returns for the two, with DefaultNamespace "live/alice"), so these tests
+// pin interop with the Go implementation of draft-ietf-moq-msf-02 rather
+// than this package's reading of it. The delta interleaves its operations
+// (add, remove, clone, update, add, empty update), removes and re-adds
+// "audio", and the catalog uses string and number depends.
 const GO_CATALOG =
-	'{"initDataList":[{"data":"AUIAH//hABdnQgAf","id":"video","type":"inline"},{"data":"EhA=","id":"audio","type":"inline"}],"tracks":[{"codec":"avc1.64001f","initRef":"video","isLive":true,"name":"video","packaging":"loc","role":"video"},{"codec":"mp4a.40.2","initRef":"audio","isLive":true,"name":"audio","packaging":"loc","role":"audio"}],"version":1}';
+	'{"generatedAt":1746104606044,"publishTracks":[{"connectionURI":"moqt://relay.example.com/logs","isLive":true,"name":"3","packaging":"moqlog","role":"log"}],"tracks":[{"accessibility":[{"scheme":"urn:scte:dash:cc:cea-608:2015","value":"CC1=eng"}],"accessibleWindowTime":30000,"altGroup":1,"authInfo":{"cat":"abc"},"avgBitrate":4000000,"bitrate":5000000,"buffers":{"min":100,"target":500,"x-b":1},"cipherSuite":"aes-128-gcm-sha256","codec":"av01.0.08M.10.0.110.09","encryptionScheme":"moq-secure-objects","framerate":30,"height":1080,"initRef":"video-init","isLive":true,"keyId":"k1","keyframeSpacing":60,"maxGopDuration":2000,"maxGroupDuration":2000,"name":"video","packaging":"loc","packagingMetadata":"streamMapping=object;profile=main","renderGroup":1,"role":"video","trackBaseKey":"AAEC","width":1920,"x-vendor":[1,2]},{"accessibleWindowTime":30000,"altGroup":1,"bitrate":800000,"codec":"av01.0.04M.10.0.110.09","framerate":30,"height":360,"isLive":true,"name":"video-lo","packaging":"loc","renderGroup":1,"role":"video","template":[0,2000,[0,0],[1,0],1746104600000,2000],"width":640},{"bitrate":32000,"channelConfig":"2","codec":"opus","initRef":"audio-init","isLive":true,"lang":"en","name":"audio","packaging":"loc","renderGroup":1,"role":"audio","samplerate":48000},{"depends":["video",1],"isLive":true,"mimeType":"application/json","name":"timeline","packaging":"mediatimeline","role":"mediatimeline"},{"depends":[1],"eventType":"com.example.score","isLive":true,"mimeType":"application/json","name":"events","packaging":"eventtimeline","role":"eventtimeline"},{"isLive":true,"name":"catalog","namespace":"live/alice/extras","packaging":"catalog"}],"version":"draft-02","x-root":{"note":"kept"},"initDataList":[{"data":"AUIAH//hABdnQgAf","id":"video-init","type":"inline"},{"data":"0x2a","id":"audio-init","type":"track-property"}]}';
 const GO_DELTA =
-	'{"deltaUpdate":[{"op":"add","tracks":[{"codec":"avc1.640028","initRef":"video","isLive":true,"name":"video-hd","packaging":"loc","role":"video"}]},{"op":"remove","tracks":[{"name":"audio"}]},{"op":"clone","tracks":[{"codec":"avc1.64000d","name":"video-lo","parentName":"video","parentNamespace":"live/alice"}]}]}';
+	'{"deltaUpdate":[{"op":"add","tracks":[{"accessibleWindowTime":30000,"altGroup":1,"bitrate":8000000,"codec":"av01.0.12M.10.0.110.09","framerate":60,"initRef":"video-init","isLive":true,"name":"video-hd","packaging":"loc","renderGroup":1,"role":"video"}]},{"op":"remove","tracks":[{"name":"audio"}]},{"op":"clone","tracks":[{"bitrate":1500000,"codec":"av01.0.05M.10.0.110.09","height":720,"name":"video-sd","parentName":"video","width":1280}]},{"op":"update","tracks":[{"bitrate":400000,"label":"Low","parentName":"video-lo"}]},{"op":"add","tracks":[{"bitrate":64000,"channelConfig":"2","codec":"opus","depends":["video"],"isLive":true,"name":"audio","packaging":"loc","renderGroup":1,"role":"audio","samplerate":48000}]},{"op":"update","tracks":[]}],"generatedAt":1746104607000,"x-delta":true}';
+const GO_RESULT =
+	'{"generatedAt":1746104607000,"publishTracks":[{"connectionURI":"moqt://relay.example.com/logs","isLive":true,"name":"3","packaging":"moqlog","role":"log"}],"tracks":[{"accessibility":[{"scheme":"urn:scte:dash:cc:cea-608:2015","value":"CC1=eng"}],"accessibleWindowTime":30000,"altGroup":1,"authInfo":{"cat":"abc"},"avgBitrate":4000000,"bitrate":5000000,"buffers":{"min":100,"target":500,"x-b":1},"cipherSuite":"aes-128-gcm-sha256","codec":"av01.0.08M.10.0.110.09","encryptionScheme":"moq-secure-objects","framerate":30,"height":1080,"initRef":"video-init","isLive":true,"keyId":"k1","keyframeSpacing":60,"maxGopDuration":2000,"maxGroupDuration":2000,"name":"video","packaging":"loc","packagingMetadata":"streamMapping=object;profile=main","renderGroup":1,"role":"video","trackBaseKey":"AAEC","width":1920,"x-vendor":[1,2]},{"accessibleWindowTime":30000,"altGroup":1,"bitrate":400000,"codec":"av01.0.04M.10.0.110.09","framerate":30,"height":360,"isLive":true,"label":"Low","name":"video-lo","packaging":"loc","renderGroup":1,"role":"video","template":[0,2000,[0,0],[1,0],1746104600000,2000],"width":640},{"depends":["video",1],"isLive":true,"mimeType":"application/json","name":"timeline","packaging":"mediatimeline","role":"mediatimeline"},{"depends":[1],"eventType":"com.example.score","isLive":true,"mimeType":"application/json","name":"events","packaging":"eventtimeline","role":"eventtimeline"},{"isLive":true,"name":"catalog","namespace":"live/alice/extras","packaging":"catalog"},{"accessibleWindowTime":30000,"altGroup":1,"bitrate":8000000,"codec":"av01.0.12M.10.0.110.09","framerate":60,"initRef":"video-init","isLive":true,"name":"video-hd","packaging":"loc","renderGroup":1,"role":"video"},{"accessibility":[{"scheme":"urn:scte:dash:cc:cea-608:2015","value":"CC1=eng"}],"accessibleWindowTime":30000,"altGroup":1,"authInfo":{"cat":"abc"},"avgBitrate":4000000,"bitrate":1500000,"buffers":{"min":100,"target":500,"x-b":1},"cipherSuite":"aes-128-gcm-sha256","codec":"av01.0.05M.10.0.110.09","encryptionScheme":"moq-secure-objects","framerate":30,"height":720,"initRef":"video-init","isLive":true,"keyId":"k1","keyframeSpacing":60,"maxGopDuration":2000,"maxGroupDuration":2000,"name":"video-sd","packaging":"loc","packagingMetadata":"streamMapping=object;profile=main","renderGroup":1,"role":"video","trackBaseKey":"AAEC","width":1280,"x-vendor":[1,2]},{"bitrate":64000,"channelConfig":"2","codec":"opus","depends":["video"],"isLive":true,"name":"audio","packaging":"loc","renderGroup":1,"role":"audio","samplerate":48000}],"version":"draft-02","x-delta":true,"x-root":{"note":"kept"},"initDataList":[{"data":"AUIAH//hABdnQgAf","id":"video-init","type":"inline"},{"data":"0x2a","id":"audio-init","type":"track-property"}]}';
 
-const VIDEO_INIT = "AUIAH//hABdnQgAf";
-const AUDIO_INIT = "EhA=";
-
-// Go keeps DefaultNamespace out of the wire form: in msf-01 it is implied by
-// the catalog track itself, so a receiver supplies it. Parse, then set it as
-// the Go catalog that produced GO_CATALOG had it.
+// Go keeps DefaultNamespace out of the wire form: it is implied by the
+// catalog track itself, so a receiver supplies it.
 function goBaseCatalog(): Catalog {
 	const catalog = parseCatalog(GO_CATALOG);
 	catalog.defaultNamespace = "live/alice";
 	return catalog;
 }
 
-function validationProblems(fn: () => void): string[] {
-	try {
-		fn();
-	} catch (err) {
-		if (err instanceof ValidationError) {
-			return err.problems;
-		}
-		throw err;
-	}
-	return [];
-}
+// ─── Go → TS ─────────────────────────────────────────────────────────────────
 
-// ─── Go → TS: independent catalog ────────────────────────────────────────────
+Deno.test("validateCatalog accepts a Go-emitted draft-02 catalog", () => {
+	const catalog = goBaseCatalog();
 
-Deno.test("parseCatalog resolves each initRef of a Go-emitted catalog into initData", () => {
-	const catalog = parseCatalog(GO_CATALOG);
-
-	assertEquals(
-		catalog.tracks.map((t) => [t.name, t.initRef, t.initData]),
-		[["video", "video", VIDEO_INIT], ["audio", "audio", AUDIO_INIT]],
-	);
+	validateCatalog(catalog);
 });
 
-Deno.test("parseCatalog keeps the initDataList as a typed field, not an extra field", () => {
+Deno.test("parseCatalog reads every draft-02 field of a Go-emitted catalog", () => {
 	const catalog = parseCatalog(GO_CATALOG);
 
-	assertEquals(catalog.initDataList, [
-		{ id: "video", type: "inline", data: VIDEO_INIT, extraFields: undefined },
-		{ id: "audio", type: "inline", data: AUDIO_INIT, extraFields: undefined },
+	assertEquals(catalog.version, "draft-02");
+	assertEquals(catalog.tracks[0]?.buffers, { target: 500, min: 100, extraFields: { "x-b": 1 } });
+	assertEquals(catalog.tracks[1]?.template, {
+		startMediaTime: 0,
+		deltaMediaTime: 2000,
+		startLocation: { groupId: 0, objectId: 0 },
+		deltaLocation: { groupId: 1, objectId: 0 },
+		startWallclock: 1746104600000,
+		deltaWallclock: 2000,
+	});
+	assertEquals(catalog.tracks[3]?.depends, ["video", 1]);
+	assertEquals(catalog.publishTracks?.[0]?.connectionURI, "moqt://relay.example.com/logs");
+	assertEquals(catalog.initDataList?.[1], {
+		id: "audio-init",
+		type: "track-property",
+		data: "0x2a",
+	});
+	assertEquals(catalog.extraFields, { "x-root": { note: "kept" } });
+});
+
+Deno.test("parseCatalogDelta records each operation of a Go-emitted delta in wire order", () => {
+	const delta = parseCatalogDelta(GO_DELTA);
+
+	assertEquals(delta.deltaOps, [
+		{ kind: "addTracks", count: 1 },
+		{ kind: "removeTracks", count: 1 },
+		{ kind: "cloneTracks", count: 1 },
+		{ kind: "updateTracks", count: 1 },
+		{ kind: "addTracks", count: 1 },
+		{ kind: "updateTracks", count: 0 },
 	]);
-	assertEquals(catalog.extraFields, undefined);
 });
 
-Deno.test("validateCatalog accepts a Go-emitted catalog", () => {
-	const catalog = parseCatalog(GO_CATALOG);
+Deno.test("validateCatalogDelta accepts a Go-emitted delta", () => {
+	const delta = parseCatalogDelta(GO_DELTA);
 
-	assertEquals(validationProblems(() => validateCatalog(catalog)), []);
+	validateCatalogDelta(delta);
 });
 
-Deno.test("stringifyCatalog round-trips a Go-emitted catalog to the same JSON content", () => {
-	const catalog = parseCatalog(GO_CATALOG);
+Deno.test("applyCatalogDelta gives the catalog Go's ApplyDelta gives", () => {
+	const delta = parseCatalogDelta(GO_DELTA);
 
-	const json = stringifyCatalog(catalog);
+	const result = applyCatalogDelta(goBaseCatalog(), delta);
+
+	assertEquals(JSON.parse(stringifyCatalog(result)), JSON.parse(GO_RESULT));
+});
+
+// ─── TS → Go: re-encoding gives the document Go emitted ──────────────────────
+
+Deno.test("stringifyCatalog re-encodes a Go-emitted catalog to the same JSON content", () => {
+	const json = stringifyCatalog(parseCatalog(GO_CATALOG));
 
 	assertEquals(JSON.parse(json), JSON.parse(GO_CATALOG));
 });
 
-// ─── Go → TS: delta ──────────────────────────────────────────────────────────
+Deno.test("stringifyCatalog writes initDataList after tracks, as Go does", () => {
+	const keys = Object.keys(JSON.parse(stringifyCatalog(parseCatalog(GO_CATALOG))));
 
-Deno.test("parseCatalogDelta parses every operation of a Go-emitted delta", () => {
-	const delta = parseCatalogDelta(GO_DELTA);
-
-	assertEquals(delta.deltaOpOrder, ["addTracks", "removeTracks", "cloneTracks"]);
-	assertEquals(delta.addTracks.map((t) => [t.name, t.initRef]), [["video-hd", "video"]]);
-	assertEquals(delta.removeTracks.map((r) => r.name), ["audio"]);
-	assertEquals(
-		delta.cloneTracks.map((c) => [c.track.name, c.parentName, c.parentNamespace]),
-		[["video-lo", "video", "live/alice"]],
-	);
+	assertEquals(keys.at(-1), "initDataList");
 });
 
-Deno.test("applyCatalogDelta resolves an added track's initRef against the base catalog's list", () => {
-	const base = goBaseCatalog();
-	const delta = parseCatalogDelta(GO_DELTA);
-
-	const result = applyCatalogDelta(base, delta);
-
-	assertEquals(result.tracks.find((t) => t.name === "video-hd")?.initData, VIDEO_INIT);
-});
-
-// Expected tracks and clone codec are what Go's own Catalog.ApplyDelta returns
-// for the same inputs (video, video-hd, video-lo; clone codec avc1.64000d,
-// clone initRef inherited as "video").
-Deno.test("applyCatalogDelta applies a Go-emitted delta's removes and clones", () => {
-	const base = goBaseCatalog();
-	const delta = parseCatalogDelta(GO_DELTA);
-
-	const result = applyCatalogDelta(base, delta);
-
-	assertEquals(result.tracks.map((t) => t.name), ["video", "video-hd", "video-lo"]);
-	const clone = result.tracks.find((t) => t.name === "video-lo");
-	assertEquals([clone?.codec, clone?.initData], ["avc1.64000d", VIDEO_INIT]);
-});
-
-// ─── TS → wire: catalog init data ────────────────────────────────────────────
-
-Deno.test("stringifyCatalog writes a track's initData as an initDataList entry, never inline", () => {
-	const catalog: Catalog = {
-		version: 1,
-		tracks: [{ name: "video", packaging: "loc", isLive: true, initData: VIDEO_INIT }],
-	};
-
-	const wire = JSON.parse(stringifyCatalog(catalog));
-
-	assertEquals(wire.initDataList, [{ id: "video", type: "inline", data: VIDEO_INIT }]);
-	assertEquals(wire.tracks, [{
-		name: "video",
-		packaging: "loc",
-		isLive: true,
-		initRef: "video",
-	}]);
-});
-
-Deno.test("stringifyCatalog gives tracks that share a payload one shared entry", () => {
-	const catalog: Catalog = {
-		version: 1,
-		tracks: [
-			{ name: "hd", packaging: "loc", isLive: true, initData: VIDEO_INIT },
-			{ name: "sd", packaging: "loc", isLive: true, initData: VIDEO_INIT },
-		],
-	};
-
-	const wire = JSON.parse(stringifyCatalog(catalog));
-
-	assertEquals(wire.initDataList, [{ id: "hd", type: "inline", data: VIDEO_INIT }]);
-	assertEquals(wire.tracks.map((t: { initRef: string }) => t.initRef), ["hd", "hd"]);
-});
-
-Deno.test("stringifyCatalog does not let a stale initRef hide a payload edited in place", () => {
-	const catalog = parseCatalog(GO_CATALOG);
-	catalog.tracks[0]!.initData = "bmV3";
-
-	const wire = JSON.parse(stringifyCatalog(catalog));
-
-	const ref = wire.tracks[0].initRef;
-	assertNotEquals(ref, "video");
-	assertEquals(
-		wire.initDataList.find((e: { id: string }) => e.id === ref),
-		{ id: ref, type: "inline", data: "bmV3" },
-	);
-});
-
-Deno.test("stringifyCatalog derives a fresh id when the track's name is already taken", () => {
-	const catalog: Catalog = {
-		version: 1,
-		initDataList: [{ id: "video", type: "inline", data: VIDEO_INIT }],
-		tracks: [{ name: "video", packaging: "loc", isLive: true, initData: "bmV3" }],
-	};
-
-	const wire = JSON.parse(stringifyCatalog(catalog));
-
-	assertEquals(wire.tracks[0].initRef, "video-2");
-});
-
-Deno.test("stringifyCatalog names an unnamed track's entry init", () => {
-	const catalog: Catalog = {
-		version: 1,
-		tracks: [{ name: "", packaging: "loc", isLive: true, initData: VIDEO_INIT }],
-	};
-
-	const wire = JSON.parse(stringifyCatalog(catalog));
-
-	assertEquals(wire.tracks[0].initRef, "init");
-});
-
-Deno.test("stringifyCatalog spreads a track's extraFields instead of writing the key", () => {
-	const catalog: Catalog = {
-		version: 1,
-		tracks: [{ name: "v", packaging: "cmaf", extraFields: { vendor: 1 } }],
-	};
-
-	const wire = JSON.parse(stringifyCatalog(catalog));
-
-	assertEquals(wire.tracks, [{ vendor: 1, name: "v", packaging: "cmaf" }]);
-});
-
-// ─── validateCatalog: Initialization Data List rules ────────────────────────
-
-Deno.test("validateCatalog rejects a malformed Initialization Data List", async (t) => {
-	const cases: { name: string; catalog: Catalog; problem: string }[] = [
-		{
-			name: "duplicate id",
-			catalog: {
-				version: 1,
-				initDataList: [{ id: "a", data: "AA==" }, { id: "a", data: "AQ==" }],
-				tracks: [],
-			},
-			problem: 'initDataList[1]: duplicate init id "a"',
-		},
-		{
-			name: "non-inline type",
-			catalog: { version: 1, initDataList: [{ id: "a", type: "url" }], tracks: [] },
-			problem: 'initDataList[0]: type must be "inline"',
-		},
-		{
-			name: "missing id",
-			catalog: { version: 1, initDataList: [{ id: "", data: "AA==" }], tracks: [] },
-			problem: "initDataList[0]: id is required",
-		},
-		{
-			name: "dangling initRef",
-			catalog: {
-				version: 1,
-				tracks: [{ name: "v", packaging: "cmaf", initRef: "missing" }],
-			},
-			problem: 'tracks[0]: initRef "missing" does not match any initDataList id',
-		},
-	];
-	for (const c of cases) {
-		await t.step(c.name, () => {
-			const problems = validationProblems(() => validateCatalog(c.catalog));
-
-			assertEquals(problems, [c.problem]);
-		});
-	}
-});
-
-Deno.test("validateCatalog accepts an initRef its track can supply itself", () => {
-	const catalog: Catalog = {
-		version: 1,
-		tracks: [{ name: "v", packaging: "cmaf", initRef: "own", initData: "AA==" }],
-	};
-
-	assertEquals(validationProblems(() => validateCatalog(catalog)), []);
-});
-
-// ─── Delta wire form ─────────────────────────────────────────────────────────
-
-Deno.test("parseCatalogDelta rejects an unknown operation", () => {
-	assertThrows(
-		() => parseCatalogDelta('{"deltaUpdate":[{"op":"rename","tracks":[]}]}'),
-		Error,
-		'unknown delta update op "rename"',
-	);
-});
-
-Deno.test("parseCatalogDelta rejects a delta without a deltaUpdate array", () => {
-	assertThrows(() => parseCatalogDelta('{"generatedAt":1}'), Error, "deltaUpdate");
-});
-
-Deno.test("parseCatalogDelta appends repeated operations and records first-seen order", () => {
-	const delta = parseCatalogDelta(
-		'{"deltaUpdate":[{"op":"remove","tracks":[{"name":"a"}]},{"op":"add","tracks":[{"name":"b","packaging":"cmaf"}]},{"op":"remove","tracks":[{"name":"c"}]}]}',
-	);
-
-	assertEquals(delta.removeTracks.map((r) => r.name), ["a", "c"]);
-	assertEquals(delta.deltaOpOrder, ["removeTracks", "addTracks"]);
-});
-
-Deno.test("stringifyCatalogDelta refuses a track whose initData it cannot represent", () => {
-	const delta: CatalogDelta = {
-		addTracks: [{ name: "v", packaging: "cmaf", initData: VIDEO_INIT }],
-		removeTracks: [],
-		cloneTracks: [],
-	};
-
-	assertThrows(() => stringifyCatalogDelta(delta), Error, "addTracks[0] carries initData");
-});
-
-Deno.test("stringifyCatalogDelta writes an initRef and drops the initData it resolved to", () => {
-	const delta: CatalogDelta = {
-		addTracks: [{ name: "v", packaging: "cmaf", initRef: "video", initData: VIDEO_INIT }],
-		removeTracks: [],
-		cloneTracks: [],
-	};
-
-	const wire = JSON.parse(stringifyCatalogDelta(delta));
-
-	assertEquals(wire.deltaUpdate, [
-		{ op: "add", tracks: [{ name: "v", packaging: "cmaf", initRef: "video" }] },
-	]);
-});
-
-Deno.test("stringifyCatalogDelta writes a clone's parentNamespace", () => {
-	const delta: CatalogDelta = {
-		addTracks: [],
-		removeTracks: [],
-		cloneTracks: [{ track: { name: "lo" }, parentName: "hi", parentNamespace: "other" }],
-	};
-
-	const wire = JSON.parse(stringifyCatalogDelta(delta));
-
-	assertEquals(wire.deltaUpdate, [
-		{ op: "clone", tracks: [{ name: "lo", parentName: "hi", parentNamespace: "other" }] },
-	]);
-});
-
-Deno.test("stringifyCatalogDelta round-trips a Go-emitted delta to the same JSON content", () => {
-	const delta = parseCatalogDelta(GO_DELTA);
-
-	const json = stringifyCatalogDelta(delta);
+Deno.test("stringifyCatalogDelta re-encodes a Go-emitted delta to the same JSON content", () => {
+	const json = stringifyCatalogDelta(parseCatalogDelta(GO_DELTA));
 
 	assertEquals(JSON.parse(json), JSON.parse(GO_DELTA));
 });
 
-Deno.test("applyCatalogDelta looks for a clone's parent in parentNamespace, not the clone's own", () => {
-	const base: Catalog = {
-		version: 1,
-		defaultNamespace: "home",
-		tracks: [{ namespace: "other", name: "src", packaging: "cmaf", codec: "c1" }],
-	};
-	const delta: CatalogDelta = {
-		addTracks: [],
-		removeTracks: [],
-		cloneTracks: [{
-			track: { namespace: "home", name: "copy" },
-			parentName: "src",
-			parentNamespace: "other",
-		}],
-	};
+Deno.test("stringifyCatalog writes an empty catalog's tracks as [], as Go does", () => {
+	const catalog: Catalog = { version: "draft-02", tracks: [] };
 
-	const result = applyCatalogDelta(base, delta);
-
-	assertEquals(result.tracks.find((t) => t.name === "copy")?.codec, "c1");
+	assertEquals(stringifyCatalog(catalog), '{"version":"draft-02","tracks":[]}');
 });
 
-Deno.test("applyCatalogDelta resolves a clone's overridden initRef instead of inheriting the parent's payload", () => {
-	const base = goBaseCatalog();
+Deno.test("stringifyCatalogDelta writes an empty operation's tracks as [], as Go does", () => {
 	const delta: CatalogDelta = {
+		generatedAt: 1,
 		addTracks: [],
-		removeTracks: [],
-		cloneTracks: [{ track: { name: "video-alt", initRef: "audio" }, parentName: "video" }],
+		removeTracks: [{ name: "a" }],
+		cloneTracks: [],
+		updateTracks: [],
+		deltaOps: [{ kind: "removeTracks", count: 1 }, { kind: "updateTracks", count: 0 }],
 	};
 
-	const result = applyCatalogDelta(base, delta);
-
-	const clone = result.tracks.find((t) => t.name === "video-alt");
-	assertEquals([clone?.initRef, clone?.initData], ["audio", AUDIO_INIT]);
+	assertEquals(
+		JSON.parse(stringifyCatalogDelta(delta)).deltaUpdate,
+		[{ op: "remove", tracks: [{ name: "a" }] }, { op: "update", tracks: [] }],
+	);
 });
 
-Deno.test("stringifyCatalog treats an empty initRef as unset", () => {
-	const catalog: Catalog = {
-		version: 1,
-		tracks: [{ name: "video", packaging: "loc", initRef: "", initData: VIDEO_INIT }],
-	};
+Deno.test("parseCatalog rejects a version Go does not accept", () => {
+	const catalog = parseCatalog('{"version":"draft-01","tracks":[]}');
 
-	const wire = JSON.parse(stringifyCatalog(catalog));
-
-	assertEquals(wire.initDataList, [{ id: "video", type: "inline", data: VIDEO_INIT }]);
-	assertEquals(wire.tracks[0].initRef, "video");
+	assertThrows(() => validateCatalog(catalog), Error, 'unsupported catalog version "draft-01"');
 });
