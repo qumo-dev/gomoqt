@@ -479,21 +479,21 @@ func (c Catalog) Validate() error {
 		}
 		initIDs[ref.ID] = struct{}{}
 	}
-	if len(initIDs) > 0 {
-		checkRef := func(prefix, ref string) {
-			if ref == "" {
-				return
-			}
-			if _, ok := initIDs[ref]; !ok {
-				problems = append(problems, fmt.Sprintf("%s: initRef %q does not match any initDataList id", prefix, ref))
-			}
+	// An initRef must resolve even when the catalog declares no
+	// initDataList at all.
+	checkRef := func(prefix, ref string) {
+		if ref == "" {
+			return
 		}
-		for i := range c.Tracks {
-			checkRef("tracks["+itoa(i)+"]", c.Tracks[i].InitRef)
+		if _, ok := initIDs[ref]; !ok {
+			problems = append(problems, fmt.Sprintf("%s: initRef %q does not match any initDataList id", prefix, ref))
 		}
-		for i := range c.PublishTracks {
-			checkRef("publishTracks["+itoa(i)+"]", c.PublishTracks[i].InitRef)
-		}
+	}
+	for i := range c.Tracks {
+		checkRef("tracks["+itoa(i)+"]", c.Tracks[i].InitRef)
+	}
+	for i := range c.PublishTracks {
+		checkRef("publishTracks["+itoa(i)+"]", c.PublishTracks[i].InitRef)
 	}
 
 	if hasDepends {
@@ -748,7 +748,7 @@ func (c *Catalog) updateTrack(update TrackUpdate) error {
 	if !ok {
 		return fmt.Errorf("msf: cannot update unknown track %q", targetID.String())
 	}
-	if target.IsLive != nil && !*target.IsLive && update.hasField("isLive") && update.IsLive != nil && *update.IsLive {
+	if target.IsLive != nil && !*target.IsLive && update.IsLive != nil && *update.IsLive {
 		return fmt.Errorf("msf: cannot update track %q: isLive must not change from false to true", targetID.String())
 	}
 
@@ -1569,9 +1569,12 @@ func isJSONNull(raw json.RawMessage) bool {
 	return string(bytes.TrimSpace(raw)) == "null"
 }
 
+// zeroTrack is the Track isTrackFieldKey probes; read-only.
+var zeroTrack Track
+
 // isTrackFieldKey reports whether key names a field Track models.
 func isTrackFieldKey(key string) bool {
-	_, known := trackFieldState(&Track{}, key)
+	_, known := trackFieldState(&zeroTrack, key)
 	return known
 }
 
@@ -1795,7 +1798,10 @@ func (r InitDataRef) PropertyType() (uint64, error) {
 	if r.Type != InitDataTypeTrackProperty && r.Type != InitDataTypeObjectProperty {
 		return 0, fmt.Errorf("msf: init data type %q does not name a property", r.Type)
 	}
-	digits := strings.TrimPrefix(strings.TrimPrefix(r.Data, "0x"), "0X")
+	digits := r.Data
+	if len(digits) >= 2 && digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X') {
+		digits = digits[2:]
+	}
 	if digits == "" {
 		return 0, fmt.Errorf("msf: init data property type %q is not hex notation", r.Data)
 	}

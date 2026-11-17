@@ -2100,6 +2100,19 @@ func TestCatalogValidate_DanglingInitRef(t *testing.T) {
 	assert.Contains(t, err.Error(), "does not match any initDataList id")
 }
 
+// TestCatalogValidate_DanglingInitRefWithoutInitDataList checks that an
+// initRef must resolve even when the catalog declares no initDataList.
+func TestCatalogValidate_DanglingInitRefWithoutInitDataList(t *testing.T) {
+	catalog := Catalog{
+		Version: CurrentVersion,
+		Tracks:  []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(true), InitRef: "init1"}},
+	}
+
+	err := catalog.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `initRef "init1" does not match any initDataList id`)
+}
+
 func TestCatalogValidate_ValidInitRef(t *testing.T) {
 	catalog := Catalog{
 		Version: CurrentVersion,

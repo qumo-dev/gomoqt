@@ -340,6 +340,19 @@ func TestParseCatalogDelta_RepeatedDeltaUpdateLastWins(t *testing.T) {
 	assert.JSONEq(t, `{"generatedAt":1,"deltaUpdate":[{"op":"remove","tracks":[{"name":"b"}]}]}`, string(data))
 }
 
+// TestCatalogDelta_MarshalJSON_EmptyOperationKeepsTracksArray checks that a
+// decoded operation with no tracks re-encodes its required tracks member as
+// [], not null.
+func TestCatalogDelta_MarshalJSON_EmptyOperationKeepsTracksArray(t *testing.T) {
+	delta, err := ParseCatalogDeltaString(`{"generatedAt":1,
+		"deltaUpdate":[{"op":"add","tracks":[]},{"op":"remove","tracks":[{"name":"b"}]}]}`)
+	require.NoError(t, err)
+
+	data, err := json.Marshal(delta)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"generatedAt":1,"deltaUpdate":[{"op":"add","tracks":[]},{"op":"remove","tracks":[{"name":"b"}]}]}`, string(data))
+}
+
 func TestParseCatalog_RepeatedTracksLastWins(t *testing.T) {
 	catalog, err := ParseCatalogString(`{"version":"draft-02",
 		"tracks":[{"name":"a","packaging":"loc","isLive":true}],

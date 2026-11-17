@@ -247,6 +247,13 @@ func (d CatalogDelta) MarshalJSON() ([]byte, error) {
 	ops := make([]map[string]any, 0, len(spans))
 	for _, op := range spans {
 		entry := map[string]any{"op": string(op.kind)}
+		if op.lo == op.hi {
+			// tracks is required; an empty operation still encodes it as [],
+			// not as the null a nil slice of that kind would produce.
+			entry["tracks"] = []struct{}{}
+			ops = append(ops, entry)
+			continue
+		}
 		switch op.kind {
 		case deltaOperationAdd:
 			entry["tracks"] = d.AddTracks[op.lo:op.hi]

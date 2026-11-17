@@ -100,11 +100,8 @@ func WalkCatalogRefs(ctx context.Context, root TrackID, limits CatalogWalkLimits
 	if root.Namespace == inheritedNamespaceSentinel {
 		root.Namespace = ""
 	}
-	if err := validateNamespace(root.Namespace); err != nil {
-		return fmt.Errorf("msf: root catalog %q needs the Track Namespace it is published under: %w", root.Name, err)
-	}
-	if err := validateNameText(root.Name); err != nil || root.Name == "" {
-		return fmt.Errorf("msf: root catalog needs a valid Track Name, got %q", root.Name)
+	if err := validateCatalogTrackID(root); err != nil {
+		return fmt.Errorf("msf: root catalog: %w", err)
 	}
 	w := catalogWalk{
 		load:    load,
@@ -168,9 +165,29 @@ func (w *catalogWalk) walk(ctx context.Context, id TrackID, depth int) error {
 	}()
 
 	for _, ref := range refs {
+		// The referencing catalog is not validated, so a reference may carry
+		// an empty name or a malformed namespace; never hand that to load.
+		if err := validateCatalogTrackID(ref); err != nil {
+			return fmt.Errorf("msf: catalog %q references an invalid catalog track: %w", id.String(), err)
+		}
 		if err := w.walk(ctx, ref, depth+1); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validateCatalogTrackID checks that id names a catalog track the walk can
+// load: a valid Track Namespace and a non-empty, valid Track Name.
+func validateCatalogTrackID(id TrackID) error {
+	if err := validateNamespace(id.Namespace); err != nil {
+		return fmt.Errorf("catalog %q needs the Track Namespace it is published under: %w", id.Name, err)
+	}
+	if id.Name == "" {
+		return errors.New("catalog needs a non-empty Track Name")
+	}
+	if err := validateNameText(id.Name); err != nil {
+		return fmt.Errorf("catalog Track Name: %w", err)
 	}
 	return nil
 }

@@ -222,8 +222,8 @@ func TestWalkCatalogRefs_RejectsUnusableRoot(t *testing.T) {
 		"no namespace":          {root: TrackID{Name: "catalog"}, errMatch: "needs the Track Namespace"},
 		"inherited marker":      {root: Track{Name: "catalog"}.ID(""), errMatch: "needs the Track Namespace"},
 		"malformed namespace":   {root: TrackID{Namespace: "a//b", Name: "catalog"}, errMatch: "needs the Track Namespace"},
-		"no name":               {root: TrackID{Namespace: "live"}, errMatch: "valid Track Name"},
-		"NUL in name":           {root: TrackID{Namespace: "live", Name: "cat\x00alog"}, errMatch: "valid Track Name"},
+		"no name":               {root: TrackID{Namespace: "live"}, errMatch: "Track Name"},
+		"NUL in name":           {root: TrackID{Namespace: "live", Name: "cat\x00alog"}, errMatch: "Track Name"},
 		"usable root is walked": {root: TrackID{Namespace: "live", Name: "catalog"}},
 	}
 
@@ -249,6 +249,38 @@ func TestWalkCatalogRefs_RejectsUnusableRoot(t *testing.T) {
 			for _, id := range loaded {
 				assert.Equal(t, "live", id.Namespace, "load only sees real namespaces")
 			}
+		})
+	}
+}
+
+// TestWalkCatalogRefs_RejectsUnusableReference checks that a reference with an
+// empty name or a malformed namespace stops the walk before load sees it,
+// since the referencing catalog is not validated.
+func TestWalkCatalogRefs_RejectsUnusableReference(t *testing.T) {
+	tests := map[string]struct {
+		ref Track
+	}{
+		"no name":             {ref: catalogRefTrack("", "")},
+		"malformed namespace": {ref: catalogRefTrack("a//b", "child")},
+		"NUL in name":         {ref: catalogRefTrack("", "ch\x00ild")},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			root := TrackID{Namespace: "live", Name: "catalog"}
+			var loaded []TrackID
+			load := func(_ context.Context, id TrackID) (Catalog, error) {
+				loaded = append(loaded, id)
+				return Catalog{Version: CurrentVersion, Tracks: []Track{tt.ref}}, nil
+			}
+			visit := func(TrackID, Catalog) error { return nil }
+
+			err := WalkCatalogRefs(ctx, root, CatalogWalkLimits{}, load, visit)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "references an invalid catalog track")
+			assert.Equal(t, []TrackID{root}, loaded, "only the root is loaded")
 		})
 	}
 }
