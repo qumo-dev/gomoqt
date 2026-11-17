@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -224,4 +225,56 @@ func TestSession_handleFetchStream_Malformed(t *testing.T) {
 	session.handleFetchStream(stream)
 
 	assert.Contains(t, stream.CancelWriteCodes(), transport.StreamErrorCode(InternalGroupErrorCode))
+}
+
+// TestSession_handleGoawayStream_Violations verifies moq-lite-06 §7.18: a
+// second GOAWAY, a New Session URI sent to a server, and an over-long URI all
+// close the session with PROTOCOL_VIOLATION.
+func TestSession_handleGoawayStream_Violations(t *testing.T) {
+	encode := func(uri string) []byte {
+		body, _ := message.WriteString(nil, uri)
+		full, _ := message.WriteMessageLength(nil, uint64(len(body)))
+		return append(full, body...)
+	}
+	tests := map[string]struct {
+		server  bool
+		goaways [][]byte
+	}{
+		"a second GOAWAY":           {goaways: [][]byte{encode(""), encode("")}},
+		"a redirect sent to server": {server: true, goaways: [][]byte{encode("https://example.com/next")}},
+		"an over-long URI":          {goaways: [][]byte{encode(strings.Repeat("a", message.MaxNewSessionURILen+1))}},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			conn := &fakeStreamConn{}
+			sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{server: tt.server}, nil)
+			defer sess.CloseWithError(NoError, "")
+
+			for _, g := range tt.goaways {
+				_ = sess.handleGoawayStream(&fakeQUICStream{reads: []streamResult{{Data: g}, {Err: io.EOF}}}) // the violation is what is asserted
+			}
+
+			select {
+			case <-conn.Context().Done():
+			case <-time.After(time.Second):
+				t.Fatal("session was not terminated on protocol violation")
+			}
+			calls := conn.CloseCalls()
+			require.NotEmpty(t, calls)
+			assert.Equal(t, transport.ConnErrorCode(ProtocolViolationErrorCode), calls[0].Code)
+		})
+	}
+}
+
+func TestSession_handleGoawayStream_ServerAcceptsEmptyURI(t *testing.T) {
+	conn := &fakeStreamConn{}
+	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{server: true}, nil)
+	defer sess.CloseWithError(NoError, "")
+
+	var goaway bytes.Buffer
+	require.NoError(t, message.GoawayMessage{}.Encode(&goaway))
+	require.NoError(t, sess.handleGoawayStream(&fakeQUICStream{reads: []streamResult{{Data: goaway.Bytes()}, {Err: io.EOF}}}))
+
+	assert.NoError(t, conn.Context().Err(), "a client's GOAWAY carries no URI and is fine")
 }

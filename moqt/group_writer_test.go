@@ -78,7 +78,7 @@ func TestGroupWriter_WriteFrame(t *testing.T) {
 			expectError:      false,
 			expectFrameCount: 1,
 			verifyData: func(t *testing.T, stream *fakeQUICSendStream) {
-				// draft-05 frame format: varint(timestamp_delta) + varint(length) + payload.
+				// moq-lite frame format: varint(timestamp_delta) + varint(length) + payload.
 				// For the first frame with Timestamp 0: delta=0 (1 byte 0x00), length=9 (1 byte 0x09), payload="test data".
 				assert.Equal(t, append([]byte{0, 9}, []byte("test data")...), stream.Written())
 			},

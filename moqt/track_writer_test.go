@@ -759,3 +759,143 @@ func TestTrackWriter_OpenGroup_GroupErrorStreamWriteFailures(t *testing.T) {
 		assert.Same(t, streamErr, groupErr.StreamError)
 	})
 }
+
+// newRangeTestWriter returns a TrackWriter serving config, and the group
+// streams it opens.
+func newRangeTestWriter(t *testing.T, config *SubscribeConfig) (*TrackWriter, *[]*fakeQUICSendStream) {
+	t.Helper()
+	var opened []*fakeQUICSendStream
+	substr := newReceiveSubscribeStream(SubscribeID(3), &fakeQUICStream{}, config)
+	open := func(context.Context) (transport.SendStream, error) {
+		s := &fakeQUICSendStream{}
+		opened = append(opened, s)
+		return s, nil
+	}
+	return newTrackWriter("/live", "video", substr, open, func() {}), &opened
+}
+
+func TestTrackWriter_OpenGroupAt_Range(t *testing.T) {
+	tests := map[string]struct {
+		config  SubscribeConfig
+		seq     GroupSequence
+		wantErr error
+	}{
+		"no floor":             {config: SubscribeConfig{}, seq: 0},
+		"at the floor":         {config: SubscribeConfig{StartGroup: 5}, seq: 5},
+		"below the floor":      {config: SubscribeConfig{StartGroup: 5}, seq: 4, wantErr: ErrGroupOutOfRange},
+		"at the end group":     {config: SubscribeConfig{EndGroup: 9}, seq: 9},
+		"past the end group":   {config: SubscribeConfig{EndGroup: 9}, seq: 10, wantErr: ErrGroupOutOfRange},
+		"unbounded end, large": {config: SubscribeConfig{}, seq: 1 << 40},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			w, opened := newRangeTestWriter(t, &tt.config)
+
+			gw, err := w.OpenGroupAt(context.Background(), tt.seq)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+				assert.Nil(t, gw)
+				assert.Empty(t, *opened, "nothing is opened for a refused group")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.seq, gw.GroupSequence())
+		})
+	}
+}
+
+func TestTrackWriter_OpenGroupAt_FrameStart(t *testing.T) {
+	tests := map[string]struct {
+		config         SubscribeConfig
+		seq            GroupSequence
+		wantFrameStart uint64
+		wantFrameEnd   uint64
+	}{
+		"start group from a frame":      {config: SubscribeConfig{StartGroup: 5, StartFrame: 15}, seq: 5, wantFrameStart: 15},
+		"a later group is whole":        {config: SubscribeConfig{StartGroup: 5, StartFrame: 15}, seq: 6},
+		"end group up to a frame":       {config: SubscribeConfig{EndGroup: 8, EndFrame: 4}, seq: 8, wantFrameEnd: 4},
+		"an earlier group is whole":     {config: SubscribeConfig{EndGroup: 8, EndFrame: 4}, seq: 7},
+		"start and end in one group":    {config: SubscribeConfig{StartGroup: 3, StartFrame: 2, EndGroup: 3, EndFrame: 6}, seq: 3, wantFrameStart: 2, wantFrameEnd: 6},
+		"no frame bounds, whole groups": {config: SubscribeConfig{StartGroup: 3, EndGroup: 3}, seq: 3},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			w, opened := newRangeTestWriter(t, &tt.config)
+
+			gw, err := w.OpenGroupAt(context.Background(), tt.seq)
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.wantFrameStart, gw.frameStart)
+			assert.Equal(t, tt.wantFrameEnd, gw.frameEnd)
+
+			r := bytes.NewReader((*opened)[0].Written())
+			var st message.StreamType
+			require.NoError(t, st.Decode(r))
+			var gm message.GroupMessage
+			require.NoError(t, gm.Decode(r))
+			assert.Equal(t, uint64(tt.seq), gm.GroupSequence)
+			assert.Equal(t, tt.wantFrameStart, gm.FrameStart, "GROUP carries the stream's first frame index")
+		})
+	}
+}
+
+func TestTrackWriter_Close_EndGroup(t *testing.T) {
+	tests := map[string]struct {
+		open    func(*TrackWriter) error
+		wantEnd uint64
+		wantOK  bool
+	}{
+		"no group produced": {
+			open:    func(*TrackWriter) error { return nil },
+			wantEnd: 0,
+		},
+		"only group 0": {
+			open: func(w *TrackWriter) error {
+				gw, err := w.OpenGroupAt(context.Background(), 0)
+				if err != nil {
+					return err
+				}
+				return gw.Close()
+			},
+			wantEnd: 1,
+			wantOK:  true,
+		},
+		"groups 1 and 2": {
+			open: func(w *TrackWriter) error {
+				for range 2 {
+					gw, err := w.OpenGroup(context.Background())
+					if err != nil {
+						return err
+					}
+					if err := gw.Close(); err != nil {
+						return err
+					}
+				}
+				return nil
+			},
+			wantEnd: 3,
+			wantOK:  true,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			sender, buf := newTrackWriterDropTestSender(t)
+			require.NoError(t, tt.open(sender))
+			require.NoError(t, sender.Close())
+
+			r := bytes.NewReader(buf.Bytes())
+			resp, err := readSubscribeResponse(r)
+			require.NoError(t, err)
+			if tt.wantOK {
+				require.NotNil(t, resp.ok)
+				resp, err = readSubscribeResponse(r)
+				require.NoError(t, err)
+			}
+			require.NotNil(t, resp.end, "SUBSCRIBE_END follows")
+			assert.Equal(t, tt.wantEnd, resp.end.Group)
+		})
+	}
+}

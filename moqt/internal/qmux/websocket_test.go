@@ -16,25 +16,25 @@ func TestSelectProtocol(t *testing.T) {
 		ok        bool
 	}{
 		"offered": {
-			offered: []string{"qmux-02.moq-lite-05"}, supported: []string{"moq-lite-05"},
-			expected: "moq-lite-05", ok: true,
+			offered: []string{"qmux-02.moq-lite-06"}, supported: []string{"moq-lite-06"},
+			expected: "moq-lite-06", ok: true,
 		},
 		"several in one header value, as browsers send them": {
-			offered: []string{"qmux-02.moq-lite-05, qmux-01.moq-lite-05, webtransport"}, supported: []string{"moq-lite-05"},
-			expected: "moq-lite-05", ok: true,
+			offered: []string{"qmux-02.moq-lite-06, qmux-01.moq-lite-06, webtransport"}, supported: []string{"moq-lite-06"},
+			expected: "moq-lite-06", ok: true,
 		},
 		"the server's preference decides": {
 			offered: []string{"qmux-02.a", "qmux-02.b"}, supported: []string{"b", "a"},
 			expected: "b", ok: true,
 		},
-		"another QMux draft":               {offered: []string{"qmux-01.moq-lite-05"}, supported: []string{"moq-lite-05"}},
-		"the QMux draft alone":             {offered: []string{"qmux-02"}, supported: []string{"moq-lite-05"}},
-		"the application protocol alone":   {offered: []string{"moq-lite-05"}, supported: []string{"moq-lite-05"}},
-		"another application protocol":     {offered: []string{"qmux-02.moq-lite-04"}, supported: []string{"moq-lite-05"}},
-		"nothing offered":                  {offered: nil, supported: []string{"moq-lite-05"}},
-		"nothing supported":                {offered: []string{"qmux-02.moq-lite-05"}, supported: nil},
-		"an empty header value":            {offered: []string{""}, supported: []string{"moq-lite-05"}},
-		"a prefix of a supported protocol": {offered: []string{"qmux-02.moq"}, supported: []string{"moq-lite-05"}},
+		"another QMux draft":               {offered: []string{"qmux-01.moq-lite-06"}, supported: []string{"moq-lite-06"}},
+		"the QMux draft alone":             {offered: []string{"qmux-02"}, supported: []string{"moq-lite-06"}},
+		"the application protocol alone":   {offered: []string{"moq-lite-06"}, supported: []string{"moq-lite-06"}},
+		"another application protocol":     {offered: []string{"qmux-02.moq-lite-04"}, supported: []string{"moq-lite-06"}},
+		"nothing offered":                  {offered: nil, supported: []string{"moq-lite-06"}},
+		"nothing supported":                {offered: []string{"qmux-02.moq-lite-06"}, supported: nil},
+		"an empty header value":            {offered: []string{""}, supported: []string{"moq-lite-06"}},
+		"a prefix of a supported protocol": {offered: []string{"qmux-02.moq"}, supported: []string{"moq-lite-06"}},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {

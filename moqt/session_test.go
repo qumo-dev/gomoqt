@@ -3127,3 +3127,144 @@ func TestSession_ProcessUniStream_TrackReadersRace(t *testing.T) {
 		<-writerDone
 	}
 }
+
+func TestSession_Subscribe_RejectsFrameEndWithoutGroupEnd(t *testing.T) {
+	session, conn := newTestSessionWithConn(t)
+
+	_, err := session.Subscribe(context.Background(), "/live", "video", &SubscribeConfig{EndFrame: 3})
+
+	assert.ErrorIs(t, err, errFrameEndWithoutGroupEnd)
+	assert.Empty(t, conn.openStreams, "nothing is sent for an invalid range")
+}
+
+func TestSession_Fetch_RejectsFrameRange(t *testing.T) {
+	tests := map[string]struct {
+		start, end uint64
+		wantErr    bool
+	}{
+		"whole group":          {},
+		"from a frame":         {start: 4},
+		"single frame":         {start: 4, end: 5},
+		"end below start":      {start: 4, end: 3, wantErr: true},
+		"end equal to start":   {start: 4, end: 4, wantErr: true},
+		"end without a start":  {end: 2},
+		"end at the first one": {start: 0, end: 1},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			session, conn := newTestSessionWithConn(t)
+			conn.openStreams = []biStreamResult{{Stream: &fakeQUICStream{}}}
+
+			group, err := session.Fetch(&FetchRequest{BroadcastPath: "/live", TrackName: "video", FrameStart: tt.start, FrameEnd: tt.end})
+			if tt.wantErr {
+				assert.ErrorIs(t, err, errFetchFrameRange)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.start, group.FrameStart(), "the first returned frame is implicit from the request")
+		})
+	}
+}
+
+// subscribeStreamFor returns a bidirectional stream carrying a SUBSCRIBE.
+func subscribeStreamFor(tb testing.TB, sm message.SubscribeMessage) *fakeQUICStream {
+	tb.Helper()
+	var buf bytes.Buffer
+	require.NoError(tb, message.StreamTypeSubscribe.Encode(&buf))
+	require.NoError(tb, sm.Encode(&buf))
+	return &fakeQUICStream{reads: []streamResult{{Data: buf.Bytes()}, {Block: true}}}
+}
+
+func TestSession_HandleSubscribeStream_Refusals(t *testing.T) {
+	tests := map[string]struct {
+		sm       message.SubscribeMessage
+		hopIDs   []uint64 // the served broadcast's hop path
+		peerHop  uint64   // the subscriber's SETUP Hop ID
+		wantCode transport.StreamErrorCode
+	}{
+		"frame end without group end": {
+			sm:       message.SubscribeMessage{BroadcastPath: "/live", TrackName: "video", FrameEnd: 2},
+			wantCode: transport.StreamErrorCode(SubscribeErrorCodeInvalidRange),
+		},
+		"a path through the subscriber is unroutable": {
+			sm:       message.SubscribeMessage{BroadcastPath: "/live", TrackName: "video"},
+			hopIDs:   []uint64{11, 22},
+			peerHop:  22,
+			wantCode: transport.StreamErrorCode(SubscribeErrorCodeUnroutable),
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			conn := &fakeStreamConn{}
+			session := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
+			defer session.CloseWithError(NoError, "")
+			session.peerSetupReceived.Store(true)
+			session.peerHopID = tt.peerHop
+			close(session.peerSetupCh)
+
+			ann, end := NewAnnouncement(t.Context(), "/live")
+			defer end()
+			ann.setRoute(announceRoute{hopIDs: tt.hopIDs})
+			session.mux.Announce(ann, TrackHandlerFunc(func(tw *TrackWriter) {
+				t.Error("the handler must not be reached")
+			}))
+
+			stream := subscribeStreamFor(t, tt.sm)
+			session.processBiStream(stream)
+
+			assert.Equal(t, []transport.StreamErrorCode{tt.wantCode}, stream.CancelWriteCodes())
+		})
+	}
+}
+
+func TestSession_HandleFetchStream_RejectsFrameRange(t *testing.T) {
+	session, _ := newTestSessionWithConn(t)
+	session.fetchHandler = FetchHandlerFunc(func(*GroupWriter, *FetchRequest) {
+		t.Error("the handler must not be reached")
+	})
+
+	var buf bytes.Buffer
+	require.NoError(t, message.StreamTypeFetch.Encode(&buf))
+	require.NoError(t, message.FetchMessage{BroadcastPath: "/live", TrackName: "video", FrameStart: 5, FrameEnd: 5}.Encode(&buf))
+	stream := &fakeQUICStream{reads: []streamResult{{Data: buf.Bytes()}, {Block: true}}}
+
+	session.processBiStream(stream)
+
+	assert.Equal(t, []transport.StreamErrorCode{transport.StreamErrorCode(InvalidRangeGroupErrorCode)}, stream.CancelWriteCodes())
+}
+
+func TestSession_HandleFetchStream_ServesFrameRange(t *testing.T) {
+	session, _ := newTestSessionWithConn(t)
+	session.fetchHandler = FetchHandlerFunc(func(w *GroupWriter, r *FetchRequest) {
+		for ts := uint64(0); ts < 6; ts++ {
+			f := NewFrame(0)
+			f.Timestamp = ts
+			if err := w.WriteFrame(f); err != nil {
+				t.Error(err)
+			}
+		}
+		if err := w.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	var buf bytes.Buffer
+	require.NoError(t, message.StreamTypeFetch.Encode(&buf))
+	require.NoError(t, message.FetchMessage{BroadcastPath: "/live", TrackName: "video", FrameStart: 2, FrameEnd: 4}.Encode(&buf))
+	stream := &fakeQUICStream{reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
+
+	session.processBiStream(stream)
+
+	r := bytes.NewReader(stream.Written())
+	var got []uint64
+	prev := uint64(0)
+	for r.Len() > 0 {
+		f := NewFrame(0)
+		require.NoError(t, f.decode(r, prev))
+		prev = f.Timestamp
+		got = append(got, f.Timestamp)
+	}
+	assert.Equal(t, []uint64{2, 3}, got, "frames 2 and 3 of the group, the first delta-encoded from 0")
+}

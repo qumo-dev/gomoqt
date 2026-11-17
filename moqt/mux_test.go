@@ -12,6 +12,7 @@ import (
 
 	"testing/synctest"
 
+	"github.com/qumo-dev/gomoqt/moqt/internal/message"
 	"github.com/qumo-dev/gomoqt/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -2229,4 +2230,76 @@ func TestMux_ServeAnnouncements_AncestorAndDescendantReceive(t *testing.T) {
 		cancelS()
 		wg.Wait()
 	})
+}
+
+// TestMux_ServeAnnouncements_ClampsCoveringRoutes verifies a route above the
+// requested prefix reaches the request clamped to it (moq-lite-06 §5.1.1),
+// whether it was announced before the request or after.
+func TestMux_ServeAnnouncements_ClampsCoveringRoutes(t *testing.T) {
+	tests := map[string]struct {
+		announceFirst bool
+	}{
+		"announced before the request": {announceFirst: true},
+		"announced after the request":  {announceFirst: false},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				mux := NewTrackMux(0)
+				announce := func() {
+					mux.Announce(func() *Announcement {
+						ann, _ := NewAnnouncement(t.Context(), "/live")
+						return ann
+					}(), TrackHandlerFunc(func(*TrackWriter) {}))
+				}
+				if tt.announceFirst {
+					announce()
+				}
+
+				streamCtx, cancel := context.WithCancel(t.Context())
+				stream := &fakeQUICStream{parentCtx: streamCtx}
+				aw := newAnnouncementWriter(stream, "/live/alice/", 0, 0, nil, nil)
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					mux.serveAnnouncements(aw)
+				}()
+				synctest.Wait()
+
+				if !tt.announceFirst {
+					announce()
+					synctest.Wait()
+				}
+
+				events := readAnnounceEvents(t, stream.Written())
+				require.Len(t, events, 1)
+				assert.Equal(t, message.MessageTypeAnnounceStart, events[0].typ)
+				assert.Equal(t, "", events[0].suffix, "the covering route presents as the request prefix")
+
+				cancel()
+				<-done
+			})
+		})
+	}
+}
+
+func TestMux_CoveringAnnouncements(t *testing.T) {
+	mux := NewTrackMux(0)
+	paths := []BroadcastPath{"/", "/a", "/a/b", "/a/bc", "/a/b/c/d"}
+	anns := make(map[BroadcastPath]*Announcement, len(paths))
+	for _, p := range paths {
+		ann, end := NewAnnouncement(t.Context(), p)
+		defer end()
+		anns[p] = ann
+		mux.Announce(ann, TrackHandlerFunc(func(*TrackWriter) {}))
+	}
+
+	got := make(map[*Announcement]struct{})
+	mux.coveringAnnouncements("/a/b/c/", got)
+
+	assert.Len(t, got, 3)
+	for _, p := range []BroadcastPath{"/", "/a", "/a/b"} {
+		assert.Contains(t, got, anns[p], "%s covers /a/b/c/", p)
+	}
 }

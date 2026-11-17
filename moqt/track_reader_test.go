@@ -226,7 +226,7 @@ func TestTrackReader_Drops(t *testing.T) {
 	// Write a SUBSCRIBE_DROP response (readSubscribeResponses returns after one drop)
 	_, _ = buf.Write([]byte{byte(message.MessageTypeSubscribeDrop)})
 	require.NoError(t, (message.SubscribeDropMessage{
-		GroupStart: 11, // plain absolute sequence per draft-05
+		GroupStart: 11, // plain absolute sequence
 		GroupEnd:   21,
 		ErrorCode:  3,
 	}).Encode(&buf))
