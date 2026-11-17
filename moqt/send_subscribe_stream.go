@@ -106,12 +106,7 @@ type subscribeResponse struct {
 }
 
 func readSubscribeResponse(stream io.Reader) (subscribeResponse, error) {
-	head := make([]byte, 1)
-	if _, err := io.ReadFull(stream, head); err != nil {
-		return subscribeResponse{}, err
-	}
-
-	msgType, _, err := message.ReadVarint(head)
+	msgType, err := message.ReadMessageType(stream)
 	if err != nil {
 		return subscribeResponse{}, err
 	}

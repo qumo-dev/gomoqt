@@ -5,7 +5,6 @@ import {
 	AnnounceMessageTypes,
 	AnnounceStartMessage,
 	AnnounceUpdateMessage,
-	duplicateHopID,
 } from "./announce.ts";
 import type { AnnounceMessage } from "./announce.ts";
 import { MessageDecodeError } from "./message.ts";
@@ -110,21 +109,6 @@ Deno.test("a malformed announcement body is a MessageDecodeError", async (t) => 
 			const err = await c.fresh().decode(buf);
 
 			assertInstanceOf(err, MessageDecodeError);
-		});
-	}
-});
-
-Deno.test("duplicateHopID", async (t) => {
-	const cases: { name: string; ids: number[]; want: number | undefined }[] = [
-		{ name: "empty list", ids: [], want: undefined },
-		{ name: "distinct IDs", ids: [1, 2, 3], want: undefined },
-		{ name: "repeated zeros are legal", ids: [0, 5, 0], want: undefined },
-		{ name: "repeated non-zero ID", ids: [5, 0, 5], want: 5 },
-		{ name: "first repeated ID wins", ids: [2, 3, 3, 2], want: 2 },
-	];
-	for (const c of cases) {
-		await t.step(c.name, () => {
-			assertEquals(duplicateHopID(c.ids), c.want);
 		});
 	}
 });

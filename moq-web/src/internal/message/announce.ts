@@ -20,17 +20,6 @@ export const AnnounceMessageTypes = {
 } as const;
 
 /**
- * Returns the first non-zero Hop ID that appears twice in `ids`, or undefined.
- * Repeated zeros are legal: 0 identifies nothing (moq-lite-06 §7.6).
- */
-export function duplicateHopID(ids: readonly number[]): number | undefined {
-	for (const [i, id] of ids.entries()) {
-		if (id !== 0 && ids.indexOf(id, i + 1) !== -1) return id;
-	}
-	return undefined;
-}
-
-/**
  * Reads a length-prefixed body and parses it with `parse`, which reads fields
  * through the strict {@link MessageDecoder} methods. A body that does not
  * parse, or has bytes left over, yields a {@link MessageDecodeError}.

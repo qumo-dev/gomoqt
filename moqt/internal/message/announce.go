@@ -1,30 +1,18 @@
 package message
 
 import (
-	"errors"
 	"io"
 )
 
 // Type tags for the announcements a publisher sends on the Announce Stream
 // after ANNOUNCE_OK (moq-lite-06 §7.6–7.8). Each message's Encode writes its
-// own tag; its Decode expects the caller to have consumed it (see
-// ReadMessageType).
+// own tag; its Decode expects the caller to have consumed it with
+// ReadMessageType.
 const (
 	MessageTypeAnnounceStart  uint64 = 0x0
 	MessageTypeAnnounceEnd    uint64 = 0x1
 	MessageTypeAnnounceUpdate uint64 = 0x2
 )
-
-// ErrDuplicateHopID is returned for a Hop ID list that names one non-zero Hop
-// ID twice. Repeated zeros are legal: 0 identifies nothing.
-var ErrDuplicateHopID = errors.New("duplicate non-zero hop id")
-
-// ReadMessageType reads the varint Type tag that precedes a typed message on
-// the Announce and Subscribe streams. A tag is a varint like a message
-// length, so it shares that reader and its allocation-free fast path.
-func ReadMessageType(r io.Reader) (uint64, error) {
-	return ReadMessageLength(r)
-}
 
 // AnnounceStartMessage advertises a route: a claim that paths under a prefix
 // can be served. Each one implicitly assigns the next Announce ID on the
@@ -220,23 +208,6 @@ func (am *AnnounceUpdateMessage) Decode(src io.Reader) error {
 
 	if len(b) != 0 {
 		return ErrMessageTooShort
-	}
-	return nil
-}
-
-// CheckHopIDs returns ErrDuplicateHopID when a non-zero Hop ID appears twice
-// in ids (moq-lite-06 §7.6). Lists are short, so a quadratic scan beats a set
-// and allocates nothing.
-func CheckHopIDs(ids []uint64) error {
-	for i, id := range ids {
-		if id == 0 {
-			continue
-		}
-		for _, other := range ids[i+1:] {
-			if other == id {
-				return ErrDuplicateHopID
-			}
-		}
 	}
 	return nil
 }

@@ -208,11 +208,31 @@ func (ar *AnnouncementReader) run() {
 	}
 }
 
+// errDuplicateHopID reports a Hop ID list that names one non-zero Hop ID
+// twice, a protocol violation (moq-lite-06 §7.6). Repeated zeros are legal:
+// 0 identifies nothing.
+var errDuplicateHopID = errors.New("duplicate non-zero hop id")
+
+// checkHopIDs returns errDuplicateHopID when a non-zero Hop ID appears twice
+// in ids. Lists are short, so a quadratic scan beats a set and allocates
+// nothing.
+func checkHopIDs(ids []uint64) error {
+	for i, id := range ids {
+		if id == 0 {
+			continue
+		}
+		if slices.Contains(ids[i+1:], id) {
+			return errDuplicateHopID
+		}
+	}
+	return nil
+}
+
 // receivedRoute reconstructs an advertisement's routing metadata: its Hop ID
 // list plus the peer's implicit ANNOUNCE_OK Hop ID, and both route costs plus
 // the cost the peer declared for its link, saturating at the varint ceiling.
 func receivedRoute(hopIDs []uint64, peerHopID, warm, cold, peerCost uint64) (announceRoute, error) {
-	if err := message.CheckHopIDs(hopIDs); err != nil {
+	if err := checkHopIDs(hopIDs); err != nil {
 		return announceRoute{}, fmt.Errorf("%w: %w", errAnnounceViolation, err)
 	}
 	return announceRoute{

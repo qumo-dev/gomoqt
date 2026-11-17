@@ -8,7 +8,6 @@ import {
 	AnnounceStartMessage,
 	AnnounceUpdateMessage,
 	DEFAULT_COST,
-	duplicateHopID,
 	MessageDecodeError,
 	readVarint,
 	writeVarint,
@@ -401,6 +400,18 @@ export interface AnnouncementReaderOptions {
 // stream ending between messages.
 function truncated(err: Error): Error {
 	return err instanceof EOFError ? new MessageDecodeError("truncated announcement") : err;
+}
+
+/**
+ * Returns the first non-zero Hop ID that appears twice in `ids`, or undefined.
+ * A repeat is a protocol violation; repeated zeros are legal, since 0
+ * identifies nothing (moq-lite-06 §7.6).
+ */
+function duplicateHopID(ids: readonly number[]): number | undefined {
+	for (const [i, id] of ids.entries()) {
+		if (id !== 0 && ids.indexOf(id, i + 1) !== -1) return id;
+	}
+	return undefined;
 }
 
 /** Raised for an Announce Stream message that breaks moq-lite-06 §5.1.1. */

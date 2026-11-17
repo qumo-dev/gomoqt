@@ -518,3 +518,27 @@ func TestAnnouncementReader_RouteOutsideScopeIsKeptLive(t *testing.T) {
 	assert.Equal(t, BroadcastPath("/room/1/alice"), receiveN(t, ar, 1)[0].BroadcastPath())
 	assert.Empty(t, violations.wait(20*time.Millisecond))
 }
+
+func TestCheckHopIDs(t *testing.T) {
+	tests := map[string]struct {
+		ids     []uint64
+		wantErr error
+	}{
+		"empty":                  {ids: nil},
+		"distinct":               {ids: []uint64{1, 2, 3}},
+		"repeated zeros":         {ids: []uint64{0, 4, 0, 0}},
+		"repeated non-zero":      {ids: []uint64{5, 6, 5}, wantErr: errDuplicateHopID},
+		"adjacent repeated hops": {ids: []uint64{0, 8, 8}, wantErr: errDuplicateHopID},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := checkHopIDs(tc.ids)
+			if tc.wantErr != nil {
+				assert.ErrorIs(t, err, tc.wantErr)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}

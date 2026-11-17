@@ -3,7 +3,7 @@ import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.
 import { varintLen } from "../webtransport/len.ts";
 
 /** The longest GOAWAY New Session URI, in bytes (moq-lite-06 §7.18). */
-export const MAX_NEW_SESSION_URI_LEN = 8192;
+const MAX_NEW_SESSION_URI_LEN = 8192;
 
 /** Raised for a GOAWAY New Session URI longer than {@link MAX_NEW_SESSION_URI_LEN}. */
 export class NewSessionURITooLongError extends Error {

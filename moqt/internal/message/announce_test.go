@@ -98,27 +98,3 @@ func TestAnnounceStartMessage_Decode_HopCountMismatch(t *testing.T) {
 		})
 	}
 }
-
-func TestCheckHopIDs(t *testing.T) {
-	tests := map[string]struct {
-		ids     []uint64
-		wantErr error
-	}{
-		"empty":                  {ids: nil},
-		"distinct":               {ids: []uint64{1, 2, 3}},
-		"repeated zeros":         {ids: []uint64{0, 4, 0, 0}},
-		"repeated non-zero":      {ids: []uint64{5, 6, 5}, wantErr: message.ErrDuplicateHopID},
-		"adjacent repeated hops": {ids: []uint64{0, 8, 8}, wantErr: message.ErrDuplicateHopID},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			err := message.CheckHopIDs(tc.ids)
-			if tc.wantErr != nil {
-				assert.ErrorIs(t, err, tc.wantErr)
-				return
-			}
-			assert.NoError(t, err)
-		})
-	}
-}

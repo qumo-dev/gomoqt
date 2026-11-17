@@ -14,7 +14,6 @@ import {
 	FetchMessage,
 	GoawayMessage,
 	GroupMessage,
-	MAX_NEW_SESSION_URI_LEN,
 	NewSessionURITooLongError,
 	readVarint,
 	SetupMessage,
@@ -130,9 +129,12 @@ Deno.test("draft-06 wire: new fields round-trip", async (t) => {
 	}
 });
 
+// The GOAWAY New Session URI cap moq-lite-06 sets (§7.18), matching moq-transport.
+const uriLimit = 8192;
+
 Deno.test("draft-06 GOAWAY URI limit", async (t) => {
 	await t.step("encode refuses an over-long URI", async () => {
-		const gm = new GoawayMessage({ newSessionURI: "a".repeat(MAX_NEW_SESSION_URI_LEN + 1) });
+		const gm = new GoawayMessage({ newSessionURI: "a".repeat(uriLimit + 1) });
 
 		const err = await gm.encode(Buffer.make(16));
 
@@ -140,20 +142,20 @@ Deno.test("draft-06 GOAWAY URI limit", async (t) => {
 	});
 
 	await t.step("a URI at the limit round-trips", async () => {
-		const gm = new GoawayMessage({ newSessionURI: "a".repeat(MAX_NEW_SESSION_URI_LEN) });
-		const buf = Buffer.make(MAX_NEW_SESSION_URI_LEN + 16);
+		const gm = new GoawayMessage({ newSessionURI: "a".repeat(uriLimit) });
+		const buf = Buffer.make(uriLimit + 16);
 		await gm.encode(buf);
 		const decoded = new GoawayMessage();
 
 		const err = await decoded.decode(buf);
 
 		assertEquals(err, undefined);
-		assertEquals(decoded.newSessionURI.length, MAX_NEW_SESSION_URI_LEN);
+		assertEquals(decoded.newSessionURI.length, uriLimit);
 	});
 
 	await t.step("decode refuses an over-long URI from its length", async () => {
 		const buf = Buffer.make(16);
-		await writeVarint(buf, MAX_NEW_SESSION_URI_LEN + 100);
+		await writeVarint(buf, uriLimit + 100);
 
 		const err = await new GoawayMessage().decode(buf);
 
