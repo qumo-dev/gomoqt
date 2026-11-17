@@ -4,7 +4,7 @@ import (
 	"io"
 )
 
-// SubscribeEndMessage is sent by the publisher to signal that no group
+// SubscribeEndMessage is sent by the publisher to signal that no group at or
 // after the given sequence will be produced.
 //
 // Wire format:
@@ -15,8 +15,9 @@ import (
 //	  Group (i)
 //	}
 type SubscribeEndMessage struct {
-	// Group is the absolute sequence number of the last group that may be
-	// delivered, inclusive (plain absolute sequence, not the +1 form).
+	// Group is the exclusive end of the range: the absolute sequence of the
+	// first group that will never be delivered. 0 means the track ended
+	// before producing any group.
 	Group uint64
 }
 

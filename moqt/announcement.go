@@ -61,7 +61,34 @@ type Announcement struct {
 	active atomic.Bool
 	once   sync.Once
 
-	hopIDs []uint64
+	// route is the routing metadata of an announcement received from a peer:
+	// the hop path and the accumulated route costs. An ANNOUNCE_UPDATE
+	// replaces it in place, so it is guarded by routeMu. A local
+	// announcement has none: no hops, and both costs 0 (content it is
+	// already producing).
+	routeMu sync.Mutex
+	route   announceRoute
+}
+
+// announceRoute is an advertisement's routing metadata (moq-lite-06 §7.6).
+type announceRoute struct {
+	hopIDs   []uint64
+	warmCost uint64
+	coldCost uint64
+}
+
+// setRoute replaces the routing metadata, as an ANNOUNCE_UPDATE does.
+func (a *Announcement) setRoute(r announceRoute) {
+	a.routeMu.Lock()
+	defer a.routeMu.Unlock()
+	a.route = r
+}
+
+// routeInfo returns the routing metadata.
+func (a *Announcement) routeInfo() announceRoute {
+	a.routeMu.Lock()
+	defer a.routeMu.Unlock()
+	return a.route
 }
 
 // String returns a string representation of the announcement for debugging.
@@ -89,10 +116,13 @@ func (a *Announcement) BroadcastPath() BroadcastPath {
 	return a.path
 }
 
-// HopIDs returns the list of hop IDs the announcement has traversed.
-// Each relay appends its own hop ID when forwarding. For local announcements, HopIDs returns nil.
+// HopIDs returns the hop path the announcement traversed, from the origin to
+// the peer it arrived from; a 0 entry is a hop that withheld its identity. An
+// ANNOUNCE_UPDATE may replace it while the announcement stays active. For
+// local announcements, HopIDs returns nil. The returned slice must not be
+// modified.
 func (a *Announcement) HopIDs() []uint64 {
-	return a.hopIDs
+	return a.routeInfo().hopIDs
 }
 
 // Done returns a channel that is closed once when the announcement ends.

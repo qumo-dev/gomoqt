@@ -8,8 +8,7 @@ import (
  *	TRACK_INFO Message {
  *	  Message Length (i)
  *	  Publisher Priority (8)
- *	  Publisher Ordered (8)
- *	  Publisher Max Latency (i)
+ *	  Publisher Max Age (i)
  *	  Timescale (i)
  *	}
  *
@@ -17,18 +16,16 @@ import (
  * Timescale MUST be non-zero.
  */
 type TrackInfoMessage struct {
-	PublisherPriority   uint8
-	PublisherOrdered    uint8
-	PublisherMaxLatency uint64
-	Timescale           uint64
+	PublisherPriority uint8
+	PublisherMaxAge   uint64
+	Timescale         uint64
 }
 
 func (tim TrackInfoMessage) Len() int {
 	var l int
 
 	l += 1 // PublisherPriority (uint8)
-	l += 1 // PublisherOrdered (uint8)
-	l += VarintLen(tim.PublisherMaxLatency)
+	l += VarintLen(tim.PublisherMaxAge)
 	l += VarintLen(tim.Timescale)
 
 	return l
@@ -40,8 +37,7 @@ func (tim TrackInfoMessage) Encode(w io.Writer) error {
 
 	b, _ = WriteMessageLength(b, uint64(msgLen))
 	b = append(b, tim.PublisherPriority)
-	b = append(b, tim.PublisherOrdered)
-	b, _ = WriteVarint(b, tim.PublisherMaxLatency)
+	b, _ = WriteVarint(b, tim.PublisherMaxAge)
 	b, _ = WriteVarint(b, tim.Timescale)
 
 	_, err := w.Write(b)
@@ -55,18 +51,17 @@ func (tim *TrackInfoMessage) Decode(src io.Reader) error {
 		return err
 	}
 
-	if len(b) < 2 {
+	if len(b) < 1 {
 		return ErrMessageTooShort
 	}
 	tim.PublisherPriority = b[0]
-	tim.PublisherOrdered = b[1]
-	b = b[2:]
+	b = b[1:]
 
 	num, n, err := ReadVarint(b)
 	if err != nil {
 		return err
 	}
-	tim.PublisherMaxLatency = num
+	tim.PublisherMaxAge = num
 	b = b[n:]
 
 	num, n, err = ReadVarint(b)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
@@ -12,8 +13,10 @@ import (
 )
 
 // newAnnouncementWriter serves the peer's announcement request for prefix.
-// scope, when set, is what the peer may list: the writer closes with
-// UNAUTHORIZED once prefix lies within no root of it.
+// excludeHop is the Hop ID the peer declared in its SETUP (0 for none): a path
+// through it is never advertised to the peer. scope, when set, is what the
+// peer may list: the writer closes with UNAUTHORIZED once prefix lies within
+// no root of it.
 func newAnnouncementWriter(stream transport.Stream, prefix prefix, localHopID uint64, excludeHop uint64, logger *slog.Logger, scope *authScope) *AnnouncementWriter {
 	if !isValidPrefix(prefix) {
 		panic("invalid prefix for AnnouncementWriter")
@@ -59,17 +62,25 @@ var errAnnouncementWriterClosed = errors.New("moqt: announcement writer closed")
 
 // AnnouncementWriter manages the sending of announcements for a specified prefix.
 // It handles initialization, sending active announcements, and cleanup.
+//
+// Each route has at most one advertisement on the stream (moq-lite-06
+// §5.1.1): the first ANNOUNCE_START for it assigns an Announce ID, a change of
+// the announcement behind it travels as ANNOUNCE_UPDATE on that ID, and its end
+// as ANNOUNCE_END.
 type AnnouncementWriter struct {
 	prefix     prefix
 	stream     transport.Stream
 	ctx        context.Context
 	logger     *slog.Logger
-	localHopID uint64 // this node's Hop ID to append when forwarding
-	excludeHop uint64 // skip announcements whose HopIDs contain this value
+	localHopID uint64 // this node's Hop ID, carried in ANNOUNCE_OK
+	excludeHop uint64 // the peer's SETUP Hop ID: skip paths that contain it
 	scope      *authScope
 
 	mu      sync.RWMutex
 	actives map[suffix]*activeAnnouncement
+	// nextID is the Announce ID the next ANNOUNCE_START assigns. Both ends
+	// count ANNOUNCE_STARTs, so it must advance with every one sent.
+	nextID uint64
 	// closed is set once Close or CloseWithError has run; the writer then
 	// takes no more announcements, even from an init still running.
 	closed bool
@@ -88,9 +99,10 @@ func (aw *AnnouncementWriter) logError(msg string, err error, args ...any) {
 	}
 }
 
-// shouldExclude returns true if the announcement should be skipped because
-// its hop path — including this node's own Hop ID, which is the implicit
-// trailing entry carried by ANNOUNCE_OK — contains the excludeHop value.
+// shouldExclude reports whether ann must not be advertised to the peer: its
+// hop path — including this node's own Hop ID, the implicit trailing entry
+// ANNOUNCE_OK carries — contains the Hop ID the peer declared (moq-lite-06
+// §5.1.1.1). The peer could only discard it, and acting on it would loop.
 func (aw *AnnouncementWriter) shouldExclude(ann *Announcement) bool {
 	if aw.excludeHop == 0 {
 		return false
@@ -101,16 +113,43 @@ func (aw *AnnouncementWriter) shouldExclude(ann *Announcement) bool {
 	return slices.Contains(ann.HopIDs(), aw.excludeHop)
 }
 
-// buildHopIDs returns the Hop ID list to encode in the outgoing
-// ANNOUNCE_BROADCAST message. This node's own Hop ID is NOT included: it is
-// carried once in ANNOUNCE_OK as the implicit trailing entry, and the spec
-// forbids repeating it as the last entry of the broadcast's list.
-func (aw *AnnouncementWriter) buildHopIDs(ann *Announcement) []uint64 {
-	return ann.HopIDs()
+// routeSuffix returns the route suffix ann is advertised under on this
+// stream: the part of its path past the requested prefix, or "" for a route
+// at or above the prefix, which presents clamped to it (moq-lite-06 §5.1.1).
+// Matching is per path segment, so a path never matches half a segment.
+func (aw *AnnouncementWriter) routeSuffix(ann *Announcement) (suffix, bool) {
+	return routeSuffix(ann.BroadcastPath(), aw.prefix)
 }
 
-// init snapshots the currently active announcements, sends an ACTIVE AnnounceBroadcastMessage
-// for each active track suffix on the announce stream, and sets up end handlers.
+// routeSuffix is AnnouncementWriter.routeSuffix for a path and a prefix.
+func routeSuffix(path BroadcastPath, pfx prefix) (suffix, bool) {
+	if sfx, ok := path.GetSuffix(pfx); ok {
+		return sfx, true
+	}
+	// A prefix ends in "/", so path covers it when path is the root or path
+	// followed by "/" leads the prefix.
+	p := string(path)
+	if p == "/" || (strings.HasPrefix(pfx, p) && pfx[len(p)] == '/') {
+		return "", true
+	}
+	return "", false
+}
+
+// startMessage builds the ANNOUNCE_START for ann under sfx. This node's own
+// Hop ID is NOT in the list: ANNOUNCE_OK carries it once as the implicit
+// trailing entry.
+func startMessage(sfx suffix, ann *Announcement) message.AnnounceStartMessage {
+	r := ann.routeInfo()
+	return message.AnnounceStartMessage{
+		RoutePrefixSuffix: sfx,
+		HopIDs:            r.hopIDs,
+		WarmRouteCost:     r.warmCost,
+		ColdRouteCost:     r.coldCost,
+	}
+}
+
+// init snapshots the currently active announcements, sends ANNOUNCE_OK and an
+// ANNOUNCE_START for each route, and watches each for its end.
 func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) error {
 	var err error
 	aw.initOnce.Do(func() {
@@ -130,14 +169,19 @@ func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) err
 			if !ann.IsActive() {
 				continue
 			}
-			sfx, ok := ann.BroadcastPath().GetSuffix(aw.prefix)
+			sfx, ok := aw.routeSuffix(ann)
 			if !ok {
 				continue
 			}
 			if aw.shouldExclude(ann) {
 				continue
 			}
-			// Always replace with the latest active announcement for the suffix.
+			if active, ok := actives[sfx]; ok {
+				// Several routes clamp to the request prefix: advertise one,
+				// keep the rest to fall back on.
+				active.standby = append(active.standby, ann)
+				continue
+			}
 			actives[sfx] = &activeAnnouncement{announcement: ann}
 		}
 
@@ -151,8 +195,8 @@ func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) err
 		aw.actives = actives
 		aw.mu.Unlock()
 
-		// ANNOUNCE_OK is sent exactly once, before any ANNOUNCE_BROADCAST,
-		// carrying this node's Hop ID and the size of the initial set.
+		// ANNOUNCE_OK is sent exactly once, before any announcement, carrying
+		// this node's Hop ID and the size of the initial set.
 		err = message.AnnounceOkMessage{
 			HopID:       aw.localHopID,
 			ActiveCount: uint64(len(actives)),
@@ -168,23 +212,19 @@ func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) err
 		}
 
 		for sfx, active := range actives {
-			err = message.AnnounceBroadcastMessage{
-				AnnounceStatus:      message.ACTIVE,
-				BroadcastPathSuffix: sfx,
-				HopIDs:              aw.buildHopIDs(active.announcement),
-			}.Encode(aw.stream)
+			aw.mu.Lock()
+			active.id = aw.nextID
+			aw.nextID++
+			err = startMessage(sfx, active.announcement).Encode(aw.stream)
 			if err != nil {
 				if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
 					err = &AnnounceError{StreamError: strErr}
 				}
-				aw.mu.Lock()
 				aw.initErr = err
 				aw.mu.Unlock()
 				return
 			}
-
-			aw.mu.Lock()
-			aw.registerEndHandlerLocked(sfx, active.announcement)
+			aw.watchLocked(sfx, active)
 			aw.mu.Unlock()
 		}
 	})
@@ -197,55 +237,77 @@ func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) err
 	return aw.initErr
 }
 
-// registerEndHandlerLocked watches the active announcement for sfx, ending it on
-// the peer when it ends. Caller MUST hold aw.mu.
-func (aw *AnnouncementWriter) registerEndHandlerLocked(sfx suffix, ann *Announcement) {
-	active, ok := aw.actives[sfx]
-	if !ok || active.announcement != ann {
+// watchLocked watches the announcement active advertises, re-advertising or
+// ending the route when it ends. Caller MUST hold aw.mu.
+func (aw *AnnouncementWriter) watchLocked(sfx suffix, active *activeAnnouncement) {
+	if aw.actives[sfx] != active {
 		// The writer was closed while the caller had released aw.mu.
 		return
 	}
-	active.stop = ann.AfterFunc(func() { aw.remove(sfx, active) })
+	ann := active.announcement
+	active.stop = ann.AfterFunc(func() { aw.ended(sfx, active, ann) })
 }
 
-// end stops watching active and sends ENDED for it, unless its own end
-// handler already has or the writer has been closed since. It takes aw.mu.
-func (aw *AnnouncementWriter) end(sfx suffix, active *activeAnnouncement) {
-	if active.stop == nil || !active.stop() {
-		return
-	}
-	aw.remove(sfx, active)
-}
-
-// remove forgets active and sends ENDED for it, unless the writer has been
-// closed or sfx announced again since. It takes aw.mu.
-func (aw *AnnouncementWriter) remove(sfx suffix, active *activeAnnouncement) {
+// ended handles the end of ann, the announcement behind active. A route with a
+// standby still active moves to it with ANNOUNCE_UPDATE; otherwise it ends
+// with ANNOUNCE_END. Nothing is sent once the writer has closed or active is no
+// longer the route's advertisement. It takes aw.mu.
+func (aw *AnnouncementWriter) ended(sfx suffix, active *activeAnnouncement, ann *Announcement) {
 	aw.mu.Lock()
 	defer aw.mu.Unlock()
-	if aw.actives[sfx] == active {
-		delete(aw.actives, sfx)
-		aw.sendEndedLocked(sfx)
+	if aw.actives[sfx] != active || active.announcement != ann {
+		return
 	}
+
+	for len(active.standby) > 0 {
+		next := active.standby[len(active.standby)-1]
+		active.standby = active.standby[:len(active.standby)-1]
+		if !next.IsActive() || aw.shouldExclude(next) {
+			continue
+		}
+		active.announcement = next
+		aw.sendUpdateLocked(active)
+		aw.watchLocked(sfx, active)
+		return
+	}
+
+	delete(aw.actives, sfx)
+	aw.sendEndLocked(active.id)
 }
 
-// sendEndedLocked sends ANNOUNCE_BROADCAST ENDED for sfx. A stream that has already
-// ended, as it has once the session closes, is not written to: its end ends
-// every announcement on the peer. Caller MUST hold aw.mu.
-func (aw *AnnouncementWriter) sendEndedLocked(sfx suffix) {
+// sendEndLocked sends ANNOUNCE_END for id. A stream that has already ended,
+// as it has once the session closes, is not written to: its end ends every
+// announcement on the peer. Caller MUST hold aw.mu.
+func (aw *AnnouncementWriter) sendEndLocked(id uint64) {
 	if aw.ctx.Err() != nil {
 		return
 	}
-	err := message.AnnounceBroadcastMessage{
-		AnnounceStatus:      message.ENDED,
-		BroadcastPathSuffix: sfx,
-	}.Encode(aw.stream)
-	if err != nil {
-		aw.logError("failed to encode ANNOUNCE end message", err)
+	if err := (message.AnnounceEndMessage{AnnounceID: id}).Encode(aw.stream); err != nil {
+		aw.logError("failed to encode ANNOUNCE_END message", err)
 	}
 }
 
-// SendAnnouncement sends an announcement if it's active and not already sent.
-// It replaces any existing announcement for the same suffix.
+// sendUpdateLocked sends ANNOUNCE_UPDATE carrying the routing metadata of the
+// announcement now behind active. Caller MUST hold aw.mu.
+func (aw *AnnouncementWriter) sendUpdateLocked(active *activeAnnouncement) {
+	if aw.ctx.Err() != nil {
+		return
+	}
+	r := active.announcement.routeInfo()
+	err := message.AnnounceUpdateMessage{
+		AnnounceID:    active.id,
+		HopIDs:        r.hopIDs,
+		WarmRouteCost: r.warmCost,
+		ColdRouteCost: r.coldCost,
+	}.Encode(aw.stream)
+	if err != nil {
+		aw.logError("failed to encode ANNOUNCE_UPDATE message", err)
+	}
+}
+
+// SendAnnouncement advertises announcement if it is active and not already
+// advertised. A route already advertised by another announcement moves to
+// this one with ANNOUNCE_UPDATE, keeping its Announce ID.
 func (aw *AnnouncementWriter) SendAnnouncement(announcement *Announcement) error {
 	// Wait for initialization to complete
 	select {
@@ -270,43 +332,41 @@ func (aw *AnnouncementWriter) SendAnnouncement(announcement *Announcement) error
 		return nil
 	}
 
-	// Get suffix for this announcement
-	suffix, ok := announcement.BroadcastPath().GetSuffix(aw.prefix)
+	sfx, ok := aw.routeSuffix(announcement)
 	if !ok {
 		return errors.New("moq: broadcast path with invalid prefix")
 	}
 
 	aw.mu.Lock()
-
-	active, exists := aw.actives[suffix]
-	if exists && active.announcement == announcement {
-		aw.mu.Unlock()
-		return nil // Already active, no need to re-announce
-	}
-
-	// If there's an existing announcement for this suffix, end it first.
-	// Release lock before calling end() since it acquires the lock internally.
-	aw.mu.Unlock()
-
-	if exists {
-		aw.end(suffix, active)
-	}
-
-	aw.mu.Lock()
 	defer aw.mu.Unlock()
 
-	// The writer may have been closed while the lock was released above to
-	// end the previous announcement; it must not encode onto a closing stream.
+	// The writer may have been closed; it must not encode onto a closing
+	// stream.
 	if aw.closed {
 		return nil
 	}
 
-	// Encode and send ACTIVE announcement
-	err := message.AnnounceBroadcastMessage{
-		AnnounceStatus:      message.ACTIVE,
-		BroadcastPathSuffix: suffix,
-		HopIDs:              aw.buildHopIDs(announcement),
-	}.Encode(aw.stream)
+	if active, exists := aw.actives[sfx]; exists {
+		if active.announcement == announcement || slices.Contains(active.standby, announcement) {
+			return nil // Already advertised, no need to re-announce
+		}
+		// The route is advertised already: a second ANNOUNCE_START for it
+		// would be a protocol violation. Move it to the newer announcement
+		// in place, keeping the older one to fall back on while it lasts.
+		if active.stop != nil {
+			active.stop()
+		}
+		if prev := active.announcement; prev.IsActive() {
+			active.standby = append(active.standby, prev)
+		}
+		active.announcement = announcement
+		aw.sendUpdateLocked(active)
+		aw.watchLocked(sfx, active)
+		return nil
+	}
+
+	active := &activeAnnouncement{announcement: announcement, id: aw.nextID}
+	err := startMessage(sfx, announcement).Encode(aw.stream)
 	if err != nil {
 		if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
 			return &AnnounceError{
@@ -316,15 +376,16 @@ func (aw *AnnouncementWriter) SendAnnouncement(announcement *Announcement) error
 
 		return err
 	}
+	aw.nextID++
 
-	aw.actives[suffix] = &activeAnnouncement{announcement: announcement}
-	aw.registerEndHandlerLocked(suffix, announcement)
+	aw.actives[sfx] = active
+	aw.watchLocked(sfx, active)
 
 	return nil
 }
 
 // Close finishes the stream. The peer then treats every announcement on it as
-// ended (moq-lite-05 §5.1.1), so no ENDED is sent.
+// ended (moq-lite-06 §5.1.1), so no ANNOUNCE_END is sent.
 func (aw *AnnouncementWriter) Close() error {
 	aw.stopAll()
 	return aw.stream.Close()
@@ -362,8 +423,15 @@ func (aw *AnnouncementWriter) Context() context.Context {
 	return aw.ctx
 }
 
-// activeAnnouncement represents an active announcement being managed by AnnouncementWriter.
+// activeAnnouncement is one route advertised on the stream.
 type activeAnnouncement struct {
+	// id is the Announce ID its ANNOUNCE_START assigned.
+	id uint64
+	// announcement is the announcement the route currently advertises.
 	announcement *Announcement
-	stop         func() bool // stops the watch registerEndHandlerLocked set, if it has not run
+	// standby are other announcements for the same route, newest last: the
+	// route moves to one with ANNOUNCE_UPDATE when announcement ends. Only
+	// routes clamped to the request prefix collect them.
+	standby []*Announcement
+	stop    func() bool // stops the watch watchLocked set, if it has not run
 }

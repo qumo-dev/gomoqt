@@ -20,6 +20,13 @@ func TestGroupMessage_EncodeDecode(t *testing.T) {
 				GroupSequence: 1,
 			},
 		},
+		"partial group": {
+			input: message.GroupMessage{
+				SubscribeID:   1,
+				GroupSequence: 7,
+				FrameStart:    15,
+			},
+		},
 		"max values": {
 			input: message.GroupMessage{
 				SubscribeID:   1<<(64-2) - 1, // maxVarInt8 (uint62 max)
@@ -124,10 +131,11 @@ func TestGroupMessage_DecodeErrors(t *testing.T) {
 	t.Run("extra data", func(t *testing.T) {
 		var g message.GroupMessage
 		var buf bytes.Buffer
-		buf.WriteByte(0x03) // length varint = 3
+		buf.WriteByte(0x04) // length varint = 4
 		buf.WriteByte(0x01) // subscribe id
 		buf.WriteByte(0x01) // group sequence
-		buf.WriteByte(0x00) // extra (fills to 3 bytes)
+		buf.WriteByte(0x00) // frame start
+		buf.WriteByte(0x00) // extra (fills to 4 bytes)
 		src := bytes.NewReader(buf.Bytes())
 		err := g.Decode(src)
 		assert.Error(t, err)

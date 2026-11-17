@@ -19,7 +19,9 @@ func TestDecode_RejectsOversizedLength(t *testing.T) {
 	lengthPrefix, _ := message.WriteMessageLength(nil, 1<<62-1)
 
 	decoders := map[string]interface{ Decode(io.Reader) error }{
-		"AnnounceBroadcastMessage": &message.AnnounceBroadcastMessage{},
+		"AnnounceStartMessage":     &message.AnnounceStartMessage{},
+		"AnnounceEndMessage":       &message.AnnounceEndMessage{},
+		"AnnounceUpdateMessage":    &message.AnnounceUpdateMessage{},
 		"AnnounceRequestMessage":   &message.AnnounceRequestMessage{},
 		"AnnounceOkMessage":        &message.AnnounceOkMessage{},
 		"FetchMessage":             &message.FetchMessage{},
@@ -52,25 +54,25 @@ func TestDecode_RejectsOversizedLength(t *testing.T) {
 }
 
 func TestDecode_RejectsOversizedArrayCount(t *testing.T) {
-	// 1. AnnounceBroadcastMessage HopIDs
+	// 1. AnnounceStartMessage HopIDs
 	// Create a payload with a large hop count but no actual hop ID bytes
 	b := make([]byte, 0, 8)
 	b, _ = message.WriteVarint(b, 1000000) // HopCount = 1,000,000
 
-	// Create an AnnounceBroadcastMessage with proper length prefix and structure
+	// Create an AnnounceStartMessage body with proper length prefix and structure
 	payload := make([]byte, 0, 64)
-	payload, _ = message.WriteVarint(payload, uint64(message.ACTIVE)) // AnnounceStatus
-	payload, _ = message.WriteString(payload, "test")                 // BroadcastPathSuffix
-	payload = append(payload, b...)                                   // Add the giant HopCount
+	payload, _ = message.WriteString(payload, "test") // RoutePrefixSuffix
+	payload = append(payload, b...)                   // Add the giant HopCount
 
 	msgLen := uint64(len(payload))
 	full := make([]byte, 0, 128)
 	full, _ = message.WriteMessageLength(full, msgLen)
 	full = append(full, payload...)
 
-	am := &message.AnnounceBroadcastMessage{}
+	am := &message.AnnounceStartMessage{}
 	err := am.Decode(bytes.NewReader(full))
-	assert.ErrorIs(t, err, io.EOF) // Should fail with EOF reading first missing HopID, NOT OOM crash
+	// The count exceeds the bytes left, so it is refused before allocating.
+	assert.ErrorIs(t, err, message.ErrMessageTooShort)
 
 	// 2. ReadStringArray count
 	b2 := make([]byte, 0, 8)

@@ -155,38 +155,11 @@ func TestTrackWriter_OpenGroup_SetsPriority(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, group)
 
-	wantUrgency, wantIncremental := urgencyFor(200, false)
+	wantUrgency, wantIncremental := urgencyFor(200)
 	gotUrgency, gotIncremental, ok := mockSendStream.LastPriority()
 	assert.True(t, ok, "SetPriority should have been called")
 	assert.Equal(t, wantUrgency, gotUrgency)
 	assert.Equal(t, wantIncremental, gotIncremental)
-}
-
-func TestTrackWriter_OpenGroup_OrderedSetsNonIncrementalPriority(t *testing.T) {
-	mockStream := &fakeQUICStream{}
-	substr := newReceiveSubscribeStream(
-		SubscribeID(1),
-		mockStream,
-		&SubscribeConfig{Priority: 200, Ordered: true},
-	)
-
-	var mockSendStream *fakeQUICSendStream
-	openUniStreamFunc := func(_ context.Context) (transport.SendStream, error) {
-		mockSendStream = &fakeQUICSendStream{}
-		return mockSendStream, nil
-	}
-
-	sender := newTrackWriter("/broadcastpath", "trackname", substr, openUniStreamFunc, func() {})
-
-	group, err := sender.OpenGroup(context.Background())
-	require.NoError(t, err)
-	require.NotNil(t, group)
-
-	wantUrgency, _ := urgencyFor(200, true)
-	gotUrgency, gotIncremental, ok := mockSendStream.LastPriority()
-	assert.True(t, ok, "SetPriority should have been called")
-	assert.Equal(t, wantUrgency, gotUrgency)
-	assert.False(t, gotIncremental)
 }
 
 func TestTrackWriter_ContextCancellation(t *testing.T) {
@@ -280,12 +253,12 @@ func TestTrackWriter_CloseWithError(t *testing.T) {
 	assert.True(t, onCloseTrackCalled, "onCloseTrack should be called")
 	assert.Nil(t, sender.groupManager, "groupManager should be nil after CloseWithError()")
 
-	// Active groups are cancelled with PublishAbortedErrorCode.
+	// Active groups are cancelled with InternalGroupErrorCode.
 	for i, s := range groupStreams {
 		streamErr, ok := s.cancelWriteErr.(*transport.StreamError)
 		require.True(t, ok, "group %d should be cancelled", i)
-		assert.Equal(t, transport.StreamErrorCode(PublishAbortedErrorCode), streamErr.ErrorCode,
-			"group %d should be cancelled with PublishAbortedErrorCode", i)
+		assert.Equal(t, transport.StreamErrorCode(InternalGroupErrorCode), streamErr.ErrorCode,
+			"group %d should be cancelled with InternalGroupErrorCode", i)
 	}
 
 	// The subscribe stream is cancelled (read and write side) with the passed code.
@@ -627,7 +600,7 @@ func TestTrackWriter_OpenGroupAt_AdvancesCounter(t *testing.T) {
 	assert.Equal(t, GroupSequence(101), g5.GroupSequence())
 }
 
-func TestTrackWriter_Close_EndNamesLastOpenGroupAt(t *testing.T) {
+func TestTrackWriter_Close_EndIsOnePastLastOpenGroupAt(t *testing.T) {
 	sender, buf := newTrackWriterDropTestSender(t)
 
 	for _, seq := range []GroupSequence{1, 2, 3} {
@@ -642,7 +615,7 @@ func TestTrackWriter_Close_EndNamesLastOpenGroupAt(t *testing.T) {
 	require.Equal(t, byte(message.MessageTypeSubscribeEnd), b[3])
 	var end message.SubscribeEndMessage
 	require.NoError(t, end.Decode(bytes.NewReader(b[4:])))
-	assert.Equal(t, uint64(3), end.Group, "SUBSCRIBE_END names the last group opened, not one past it")
+	assert.Equal(t, uint64(4), end.Group, "SUBSCRIBE_END is exclusive: the first group never delivered")
 }
 
 func TestTrackWriter_FirstOpenGroupSendsSubscribeOk(t *testing.T) {

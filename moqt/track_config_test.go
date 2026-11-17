@@ -58,16 +58,15 @@ func TestTrackConfig_Comparison(t *testing.T) {
 func TestSubscribeConfig_String(t *testing.T) {
 	config := SubscribeConfig{
 		Priority:   128,
-		Ordered:    true,
-		MaxLatency: 250,
+		MaxAge:     250,
 		StartGroup: 5,
 		EndGroup:   10,
 	}
 
 	result := config.String()
 	assert.Contains(t, result, "subscriber_priority: 128")
-	assert.Contains(t, result, "ordered: true")
-	assert.Contains(t, result, "max_latency_ms: 250")
+	assert.Contains(t, result, "max_age_ms: 250")
+	assert.NotContains(t, result, "ordered")
 	assert.Contains(t, result, "start_group: 5")
 	assert.Contains(t, result, "end_group: 10")
 }

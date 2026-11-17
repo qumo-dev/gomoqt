@@ -15,791 +15,475 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// NOTE: helper logic inlined at call-sites to keep scope local and make
-// each test tune its timeout precisely. This avoids proliferating rarely
-// used top-level helpers and keeps timings tighter for CI.
+// announceWire encodes an Announce Stream response: ANNOUNCE_OK carrying
+// okHop, then each announcement message in order.
+func announceWire(tb testing.TB, okHop uint64, msgs ...interface{ Encode(io.Writer) error }) []byte {
+	tb.Helper()
+	var buf bytes.Buffer
+	require.NoError(tb, message.AnnounceOkMessage{HopID: okHop}.Encode(&buf))
+	for _, m := range msgs {
+		require.NoError(tb, m.Encode(&buf))
+	}
+	return buf.Bytes()
+}
+
+// violationRecorder records the protocol violations a reader reports.
+type violationRecorder struct {
+	ch chan string
+}
+
+func newViolationRecorder() *violationRecorder {
+	return &violationRecorder{ch: make(chan string, 4)}
+}
+
+func (v *violationRecorder) record(msg string) {
+	select {
+	case v.ch <- msg:
+	default:
+	}
+}
+
+// wait returns the first violation reported within timeout, or "".
+func (v *violationRecorder) wait(timeout time.Duration) string {
+	select {
+	case msg := <-v.ch:
+		return msg
+	case <-time.After(timeout):
+		return ""
+	}
+}
+
+// receiveN receives n announcements, failing the test if they do not arrive.
+func receiveN(t *testing.T, ar *AnnouncementReader, n int) []*Announcement {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	anns := make([]*Announcement, 0, n)
+	for range n {
+		ann, err := ar.ReceiveAnnouncement(ctx)
+		require.NoError(t, err)
+		anns = append(anns, ann)
+	}
+	return anns
+}
 
 func TestNewAnnouncementReader(t *testing.T) {
 	mockStream := &fakeQUICStream{}
 	prefix := "/test/prefix/"
 
-	ras := newAnnouncementReader(mockStream, prefix, []string{"suffix1", "suffix2"}, nil)
+	ras := newAnnouncementReader(mockStream, prefix, []string{"suffix1", "suffix2"}, nil, announceReaderConfig{})
 
 	require.NotNil(t, ras)
 	assert.Equal(t, prefix, ras.prefix)
 	assert.Equal(t, mockStream, ras.stream)
-	assert.NotNil(t, ras.actives)
-	assert.NotNil(t, ras.pendings)
+	assert.NotNil(t, ras.advertised)
+	assert.Len(t, ras.pendings, 2)
 	assert.NotNil(t, ras.announcedCh)
 	assert.NotNil(t, ras.ctx)
-
-	// Clean up: short wait for goroutine startup; keep tiny to avoid flakiness
-	time.Sleep(1 * time.Millisecond)
 }
 
 func TestAnnouncementReader_ReceiveAnnouncement(t *testing.T) {
 	tests := map[string]struct {
-		receiveAnnounceStream *AnnouncementReader
-		ctx                   context.Context
-		wantErr               bool
-		wantErrType           error
-		wantAnn               bool
+		reader      func() *AnnouncementReader
+		ctx         context.Context
+		wantErrType error
+		wantPath    BroadcastPath
 	}{
-		"success_with_valid_announcement": {
-			receiveAnnounceStream: func() *AnnouncementReader {
-				buf := bytes.NewBuffer(nil)
-				// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
-				require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
-				err := message.AnnounceBroadcastMessage{
-					BroadcastPathSuffix: "valid_announcement",
-					AnnounceStatus:      message.ACTIVE,
-				}.Encode(buf)
-				require.NoError(t, err)
-
-				data := append([]byte(nil), buf.Bytes()...)
-				mockStream := &fakeQUICStream{reads: []streamResult{{Data: data}, {Err: io.EOF}}}
-				ras := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"}, nil)
-				return ras
-			}(),
-			ctx:     context.Background(),
-			wantErr: false,
-			wantAnn: true,
+		"start is announced": {
+			reader: func() *AnnouncementReader {
+				data := announceWire(t, 0, message.AnnounceStartMessage{RoutePrefixSuffix: "valid_announcement"})
+				s := &fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}
+				return newAnnouncementReader(s, "/test/", nil, nil, announceReaderConfig{})
+			},
+			ctx:      context.Background(),
+			wantPath: "/test/valid_announcement",
 		},
-		"context_cancelled": {
-			receiveAnnounceStream: func() *AnnouncementReader {
-				mockStream := &fakeQUICStream{
-					// Block forever on read so the only cancellation signal is
-					// the caller's context (a read EOF would independently
-					// fatal-cancel the reader under draft-05 error handling).
-					reads: []streamResult{{Block: true}},
-				}
-				// Don't provide initial suffixes so that ReceiveAnnouncement will wait
-				return newAnnouncementReader(mockStream, "/test/", []string{}, nil)
+		"context cancelled": {
+			reader: func() *AnnouncementReader {
+				s := &fakeQUICStream{reads: []streamResult{{Block: true}}}
+				return newAnnouncementReader(s, "/test/", nil, nil, announceReaderConfig{})
+			},
+			ctx: func() context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
 			}(),
-			ctx: func() context.Context { ctx, cancel := context.WithCancel(context.Background()); cancel(); return ctx }(), wantErr: true,
 			wantErrType: context.Canceled,
-			wantAnn:     false,
 		},
-		"stream_closed": {
-			receiveAnnounceStream: func() *AnnouncementReader {
-				mockStream := &fakeQUICStream{}
-				// Don't provide initial suffixes so that ReceiveAnnouncement will wait
-				ras := newAnnouncementReader(mockStream, "/test/", []string{}, nil)
-				// Allow goroutine to start (very short)
-				time.Sleep(1 * time.Millisecond)
-				_ = ras.Close()
+		"reader closed": {
+			reader: func() *AnnouncementReader {
+				ras := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Block: true}}}, "/test/", nil, nil, announceReaderConfig{})
+				require.NoError(t, ras.Close())
 				return ras
-			}(),
-			ctx:     context.Background(),
-			wantErr: true,
-			wantAnn: false,
+			},
+			ctx:         context.Background(),
+			wantErrType: context.Canceled,
 		},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			ras := tt.receiveAnnounceStream
+			ras := tt.reader()
+			defer func() { _ = ras.Close() }() // not actionable: the test is over
 
-			// Allow time for background goroutine processing: wait for announcement
-			if name == "success_with_valid_announcement" {
-				// inline waitForAnnouncements with a smaller timeout
-				deadline := time.Now().Add(100 * time.Millisecond)
-				for time.Now().Before(deadline) {
-					ras.announcementsMu.Lock()
-					n := len(ras.actives) + len(ras.pendings)
-					ras.announcementsMu.Unlock()
-					if n > 0 {
-						break
-					}
-					time.Sleep(1 * time.Millisecond)
-				}
-				if time.Now().After(deadline) {
-					t.Fatalf("timeout waiting for announcements after %v", 100*time.Millisecond)
-				}
-			}
-
-			ctxWithTimeout, cancel := context.WithTimeout(tt.ctx, 500*time.Millisecond)
+			ctx, cancel := context.WithTimeout(tt.ctx, time.Second)
 			defer cancel()
+			ann, err := ras.ReceiveAnnouncement(ctx)
 
-			announcement, err := ras.ReceiveAnnouncement(ctxWithTimeout)
-
-			if tt.wantErr {
-				assert.Error(t, err)
-				if tt.wantErrType != nil {
-					assert.ErrorIs(t, err, tt.wantErrType)
-				}
-			} else {
-				assert.NoError(t, err)
+			if tt.wantErrType != nil {
+				assert.ErrorIs(t, err, tt.wantErrType)
+				assert.Nil(t, ann)
+				return
 			}
-
-			if tt.wantAnn {
-				assert.NotNil(t, announcement)
-				if announcement != nil {
-					assert.Equal(t, BroadcastPath("/test/valid_announcement"), announcement.BroadcastPath())
-				}
-			} else {
-				assert.Nil(t, announcement)
-			}
-
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantPath, ann.BroadcastPath())
+			assert.True(t, ann.IsActive())
 		})
 	}
 }
 
 func TestAnnouncementReader_Close(t *testing.T) {
+	ras := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Block: true}}}, "/test/", []string{"a"}, nil, announceReaderConfig{})
+
+	assert.NoError(t, ras.Close())
+	assert.NoError(t, ras.Close(), "a second Close is a no-op")
+	assert.Error(t, ras.Context().Err())
+}
+
+func TestAnnouncementReader_CloseWithError(t *testing.T) {
+	cancelled := make(chan transport.StreamErrorCode, 2)
+	s := &fakeQUICStream{reads: []streamResult{{Block: true}}, cancelReadNotify: cancelled}
+	ras := newAnnouncementReader(s, "/test/", nil, nil, announceReaderConfig{})
+
+	ras.CloseWithError(UninterestedErrorCode)
+	ras.CloseWithError(AnnounceErrorCodeInternal) // a second call is harmless
+
+	assert.Error(t, ras.Context().Err())
+	select {
+	case code := <-cancelled:
+		assert.Equal(t, transport.StreamErrorCode(UninterestedErrorCode), code)
+	case <-time.After(time.Second):
+		t.Fatal("the stream was not reset")
+	}
+}
+
+func TestAnnouncementReader_ImplicitAnnounceIDs(t *testing.T) {
+	// Each ANNOUNCE_START takes the next id: 0, 1, 2. END 1 retires the
+	// second, and a later START gets a fresh id 3, which END 3 then retires.
+	data := announceWire(t, 0,
+		message.AnnounceStartMessage{RoutePrefixSuffix: "a"},
+		message.AnnounceStartMessage{RoutePrefixSuffix: "b"},
+		message.AnnounceStartMessage{RoutePrefixSuffix: "c"},
+		message.AnnounceEndMessage{AnnounceID: 1},
+		message.AnnounceStartMessage{RoutePrefixSuffix: "b"},
+		message.AnnounceEndMessage{AnnounceID: 3},
+	)
+	violations := newViolationRecorder()
+	s := &fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}
+	ras := newAnnouncementReader(s, "/live/", nil, nil, announceReaderConfig{onProtocolViolation: violations.record})
+	defer func() { _ = ras.Close() }() // not actionable: the test is over
+
+	anns := receiveN(t, ras, 4)
+	byPath := make(map[BroadcastPath][]*Announcement)
+	for _, ann := range anns {
+		byPath[ann.BroadcastPath()] = append(byPath[ann.BroadcastPath()], ann)
+	}
+
+	require.Len(t, byPath["/live/b"], 2)
+	for _, ann := range byPath["/live/b"] {
+		select {
+		case <-ann.Done():
+		case <-time.After(time.Second):
+			t.Fatal("both advertisements of b should have ended")
+		}
+	}
+	assert.True(t, byPath["/live/a"][0].IsActive())
+	assert.True(t, byPath["/live/c"][0].IsActive())
+	assert.Empty(t, violations.wait(20*time.Millisecond))
+}
+
+func TestAnnouncementReader_UpdateInPlace(t *testing.T) {
+	data := announceWire(t, 9,
+		message.AnnounceStartMessage{RoutePrefixSuffix: "a", HopIDs: []uint64{1}, WarmRouteCost: 4, ColdRouteCost: 5},
+		message.AnnounceUpdateMessage{AnnounceID: 0, HopIDs: []uint64{2, 3}, WarmRouteCost: 7, ColdRouteCost: 8},
+	)
+	s := &fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}
+	ras := newAnnouncementReader(s, "/live/", nil, nil, announceReaderConfig{
+		peerCost: func() uint64 { return 10 },
+	})
+	defer func() { _ = ras.Close() }() // not actionable: the test is over
+
+	ann := receiveN(t, ras, 1)[0]
+
+	// The update arrives after the start; wait for it to apply.
+	assert.Eventually(t, func() bool { return len(ann.HopIDs()) == 3 }, time.Second, time.Millisecond)
+	assert.Equal(t, []uint64{2, 3, 9}, ann.HopIDs(), "the peer's ANNOUNCE_OK Hop ID is the trailing entry")
+	route := ann.routeInfo()
+	assert.Equal(t, uint64(17), route.warmCost, "the peer's SETUP Cost is added")
+	assert.Equal(t, uint64(18), route.coldCost)
+	assert.True(t, ann.IsActive(), "an update does not end the announcement")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := ras.ReceiveAnnouncement(ctx)
+	assert.ErrorIs(t, err, context.DeadlineExceeded, "an update announces nothing new")
+}
+
+func TestAnnouncementReader_ZeroOKHopIDIsAppended(t *testing.T) {
+	data := announceWire(t, 0, message.AnnounceStartMessage{RoutePrefixSuffix: "a", HopIDs: []uint64{5}})
+	s := &fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}
+	ras := newAnnouncementReader(s, "/live/", nil, nil, announceReaderConfig{})
+	defer func() { _ = ras.Close() }() // not actionable: the test is over
+
+	ann := receiveN(t, ras, 1)[0]
+	assert.Equal(t, []uint64{5, 0}, ann.HopIDs(), "an unknown hop is kept as 0")
+}
+
+func TestAnnouncementReader_CostSaturates(t *testing.T) {
+	data := announceWire(t, 0, message.AnnounceStartMessage{RoutePrefixSuffix: "a", WarmRouteCost: maxRouteCost - 1, ColdRouteCost: maxRouteCost})
+	s := &fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}
+	ras := newAnnouncementReader(s, "/live/", nil, nil, announceReaderConfig{peerCost: func() uint64 { return 5 }})
+	defer func() { _ = ras.Close() }() // not actionable: the test is over
+
+	route := receiveN(t, ras, 1)[0].routeInfo()
+	assert.Equal(t, uint64(maxRouteCost), route.warmCost)
+	assert.Equal(t, uint64(maxRouteCost), route.coldCost)
+}
+
+func TestAnnouncementReader_LoopIsDiscarded(t *testing.T) {
+	const self = 42
+	data := announceWire(t, 7,
+		// Loops through this endpoint: discarded, but its id is still live.
+		message.AnnounceStartMessage{RoutePrefixSuffix: "looped", HopIDs: []uint64{self}},
+		message.AnnounceStartMessage{RoutePrefixSuffix: "fine", HopIDs: []uint64{3}},
+		// The looped route stops looping: it is announced now.
+		message.AnnounceUpdateMessage{AnnounceID: 0, HopIDs: []uint64{4}},
+		// The fine route starts looping: it ends.
+		message.AnnounceUpdateMessage{AnnounceID: 1, HopIDs: []uint64{self}},
+	)
+	violations := newViolationRecorder()
+	s := &fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}
+	ras := newAnnouncementReader(s, "/live/", nil, nil, announceReaderConfig{
+		localHopID:          self,
+		onProtocolViolation: violations.record,
+	})
+	defer func() { _ = ras.Close() }() // not actionable: the test is over
+
+	anns := receiveN(t, ras, 2)
+	assert.Equal(t, BroadcastPath("/live/fine"), anns[0].BroadcastPath())
+	assert.Equal(t, BroadcastPath("/live/looped"), anns[1].BroadcastPath())
+	assert.Equal(t, []uint64{4, 7}, anns[1].HopIDs())
+
+	select {
+	case <-anns[0].Done():
+	case <-time.After(time.Second):
+		t.Fatal("a route that starts looping should end")
+	}
+	assert.True(t, anns[1].IsActive())
+	assert.Empty(t, violations.wait(20*time.Millisecond))
+}
+
+func TestAnnouncementReader_ProtocolViolations(t *testing.T) {
 	tests := map[string]struct {
-		setupFunc func() *AnnouncementReader
-		wantErr   bool
-	}{"normal_close": {
-		setupFunc: func() *AnnouncementReader {
-			mockStream := &fakeQUICStream{}
-			return newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"}, nil)
+		data []byte
+	}{
+		"second start for an advertised route": {
+			data: announceWire(t, 0,
+				message.AnnounceStartMessage{RoutePrefixSuffix: "a"},
+				message.AnnounceStartMessage{RoutePrefixSuffix: "a"},
+			),
 		},
-		wantErr: false,
-	},
-		"already_closed": {
-			setupFunc: func() *AnnouncementReader {
-				mockStream := &fakeQUICStream{}
-				ras := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"}, nil)
-				_ = ras.Close() // Close once
-				return ras
-			},
-			wantErr: false,
+		"end for an id never assigned": {
+			data: announceWire(t, 0, message.AnnounceEndMessage{AnnounceID: 0}),
+		},
+		"end for a retired id": {
+			data: announceWire(t, 0,
+				message.AnnounceStartMessage{RoutePrefixSuffix: "a"},
+				message.AnnounceEndMessage{AnnounceID: 0},
+				message.AnnounceEndMessage{AnnounceID: 0},
+			),
+		},
+		"update for an id never assigned": {
+			data: announceWire(t, 0, message.AnnounceUpdateMessage{AnnounceID: 3}),
+		},
+		"repeated non-zero hop id": {
+			data: announceWire(t, 0, message.AnnounceStartMessage{RoutePrefixSuffix: "a", HopIDs: []uint64{5, 0, 5}}),
+		},
+		"unknown announcement type": {
+			data: append(announceWire(t, 0), 0x07, 0x00),
+		},
+		"announcement before ANNOUNCE_OK": {
+			data: func() []byte {
+				var buf bytes.Buffer
+				require.NoError(t, message.AnnounceStartMessage{RoutePrefixSuffix: "a"}.Encode(&buf))
+				return buf.Bytes()
+			}(),
+		},
+		"message cut short by FIN": {
+			data: func() []byte {
+				full := announceWire(t, 0, message.AnnounceStartMessage{RoutePrefixSuffix: "abcdef"})
+				return full[:len(full)-3]
+			}(),
 		},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			ras := tt.setupFunc()
-			time.Sleep(5 * time.Millisecond) // Allow goroutine to start
+			violations := newViolationRecorder()
+			s := &fakeQUICStream{reads: []streamResult{{Data: tt.data}, {Err: io.EOF}}}
+			ras := newAnnouncementReader(s, "/live/", nil, nil, announceReaderConfig{onProtocolViolation: violations.record})
+			defer func() { _ = ras.Close() }() // not actionable: the test is over
 
-			err := ras.Close()
-
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
+			assert.NotEmpty(t, violations.wait(time.Second), "the session should be closed")
+			select {
+			case <-ras.Context().Done():
+			case <-time.After(time.Second):
+				t.Fatal("the reader should end")
 			}
-
-			// The Close method only closes the stream, it doesn't cancel the context
-			// So we don't need to check for context cancellation here
 		})
 	}
 }
 
-func TestAnnouncementReader_CloseWithError(t *testing.T) {
-	mockStream := &fakeQUICStream{}
-
-	ras := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"}, nil)
-
-	// Allow goroutine to start and call Read (very short)
-	time.Sleep(1 * time.Millisecond)
-
-	// First close with error
-	ras.CloseWithError(AnnounceErrorCodeInternal)
-
-	assert.True(t, ras.Context().Err() != nil, "Context should be cancelled after close with error")
-	// TODO: Fix Cause function issue
-	// assert.ErrorAs(t, Cause(ras.Context()), &AnnounceError{})
-}
-
-func TestAnnouncementReader_CloseWithError_MultipleClose(t *testing.T) {
-	mockStream := &fakeQUICStream{}
-
-	ras := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"}, nil)
-
-	// Allow goroutine to start and call Read (very short)
-	time.Sleep(1 * time.Millisecond)
-
-	// First close with error
-	ras.CloseWithError(AnnounceErrorCodeInternal)
-
-	// Second close with error should return the same error
-	ras.CloseWithError(AnnounceErrorCodeDuplicated)
-
-	assert.True(t, ras.Context().Err() != nil, "Context should be cancelled after close with error")
-}
-
-func TestAnnouncementReader_AnnouncementTracking(t *testing.T) {
-	mockStream := &fakeQUICStream{}
-	ras := newAnnouncementReader(mockStream, "/test/", []string{}, nil) // No initial announcements
-
-	// Wait for the goroutine to start and process EOF (deterministic)
-	{
-		tctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		select {
-		case <-ras.ctx.Done():
-		case <-tctx.Done():
-		}
-		cancel()
-		// Not fatal; proceed — the goroutine may not cancel context on EOF, but this avoids blind sleeps
+func TestAnnouncementReader_StreamEndIsNotAViolation(t *testing.T) {
+	tests := map[string]struct {
+		reads []streamResult
+	}{
+		"fin before ANNOUNCE_OK": {reads: []streamResult{{Err: io.EOF}}},
+		"fin between messages": {
+			reads: []streamResult{{Data: announceWire(t, 0, message.AnnounceStartMessage{RoutePrefixSuffix: "a"})}, {Err: io.EOF}},
+		},
+		"stream reset mid-message": {
+			reads: []streamResult{
+				{Data: announceWire(t, 0)[:1]},
+				{Err: &transport.StreamError{ErrorCode: 42, Remote: true}},
+			},
+		},
 	}
 
-	// Test internal announcement tracking
-	ctx := context.Background()
-	ann1, end1 := NewAnnouncement(ctx, BroadcastPath("/test/stream1"))
-	ann2, end2 := NewAnnouncement(ctx, BroadcastPath("/test/stream2"))
-	defer end2()
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			violations := newViolationRecorder()
+			ras := newAnnouncementReader(&fakeQUICStream{reads: tt.reads}, "/live/", nil, nil, announceReaderConfig{onProtocolViolation: violations.record})
+			defer func() { _ = ras.Close() }() // not actionable: the test is over
 
-	// Manually add announcements to test tracking
-	ras.announcementsMu.Lock()
-	ras.actives["stream1"] = ann1
-	ras.actives["stream2"] = ann2
-	ras.announcementsMu.Unlock()
-
-	assert.Len(t, ras.actives, 2)
-
-	// Test ending announcement
-	end1()
-
-	// Announcement should still be in map until processed by background goroutine
-	assert.Len(t, ras.actives, 2)
-
-}
-
-func TestAnnouncementReader_ConcurrentAccess(t *testing.T) {
-	// Create multiple messages
-	buf := bytes.NewBuffer(nil)
-	// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
-	require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
-	for i := range 5 {
-		err := message.AnnounceBroadcastMessage{
-			BroadcastPathSuffix: fmt.Sprintf("/stream%d", i),
-			AnnounceStatus:      message.ACTIVE,
-		}.Encode(buf)
-		require.NoError(t, err)
-	}
-
-	data := append([]byte(nil), buf.Bytes()...)
-	mockStream := &fakeQUICStream{
-		reads: []streamResult{{Data: data}, {Err: io.EOF}},
-	}
-
-	ras := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"}, nil)
-
-	// Wait for message processing to begin (deterministic)
-	{
-		deadline := time.Now().Add(100 * time.Millisecond)
-		for time.Now().Before(deadline) {
-			ras.announcementsMu.Lock()
-			n := len(ras.actives) + len(ras.pendings)
-			ras.announcementsMu.Unlock()
-			if n > 0 {
-				break
+			select {
+			case <-ras.Context().Done():
+			case <-time.After(time.Second):
+				t.Fatal("the reader should end with the stream")
 			}
-			time.Sleep(1 * time.Millisecond)
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("timeout waiting for announcements after %v", 100*time.Millisecond)
-		}
+			assert.Empty(t, violations.wait(20*time.Millisecond))
+		})
 	}
+}
 
-	// Test concurrent ReceiveAnnouncement calls
+func TestAnnouncementReader_StreamEndEndsAnnouncements(t *testing.T) {
+	data := announceWire(t, 0, message.AnnounceStartMessage{RoutePrefixSuffix: "a"})
+	ras := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Data: data}, {Err: io.EOF}}}, "/live/", nil, nil, announceReaderConfig{})
+
+	ann := receiveN(t, ras, 1)[0]
+	select {
+	case <-ann.Done():
+	case <-time.After(time.Second):
+		t.Fatal("a closed stream should end every route on it")
+	}
+}
+
+func TestAnnouncementReader_ConcurrentReceive(t *testing.T) {
+	msgs := make([]interface{ Encode(io.Writer) error }, 0, 5)
+	for i := range 5 {
+		msgs = append(msgs, message.AnnounceStartMessage{RoutePrefixSuffix: fmt.Sprintf("stream%d", i)})
+	}
+	s := &fakeQUICStream{reads: []streamResult{{Data: announceWire(t, 0, msgs...)}, {Block: true}}}
+	ras := newAnnouncementReader(s, "/test/", nil, nil, announceReaderConfig{})
+	defer func() { _ = ras.Close() }() // not actionable: the test is over
+
+	var mu sync.Mutex
+	got := make(map[BroadcastPath]bool)
 	var wg sync.WaitGroup
-	results := make(chan *Announcement, 5)
-	errors := make(chan error, 5)
-
-	for range 3 {
+	for range 5 {
 		wg.Go(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			ann, err := ras.ReceiveAnnouncement(ctx)
 			if err != nil {
-				errors <- err
-			} else if ann != nil {
-				results <- ann
+				return
 			}
+			mu.Lock()
+			got[ann.BroadcastPath()] = true
+			mu.Unlock()
 		})
 	}
-
-	// Concurrent close call
-	wg.Go(func() {
-		time.Sleep(10 * time.Millisecond)
-		_ = ras.Close()
-	})
-
 	wg.Wait()
-	close(results)
-	close(errors)
 
-	// Verify we got some results before closing
-	receivedCount := 0
-	for range results {
-		receivedCount++
-	}
-
-	// Should have received at least some announcements
-	assert.GreaterOrEqual(t, receivedCount, 0)
+	assert.Len(t, got, 5, "each announcement goes to exactly one receiver")
 }
 
 func TestAnnouncementReader_PrefixHandling(t *testing.T) {
 	tests := map[string]struct {
 		prefix       string
 		suffix       string
-		expectedPath string
+		expectedPath BroadcastPath
 	}{
-		"simple_prefix_and_suffix": {
-			prefix:       "/test/",
-			suffix:       "/stream",
-			expectedPath: "/test//stream",
-		},
-		"nested_prefix": {
-			prefix:       "/test/sub/",
-			suffix:       "/stream",
-			expectedPath: "/test/sub//stream",
-		},
-		"root_prefix": {
-			prefix:       "/",
-			suffix:       "stream",
-			expectedPath: "/stream",
-		},
+		"simple":         {prefix: "/test/", suffix: "stream", expectedPath: "/test/stream"},
+		"root prefix":    {prefix: "/", suffix: "stream", expectedPath: "/stream"},
+		"nested suffix":  {prefix: "/test/", suffix: "a/b/stream", expectedPath: "/test/a/b/stream"},
+		"clamped route":  {prefix: "/test/", suffix: "", expectedPath: "/test/"},
+		"long prefix":    {prefix: "/very/long/nested/prefix/path/", suffix: "s", expectedPath: "/very/long/nested/prefix/path/s"},
+		"leading slash":  {prefix: "/test/", suffix: "/stream", expectedPath: "/test//stream"},
+		"nested prefix":  {prefix: "/test/sub/", suffix: "stream", expectedPath: "/test/sub/stream"},
+		"dotted segment": {prefix: "/test/", suffix: "a.b", expectedPath: "/test/a.b"},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			mockStream := &fakeQUICStream{}
-			ras := newAnnouncementReader(mockStream, tt.prefix, []string{tt.suffix}, nil)
+			data := announceWire(t, 0, message.AnnounceStartMessage{RoutePrefixSuffix: tt.suffix})
+			ras := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}, tt.prefix, nil, nil, announceReaderConfig{})
+			defer func() { _ = ras.Close() }() // not actionable: the test is over
 
-			// Allow goroutine to start and call Read (very short)
-			time.Sleep(1 * time.Millisecond)
-
-			require.NotNil(t, ras)
-			assert.Equal(t, tt.prefix, ras.prefix)
-
-			// Test path construction by manually adding announcement
-			ctx := context.Background()
-			ann, end := NewAnnouncement(ctx, BroadcastPath(tt.expectedPath))
-			defer end()
-			ras.announcementsMu.Lock()
-			ras.pendings = append(ras.pendings, ann)
-			ras.announcementsMu.Unlock()
-
-			announcement, err := ras.ReceiveAnnouncement(ctx)
-			require.NoError(t, err)
-			assert.Equal(t, tt.expectedPath, string(announcement.BroadcastPath()))
+			assert.Equal(t, tt.expectedPath, receiveN(t, ras, 1)[0].BroadcastPath())
 		})
 	}
 }
 
-func TestAnnouncementReader_InvalidMessage(t *testing.T) {
-	// Create invalid message data
-	invalidData := []byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
-
-	mockStream := &fakeQUICStream{
-		reads: []streamResult{{Data: invalidData}},
-	}
-
-	ras := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"}, nil)
-
-	// Give time for processing invalid data (short)
-	time.Sleep(5 * time.Millisecond)
-
-	// A fatal ANNOUNCE_OK decode error cancels the reader context (surfacing
-	// the failure to ReceiveAnnouncement instead of hanging forever on an
-	// open stream).
-	select {
-	case <-ras.ctx.Done():
-		// expected: the reader context is cancelled with the decode error.
-	default:
-		t.Error("reader context should be cancelled after a fatal ANNOUNCE_OK decode error")
-	}
-
-}
-
-func TestAnnouncementReader_ActiveThenEnded(t *testing.T) {
-	// Test scenario: stream becomes active then ended
-	buf := bytes.NewBuffer(nil)
-	// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
-	require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
-	messages := []message.AnnounceBroadcastMessage{
-		{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ACTIVE},
-		{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ENDED},
-	}
-	for _, msg := range messages {
-		err := msg.Encode(buf)
-		require.NoError(t, err)
-	}
-
-	mockStream := &fakeQUICStream{
-		reads: []streamResult{{Data: buf.Bytes()}, {Block: true}},
-	}
-
-	ras := newAnnouncementReader(mockStream, "/test/", []string{}, nil)
-
-	// Wait until messages are observed by the reader instead of sleeping.
-	{
-		deadline := time.Now().Add(100 * time.Millisecond)
-		for time.Now().Before(deadline) {
-			ras.announcementsMu.Lock()
-			n := len(ras.actives) + len(ras.pendings)
-			ras.announcementsMu.Unlock()
-			if n > 0 {
-				break
-			}
-			time.Sleep(1 * time.Millisecond)
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("timeout waiting for announcements after %v", 100*time.Millisecond)
-		}
-	}
-
-	// Try to receive announcements - in this scenario, the announcement
-	// becomes active and then immediately ends, so we might not catch it in the active state
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-
-	ann, err := ras.ReceiveAnnouncement(ctx)
-	assert.NoError(t, err)
-	assert.NotNil(t, ann)
-	// The path should be constructed as prefix + suffix, which gives "/test/" + "/stream1" = "/test//stream1"
-	assert.Equal(t, BroadcastPath("/test/stream1"), ann.BroadcastPath())
-	assert.False(t, ann.IsActive())
-
-	// The announcement should eventually be ended by the ENDED message
-	// No extra wait needed here — ReceiveAnnouncement observed the ended announcement.
-
-}
-
-func TestAnnouncementReader_MultipleActiveStreams(t *testing.T) {
-	// Test scenario: multiple streams become active
-	buf := bytes.NewBuffer(nil)
-	// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
-	require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
-	messages := []message.AnnounceBroadcastMessage{
-		{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ACTIVE},
-		{BroadcastPathSuffix: "stream2", AnnounceStatus: message.ACTIVE},
-	}
-	for _, msg := range messages {
-		err := msg.Encode(buf)
-		require.NoError(t, err)
-	}
-
-	mockStream := &fakeQUICStream{
-		reads: []streamResult{{Data: buf.Bytes()}, {Block: true}},
-	}
-
-	ras := newAnnouncementReader(mockStream, "/test/", []string{}, nil)
-
-	// Wait until messages are observed by the reader instead of sleeping.
-	{
-		deadline := time.Now().Add(50 * time.Millisecond)
-		for time.Now().Before(deadline) {
-			ras.announcementsMu.Lock()
-			n := len(ras.actives) + len(ras.pendings)
-			ras.announcementsMu.Unlock()
-			if n > 0 {
-				break
-			}
-			time.Sleep(1 * time.Millisecond)
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("timeout waiting for announcements after %v", 50*time.Millisecond)
-		}
-	}
-
-	// Verify that we can receive multiple active announcements
-	receivedAnnouncements := make(map[string]*Announcement)
-
-	// Try to receive up to 3 announcements (2 from messages + 1 initial)
-	for range 3 {
-		// Use a short per-call timeout so a single blocking call doesn't dominate the test
-		perCtx, perCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		ann, err := ras.ReceiveAnnouncement(perCtx)
-		perCancel()
-		if err != nil {
-			if err == context.DeadlineExceeded {
-				break
-			}
-			t.Fatalf("Unexpected error: %v", err)
-		}
-		if ann != nil && ann.IsActive() {
-			receivedAnnouncements[string(ann.BroadcastPath())] = ann
-		}
-	}
-
-	// Should have received at least the 2 new announcements
-	assert.GreaterOrEqual(t, len(receivedAnnouncements), 2)
-	// The paths are constructed as prefix + suffix, so "/test/" + "stream1" = "/test/stream1"
-	assert.Contains(t, receivedAnnouncements, "/test/stream1")
-	assert.Contains(t, receivedAnnouncements, "/test/stream2")
-
-}
-
-func TestAnnouncementReader_DuplicateActiveError(t *testing.T) {
-	// Test scenario: duplicate ACTIVE message should cause error
-	buf := bytes.NewBuffer(nil)
-	// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
-	require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
-	messages := []message.AnnounceBroadcastMessage{
-		{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ACTIVE},
-		{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ACTIVE}, // Duplicate
-	}
-	for _, msg := range messages {
-		err := msg.Encode(buf)
-		require.NoError(t, err)
-	}
-
-	mockStream := &fakeQUICStream{
-		reads: []streamResult{{Data: buf.Bytes()}, {Block: true}},
-	}
-
-	ras := newAnnouncementReader(mockStream, "/test/", []string{}, nil)
-
-	// Wait for the reader's context to be cancelled due to error.
-	{
-		closed := false
-		timer := time.NewTimer(100 * time.Millisecond)
-		select {
-		case <-ras.ctx.Done():
-			closed = true
-			timer.Stop()
-		case <-timer.C:
-			closed = false
-		}
-		if closed {
-			t.Log("Stream correctly closed due to duplicate announcement")
-		} else {
-			t.Log("Stream not closed - this may be acceptable depending on implementation")
-		}
-	}
-}
-
-func TestAnnouncementReader_EndNonExistentStreamError(t *testing.T) {
-	// Test scenario: ENDED message for non-existent stream should cause error
-	buf := bytes.NewBuffer(nil)
-	// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
-	require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
-	messages := []message.AnnounceBroadcastMessage{
-		{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ENDED}, // End without ACTIVE
-	}
-	for _, msg := range messages {
-		err := msg.Encode(buf)
-		require.NoError(t, err)
-	}
-
-	mockStream := &fakeQUICStream{
-		reads: []streamResult{{Data: buf.Bytes()}, {Block: true}},
-	}
-
-	ras := newAnnouncementReader(mockStream, "/test/", []string{}, nil)
-
-	// Wait for the reader's context to be cancelled due to error.
-	{
-		closed := false
-		timer := time.NewTimer(100 * time.Millisecond)
-		select {
-		case <-ras.ctx.Done():
-			closed = true
-			timer.Stop()
-		case <-timer.C:
-			closed = false
-		}
-		if closed {
-			t.Log("Stream correctly closed due to ending non-existent stream")
-		} else {
-			t.Log("Stream not closed - this may be acceptable depending on implementation")
-		}
-	}
-}
-
-func TestAnnouncementReader_NotifyChannel(t *testing.T) {
-	// Create a message
-	buf := bytes.NewBuffer(nil)
-	// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
-	require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
-	err := message.AnnounceBroadcastMessage{
-		BroadcastPathSuffix: "test_stream",
-		AnnounceStatus:      message.ACTIVE}.Encode(buf)
-	require.NoError(t, err)
-
-	mockStream := &fakeQUICStream{
-		reads: []streamResult{{Data: buf.Bytes()}, {Block: true}},
-	}
-
-	// Don't provide initial suffixes so we only get the stream message
-	ras := newAnnouncementReader(mockStream, "/test/", []string{}, nil)
-
-	// Wait until the reader has processed the message
-	{
-		deadline := time.Now().Add(100 * time.Millisecond)
-		for time.Now().Before(deadline) {
-			ras.announcementsMu.Lock()
-			n := len(ras.actives) + len(ras.pendings)
-			ras.announcementsMu.Unlock()
-			if n > 0 {
-				break
-			}
-			time.Sleep(1 * time.Millisecond)
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("timeout waiting for announcements after %v", 100*time.Millisecond)
-		}
-	}
-
-	// Verify that we can receive the announcement without blocking
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-
-	announcement, err := ras.ReceiveAnnouncement(ctx)
-
-	assert.NoError(t, err)
-	assert.NotNil(t, announcement)
-	assert.Equal(t, BroadcastPath("/test/test_stream"), announcement.BroadcastPath())
-	assert.True(t, announcement.IsActive())
-}
-
-func TestAnnouncementReader_BoundaryValues(t *testing.T) {
+func TestNewAnnouncementReader_InvalidPrefixPanics(t *testing.T) {
 	tests := map[string]struct {
-		prefix       string
-		suffix       string
-		expectedPath string
-		wantErr      bool
-		expectPanic  bool
+		prefix string
 	}{
-		"empty_prefix": {
-			prefix:      "",
-			suffix:      "/stream",
-			expectPanic: true, // invalid prefix causes panic
-		},
-		"empty_suffix": {
-			prefix:       "/test/",
-			suffix:       "",
-			expectedPath: "/test/",
-			wantErr:      false,
-		},
-		"both_empty": {
-			prefix:      "",
-			suffix:      "",
-			expectPanic: true, // invalid prefix causes panic
-		},
-		"root_prefix": {
-			prefix:       "/",
-			suffix:       "stream",
-			expectedPath: "/stream",
-			wantErr:      false,
-		},
-		"long_prefix": {
-			prefix:       "/very/long/nested/prefix/path/",
-			suffix:       "stream",
-			expectedPath: "/very/long/nested/prefix/path/stream", // Note: double slash expected
-			wantErr:      false,
-		},
-		"long_suffix": {
-			prefix:       "/test/",
-			suffix:       "very/long/nested/suffix/path/stream",
-			expectedPath: "/test/very/long/nested/suffix/path/stream", // Note: double slash expected
-			wantErr:      false,
-		},
+		"empty":                {prefix: ""},
+		"no trailing slash":    {prefix: "/test"},
+		"no leading slash":     {prefix: "test/"},
+		"bare segment no root": {prefix: "a"},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			// Handle panic cases
-			if tt.expectPanic {
-				assert.Panics(t, func() {
-					mockStream := &fakeQUICStream{}
-					newAnnouncementReader(mockStream, tt.prefix, []string{}, nil)
-				})
-				return
-			}
-
-			// Create message with the test suffix
-			buf := bytes.NewBuffer(nil)
-			// The publisher sends ANNOUNCE_OK before any ANNOUNCE_BROADCAST.
-			require.NoError(t, message.AnnounceOkMessage{}.Encode(buf))
-			err := message.AnnounceBroadcastMessage{
-				BroadcastPathSuffix: tt.suffix,
-				AnnounceStatus:      message.ACTIVE}.Encode(buf)
-			require.NoError(t, err)
-
-			mockStream := &fakeQUICStream{
-				reads: []streamResult{{Data: buf.Bytes()}, {Block: true}},
-			}
-
-			// Don't provide initial suffixes so we only get the stream message
-			ras := newAnnouncementReader(mockStream, tt.prefix, []string{}, nil)
-
-			// Wait until the reader has processed the message
-			{
-				deadline := time.Now().Add(50 * time.Millisecond)
-				for time.Now().Before(deadline) {
-					ras.announcementsMu.Lock()
-					n := len(ras.actives) + len(ras.pendings)
-					ras.announcementsMu.Unlock()
-					if n > 0 {
-						break
-					}
-					time.Sleep(1 * time.Millisecond)
-				}
-				if time.Now().After(deadline) {
-					t.Fatalf("timeout waiting for announcements after %v", 50*time.Millisecond)
-				}
-			}
-
-			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-			defer cancel()
-
-			announcement, err := ras.ReceiveAnnouncement(ctx)
-
-			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Nil(t, announcement)
-			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, announcement)
-				assert.Equal(t, BroadcastPath(tt.expectedPath), announcement.BroadcastPath())
-			}
+			assert.Panics(t, func() {
+				newAnnouncementReader(&fakeQUICStream{}, tt.prefix, nil, nil, announceReaderConfig{})
+			})
 		})
 	}
 }
 
 func TestAnnouncementReader_StreamErrors(t *testing.T) {
 	tests := map[string]struct {
-		setupError func() error
+		err error
 	}{
-		"quic_stream_error": {
-			setupError: func() error {
-				return &transport.StreamError{
-					StreamID:  transport.StreamID(123),
-					ErrorCode: transport.StreamErrorCode(42),
-				}
-			},
-		},
-		"generic_io_error": {
-			setupError: func() error {
-				return io.ErrUnexpectedEOF
-			},
-		},
+		"quic stream error": {err: &transport.StreamError{StreamID: 123, ErrorCode: 42}},
+		"generic io error":  {err: io.ErrUnexpectedEOF},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			testError := tt.setupError()
+			ras := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Err: tt.err}}}, "/test/", []string{"valid_announcement"}, nil, announceReaderConfig{})
 
-			mockStream := &fakeQUICStream{
-				reads: []streamResult{{Err: testError}},
-			}
-
-			ras := newAnnouncementReader(mockStream, "/test/", []string{"valid_announcement"}, nil)
-
-			// A read error on the announce stream is now fatal to the reader:
-			// the goroutine cancels the reader context with the decode error
-			// as cause (rather than exiting silently and leaving
-			// ReceiveAnnouncement blocked forever on an open stream).
-
-			// The initial "valid_announcement" is still available (consumed
-			// from the pending batch before the cancellation is observed).
-			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-			defer cancel()
-
-			ann, err := ras.ReceiveAnnouncement(ctx)
-			assert.NoError(t, err)
+			// The seeded announcement is still delivered first.
+			ann, err := ras.ReceiveAnnouncement(context.Background())
+			require.NoError(t, err)
 			assert.NotNil(t, ann)
 
-			// After consuming the initial pending, the reader context is
-			// cancelled with the decode error, so ReceiveAnnouncement returns
-			// that error promptly instead of blocking until ctx times out.
+			// Then the read error surfaces instead of blocking forever.
 			ann2, err := ras.ReceiveAnnouncement(context.Background())
 			assert.Nil(t, ann2)
-			assert.ErrorIs(t, err, testError)
+			assert.ErrorIs(t, err, tt.err)
 		})
 	}
 }
@@ -808,11 +492,29 @@ func TestNewAnnouncementReader_InitSuffixesOutsideScope(t *testing.T) {
 	scope := newAuthScope(func() {})
 	require.NoError(t, (&AuthWriter{scope: scope}).Grant(Grant{Root: "/room/1/", Publish: []string{"/"}}))
 
-	ar := newAnnouncementReader(&fakeQUICStream{}, "/room/", []suffix{"1/alice", "2/bob"}, scope)
+	ar := newAnnouncementReader(&fakeQUICStream{}, "/room/", []suffix{"1/alice", "2/bob"}, scope, announceReaderConfig{})
 	defer func() { _ = ar.Close() }() // not actionable: the test is over
 
 	ar.announcementsMu.Lock()
 	defer ar.announcementsMu.Unlock()
-	assert.Contains(t, ar.actives, "1/alice")
-	assert.NotContains(t, ar.actives, "2/bob", "a suffix the peer may not publish is dropped")
+	require.Len(t, ar.seeded, 1, "a suffix the peer may not publish is dropped")
+	assert.Equal(t, BroadcastPath("/room/1/alice"), ar.seeded[0].BroadcastPath())
+}
+
+func TestAnnouncementReader_RouteOutsideScopeIsKeptLive(t *testing.T) {
+	scope := newAuthScope(func() {})
+	require.NoError(t, (&AuthWriter{scope: scope}).Grant(Grant{Root: "/room/1/", Publish: []string{"/"}}))
+
+	data := announceWire(t, 0,
+		message.AnnounceStartMessage{RoutePrefixSuffix: "2/bob"},   // id 0, outside the scope
+		message.AnnounceStartMessage{RoutePrefixSuffix: "1/alice"}, // id 1
+		message.AnnounceEndMessage{AnnounceID: 0},                  // still a live id
+	)
+	violations := newViolationRecorder()
+	ar := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}, "/room/", nil, scope,
+		announceReaderConfig{onProtocolViolation: violations.record})
+	defer func() { _ = ar.Close() }() // not actionable: the test is over
+
+	assert.Equal(t, BroadcastPath("/room/1/alice"), receiveN(t, ar, 1)[0].BroadcastPath())
+	assert.Empty(t, violations.wait(20*time.Millisecond))
 }

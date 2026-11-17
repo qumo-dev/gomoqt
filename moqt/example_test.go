@@ -270,7 +270,7 @@ func ExampleGroupReader_Frames() {
 // the live tail (latest groups) with default priority and no range filter.
 //
 // To customize delivery, pass a *SubscribeConfig: Priority affects relative
-// scheduling, Ordered requests in-order group delivery, MaxLatency caps
+// scheduling, Ordered requests in-order group delivery, MaxAge caps
 // buffering, and StartGroup/EndGroup select a range (useful for seek/rewind).
 //
 // Then loop: AcceptGroup blocks for the next group, and group.Frames iterates

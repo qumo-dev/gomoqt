@@ -261,8 +261,7 @@ func TestSession_Subscribe(t *testing.T) {
 			name: TrackName("video"),
 			config: &SubscribeConfig{
 				Priority:   TrackPriority(1),
-				Ordered:    true,
-				MaxLatency: 250,
+				MaxAge:     250,
 				StartGroup: 4,
 				EndGroup:   9,
 			},
@@ -302,8 +301,7 @@ func TestSession_Subscribe(t *testing.T) {
 				assert.Equal(t, tt.name, track.TrackName)
 				gotConfig := track.TrackConfig()
 				assert.Equal(t, tt.config, gotConfig)
-				assert.Equal(t, tt.config.Ordered, gotConfig.Ordered)
-				assert.Equal(t, tt.config.MaxLatency, gotConfig.MaxLatency)
+				assert.Equal(t, tt.config.MaxAge, gotConfig.MaxAge)
 				assert.Equal(t, tt.config.StartGroup, gotConfig.StartGroup)
 				assert.Equal(t, tt.config.EndGroup, gotConfig.EndGroup)
 			}
@@ -740,7 +738,7 @@ func TestSession_TrackInfo_PendingEndsWhenTheCallerCancels(t *testing.T) {
 		default:
 			t.Fatal("TrackInfo still waits after the caller cancelled")
 		}
-		assert.Contains(t, stream.CancelReadCodes(), transport.StreamErrorCode(SubscribeErrorCodeInternal))
+		assert.Contains(t, stream.CancelReadCodes(), transport.StreamErrorCode(SubscribeErrorCodeCanceled))
 	})
 }
 
@@ -1275,14 +1273,13 @@ func TestSession_ProcessBiStream_Subscribe(t *testing.T) {
 	err := message.StreamTypeSubscribe.Encode(&buf)
 	assert.NoError(t, err)
 	sm := message.SubscribeMessage{
-		SubscribeID:          1,
-		BroadcastPath:        "/test/path",
-		TrackName:            "video",
-		SubscriberPriority:   7,
-		SubscriberOrdered:    1,
-		SubscriberMaxLatency: 500,
-		GroupStart:           5,
-		GroupEnd:             10,
+		SubscribeID:        1,
+		BroadcastPath:      "/test/path",
+		TrackName:          "video",
+		SubscriberPriority: 7,
+		SubscriberMaxAge:   500,
+		GroupStart:         4, // a plain floor since moq-lite-06
+		GroupEnd:           10,
 	}
 	err = sm.Encode(&buf)
 	assert.NoError(t, err)
@@ -1322,8 +1319,7 @@ func TestSession_ProcessBiStream_Subscribe(t *testing.T) {
 
 	gotConfig := track.TrackConfig()
 	assert.Equal(t, TrackPriority(7), gotConfig.Priority)
-	assert.True(t, gotConfig.Ordered)
-	assert.Equal(t, uint64(500), gotConfig.MaxLatency)
+	assert.Equal(t, uint64(500), gotConfig.MaxAge)
 	assert.Equal(t, GroupSequence(4), gotConfig.StartGroup)
 	assert.Equal(t, GroupSequence(9), gotConfig.EndGroup)
 
@@ -1373,13 +1369,13 @@ func TestSession_ProcessBiStream_InvalidStreamType(t *testing.T) {
 	// CancelWrite check
 	var cancelWriteErr *transport.StreamError
 	require.ErrorAs(t, context.Cause(mockStream.Context()), &cancelWriteErr)
-	assert.Equal(t, transport.StreamErrorCode(InternalSessionErrorCode), cancelWriteErr.ErrorCode)
+	assert.Equal(t, streamNotSupported, cancelWriteErr.ErrorCode)
 
 	// CancelRead check
 	_, readErr := mockStream.Read(make([]byte, 1))
 	var cancelReadErr *transport.StreamError
 	require.ErrorAs(t, readErr, &cancelReadErr)
-	assert.Equal(t, transport.StreamErrorCode(InternalSessionErrorCode), cancelReadErr.ErrorCode)
+	assert.Equal(t, streamNotSupported, cancelReadErr.ErrorCode)
 
 	assert.ErrorIs(t, mockStream.Context().Err(), context.Canceled)
 }
@@ -1484,7 +1480,7 @@ func TestSession_ProcessBiStream_Fetch(t *testing.T) {
 	require.NotNil(t, gotWriter)
 	assert.Equal(t, GroupSequence(req.GroupSequence), gotWriter.GroupSequence())
 
-	wantUrgency, wantIncremental := urgencyFor(TrackPriority(req.Priority), false)
+	wantUrgency, wantIncremental := urgencyFor(TrackPriority(req.Priority))
 	gotUrgency, gotIncremental, ok := mockStream.LastPriority()
 	assert.True(t, ok, "SetPriority should have been called")
 	assert.Equal(t, wantUrgency, gotUrgency)
@@ -2119,7 +2115,7 @@ func TestSession_ProcessUniStream_UnknownSubscribeID(t *testing.T) {
 	_, cancelReadErr := mockRecvStream.Read(make([]byte, 1))
 	var cancelReadStreamErr *transport.StreamError
 	require.ErrorAs(t, cancelReadErr, &cancelReadStreamErr)
-	assert.Equal(t, transport.StreamErrorCode(InvalidSubscribeIDErrorCode), cancelReadStreamErr.ErrorCode)
+	assert.Equal(t, transport.StreamErrorCode(SubscribeCanceledErrorCode), cancelReadStreamErr.ErrorCode)
 
 	_ = session.CloseWithError(NoError, "")
 }
@@ -2437,7 +2433,7 @@ func TestSession_Fetch_SetsPriority(t *testing.T) {
 	_, err := session.Fetch(req)
 	require.NoError(t, err)
 
-	wantUrgency, wantIncremental := urgencyFor(200, false)
+	wantUrgency, wantIncremental := urgencyFor(200)
 	gotUrgency, gotIncremental, ok := mockStream.LastPriority()
 	assert.True(t, ok, "SetPriority should have been called")
 	assert.Equal(t, wantUrgency, gotUrgency)

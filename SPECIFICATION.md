@@ -1,15 +1,45 @@
 # Protocol Specification [Version: Development (0xfeedbabe)]
 
-This implementation is based on **moq-lite-draft-05**.
+This implementation is based on **moq-lite-draft-06**. The ALPN token (and
+WebTransport protocol) is `moq-lite-06`; earlier drafts are not supported.
 
-Not yet implemented from draft-05:
+Not yet implemented from draft-06:
 
 - QUIC datagram delivery for groups (Section 6.4)
-- Qmux transport bindings over TCP/TLS and WebSocket (Sections 4.2.1, 4.2.2)
+- Qmux transport bindings over TCP/TLS and WebSocket (Section 4.2)
+- The SETUP Role parameter (Section 7.3.3) is not sent, and a server ignores
+  it; a client that receives one closes the session, as required.
+
+Relay routing is wire-complete but not exposed for configuration: an endpoint
+sends neutral defaults and leaves route selection to the relay.
+
+- ANNOUNCE_START / ANNOUNCE_UPDATE carry Warm and Cold Route Cost. A local
+  announcement advertises 0 for both; a received one is stored with the peer's
+  SETUP Cost (default 1) added, saturating, and forwarded that way.
+- The SETUP Cost parameter (0x4) is never sent (the default of 1 applies);
+  the SETUP Hop parameter (0x5) is sent when the TrackMux has a Hop ID.
+- Receivers apply the local checks: a repeated non-zero Hop ID in one
+  announcement closes the session with PROTOCOL_VIOLATION, an announcement
+  whose path contains the receiver's own Hop ID is discarded, and a publisher
+  never advertises (nor serves a subscription from) a path containing the Hop
+  ID the subscriber declared in SETUP.
+- Route selection, cost ranking and splicing across routes are left to the
+  relay.
+- A TrackMux serves exact broadcast paths. It advertises each published path
+  as a route, presents a route above a requested prefix clamped to it, and
+  refuses a request for a covered path it does not publish (NOT_FOUND), which
+  section 3.2 allows.
+
+Stream error codes gomoqt needs and moq-lite does not define are assigned in
+the application range: 0x40 unauthorized, 0x41 protocol violation (a range or
+frame rule broken on a stream), 0x42 duplicate Subscribe ID, 0x43 invalid
+prefix, 0x44 banned prefix, 0x45 not supported (a Probe Stream at Probe level
+None, an unknown stream type). The Auth Stream's NOT_SUPPORTED session code is
+0x40 in the session space.
 
 ## Extensions
 
-These are additions to moq-lite-05. A peer that does not implement one is
+These are additions to moq-lite-06. A peer that does not implement one is
 never sent it.
 
 ### SUBSCRIBE_REDIRECT
@@ -60,4 +90,4 @@ Rules:
 
 ## Reference
 
-[Media over QUIC - Lite Draft 05](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-05.html)
+[Media over QUIC - Lite Draft 06](https://www.ietf.org/archive/id/draft-lcurley-moq-lite-06.html)

@@ -28,6 +28,19 @@ func TestSubscribeMessage_EncodeDecode(t *testing.T) {
 				SubscriberPriority: 5,
 			},
 		},
+		"full range with frame bounds": {
+			input: message.SubscribeMessage{
+				SubscribeID:        2,
+				BroadcastPath:      "/live/alice",
+				TrackName:          "video",
+				SubscriberPriority: 200,
+				SubscriberMaxAge:   1500,
+				GroupStart:         5,
+				GroupEnd:           11,
+				FrameStart:         15,
+				FrameEnd:           31,
+			},
+		},
 		"nil parameters": {
 			input: message.SubscribeMessage{
 				SubscribeID:        1,

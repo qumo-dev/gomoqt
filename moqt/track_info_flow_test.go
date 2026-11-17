@@ -18,16 +18,14 @@ func TestSession_TrackInfo(t *testing.T) {
 	}{
 		"valid track info": {
 			response: message.TrackInfoMessage{
-				PublisherPriority:   5,
-				PublisherOrdered:    1,
-				PublisherMaxLatency: 2000,
-				Timescale:           90000,
+				PublisherPriority: 5,
+				PublisherMaxAge:   2000,
+				Timescale:         90000,
 			},
 			expected: &PublishInfo{
-				Priority:   5,
-				Ordered:    true,
-				MaxLatency: 2000,
-				Timescale:  90000,
+				Priority:  5,
+				MaxAge:    2000,
+				Timescale: 90000,
 			},
 		},
 		"zero timescale is a protocol violation": {
@@ -84,20 +82,18 @@ func TestSession_HandleTrackStream(t *testing.T) {
 			register: func(mux *TrackMux) {
 				b := NewBroadcast()
 				require.NoError(t, b.RegisterWithInfo("video", PublishInfo{
-					Priority:   7,
-					Ordered:    true,
-					MaxLatency: 500,
-					Timescale:  48000,
+					Priority:  7,
+					MaxAge:    500,
+					Timescale: 48000,
 				}, TrackHandlerFunc(func(tw *TrackWriter) {})))
 				mux.Publish(context.Background(), "/live/alice", b)
 			},
 			path:  "/live/alice",
 			track: "video",
 			expected: message.TrackInfoMessage{
-				PublisherPriority:   7,
-				PublisherOrdered:    1,
-				PublisherMaxLatency: 500,
-				Timescale:           48000,
+				PublisherPriority: 7,
+				PublisherMaxAge:   500,
+				Timescale:         48000,
 			},
 		},
 		"registered track without info gets defaults": {

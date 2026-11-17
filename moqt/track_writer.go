@@ -71,6 +71,7 @@ func newTrackWriter(
 		onCloseTrackFunc:  onCloseTrackFunc,
 		ctx:               context.WithValue(streamCtx, biStreamTypeCtxKey, message.StreamTypeSubscribe),
 	}
+	track.ages = &groupAges{config: track.TrackConfig, timescale: DefaultTimescale}
 
 	return track
 }
@@ -95,6 +96,12 @@ type TrackWriter struct {
 
 	// groupSequence is atomically incremented for each OpenGroup call
 	groupSequence atomic.Uint64
+	// usedZero is set once group 0 has been opened, which OpenGroupAt alone
+	// can do without advancing groupSequence.
+	usedZero atomic.Bool
+
+	// ages expires the groups the subscriber's Max Age leaves behind.
+	ages *groupAges
 
 	openUniStreamFunc func(context.Context) (transport.SendStream, error)
 
@@ -108,8 +115,9 @@ type TrackWriter struct {
 }
 
 // Close stops publishing and cancels active groups.
-// It sends SUBSCRIBE_END with the last opened group sequence before closing
-// the subscribe stream, signaling that no further groups will be produced.
+// It sends SUBSCRIBE_END with the sequence after the last one used before
+// closing the subscribe stream, signaling that no further groups will be
+// produced.
 func (w *TrackWriter) Close() error {
 	// Take the write lock to ensure Close is exclusive with OpenGroup calls.
 	// This prevents OpenGroup from running concurrently with Close and
@@ -126,12 +134,23 @@ func (w *TrackWriter) Close() error {
 		return nil
 	}
 
-	// Signal that no group after the last opened sequence will be produced.
-	// When no groups were opened, this is a SUBSCRIBE_END without a
-	// preceding SUBSCRIBE_OK (a track that ended with no matching groups).
-	_ = w.subscribeStream.writeEnd(GroupSequence(w.groupSequence.Load()))
+	// Signal that no group at or after the one following the last sequence
+	// used will be produced: SUBSCRIBE_END's Group is exclusive. When no
+	// group was used it is 0, and without a preceding SUBSCRIBE_OK it says
+	// the track ended with no matching groups.
+	_ = w.subscribeStream.writeEnd(w.endGroup())
 
 	return w.subscribeStream.close()
+}
+
+// endGroup returns the exclusive end SUBSCRIBE_END carries: the sequence
+// after the last one opened, skipped or dropped, or 0 when none was.
+func (w *TrackWriter) endGroup() GroupSequence {
+	last := w.groupSequence.Load()
+	if last == 0 && !w.usedZero.Load() {
+		return 0
+	}
+	return GroupSequence(last + 1)
 }
 
 // stopLocked ends the writer's open groups with endGroup and unregisters the
@@ -209,7 +228,7 @@ func (w *TrackWriter) CloseWithError(code SubscribeErrorCode) {
 	defer w.mu.Unlock()
 
 	w.stopLocked(func(g *GroupWriter) {
-		g.CancelWrite(PublishAbortedErrorCode)
+		g.CancelWrite(InternalGroupErrorCode)
 	})
 
 	if w.subscribeStream != nil {
@@ -220,6 +239,11 @@ func (w *TrackWriter) CloseWithError(code SubscribeErrorCode) {
 // OpenGroup opens a new group with an automatically incremented sequence number
 // and returns a GroupWriter to write frames into it.
 // The sequence starts at 1 and increments by 1 for each call.
+//
+// A sequence below the subscription's StartGroup, or above its EndGroup, is
+// refused with ErrGroupOutOfRange, and nothing is sent for it. When the group
+// is the subscription's StartGroup or EndGroup, the writer sends only the
+// frames from StartFrame and before EndFrame (see GroupWriter).
 //
 // The group is opened on a fresh unidirectional QUIC stream. ctx controls
 // cancellation and backpressure: when the peer's concurrent-stream limit
@@ -239,6 +263,9 @@ func (w *TrackWriter) OpenGroup(ctx context.Context) (*GroupWriter, error) {
 //
 // ctx controls cancellation and backpressure the same way as OpenGroup.
 func (w *TrackWriter) OpenGroupAt(ctx context.Context, seq GroupSequence) (*GroupWriter, error) {
+	if seq == 0 {
+		w.usedZero.Store(true)
+	}
 	// The counter holds the last sequence used: OpenGroup adds 1 and uses
 	// the result. CAS loop ensures correctness under concurrency.
 	for {
@@ -368,6 +395,23 @@ func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequen
 		return nil, errTrackWriterStopped
 	}
 
+	// Group Start is a floor the publisher MUST NOT deliver below
+	// (moq-lite-06 §7.9), and Group End the last group to deliver.
+	config := w.TrackConfig()
+	if seq < config.StartGroup || (config.EndGroup != MinGroupSequence && seq > config.EndGroup) {
+		return nil, ErrGroupOutOfRange
+	}
+	// A partial group goes only to a subscriber that asked for one
+	// (moq-lite-06 §3.6): the start group from StartFrame, the end group up
+	// to EndFrame, every other group whole.
+	var frameStart, frameEnd uint64
+	if seq == config.StartGroup {
+		frameStart = config.StartFrame
+	}
+	if config.EndGroup != MinGroupSequence && seq == config.EndGroup {
+		frameEnd = config.EndFrame
+	}
+
 	// Ensure the first SUBSCRIBE_OK has been sent before opening a group.
 	// The first opened group resolves the subscription's absolute start.
 	err := w.subscribeStream.ensureOk(seq)
@@ -390,8 +434,7 @@ func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequen
 		return nil, err
 	}
 
-	config := w.TrackConfig()
-	stream.SetPriority(urgencyFor(config.Priority, config.Ordered))
+	stream.SetPriority(urgencyFor(config.Priority))
 
 	err = message.StreamTypeGroup.Encode(stream)
 	if err != nil {
@@ -408,6 +451,7 @@ func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequen
 	err = message.GroupMessage{
 		SubscribeID:   uint64(w.subscribeStream.subscribeID),
 		GroupSequence: uint64(seq),
+		FrameStart:    frameStart,
 	}.Encode(stream)
 	if err != nil {
 		if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
@@ -420,5 +464,16 @@ func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequen
 		return nil, err
 	}
 
-	return newGroupWriter(stream, seq, w.groupManager), nil
+	gw := newGroupWriter(stream, seq, w.groupManager)
+	gw.frameStart, gw.frameEnd = frameStart, frameEnd
+	if w.ages != nil {
+		gw.ages = w.ages
+		w.ages.add(gw)
+	}
+	return gw, nil
 }
+
+// ErrGroupOutOfRange is returned by TrackWriter.OpenGroup and OpenGroupAt for
+// a group outside the subscription's range: below its StartGroup floor or
+// above its EndGroup.
+var ErrGroupOutOfRange = errors.New("moqt: group outside the subscription's range")

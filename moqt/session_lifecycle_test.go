@@ -125,10 +125,10 @@ func TestAnnouncementReader_PeerEndsStream(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var buf bytes.Buffer
 			require.NoError(t, message.AnnounceOkMessage{}.Encode(&buf))
-			require.NoError(t, message.AnnounceBroadcastMessage{BroadcastPathSuffix: "stream1", AnnounceStatus: message.ACTIVE}.Encode(&buf))
+			require.NoError(t, message.AnnounceStartMessage{RoutePrefixSuffix: "stream1"}.Encode(&buf))
 			stream := &fakeQUICStream{reads: []streamResult{{Data: buf.Bytes()}, end}}
 
-			ar := newAnnouncementReader(stream, "/test/", nil, nil)
+			ar := newAnnouncementReader(stream, "/test/", nil, nil, announceReaderConfig{})
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
@@ -153,7 +153,7 @@ func TestAnnouncementReader_PeerEndsStream(t *testing.T) {
 // so canceling it later touches nothing.
 func TestSession_Fetch_ContextLifecycle(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		expired := transport.StreamErrorCode(ExpiredGroupErrorCode)
+		expired := transport.StreamErrorCode(SubscribeCanceledErrorCode)
 		canceled := transport.StreamErrorCode(SubscribeCanceledErrorCode)
 		cases := []struct {
 			name string

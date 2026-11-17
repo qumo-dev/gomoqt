@@ -366,11 +366,15 @@ func TestAnnouncementWriter_SendAnnouncement_EncodesHops(t *testing.T) {
 	require.NoError(t, okMsg.Decode(r))
 	assert.Equal(t, uint64(0), okMsg.ActiveCount)
 
-	var decoded message.AnnounceBroadcastMessage
+	typ, err := message.ReadMessageType(r)
+	require.NoError(t, err)
+	assert.Equal(t, message.MessageTypeAnnounceStart, typ)
+	var decoded message.AnnounceStartMessage
 	require.NoError(t, decoded.Decode(r))
-	assert.Equal(t, message.ACTIVE, decoded.AnnounceStatus)
-	assert.Equal(t, "stream1", decoded.BroadcastPathSuffix)
+	assert.Equal(t, "stream1", decoded.RoutePrefixSuffix)
 	assert.Empty(t, decoded.HopIDs)
+	assert.Zero(t, decoded.WarmRouteCost, "a local route costs nothing")
+	assert.Zero(t, decoded.ColdRouteCost)
 
 }
 
@@ -522,7 +526,7 @@ func TestAnnouncementWriter_RegisterEndHandlerLocked_StreamEnded(t *testing.T) {
 	assert.Empty(t, aw.actives)
 }
 
-func TestAnnouncementWriter_RegisterEndHandlerLocked_Closed(t *testing.T) {
+func TestAnnouncementWriter_WatchLocked_Closed(t *testing.T) {
 	aw := newTestAnnouncementWriter(t)
 	require.NoError(t, aw.init(map[*Announcement]struct{}{}))
 	ann, end := NewAnnouncement(t.Context(), BroadcastPath("/test/active"))
@@ -530,7 +534,7 @@ func TestAnnouncementWriter_RegisterEndHandlerLocked_Closed(t *testing.T) {
 	aw.stopAll()
 
 	aw.mu.Lock()
-	assert.NotPanics(t, func() { aw.registerEndHandlerLocked("active", ann) })
+	assert.NotPanics(t, func() { aw.watchLocked("active", &activeAnnouncement{announcement: ann}) })
 	aw.mu.Unlock()
 }
 
@@ -542,8 +546,8 @@ func TestAnnouncementWriter_CloseWithError(t *testing.T) {
 			"internal error": {
 				errorCode: AnnounceErrorCodeInternal,
 			},
-			"duplicated announce error": {
-				errorCode: AnnounceErrorCodeDuplicated,
+			"uninterested": {
+				errorCode: UninterestedErrorCode,
 			},
 		}
 

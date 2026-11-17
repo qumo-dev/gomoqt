@@ -14,16 +14,15 @@ func TestInfoZeroValue(t *testing.T) {
 
 func TestPublishInfo_String(t *testing.T) {
 	info := PublishInfo{
-		Priority:   5,
-		Ordered:    true,
-		MaxLatency: 100,
-		Timescale:  90000,
+		Priority:  5,
+		MaxAge:    100,
+		Timescale: 90000,
 	}
 
 	result := info.String()
 	assert.Contains(t, result, "priority: 5")
-	assert.Contains(t, result, "ordered: true")
-	assert.Contains(t, result, "max_latency_ms: 100")
+	assert.Contains(t, result, "max_age_ms: 100")
+	assert.NotContains(t, result, "ordered")
 	assert.Contains(t, result, "timescale: 90000")
 }
 

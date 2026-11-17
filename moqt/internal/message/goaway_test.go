@@ -2,6 +2,8 @@ package message_test
 
 import (
 	"bytes"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/qumo-dev/gomoqt/moqt/internal/message"
@@ -78,5 +80,31 @@ func TestGoawayMessage_DecodeErrors(t *testing.T) {
 		src := bytes.NewReader(buf.Bytes())
 		err := gm.Decode(src)
 		assert.Error(t, err)
+	})
+}
+
+func TestGoawayMessage_URILengthLimit(t *testing.T) {
+	t.Run("encode refuses an over-long uri", func(t *testing.T) {
+		gm := message.GoawayMessage{NewSessionURI: strings.Repeat("a", message.MaxNewSessionURILen+1)}
+		assert.ErrorIs(t, gm.Encode(io.Discard), message.ErrNewSessionURITooLong)
+	})
+
+	t.Run("a uri at the limit round-trips", func(t *testing.T) {
+		gm := message.GoawayMessage{NewSessionURI: strings.Repeat("a", message.MaxNewSessionURILen)}
+		var buf bytes.Buffer
+		require.NoError(t, gm.Encode(&buf))
+		var decoded message.GoawayMessage
+		require.NoError(t, decoded.Decode(&buf))
+		assert.Equal(t, gm, decoded)
+	})
+
+	t.Run("decode rejects an over-long uri", func(t *testing.T) {
+		uri := strings.Repeat("a", message.MaxNewSessionURILen+1)
+		body, _ := message.WriteString(nil, uri)
+		full, _ := message.WriteMessageLength(nil, uint64(len(body)))
+		full = append(full, body...)
+
+		var decoded message.GoawayMessage
+		assert.ErrorIs(t, decoded.Decode(bytes.NewReader(full)), message.ErrNewSessionURITooLong)
 	})
 }

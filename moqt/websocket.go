@@ -21,7 +21,7 @@ import (
 // connection: a lost segment delays every stream, and there are no
 // unreliable datagrams.
 //
-// The client offers the subprotocol NextProtoQMux, "qmux-02.moq-lite-05":
+// The client offers the subprotocol NextProtoQMux, "qmux-02.moq-lite-06":
 // the QMux draft and the MOQ version this package speaks. A request that
 // does not offer it is refused with 400.
 type WebSocketHandler struct {
