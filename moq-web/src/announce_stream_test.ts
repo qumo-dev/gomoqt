@@ -14,7 +14,9 @@ import {
 	AnnounceStartMessage,
 	AnnounceUpdateMessage,
 	readVarint,
+	writeVarint,
 } from "./internal/message/mod.ts";
+import type { AnnounceMessage } from "./internal/message/mod.ts";
 import { MockReceiveStream, MockSendStream, MockStream } from "./mock_stream_test.ts";
 import { Buffer } from "@okdaichi/golikejs/bytes";
 import { EOFError } from "@okdaichi/golikejs/io";
@@ -28,6 +30,12 @@ function openRead(buf: Buffer): (p: Uint8Array) => Promise<[number, Error | unde
 	return (p) => buf.len() > 0 ? buf.read(p) : new Promise(() => {});
 }
 
+/** Writes an announcement as the Announce Stream does: Type tag, then body. */
+async function writeAnnouncement(buf: Buffer, msg: AnnounceMessage): Promise<void> {
+	await writeVarint(buf, msg.type);
+	await msg.encode(buf);
+}
+
 /** Records the session-closing violations a reader reports. */
 class FakeViolations {
 	readonly reasons: string[] = [];
@@ -39,12 +47,12 @@ class FakeViolations {
 /** Starts a reader over buf, ANNOUNCE_OK first, then the given messages. */
 async function readerOver(
 	prefix: string,
-	messages: { encode(w: Buffer): Promise<Error | undefined> }[],
+	messages: AnnounceMessage[],
 	options: { okHop?: number; localHopId?: number; peerCost?: number } = {},
 ): Promise<{ reader: AnnouncementReader; violations: FakeViolations; done: () => void }> {
 	const buf = Buffer.make(512);
 	await new AnnounceOkMessage({ hopID: options.okHop ?? 0 }).encode(buf);
-	for (const m of messages) await m.encode(buf);
+	for (const m of messages) await writeAnnouncement(buf, m);
 	const violations = new FakeViolations();
 	const [ctx, cancel] = withCancelCause(background());
 	const reader = new AnnouncementReader(
@@ -368,7 +376,7 @@ Deno.test("AnnouncementReader", async (t) => {
 
 	await t.step("an announcement before ANNOUNCE_OK closes the session", async () => {
 		const buf = Buffer.make(64);
-		await new AnnounceStartMessage({ suffix: "a" }).encode(buf);
+		await writeAnnouncement(buf, new AnnounceStartMessage({ suffix: "a" }));
 		const violations = new FakeViolations();
 		const [ctx, cancel] = withCancelCause(background());
 		const reader = new AnnouncementReader(
@@ -406,7 +414,7 @@ Deno.test("AnnouncementReader", async (t) => {
 			await t.step(name, async () => {
 				const buf = Buffer.make(256);
 				await new AnnounceOkMessage({}).encode(buf);
-				await new AnnounceStartMessage({ suffix: "a" }).encode(buf);
+				await writeAnnouncement(buf, new AnnounceStartMessage({ suffix: "a" }));
 				const after = c.after;
 				const violations = new FakeViolations();
 				const [ctx, cancel] = withCancelCause(background());

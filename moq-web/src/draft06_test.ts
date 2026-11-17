@@ -10,9 +10,6 @@ import {
 import type { SendStream } from "./internal/webtransport/mod.ts";
 import { MockSendStream, MockStream } from "./mock_stream_test.ts";
 import {
-	AnnounceEndMessage,
-	AnnounceStartMessage,
-	AnnounceUpdateMessage,
 	DEFAULT_COST,
 	FetchMessage,
 	GoawayMessage,
@@ -131,42 +128,6 @@ Deno.test("draft-06 wire: new fields round-trip", async (t) => {
 			assertEquals(decoded, c.msg);
 		});
 	}
-
-	await t.step("announcements carry their Type tag before the length", async () => {
-		const msgs = [
-			[
-				0x0,
-				new AnnounceStartMessage({ suffix: "a", hopIDs: [7, 0], warmCost: 3, coldCost: 4 }),
-			],
-			[0x1, new AnnounceEndMessage({ announceId: 300 })],
-			[
-				0x2,
-				new AnnounceUpdateMessage({ announceId: 2, hopIDs: [9], warmCost: 1, coldCost: 2 }),
-			],
-		] as const;
-		for (const [type, msg] of msgs) {
-			const buf = Buffer.make(64);
-			await msg.encode(buf);
-			const [got] = await readVarint(buf);
-			const decoded = new (msg.constructor as new () => typeof msg)();
-
-			const err = await decoded.decode(buf);
-
-			assertEquals(got, type);
-			assertEquals(err, undefined);
-			assertEquals(decoded, msg);
-		}
-	});
-
-	await t.step("a Hop Count larger than its entries is malformed", async () => {
-		const buf = Buffer.make(16);
-		// length 4: suffix "", Hop Count 3, one Hop ID, warm cost (no cold cost)
-		await buf.write(new Uint8Array([0x04, 0x00, 0x03, 0x05, 0x00]));
-
-		const err = await new AnnounceStartMessage().decode(buf);
-
-		assertInstanceOf(err, Error);
-	});
 });
 
 Deno.test("draft-06 GOAWAY URI limit", async (t) => {

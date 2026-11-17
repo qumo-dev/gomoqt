@@ -1,10 +1,17 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
+import {
+	MessageDecodeError,
+	MessageDecoder,
+	MessageEncoder,
+	readFull,
+	readVarint,
+} from "./message.ts";
 
 /**
  * Type tags for the announcements a publisher sends on the Announce Stream
- * after ANNOUNCE_OK (moq-lite-06 §7.6–7.8). Each message's `encode` writes its
- * own tag; its `decode` expects the caller to have consumed it.
+ * after ANNOUNCE_OK (moq-lite-06 §7.6–7.8). Like the Subscribe Stream's
+ * responses, the tag is written and read by the stream, not by the message:
+ * `encode` writes and `decode` reads only the length-prefixed body.
  */
 export const AnnounceMessageTypes = {
 	Start: 0x0,
@@ -12,95 +19,58 @@ export const AnnounceMessageTypes = {
 	Update: 0x2,
 } as const;
 
-/** Raised for an announcement that does not parse: a malformed message. */
-export class AnnounceDecodeError extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "AnnounceDecodeError";
-	}
-}
-
 /**
  * Returns the first non-zero Hop ID that appears twice in `ids`, or undefined.
  * Repeated zeros are legal: 0 identifies nothing (moq-lite-06 §7.6).
  */
 export function duplicateHopID(ids: readonly number[]): number | undefined {
-	for (let i = 0; i < ids.length; i++) {
-		const id = ids[i]!;
-		if (id === 0) continue;
-		for (let j = i + 1; j < ids.length; j++) {
-			if (ids[j] === id) return id;
-		}
+	for (const [i, id] of ids.entries()) {
+		if (id !== 0 && ids.indexOf(id, i + 1) !== -1) return id;
 	}
 	return undefined;
 }
 
-async function readBody(r: Reader): Promise<[MessageDecoder | undefined, Error | undefined]> {
-	const [msgLen, , err1] = await readVarint(r);
-	if (err1) return [undefined, err1];
-	const buf = new Uint8Array(msgLen);
-	const [, err2] = await readFull(r, buf);
-	if (err2) return [undefined, err2];
-	return [new MessageDecoder(buf), undefined];
-}
-
-/** Reads a varint from `d`, refusing one that runs past the body. */
-function strictVarint(d: MessageDecoder): number {
-	if (d.remaining() < 1) {
-		throw new AnnounceDecodeError("message too short");
-	}
-	const v = d.varint();
-	if (Number.isNaN(v) || d.remaining() < 0) {
-		throw new AnnounceDecodeError("message too short");
-	}
-	return v;
-}
-
-function readHopList(d: MessageDecoder): number[] {
-	const count = strictVarint(d);
-	if (count > d.remaining()) {
-		throw new AnnounceDecodeError("hop count exceeds message");
-	}
-	const ids: number[] = [];
-	for (let i = 0; i < count; i++) {
-		ids.push(strictVarint(d));
-	}
-	return ids;
-}
-
-function finish(d: MessageDecoder): void {
-	if (!d.eof() || d.remaining() < 0) {
-		throw new AnnounceDecodeError("message length mismatch");
-	}
-}
-
-async function decodeWith(
+/**
+ * Reads a length-prefixed body and parses it with `parse`, which reads fields
+ * through the strict {@link MessageDecoder} methods. A body that does not
+ * parse, or has bytes left over, yields a {@link MessageDecodeError}.
+ */
+async function decodeBody(
 	r: Reader,
 	parse: (d: MessageDecoder) => void,
 ): Promise<Error | undefined> {
-	const [d, err] = await readBody(r);
-	if (err || d === undefined) return err;
+	const [msgLen, , err1] = await readVarint(r);
+	if (err1) return err1;
+	const buf = new Uint8Array(msgLen);
+	const [, err2] = await readFull(r, buf);
+	if (err2) return err2;
+
+	const d = new MessageDecoder(buf);
 	try {
 		parse(d);
-		finish(d);
+		d.finish();
 	} catch (e) {
-		if (e instanceof Error) return e;
-		return new AnnounceDecodeError(String(e));
+		return e instanceof Error ? e : new MessageDecodeError(String(e));
 	}
 	return undefined;
+}
+
+function readHopList(d: MessageDecoder): number[] {
+	const count = d.strictVarint();
+	// Each Hop ID takes at least one byte; a larger count cannot fit the body.
+	if (count > d.remaining()) {
+		throw new MessageDecodeError("hop count exceeds message");
+	}
+	const ids: number[] = [];
+	for (let i = 0; i < count; i++) {
+		ids.push(d.strictVarint());
+	}
+	return ids;
 }
 
 function writeHopList(e: MessageEncoder, ids: readonly number[]): void {
 	e.varint(ids.length);
 	for (const id of ids) e.varint(id);
-}
-
-/** Frames a typed message: Type varint, then the length-prefixed body. */
-function typed(type: number, body: Uint8Array): Uint8Array {
-	const out = new Uint8Array(1 + body.length);
-	out[0] = type; // every assigned tag fits a one-byte varint
-	out.set(body, 1);
-	return out;
 }
 
 export interface AnnounceStartMessageInit {
@@ -127,6 +97,7 @@ export interface AnnounceStartMessageInit {
  * ```
  */
 export class AnnounceStartMessage {
+	readonly type = AnnounceMessageTypes.Start;
 	suffix: string;
 	hopIDs: number[];
 	warmCost: number;
@@ -139,26 +110,24 @@ export class AnnounceStartMessage {
 		this.coldCost = init.coldCost ?? 0;
 	}
 
-	/** Encodes the Type tag and the message in one write. */
+	/** Encodes the length-prefixed body; the caller writes the Type tag. */
 	async encode(w: Writer): Promise<Error | undefined> {
 		const e = new MessageEncoder();
 		e.string(this.suffix);
 		writeHopList(e, this.hopIDs);
 		e.varint(this.warmCost);
 		e.varint(this.coldCost);
-		const [, err] = await w.write(typed(AnnounceMessageTypes.Start, e.frame()));
+		const [, err] = await w.write(e.frame());
 		return err;
 	}
 
-	/** Decodes the message after its Type tag. */
+	/** Decodes the length-prefixed body; the caller has read the Type tag. */
 	decode(r: Reader): Promise<Error | undefined> {
-		return decodeWith(r, (d) => {
-			if (d.remaining() < 1) throw new AnnounceDecodeError("message too short");
-			this.suffix = d.string();
-			if (d.remaining() < 0) throw new AnnounceDecodeError("message too short");
+		return decodeBody(r, (d) => {
+			this.suffix = d.strictString();
 			this.hopIDs = readHopList(d);
-			this.warmCost = strictVarint(d);
-			this.coldCost = strictVarint(d);
+			this.warmCost = d.strictVarint();
+			this.coldCost = d.strictVarint();
 		});
 	}
 }
@@ -179,24 +148,25 @@ export interface AnnounceEndMessageInit {
  * ```
  */
 export class AnnounceEndMessage {
+	readonly type = AnnounceMessageTypes.End;
 	announceId: number;
 
 	constructor(init: AnnounceEndMessageInit = {}) {
 		this.announceId = init.announceId ?? 0;
 	}
 
-	/** Encodes the Type tag and the message in one write. */
+	/** Encodes the length-prefixed body; the caller writes the Type tag. */
 	async encode(w: Writer): Promise<Error | undefined> {
 		const e = new MessageEncoder(8);
 		e.varint(this.announceId);
-		const [, err] = await w.write(typed(AnnounceMessageTypes.End, e.frame()));
+		const [, err] = await w.write(e.frame());
 		return err;
 	}
 
-	/** Decodes the message after its Type tag. */
+	/** Decodes the length-prefixed body; the caller has read the Type tag. */
 	decode(r: Reader): Promise<Error | undefined> {
-		return decodeWith(r, (d) => {
-			this.announceId = strictVarint(d);
+		return decodeBody(r, (d) => {
+			this.announceId = d.strictVarint();
 		});
 	}
 }
@@ -225,6 +195,7 @@ export interface AnnounceUpdateMessageInit {
  * ```
  */
 export class AnnounceUpdateMessage {
+	readonly type = AnnounceMessageTypes.Update;
 	announceId: number;
 	hopIDs: number[];
 	warmCost: number;
@@ -237,24 +208,30 @@ export class AnnounceUpdateMessage {
 		this.coldCost = init.coldCost ?? 0;
 	}
 
-	/** Encodes the Type tag and the message in one write. */
+	/** Encodes the length-prefixed body; the caller writes the Type tag. */
 	async encode(w: Writer): Promise<Error | undefined> {
 		const e = new MessageEncoder();
 		e.varint(this.announceId);
 		writeHopList(e, this.hopIDs);
 		e.varint(this.warmCost);
 		e.varint(this.coldCost);
-		const [, err] = await w.write(typed(AnnounceMessageTypes.Update, e.frame()));
+		const [, err] = await w.write(e.frame());
 		return err;
 	}
 
-	/** Decodes the message after its Type tag. */
+	/** Decodes the length-prefixed body; the caller has read the Type tag. */
 	decode(r: Reader): Promise<Error | undefined> {
-		return decodeWith(r, (d) => {
-			this.announceId = strictVarint(d);
+		return decodeBody(r, (d) => {
+			this.announceId = d.strictVarint();
 			this.hopIDs = readHopList(d);
-			this.warmCost = strictVarint(d);
-			this.coldCost = strictVarint(d);
+			this.warmCost = d.strictVarint();
+			this.coldCost = d.strictVarint();
 		});
 	}
 }
+
+/** An announcement the Announce Stream carries after ANNOUNCE_OK. */
+export type AnnounceMessage =
+	| AnnounceStartMessage
+	| AnnounceEndMessage
+	| AnnounceUpdateMessage;

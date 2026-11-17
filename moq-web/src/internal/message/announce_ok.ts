@@ -1,6 +1,11 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
-import { AnnounceDecodeError } from "./announce.ts";
+import {
+	MessageDecodeError,
+	MessageDecoder,
+	MessageEncoder,
+	readFull,
+	readVarint,
+} from "./message.ts";
 
 export interface AnnounceOkMessageInit {
 	hopID?: number;
@@ -59,13 +64,12 @@ export class AnnounceOkMessage {
 		// Strict: an announcement where ANNOUNCE_OK belongs does not parse as
 		// one, which is how a reader detects an announcement before ANNOUNCE_OK.
 		const d = new MessageDecoder(buf);
-		if (d.remaining() < 2) {
-			return new AnnounceDecodeError("ANNOUNCE_OK too short");
-		}
-		this.hopID = d.varint();
-		this.activeCount = d.varint();
-		if (!d.eof() || d.remaining() < 0 || Number.isNaN(this.hopID + this.activeCount)) {
-			return new AnnounceDecodeError("ANNOUNCE_OK length mismatch");
+		try {
+			this.hopID = d.strictVarint();
+			this.activeCount = d.strictVarint();
+			d.finish();
+		} catch (e) {
+			return e instanceof Error ? e : new MessageDecodeError(String(e));
 		}
 
 		return undefined;

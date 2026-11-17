@@ -1,7 +1,7 @@
 import { EOFError } from "@okdaichi/golikejs/io";
 import type { AnnounceRequestMessage } from "./internal/message/mod.ts";
+import type { AnnounceMessage } from "./internal/message/mod.ts";
 import {
-	AnnounceDecodeError,
 	AnnounceEndMessage,
 	AnnounceMessageTypes,
 	AnnounceOkMessage,
@@ -9,7 +9,9 @@ import {
 	AnnounceUpdateMessage,
 	DEFAULT_COST,
 	duplicateHopID,
+	MessageDecodeError,
 	readVarint,
+	writeVarint,
 } from "./internal/message/mod.ts";
 import { watchPromise, withCancelCause } from "@okdaichi/golikejs/context";
 import type { CancelCauseFunc, Context } from "@okdaichi/golikejs/context";
@@ -188,22 +190,33 @@ export class AnnouncementWriter {
 
 	#start(sfx: suffix, ann: Announcement): Promise<Error | undefined> {
 		const r = routeOf(ann);
-		return new AnnounceStartMessage({
-			suffix: sfx,
-			hopIDs: [...r.hopIDs],
-			warmCost: r.warmCost,
-			coldCost: r.coldCost,
-		}).encode(this.#stream.writable);
+		return this.#send(
+			new AnnounceStartMessage({
+				suffix: sfx,
+				hopIDs: [...r.hopIDs],
+				warmCost: r.warmCost,
+				coldCost: r.coldCost,
+			}),
+		);
 	}
 
 	#update(active: Advertised): Promise<Error | undefined> {
 		const r = routeOf(active.announcement);
-		return new AnnounceUpdateMessage({
-			announceId: active.id,
-			hopIDs: [...r.hopIDs],
-			warmCost: r.warmCost,
-			coldCost: r.coldCost,
-		}).encode(this.#stream.writable);
+		return this.#send(
+			new AnnounceUpdateMessage({
+				announceId: active.id,
+				hopIDs: [...r.hopIDs],
+				warmCost: r.warmCost,
+				coldCost: r.coldCost,
+			}),
+		);
+	}
+
+	// Writes an announcement: its Type tag, then its length-prefixed body.
+	async #send(msg: AnnounceMessage): Promise<Error | undefined> {
+		const [, typeErr] = await writeVarint(this.#stream.writable, msg.type);
+		if (typeErr) return typeErr;
+		return msg.encode(this.#stream.writable);
 	}
 
 	// Watches the announcement active advertises, re-advertising or ending the
@@ -231,9 +244,7 @@ export class AnnouncementWriter {
 			return;
 		}
 		this.#actives.delete(sfx);
-		const err = await new AnnounceEndMessage({ announceId: active.id }).encode(
-			this.#stream.writable,
-		);
+		const err = await this.#send(new AnnounceEndMessage({ announceId: active.id }));
 		if (err && !(err instanceof WebTransportStreamError)) {
 			console.warn(`moq: failed to send ANNOUNCE_END: ${err}`);
 		}
@@ -454,7 +465,7 @@ export class AnnouncementReader {
 				// is the stream ending between messages.
 				this.#end(
 					n > 0 && typeErr instanceof EOFError
-						? new AnnounceDecodeError("truncated type")
+						? new MessageDecodeError("truncated type")
 						: typeErr,
 				);
 				return;
@@ -591,7 +602,7 @@ export class AnnouncementReader {
 	// reader. Either way every announcement on it ends with the reader's
 	// context.
 	#end(err: unknown): void {
-		if (err instanceof AnnounceViolation || err instanceof AnnounceDecodeError) {
+		if (err instanceof AnnounceViolation || err instanceof MessageDecodeError) {
 			this.#options.onProtocolViolation?.(err.message);
 		} else if (err instanceof WebTransportStreamError) {
 			err = new AnnounceError(err.code, err.remote);
