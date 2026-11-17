@@ -1,10 +1,9 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
 import {
+	decodeMessageBody,
 	MessageDecodeError,
 	MessageDecoder,
 	MessageEncoder,
-	readFull,
-	readVarint,
 } from "./message.ts";
 
 /**
@@ -18,31 +17,6 @@ export const AnnounceMessageTypes = {
 	End: 0x1,
 	Update: 0x2,
 } as const;
-
-/**
- * Reads a length-prefixed body and parses it with `parse`, which reads fields
- * through the strict {@link MessageDecoder} methods. A body that does not
- * parse, or has bytes left over, yields a {@link MessageDecodeError}.
- */
-async function decodeBody(
-	r: Reader,
-	parse: (d: MessageDecoder) => void,
-): Promise<Error | undefined> {
-	const [msgLen, , err1] = await readVarint(r);
-	if (err1) return err1;
-	const buf = new Uint8Array(msgLen);
-	const [, err2] = await readFull(r, buf);
-	if (err2) return err2;
-
-	const d = new MessageDecoder(buf);
-	try {
-		parse(d);
-		d.finish();
-	} catch (e) {
-		return e instanceof Error ? e : new MessageDecodeError(String(e));
-	}
-	return undefined;
-}
 
 function readHopList(d: MessageDecoder): number[] {
 	const count = d.strictVarint();
@@ -112,7 +86,7 @@ export class AnnounceStartMessage {
 
 	/** Decodes the length-prefixed body; the caller has read the Type tag. */
 	decode(r: Reader): Promise<Error | undefined> {
-		return decodeBody(r, (d) => {
+		return decodeMessageBody(r, (d) => {
 			this.suffix = d.strictString();
 			this.hopIDs = readHopList(d);
 			this.warmCost = d.strictVarint();
@@ -154,7 +128,7 @@ export class AnnounceEndMessage {
 
 	/** Decodes the length-prefixed body; the caller has read the Type tag. */
 	decode(r: Reader): Promise<Error | undefined> {
-		return decodeBody(r, (d) => {
+		return decodeMessageBody(r, (d) => {
 			this.announceId = d.strictVarint();
 		});
 	}
@@ -210,7 +184,7 @@ export class AnnounceUpdateMessage {
 
 	/** Decodes the length-prefixed body; the caller has read the Type tag. */
 	decode(r: Reader): Promise<Error | undefined> {
-		return decodeBody(r, (d) => {
+		return decodeMessageBody(r, (d) => {
 			this.announceId = d.strictVarint();
 			this.hopIDs = readHopList(d);
 			this.warmCost = d.strictVarint();

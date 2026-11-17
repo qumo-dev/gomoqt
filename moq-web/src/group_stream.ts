@@ -205,8 +205,7 @@ export class GroupReader {
 		this.sequence = group.sequence;
 		// The GROUP message's Frame Start (moq-lite-06 §7.19) is not kept: this
 		// endpoint only asks for whole groups, so it is 0 from a conforming
-		// peer. A future resume partway into a group would keep it here to
-		// number the frames the stream delivers.
+		// peer.
 		this.#reader = reader;
 		this.#onDone = onDone;
 		[this.context, this.#cancelFunc] = withCancelCause(trackCtx);

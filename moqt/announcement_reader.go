@@ -34,7 +34,7 @@ type announceReaderConfig struct {
 // newAnnouncementReader reads the peer's announcements under prefix. scope,
 // when set, is what the peer may publish: an announcement outside it is
 // dropped.
-func newAnnouncementReader(stream transport.Stream, prefix prefix, initSuffixes []suffix, scope *authScope, cfg announceReaderConfig) *AnnouncementReader {
+func newAnnouncementReader(stream transport.Stream, prefix prefix, scope *authScope, cfg announceReaderConfig) *AnnouncementReader {
 	if !isValidPrefix(prefix) {
 		panic("invalid prefix for AnnouncementReader")
 	}
@@ -46,7 +46,7 @@ func newAnnouncementReader(stream transport.Stream, prefix prefix, initSuffixes 
 		stream:      stream,
 		prefix:      prefix,
 		routes:      make(map[uint64]suffix),
-		advertised:  make(map[suffix]*advertisedRoute),
+		advertised:  make(map[suffix]*Announcement),
 		pendings:    make([]*Announcement, 0),
 		announcedCh: make(chan struct{}, 1),
 		cancelCause: cancelCause,
@@ -57,15 +57,6 @@ func newAnnouncementReader(stream transport.Stream, prefix prefix, initSuffixes 
 	if scope != nil {
 		// Watching from before the first read, no scope change misses it.
 		context.AfterFunc(ar.ctx, scope.watch(ar))
-	}
-
-	for _, sfx := range initSuffixes {
-		if scope != nil && !scope.canPublish(BroadcastPath(prefix+sfx)) {
-			continue
-		}
-		ann, _ := NewAnnouncement(readerCtx, BroadcastPath(prefix+sfx))
-		ar.seeded = append(ar.seeded, ann)
-		ar.pendings = append(ar.pendings, ann)
 	}
 
 	go ar.run()
@@ -90,11 +81,13 @@ type AnnouncementReader struct {
 	nextID uint64
 	// routes maps each live Announce ID to the route suffix it advertises.
 	routes map[uint64]suffix
-	// advertised holds the peer's current advertisement for each route
-	// suffix. Each suffix has at most one per stream.
-	advertised map[suffix]*advertisedRoute
-	// seeded are announcements made at construction, outside any route.
-	seeded []*Announcement
+	// advertised holds, for each route suffix the peer advertises, the
+	// announcement handed to the application. Each suffix has at most one
+	// advertisement per stream. The value is nil while the advertisement is
+	// discarded: it looped back through this endpoint, or lies outside the
+	// scope. The peer still advertises it, so its Announce ID stays live and
+	// an ANNOUNCE_UPDATE may bring it back.
+	advertised map[suffix]*Announcement
 
 	pendings    []*Announcement
 	announcedCh chan struct{} // notify when new announcement is available
@@ -106,17 +99,6 @@ type AnnouncementReader struct {
 	// cancelCause cancels readerCtx (and thus ar.ctx) when the announce
 	// goroutine hits a fatal decode error, so ReceiveAnnouncement unblocks.
 	cancelCause context.CancelCauseFunc
-}
-
-// advertisedRoute is the peer's current advertisement of one route on the
-// stream.
-type advertisedRoute struct {
-	id uint64
-	// ann is the announcement handed to the application, or nil while the
-	// advertisement is discarded: it looped back through this endpoint, or
-	// lies outside the scope. The peer still advertises it, so its id stays
-	// live and an ANNOUNCE_UPDATE may bring it back.
-	ann *Announcement
 }
 
 // errAnnounceViolation marks an Announce Stream message that breaks
@@ -139,8 +121,15 @@ func (ar *AnnouncementReader) run() {
 	}
 	peerHopID := okMsg.HopID
 
-	peerCost := message.DefaultCost
-	peerCostKnown := false
+	// The peer's SETUP Cost is looked up at the first announcement, not
+	// here: SETUP arrives on its own stream, and waiting for it before an
+	// empty stream ends would hold the reader for the SETUP timeout.
+	peerCost := sync.OnceValue(func() uint64 {
+		if ar.cfg.peerCost == nil {
+			return message.DefaultCost
+		}
+		return ar.cfg.peerCost()
+	})
 
 	for {
 		r.n = 0
@@ -157,13 +146,7 @@ func (ar *AnnouncementReader) run() {
 				ar.end(decodeErr(r, "ANNOUNCE_START", err))
 				return
 			}
-			if !peerCostKnown {
-				if ar.cfg.peerCost != nil {
-					peerCost = ar.cfg.peerCost()
-				}
-				peerCostKnown = true
-			}
-			route, err := receivedRoute(am.HopIDs, peerHopID, am.WarmRouteCost, am.ColdRouteCost, peerCost)
+			route, err := receivedRoute(am.HopIDs, peerHopID, am.WarmRouteCost, am.ColdRouteCost, peerCost())
 			if err == nil {
 				err = ar.start(am.RoutePrefixSuffix, route)
 			}
@@ -187,13 +170,7 @@ func (ar *AnnouncementReader) run() {
 				ar.end(decodeErr(r, "ANNOUNCE_UPDATE", err))
 				return
 			}
-			if !peerCostKnown {
-				if ar.cfg.peerCost != nil {
-					peerCost = ar.cfg.peerCost()
-				}
-				peerCostKnown = true
-			}
-			route, err := receivedRoute(am.HopIDs, peerHopID, am.WarmRouteCost, am.ColdRouteCost, peerCost)
+			route, err := receivedRoute(am.HopIDs, peerHopID, am.WarmRouteCost, am.ColdRouteCost, peerCost())
 			if err == nil {
 				err = ar.update(am.AnnounceID, route)
 			}
@@ -272,13 +249,12 @@ func (ar *AnnouncementReader) start(sfx suffix, route announceRoute) error {
 	if _, ok := ar.advertised[sfx]; ok {
 		return fmt.Errorf("%w: ANNOUNCE_START for an already advertised route %q", errAnnounceViolation, sfx)
 	}
-	adv := &advertisedRoute{id: id}
-	ar.advertised[sfx] = adv
 	ar.routes[id] = sfx
-
+	var ann *Announcement
 	if ar.admits(sfx, route) {
-		adv.ann = ar.activateLocked(sfx, route)
+		ann = ar.activateLocked(sfx, route)
 	}
+	ar.advertised[sfx] = ann
 	return nil
 }
 
@@ -293,10 +269,10 @@ func (ar *AnnouncementReader) retract(id uint64) error {
 		return fmt.Errorf("%w: ANNOUNCE_END for unknown or retired Announce ID %d", errAnnounceViolation, id)
 	}
 	delete(ar.routes, id)
-	adv := ar.advertised[sfx]
+	ann := ar.advertised[sfx]
 	delete(ar.advertised, sfx)
-	if adv.ann != nil {
-		adv.ann.end()
+	if ann != nil {
+		ann.end()
 	}
 	return nil
 }
@@ -313,16 +289,16 @@ func (ar *AnnouncementReader) update(id uint64, route announceRoute) error {
 	if !ok {
 		return fmt.Errorf("%w: ANNOUNCE_UPDATE for unknown or retired Announce ID %d", errAnnounceViolation, id)
 	}
-	adv := ar.advertised[sfx]
+	ann := ar.advertised[sfx]
 
 	switch admitted := ar.admits(sfx, route); {
-	case admitted && adv.ann != nil:
-		adv.ann.setRoute(route)
+	case admitted && ann != nil:
+		ann.setRoute(route)
 	case admitted:
-		adv.ann = ar.activateLocked(sfx, route)
-	case adv.ann != nil:
-		adv.ann.end()
-		adv.ann = nil
+		ar.advertised[sfx] = ar.activateLocked(sfx, route)
+	case ann != nil:
+		ann.end()
+		ar.advertised[sfx] = nil
 	}
 	return nil
 }
@@ -409,20 +385,13 @@ func (ar *AnnouncementReader) rescope() {
 		return
 	}
 
-	for _, adv := range ar.advertised {
-		if adv.ann == nil || ar.scope.canPublish(adv.ann.BroadcastPath()) {
+	for sfx, ann := range ar.advertised {
+		if ann == nil || ar.scope.canPublish(ann.BroadcastPath()) {
 			continue
 		}
-		adv.ann.end()
-		adv.ann = nil
-	}
-	ar.seeded = slices.DeleteFunc(ar.seeded, func(ann *Announcement) bool {
-		if ar.scope.canPublish(ann.BroadcastPath()) {
-			return false
-		}
 		ann.end()
-		return true
-	})
+		ar.advertised[sfx] = nil
+	}
 }
 
 // fail cancels the reader context with cause, unblocking ReceiveAnnouncement.

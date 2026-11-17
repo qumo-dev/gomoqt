@@ -1,5 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
+import { decodeMessageBody, MessageEncoder } from "./message.ts";
 
 export interface SubscribeMessageInit {
 	subscribeId?: number;
@@ -79,24 +79,10 @@ export class SubscribeMessage {
 	/**
 	 * Decodes the message from the reader.
 	 */
-	async decode(r: Reader): Promise<Error | undefined> {
-		let err: Error | undefined;
-
-		// Read message length
-		let msgLen: number;
-		[msgLen, , err] = await readVarint(r);
-		if (err) return err;
-
-		// Read message body into a buffer
-		const buf = new Uint8Array(msgLen);
-		[, err] = await readFull(r, buf);
-		if (err) return err;
-
-		// Parse fields from the buffer
+	decode(r: Reader): Promise<Error | undefined> {
 		// Every field comes from the peer: a truncated one is an error, never a
 		// NaN that reaches the publisher (Max Age feeds group expiry).
-		const d = new MessageDecoder(buf);
-		try {
+		return decodeMessageBody(r, (d) => {
 			this.subscribeId = d.strictVarint();
 			this.broadcastPath = d.strictString();
 			this.trackName = d.strictString();
@@ -106,11 +92,6 @@ export class SubscribeMessage {
 			this.groupEnd = d.strictVarint();
 			this.frameStart = d.strictVarint();
 			this.frameEnd = d.strictVarint();
-			d.finish();
-		} catch (e) {
-			return e instanceof Error ? e : new Error(String(e));
-		}
-
-		return undefined;
+		});
 	}
 }

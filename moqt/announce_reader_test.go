@@ -71,13 +71,13 @@ func TestNewAnnouncementReader(t *testing.T) {
 	mockStream := &fakeQUICStream{}
 	prefix := "/test/prefix/"
 
-	ras := newAnnouncementReader(mockStream, prefix, []string{"suffix1", "suffix2"}, nil, announceReaderConfig{})
+	ras := newAnnouncementReader(mockStream, prefix, nil, announceReaderConfig{})
 
 	require.NotNil(t, ras)
 	assert.Equal(t, prefix, ras.prefix)
 	assert.Equal(t, mockStream, ras.stream)
 	assert.NotNil(t, ras.advertised)
-	assert.Len(t, ras.pendings, 2)
+	assert.Empty(t, ras.pendings)
 	assert.NotNil(t, ras.announcedCh)
 	assert.NotNil(t, ras.ctx)
 }
@@ -93,7 +93,7 @@ func TestAnnouncementReader_ReceiveAnnouncement(t *testing.T) {
 			reader: func() *AnnouncementReader {
 				data := announceWire(t, 0, message.AnnounceStartMessage{RoutePrefixSuffix: "valid_announcement"})
 				s := &fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}
-				return newAnnouncementReader(s, "/test/", nil, nil, announceReaderConfig{})
+				return newAnnouncementReader(s, "/test/", nil, announceReaderConfig{})
 			},
 			ctx:      context.Background(),
 			wantPath: "/test/valid_announcement",
@@ -101,7 +101,7 @@ func TestAnnouncementReader_ReceiveAnnouncement(t *testing.T) {
 		"context cancelled": {
 			reader: func() *AnnouncementReader {
 				s := &fakeQUICStream{reads: []streamResult{{Block: true}}}
-				return newAnnouncementReader(s, "/test/", nil, nil, announceReaderConfig{})
+				return newAnnouncementReader(s, "/test/", nil, announceReaderConfig{})
 			},
 			ctx: func() context.Context {
 				ctx, cancel := context.WithCancel(context.Background())
@@ -112,7 +112,7 @@ func TestAnnouncementReader_ReceiveAnnouncement(t *testing.T) {
 		},
 		"reader closed": {
 			reader: func() *AnnouncementReader {
-				ras := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Block: true}}}, "/test/", nil, nil, announceReaderConfig{})
+				ras := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Block: true}}}, "/test/", nil, announceReaderConfig{})
 				require.NoError(t, ras.Close())
 				return ras
 			},
@@ -143,7 +143,7 @@ func TestAnnouncementReader_ReceiveAnnouncement(t *testing.T) {
 }
 
 func TestAnnouncementReader_Close(t *testing.T) {
-	ras := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Block: true}}}, "/test/", []string{"a"}, nil, announceReaderConfig{})
+	ras := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Block: true}}}, "/test/", nil, announceReaderConfig{})
 
 	assert.NoError(t, ras.Close())
 	assert.NoError(t, ras.Close(), "a second Close is a no-op")
@@ -153,7 +153,7 @@ func TestAnnouncementReader_Close(t *testing.T) {
 func TestAnnouncementReader_CloseWithError(t *testing.T) {
 	cancelled := make(chan transport.StreamErrorCode, 2)
 	s := &fakeQUICStream{reads: []streamResult{{Block: true}}, cancelReadNotify: cancelled}
-	ras := newAnnouncementReader(s, "/test/", nil, nil, announceReaderConfig{})
+	ras := newAnnouncementReader(s, "/test/", nil, announceReaderConfig{})
 
 	ras.CloseWithError(UninterestedErrorCode)
 	ras.CloseWithError(AnnounceErrorCodeInternal) // a second call is harmless
@@ -180,7 +180,7 @@ func TestAnnouncementReader_ImplicitAnnounceIDs(t *testing.T) {
 	)
 	violations := newViolationRecorder()
 	s := &fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}
-	ras := newAnnouncementReader(s, "/live/", nil, nil, announceReaderConfig{onProtocolViolation: violations.record})
+	ras := newAnnouncementReader(s, "/live/", nil, announceReaderConfig{onProtocolViolation: violations.record})
 	defer func() { _ = ras.Close() }() // not actionable: the test is over
 
 	anns := receiveN(t, ras, 4)
@@ -208,7 +208,7 @@ func TestAnnouncementReader_UpdateInPlace(t *testing.T) {
 		message.AnnounceUpdateMessage{AnnounceID: 0, HopIDs: []uint64{2, 3}, WarmRouteCost: 7, ColdRouteCost: 8},
 	)
 	s := &fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}
-	ras := newAnnouncementReader(s, "/live/", nil, nil, announceReaderConfig{
+	ras := newAnnouncementReader(s, "/live/", nil, announceReaderConfig{
 		peerCost: func() uint64 { return 10 },
 	})
 	defer func() { _ = ras.Close() }() // not actionable: the test is over
@@ -232,7 +232,7 @@ func TestAnnouncementReader_UpdateInPlace(t *testing.T) {
 func TestAnnouncementReader_ZeroOKHopIDIsAppended(t *testing.T) {
 	data := announceWire(t, 0, message.AnnounceStartMessage{RoutePrefixSuffix: "a", HopIDs: []uint64{5}})
 	s := &fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}
-	ras := newAnnouncementReader(s, "/live/", nil, nil, announceReaderConfig{})
+	ras := newAnnouncementReader(s, "/live/", nil, announceReaderConfig{})
 	defer func() { _ = ras.Close() }() // not actionable: the test is over
 
 	ann := receiveN(t, ras, 1)[0]
@@ -242,7 +242,7 @@ func TestAnnouncementReader_ZeroOKHopIDIsAppended(t *testing.T) {
 func TestAnnouncementReader_CostSaturates(t *testing.T) {
 	data := announceWire(t, 0, message.AnnounceStartMessage{RoutePrefixSuffix: "a", WarmRouteCost: maxRouteCost - 1, ColdRouteCost: maxRouteCost})
 	s := &fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}
-	ras := newAnnouncementReader(s, "/live/", nil, nil, announceReaderConfig{peerCost: func() uint64 { return 5 }})
+	ras := newAnnouncementReader(s, "/live/", nil, announceReaderConfig{peerCost: func() uint64 { return 5 }})
 	defer func() { _ = ras.Close() }() // not actionable: the test is over
 
 	route := receiveN(t, ras, 1)[0].routeInfo()
@@ -263,7 +263,7 @@ func TestAnnouncementReader_LoopIsDiscarded(t *testing.T) {
 	)
 	violations := newViolationRecorder()
 	s := &fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}
-	ras := newAnnouncementReader(s, "/live/", nil, nil, announceReaderConfig{
+	ras := newAnnouncementReader(s, "/live/", nil, announceReaderConfig{
 		localHopID:          self,
 		onProtocolViolation: violations.record,
 	})
@@ -331,7 +331,7 @@ func TestAnnouncementReader_ProtocolViolations(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			violations := newViolationRecorder()
 			s := &fakeQUICStream{reads: []streamResult{{Data: tt.data}, {Err: io.EOF}}}
-			ras := newAnnouncementReader(s, "/live/", nil, nil, announceReaderConfig{onProtocolViolation: violations.record})
+			ras := newAnnouncementReader(s, "/live/", nil, announceReaderConfig{onProtocolViolation: violations.record})
 			defer func() { _ = ras.Close() }() // not actionable: the test is over
 
 			assert.NotEmpty(t, violations.wait(time.Second), "the session should be closed")
@@ -363,7 +363,7 @@ func TestAnnouncementReader_StreamEndIsNotAViolation(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			violations := newViolationRecorder()
-			ras := newAnnouncementReader(&fakeQUICStream{reads: tt.reads}, "/live/", nil, nil, announceReaderConfig{onProtocolViolation: violations.record})
+			ras := newAnnouncementReader(&fakeQUICStream{reads: tt.reads}, "/live/", nil, announceReaderConfig{onProtocolViolation: violations.record})
 			defer func() { _ = ras.Close() }() // not actionable: the test is over
 
 			select {
@@ -378,7 +378,7 @@ func TestAnnouncementReader_StreamEndIsNotAViolation(t *testing.T) {
 
 func TestAnnouncementReader_StreamEndEndsAnnouncements(t *testing.T) {
 	data := announceWire(t, 0, message.AnnounceStartMessage{RoutePrefixSuffix: "a"})
-	ras := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Data: data}, {Err: io.EOF}}}, "/live/", nil, nil, announceReaderConfig{})
+	ras := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Data: data}, {Err: io.EOF}}}, "/live/", nil, announceReaderConfig{})
 
 	ann := receiveN(t, ras, 1)[0]
 	select {
@@ -394,7 +394,7 @@ func TestAnnouncementReader_ConcurrentReceive(t *testing.T) {
 		msgs = append(msgs, message.AnnounceStartMessage{RoutePrefixSuffix: fmt.Sprintf("stream%d", i)})
 	}
 	s := &fakeQUICStream{reads: []streamResult{{Data: announceWire(t, 0, msgs...)}, {Block: true}}}
-	ras := newAnnouncementReader(s, "/test/", nil, nil, announceReaderConfig{})
+	ras := newAnnouncementReader(s, "/test/", nil, announceReaderConfig{})
 	defer func() { _ = ras.Close() }() // not actionable: the test is over
 
 	var mu sync.Mutex
@@ -437,7 +437,7 @@ func TestAnnouncementReader_PrefixHandling(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			data := announceWire(t, 0, message.AnnounceStartMessage{RoutePrefixSuffix: tt.suffix})
-			ras := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}, tt.prefix, nil, nil, announceReaderConfig{})
+			ras := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}, tt.prefix, nil, announceReaderConfig{})
 			defer func() { _ = ras.Close() }() // not actionable: the test is over
 
 			assert.Equal(t, tt.expectedPath, receiveN(t, ras, 1)[0].BroadcastPath())
@@ -458,7 +458,7 @@ func TestNewAnnouncementReader_InvalidPrefixPanics(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			assert.Panics(t, func() {
-				newAnnouncementReader(&fakeQUICStream{}, tt.prefix, nil, nil, announceReaderConfig{})
+				newAnnouncementReader(&fakeQUICStream{}, tt.prefix, nil, announceReaderConfig{})
 			})
 		})
 	}
@@ -473,9 +473,10 @@ func TestAnnouncementReader_StreamErrors(t *testing.T) {
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			ras := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Err: tt.err}}}, "/test/", []string{"valid_announcement"}, nil, announceReaderConfig{})
+			data := announceWire(t, 0, message.AnnounceStartMessage{RoutePrefixSuffix: "valid_announcement"})
+			ras := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Data: data}, {Err: tt.err}}}, "/test/", nil, announceReaderConfig{})
 
-			// The seeded announcement is still delivered first.
+			// The announcement read before the error is still delivered first.
 			ann, err := ras.ReceiveAnnouncement(context.Background())
 			require.NoError(t, err)
 			assert.NotNil(t, ann)
@@ -488,19 +489,6 @@ func TestAnnouncementReader_StreamErrors(t *testing.T) {
 	}
 }
 
-func TestNewAnnouncementReader_InitSuffixesOutsideScope(t *testing.T) {
-	scope := newAuthScope(func() {})
-	require.NoError(t, (&AuthWriter{scope: scope}).Grant(Grant{Root: "/room/1/", Publish: []string{"/"}}))
-
-	ar := newAnnouncementReader(&fakeQUICStream{}, "/room/", []suffix{"1/alice", "2/bob"}, scope, announceReaderConfig{})
-	defer func() { _ = ar.Close() }() // not actionable: the test is over
-
-	ar.announcementsMu.Lock()
-	defer ar.announcementsMu.Unlock()
-	require.Len(t, ar.seeded, 1, "a suffix the peer may not publish is dropped")
-	assert.Equal(t, BroadcastPath("/room/1/alice"), ar.seeded[0].BroadcastPath())
-}
-
 func TestAnnouncementReader_RouteOutsideScopeIsKeptLive(t *testing.T) {
 	scope := newAuthScope(func() {})
 	require.NoError(t, (&AuthWriter{scope: scope}).Grant(Grant{Root: "/room/1/", Publish: []string{"/"}}))
@@ -511,7 +499,7 @@ func TestAnnouncementReader_RouteOutsideScopeIsKeptLive(t *testing.T) {
 		message.AnnounceEndMessage{AnnounceID: 0},                  // still a live id
 	)
 	violations := newViolationRecorder()
-	ar := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}, "/room/", nil, scope,
+	ar := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}, "/room/", scope,
 		announceReaderConfig{onProtocolViolation: violations.record})
 	defer func() { _ = ar.Close() }() // not actionable: the test is over
 

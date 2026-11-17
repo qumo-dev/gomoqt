@@ -49,16 +49,12 @@ export interface TrackConfig {
  * `frameStart` is the index of the first frame to deliver within the start
  * group, `frameEnd` the exclusive end within the end group (0 = the whole
  * group). Only a peer's SUBSCRIBE sets them; this endpoint sends both as 0.
- * A future resume partway into a group would send the run it still needs.
  * @internal
  */
 export interface FrameRange {
 	frameStart: number;
 	frameEnd: number;
 }
-
-/** Whole groups: what this endpoint always asks for. @internal */
-export const WHOLE_GROUPS: FrameRange = Object.freeze({ frameStart: 0, frameEnd: 0 });
 
 /**
  * Returns an error when a peer's range breaks moq-lite-06 §3.6: a Frame End
@@ -80,15 +76,15 @@ interface WireRange {
 }
 
 /**
- * Encodes a config's range: Group Start plain, Group End + 1, and the frame
- * bounds (whole groups unless given). @internal
+ * Encodes a config's range: Group Start plain, Group End + 1, and no frame
+ * bounds, since this endpoint asks for whole groups. @internal
  */
-export function trackRangeToWire(config: TrackConfig, range: FrameRange = WHOLE_GROUPS): WireRange {
+export function trackRangeToWire(config: TrackConfig): WireRange {
 	return {
 		groupStart: config.startGroup,
 		groupEnd: groupSequenceToWire(config.endGroup),
-		frameStart: range.frameStart,
-		frameEnd: range.frameEnd,
+		frameStart: 0,
+		frameEnd: 0,
 	};
 }
 

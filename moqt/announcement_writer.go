@@ -104,13 +104,17 @@ func (aw *AnnouncementWriter) logError(msg string, err error, args ...any) {
 // ANNOUNCE_OK carries — contains the Hop ID the peer declared (moq-lite-06
 // §5.1.1.1). The peer could only discard it, and acting on it would loop.
 func (aw *AnnouncementWriter) shouldExclude(ann *Announcement) bool {
-	if aw.excludeHop == 0 {
+	return pathThroughHop(ann, aw.localHopID, aw.excludeHop)
+}
+
+// pathThroughHop reports whether ann's hop path, ending in this node's own
+// Hop ID local, runs through hop (moq-lite-06 §5.1.1.1). A hop of 0
+// identifies nothing, so nothing runs through it.
+func pathThroughHop(ann *Announcement, local, hop uint64) bool {
+	if hop == 0 {
 		return false
 	}
-	if aw.excludeHop == aw.localHopID {
-		return true
-	}
-	return slices.Contains(ann.HopIDs(), aw.excludeHop)
+	return hop == local || slices.Contains(ann.HopIDs(), hop)
 }
 
 // routeSuffix returns the route suffix ann is advertised under on this
@@ -202,9 +206,7 @@ func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) err
 			ActiveCount: uint64(len(actives)),
 		}.Encode(aw.stream)
 		if err != nil {
-			if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
-				err = &AnnounceError{StreamError: strErr}
-			}
+			err = announceStreamErr(err)
 			aw.mu.Lock()
 			aw.initErr = err
 			aw.mu.Unlock()
@@ -213,18 +215,12 @@ func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) err
 
 		for sfx, active := range actives {
 			aw.mu.Lock()
-			active.id = aw.nextID
-			aw.nextID++
-			err = startMessage(sfx, active.announcement).Encode(aw.stream)
+			err = aw.startLocked(sfx, active)
 			if err != nil {
-				if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
-					err = &AnnounceError{StreamError: strErr}
-				}
 				aw.initErr = err
 				aw.mu.Unlock()
 				return
 			}
-			aw.watchLocked(sfx, active)
 			aw.mu.Unlock()
 		}
 	})
@@ -235,6 +231,28 @@ func (aw *AnnouncementWriter) init(announcements map[*Announcement]struct{}) err
 		return err
 	}
 	return aw.initErr
+}
+
+// startLocked gives active the next Announce ID, sends its ANNOUNCE_START
+// under sfx and watches it. The peer numbers the starts in the same order, so
+// every ID is assigned here. Caller MUST hold aw.mu, with active already in
+// aw.actives.
+func (aw *AnnouncementWriter) startLocked(sfx suffix, active *activeAnnouncement) error {
+	active.id = aw.nextID
+	aw.nextID++
+	if err := startMessage(sfx, active.announcement).Encode(aw.stream); err != nil {
+		return announceStreamErr(err)
+	}
+	aw.watchLocked(sfx, active)
+	return nil
+}
+
+// announceStreamErr reports a stream error as an *AnnounceError.
+func announceStreamErr(err error) error {
+	if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
+		return &AnnounceError{StreamError: strErr}
+	}
+	return err
 }
 
 // watchLocked watches the announcement active advertises, re-advertising or
@@ -368,22 +386,12 @@ func (aw *AnnouncementWriter) SendAnnouncement(announcement *Announcement) error
 		return nil
 	}
 
-	active := &activeAnnouncement{announcement: announcement, id: aw.nextID}
-	err := startMessage(sfx, announcement).Encode(aw.stream)
-	if err != nil {
-		if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
-			return &AnnounceError{
-				StreamError: strErr,
-			}
-		}
-
+	active := &activeAnnouncement{announcement: announcement}
+	aw.actives[sfx] = active
+	if err := aw.startLocked(sfx, active); err != nil {
+		delete(aw.actives, sfx)
 		return err
 	}
-	aw.nextID++
-
-	aw.actives[sfx] = active
-	aw.watchLocked(sfx, active)
-
 	return nil
 }
 

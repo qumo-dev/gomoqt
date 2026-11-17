@@ -6,8 +6,7 @@ export interface AnnounceRequestMessageInit {
 }
 
 /**
- * ANNOUNCE_REQUEST message. moq-lite-06 removed Exclude Hop: the receiver's
- * hop-based loop check and the SETUP Hop parameter cover it.
+ * ANNOUNCE_REQUEST message.
  *
  * ```text
  * ANNOUNCE_REQUEST Message {

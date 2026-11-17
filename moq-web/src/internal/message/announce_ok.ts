@@ -1,11 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import {
-	MessageDecodeError,
-	MessageDecoder,
-	MessageEncoder,
-	readFull,
-	readVarint,
-} from "./message.ts";
+import { decodeMessageBody, MessageEncoder } from "./message.ts";
 
 export interface AnnounceOkMessageInit {
 	hopID?: number;
@@ -53,25 +47,12 @@ export class AnnounceOkMessage {
 	/**
 	 * Decodes the message from the reader.
 	 */
-	async decode(r: Reader): Promise<Error | undefined> {
-		const [msgLen, , err1] = await readVarint(r);
-		if (err1) return err1;
-
-		const buf = new Uint8Array(msgLen);
-		const [, err2] = await readFull(r, buf);
-		if (err2) return err2;
-
+	decode(r: Reader): Promise<Error | undefined> {
 		// Strict: an announcement where ANNOUNCE_OK belongs does not parse as
 		// one, which is how a reader detects an announcement before ANNOUNCE_OK.
-		const d = new MessageDecoder(buf);
-		try {
+		return decodeMessageBody(r, (d) => {
 			this.hopID = d.strictVarint();
 			this.activeCount = d.strictVarint();
-			d.finish();
-		} catch (e) {
-			return e instanceof Error ? e : new MessageDecodeError(String(e));
-		}
-
-		return undefined;
+		});
 	}
 }

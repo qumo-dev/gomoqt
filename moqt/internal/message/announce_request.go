@@ -9,9 +9,6 @@ import (
  *	  Message Length (i)
  *	  Broadcast Path Prefix (s),
  *	}
- *
- * moq-lite-06 removed Exclude Hop: the receiver's hop-based loop check and
- * the SETUP Hop parameter cover it.
  */
 type AnnounceRequestMessage struct {
 	BroadcastPathPrefix string

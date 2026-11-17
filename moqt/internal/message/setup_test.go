@@ -138,6 +138,12 @@ func TestSetupMessage_DecodeErrors(t *testing.T) {
 	}
 }
 
+// addCost appends a Cost parameter, as a peer that declares one sends it.
+func addCost(sm *message.SetupMessage, cost uint64) {
+	value, _ := message.WriteVarint(nil, cost)
+	sm.Parameters = append(sm.Parameters, message.SetupParameter{ID: message.SetupParamCost, Value: value})
+}
+
 func TestSetupMessage_CostAndHop(t *testing.T) {
 	tests := map[string]struct {
 		build    func(*message.SetupMessage)
@@ -149,12 +155,12 @@ func TestSetupMessage_CostAndHop(t *testing.T) {
 			wantCost: message.DefaultCost,
 		},
 		"declared zero cost is kept": {
-			build:    func(sm *message.SetupMessage) { sm.AddCost(0) },
+			build:    func(sm *message.SetupMessage) { addCost(sm, 0) },
 			wantCost: 0,
 		},
 		"declared cost and hop": {
 			build: func(sm *message.SetupMessage) {
-				sm.AddCost(1 << 20)
+				addCost(sm, 1<<20)
 				sm.AddHop(77)
 			},
 			wantCost: 1 << 20,

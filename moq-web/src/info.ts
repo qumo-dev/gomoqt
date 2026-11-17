@@ -8,8 +8,8 @@ export const DEFAULT_TIMESCALE = 1000;
 
 /**
  * The immutable publisher properties of a track, carried by the TRACK_INFO
- * message. Every field is fixed for the lifetime of the track. moq-lite-06
- * removed the group-order preference: group order is always newest first.
+ * message. Every field is fixed for the lifetime of the track. Group order is
+ * always newest first.
  */
 export interface Info {
 	/** Publisher priority for this track, used only to resolve ties. */

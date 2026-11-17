@@ -770,9 +770,6 @@ func (sess *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
 	if sess.closed.Load() {
 		return nil, ErrClosedSession
 	}
-	if err := req.validate(); err != nil {
-		return nil, err
-	}
 
 	stream, err := sess.openStream(sess.ctx, "fetch")
 	if err != nil {
@@ -797,9 +794,10 @@ func (sess *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
 		BroadcastPath: string(req.BroadcastPath),
 		TrackName:     string(req.TrackName),
 		Priority:      uint8(req.Priority),
+		// The whole group, even for a request taken from a peer's FETCH (as a
+		// relay forwarding one upstream passes it): gomoqt asks for whole
+		// groups, as Subscribe does.
 		GroupSequence: uint64(req.GroupSequence),
-		FrameStart:    req.frameStart,
-		FrameEnd:      req.frameEnd,
 	}.Encode(stream)
 	if err != nil {
 		if strErr, ok := errors.AsType[*transport.StreamError](err); ok && strErr.Remote {
@@ -876,7 +874,7 @@ func (sess *Session) AcceptAnnounce(prefix string) (*AnnouncementReader, error) 
 		return nil, fmt.Errorf("failed to send ANNOUNCE_REQUEST message: %w", err)
 	}
 
-	return newAnnouncementReader(stream, prefix, nil, sess.scope, announceReaderConfig{
+	return newAnnouncementReader(stream, prefix, sess.scope, announceReaderConfig{
 		localHopID:          sess.mux.hopID,
 		peerCost:            sess.waitPeerCost,
 		onProtocolViolation: sess.terminateProtocolViolation,
@@ -1172,8 +1170,7 @@ func (sess *Session) handleSubscribeStream(stream transport.Stream) {
 	// through the subscriber is unroutable to it. The check uses the peer's
 	// SETUP only if it has arrived, so it never delays a subscription.
 	ann, handler := sess.mux.TrackHandler(BroadcastPath(sm.BroadcastPath))
-	if peerHop, ok := sess.peerHop(); ok && peerHop != 0 && ann != nil &&
-		(peerHop == sess.mux.hopID || slices.Contains(ann.HopIDs(), peerHop)) {
+	if peerHop, ok := sess.peerHop(); ok && ann != nil && pathThroughHop(ann, sess.mux.hopID, peerHop) {
 		cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeUnroutable))
 		return
 	}

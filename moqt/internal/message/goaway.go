@@ -61,12 +61,11 @@ func (gm *GoawayMessage) Decode(src io.Reader) error {
 		return err
 	}
 
+	// The length check above already bounds the URI: one longer than
+	// MaxNewSessionURILen needs a body of at least MaxNewSessionURILen+3.
 	str, n, err := ReadString(b)
 	if err != nil {
 		return err
-	}
-	if len(str) > MaxNewSessionURILen {
-		return ErrNewSessionURITooLong
 	}
 	gm.NewSessionURI = str
 	b = b[n:]

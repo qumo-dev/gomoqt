@@ -622,6 +622,31 @@ export class MessageDecoder {
 // ============================================================
 
 /**
+ * Reads a length-prefixed body and parses it with `parse`, which reads fields
+ * through the strict {@link MessageDecoder} methods. A body that does not
+ * parse, or has bytes left over, yields a {@link MessageDecodeError}.
+ */
+export async function decodeMessageBody(
+	r: Reader,
+	parse: (d: MessageDecoder) => void,
+): Promise<Error | undefined> {
+	const [msgLen, , err1] = await readVarint(r);
+	if (err1) return err1;
+	const buf = new Uint8Array(msgLen);
+	const [, err2] = await readFull(r, buf);
+	if (err2) return err2;
+
+	const d = new MessageDecoder(buf);
+	try {
+		parse(d);
+		d.finish();
+	} catch (e) {
+		return e instanceof Error ? e : new MessageDecodeError(String(e));
+	}
+	return undefined;
+}
+
+/**
  * Maps a signed integer to an unsigned varint-friendly value
  * (0 → 0, -1 → 1, 1 → 2, -2 → 3, ...).
  */

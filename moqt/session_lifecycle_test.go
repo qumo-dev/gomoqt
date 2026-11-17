@@ -129,7 +129,7 @@ func TestAnnouncementReader_PeerEndsStream(t *testing.T) {
 			require.NoError(t, message.AnnounceStartMessage{RoutePrefixSuffix: "stream1"}.Encode(&buf))
 			stream := &fakeQUICStream{reads: []streamResult{{Data: buf.Bytes()}, end}}
 
-			ar := newAnnouncementReader(stream, "/test/", nil, nil, announceReaderConfig{})
+			ar := newAnnouncementReader(stream, "/test/", nil, announceReaderConfig{})
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()

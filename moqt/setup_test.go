@@ -233,7 +233,8 @@ func TestSession_HandleSetupStream_CostAndHop(t *testing.T) {
 	defer sess.CloseWithError(NoError, "")
 
 	var sm message.SetupMessage
-	sm.AddCost(0)
+	zeroCost, _ := message.WriteVarint(nil, 0)
+	sm.Parameters = append(sm.Parameters, message.SetupParameter{ID: message.SetupParamCost, Value: zeroCost})
 	sm.AddHop(77)
 	var buf bytes.Buffer
 	require.NoError(t, sm.Encode(&buf))

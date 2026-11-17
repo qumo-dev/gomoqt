@@ -90,13 +90,6 @@ func (sm SetupMessage) ProbeLevel() uint64 {
 	return ProbeLevelNone
 }
 
-// AddCost appends a Cost parameter declaring what subscribing from the
-// sender costs.
-func (sm *SetupMessage) AddCost(cost uint64) {
-	value, _ := WriteVarint(nil, cost)
-	sm.Parameters = append(sm.Parameters, SetupParameter{ID: SetupParamCost, Value: value})
-}
-
 // Cost returns the declared Cost, or DefaultCost when the parameter is absent
 // or malformed. A declared 0 is meaningful (a free link) and returned as is.
 func (sm SetupMessage) Cost() uint64 {

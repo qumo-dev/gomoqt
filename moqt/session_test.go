@@ -3154,7 +3154,8 @@ func TestSession_Fetch_AsksForWholeGroup(t *testing.T) {
 	stream := &fakeQUICStream{}
 	conn.openStreams = []biStreamResult{{Stream: stream}}
 
-	group, err := session.Fetch(&FetchRequest{BroadcastPath: "/live", TrackName: "video", GroupSequence: 7})
+	// Bounds taken from a peer's FETCH, as a relay forwarding it passes them.
+	group, err := session.Fetch(&FetchRequest{BroadcastPath: "/live", TrackName: "video", GroupSequence: 7, frameStart: 2, frameEnd: 5})
 	require.NoError(t, err)
 	require.NotNil(t, group)
 

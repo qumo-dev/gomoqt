@@ -1,5 +1,5 @@
 import type { Reader, Writer } from "@okdaichi/golikejs/io";
-import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.ts";
+import { decodeMessageBody, MessageEncoder } from "./message.ts";
 
 export interface FetchMessageInit {
 	broadcastPath?: string;
@@ -55,31 +55,14 @@ export class FetchMessage {
 		return err;
 	}
 
-	async decode(r: Reader): Promise<Error | undefined> {
-		let err: Error | undefined;
-
-		let msgLen: number;
-		[msgLen, , err] = await readVarint(r);
-		if (err) return err;
-
-		const buf = new Uint8Array(msgLen);
-		[, err] = await readFull(r, buf);
-		if (err) return err;
-
-		const d = new MessageDecoder(buf);
-
-		try {
+	decode(r: Reader): Promise<Error | undefined> {
+		return decodeMessageBody(r, (d) => {
 			this.broadcastPath = d.strictString();
 			this.trackName = d.strictString();
 			this.priority = d.strictUint8();
 			this.groupSequence = d.strictVarint();
 			this.frameStart = d.strictVarint();
 			this.frameEnd = d.strictVarint();
-			d.finish();
-		} catch (e) {
-			return e instanceof Error ? e : new Error(String(e));
-		}
-
-		return undefined;
+		});
 	}
 }

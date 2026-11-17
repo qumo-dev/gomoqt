@@ -27,8 +27,14 @@ export * from "./info.ts";
 export * from "./client.ts";
 export { isWebKit, QMUX_VERSION } from "./transport.ts";
 export type { TransportKind } from "./transport.ts";
-export * from "./announce_stream.ts";
-export * from "./group_stream.ts";
+export {
+	Announcement,
+	AnnouncementReader,
+	AnnouncementWriter,
+	AnnounceViolation,
+} from "./announce_stream.ts";
+export type { AnnouncementReaderOptions } from "./announce_stream.ts";
+export { GroupReader, GroupWriter, MAX_FRAME_SIZE } from "./group_stream.ts";
 export type { SubscribeDrop, TrackConfig } from "./subscribe_stream.ts";
 export * from "./track_writer.ts";
 export * from "./track_reader.ts";
