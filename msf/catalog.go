@@ -419,36 +419,45 @@ func (c Catalog) Validate() error {
 			}
 		}
 	}
-	// Validate unique track identities.
+	// Validate unique Full Track Names across tracks and publishTracks.
 	// For small catalogs (N<=16), O(N^2) loop is faster and avoids map allocations on the happy path.
 	// For larger catalogs, we fallback to a map to avoid O(N^2) performance degradation.
-	if len(c.Tracks) > 16 {
-		seen := make(map[TrackID]struct{}, len(c.Tracks))
-		for i := range c.Tracks {
-			id := c.Tracks[i].ID(c.DefaultNamespace)
-			if _, ok := seen[id]; ok {
-				problems = append(problems, fmt.Sprintf("tracks[%d]: duplicate track identity %q", i, id.String()))
-				continue
-			}
-			seen[id] = struct{}{}
-		}
-	} else if len(c.Tracks) > 1 {
-		var seen [16]TrackID
-		seen[0] = c.Tracks[0].ID(c.DefaultNamespace)
-		numSeen := 1
-		for i := 1; i < len(c.Tracks); i++ {
-			id := c.Tracks[i].ID(c.DefaultNamespace)
-			isDuplicate := false
-			for j := 0; j < numSeen; j++ {
-				if seen[j] == id {
-					problems = append(problems, fmt.Sprintf("tracks[%d]: duplicate track identity %q", i, id.String()))
-					isDuplicate = true
-					break
+	if total := len(c.Tracks) + len(c.PublishTracks); total > 16 {
+		seen := make(map[TrackID]struct{}, total)
+		for _, list := range [2]struct {
+			field  string
+			tracks []Track
+		}{{"tracks", c.Tracks}, {"publishTracks", c.PublishTracks}} {
+			for i := range list.tracks {
+				id := list.tracks[i].ID(c.DefaultNamespace)
+				if _, ok := seen[id]; ok {
+					problems = append(problems, fmt.Sprintf("%s[%d]: duplicate track identity %q", list.field, i, id.String()))
+					continue
 				}
+				seen[id] = struct{}{}
 			}
-			if !isDuplicate {
-				seen[numSeen] = id
-				numSeen++
+		}
+	} else if total > 1 {
+		var seen [16]TrackID
+		numSeen := 0
+		for _, list := range [2]struct {
+			field  string
+			tracks []Track
+		}{{"tracks", c.Tracks}, {"publishTracks", c.PublishTracks}} {
+			for i := range list.tracks {
+				id := list.tracks[i].ID(c.DefaultNamespace)
+				isDuplicate := false
+				for j := 0; j < numSeen; j++ {
+					if seen[j] == id {
+						problems = append(problems, fmt.Sprintf("%s[%d]: duplicate track identity %q", list.field, i, id.String()))
+						isDuplicate = true
+						break
+					}
+				}
+				if !isDuplicate {
+					seen[numSeen] = id
+					numSeen++
+				}
 			}
 		}
 	}

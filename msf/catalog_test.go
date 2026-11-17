@@ -87,6 +87,15 @@ func TestCatalogValidate_Errors(t *testing.T) {
 			},
 			errorMessage: "duplicate track identity",
 		},
+		"duplicate identity across tracks and publishTracks": {
+			catalog: Catalog{
+				Version:          CurrentVersion,
+				DefaultNamespace: "live/demo",
+				Tracks:           []Track{{Name: "0", Packaging: PackagingLOC, IsLive: new(true)}},
+				PublishTracks:    []Track{{Name: "0", Packaging: PackagingMoqLog, Role: RoleLog, IsLive: new(true)}},
+			},
+			errorMessage: "publishTracks[0]: duplicate track identity",
+		},
 		"every track requires isLive": {
 			catalog: Catalog{
 				Version: CurrentVersion,
