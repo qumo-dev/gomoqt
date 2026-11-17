@@ -19,6 +19,10 @@ export interface FetchRequestInit {
 /**
  * Represents a request to fetch a single group from a track.
  *
+ * A fetch asks for the whole group. A peer's FETCH may bound the frames
+ * (moq-lite-06 §7.16); the {@link GroupWriter} a handler gets then sends only
+ * those, so the handler writes the group whole either way.
+ *
  * Immutable — use {@link withDone} or {@link clone} to derive a new
  * request with a different cancellation signal.
  */

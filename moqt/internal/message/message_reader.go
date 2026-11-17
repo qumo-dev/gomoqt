@@ -74,6 +74,13 @@ func ReadMessageLength(r io.Reader) (uint64, error) {
 	return val, err
 }
 
+// ReadMessageType reads the varint Type tag that precedes a typed message on
+// the Announce and Subscribe streams. A tag is a varint like a message
+// length, so it shares that reader and its allocation-free fast path.
+func ReadMessageType(r io.Reader) (uint64, error) {
+	return ReadMessageLength(r)
+}
+
 // func ReadMessageLength(r io.Reader) (uint64, error) {
 // 	return ReadVarintFromReader(r)
 // }

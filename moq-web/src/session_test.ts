@@ -308,13 +308,13 @@ Deno.test({
 	sanitizeResources: false,
 	fn: async (t) => {
 		await t.step("constructor and ready sends client message", async () => {
-			const mock = new MockWebTransportSession({ protocol: "moq-lite-05" });
+			const mock = new MockWebTransportSession({ protocol: "moq-lite-06" });
 
 			const session = new Session({ transport: mock });
 			await session.ready;
 
 			assertInstanceOf(session, Session);
-			assertEquals(session.protocol, "moq-lite-05");
+			assertEquals(session.protocol, "moq-lite-06");
 			await session.close();
 		});
 
@@ -471,10 +471,11 @@ Deno.test({
 			async () => {
 				let served = false;
 				const mux: TrackMux = {
-					serveTrack: async (_t) => {
+					serveTrack: async (_t: unknown) => {
 						served = true;
 					},
-				} as TrackMux;
+					trackInfo: () => undefined,
+				} as unknown as TrackMux;
 
 				const req = new SubscribeMessage({
 					subscribeId: 1,
@@ -703,6 +704,9 @@ Deno.test({
 						type: BiStreamTypes.AnnounceStreamType,
 						data: buf,
 					}],
+					// The announce stream waits for the peer's SETUP, whose Hop
+					// ID it must not advertise back.
+					acceptUniStreamData: [await peerSetupUniStream()],
 				});
 
 				const session = new Session({ transport: mock, mux });
@@ -912,7 +916,7 @@ Deno.test({
 				const [track, err] = await session.subscribe(
 					"/test/path",
 					"track-name",
-					{ priority: 5, ordered: false, maxLatency: 0, startGroup: 0, endGroup: 0 },
+					{ priority: 5, maxAge: 0, startGroup: 0, endGroup: 0 },
 				);
 				assertExists(track);
 				assertEquals(err, undefined);

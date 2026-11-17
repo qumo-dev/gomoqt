@@ -152,7 +152,7 @@ func (mux *TrackMux) Announce(announcement *Announcement, handler TrackHandler) 
 	// Add the handler to the mux if it is not already registered
 	announced := mux.registerHandler(announcement, handler)
 
-	prefixSegments, _ := pathSegments(announcement.BroadcastPath())
+	prefixSegments, last := pathSegments(announcement.BroadcastPath())
 
 	// Add announcement to the announcement tree so that init captures it
 	current := &mux.announcementTree
@@ -173,47 +173,34 @@ func (mux *TrackMux) Announce(announcement *Announcement, handler TrackHandler) 
 	}
 
 	// Reserve a subscription slice to reuse across nodes and avoid allocations
-	type awChan struct {
-		aw *AnnouncementWriter
-		ch chan *Announcement
-	}
 	var subsArray [8]awChan
 	subs := subsArray[:0]
 
 	for _, node := range nodes {
 		node.addAnnouncement(announcement)
-
-		// Snapshot subscriptions under RLock and send without holding the lock
-		node.mu.RLock()
-		subs = subs[:0]
-		for aw, ch := range node.subscriptions {
-			subs = append(subs, awChan{aw: aw, ch: ch})
-		}
-		node.mu.RUnlock()
-
-		for _, ac := range subs {
-			ch := ac.ch
-			// Non-blocking send to avoid deadlocks; drop if buffer is full
-			select {
-			case ch <- announcement:
-			case <-announcement.Done():
-			default:
-				// Drop the message if the subscriber is not keeping up. Remove subscription
-				// from the node and close the channel safely to signal the writer side.
-				// delete by AnnouncementWriter pointer without scanning
-				node.mu.Lock()
-				delete(node.subscriptions, ac.aw)
-				node.mu.Unlock()
-				// Close the AW to signal the writer to cleanup and close its channel.
-				go func(a *AnnouncementWriter) {
-					// Use InternalAnnounceErrorCode to indicate an internal error condition
-					_ = a.CloseWithError(AnnounceErrorCodeInternal)
-				}(ac.aw)
-			}
-		}
+		subs = node.notify(announcement, subs)
 	}
 
 	lastNode := current
+
+	// The announcement is a route covering every path beneath it, so a
+	// request for a prefix below it sees it too, clamped to that prefix
+	// (moq-lite-06 §5.1.1). Those requests sit in the subtree under the
+	// announced path: below the node named by its last segment, or, for a
+	// path ending in "/", below the node the loop above ended at, whose own
+	// requests it has already notified. A broadcast path rarely has a
+	// subtree, so this is usually a single map miss.
+	dir := current
+	if last != "" {
+		current.mu.RLock()
+		dir = current.children[last]
+		current.mu.RUnlock()
+	}
+	if dir != nil {
+		dir.walkDescendants(func(node *announcingNode) {
+			subs = node.notify(announcement, subs)
+		}, last != "")
+	}
 
 	// Ensure the announcement is removed when it ends
 	announcement.AfterFunc(func() {
@@ -324,6 +311,12 @@ func (mux *TrackMux) serveAnnouncements(aw *AnnouncementWriter) {
 		leafNode.mu.Unlock()
 	}()
 
+	// Routes at or above the prefix cover it too, and present clamped to it
+	// (moq-lite-06 §5.1.1). They are found by exact path, one lookup per
+	// level of the prefix. Taken after subscribing, so one announced in
+	// between arrives on ch as well, which the writer ignores as a repeat.
+	mux.coveringAnnouncements(aw.prefix, actives)
+
 	err := aw.init(actives)
 	if err != nil {
 		_ = aw.CloseWithError(AnnounceErrorCodeInternal)
@@ -347,7 +340,82 @@ func (mux *TrackMux) serveAnnouncements(aw *AnnouncementWriter) {
 	}
 }
 
+// coveringAnnouncements adds to dst the active announcements whose path is at
+// or above pfx: the root, then each of pfx's leading segments, both without
+// and with its trailing "/" ("/a" and "/a/" for "/a/b/"). pfx ends in "/".
+func (mux *TrackMux) coveringAnnouncements(pfx prefix, dst map[*Announcement]struct{}) {
+	mux.mu.RLock()
+	defer mux.mu.RUnlock()
+	add := func(path string) {
+		if ath := mux.trackHandlerIndex[BroadcastPath(path)]; ath != nil && ath.IsActive() {
+			dst[ath.Announcement] = struct{}{}
+		}
+	}
+	add("/")
+	for i := 1; i < len(pfx); i++ {
+		if pfx[i] == '/' {
+			add(pfx[:i])
+			add(pfx[:i+1])
+		}
+	}
+}
+
 type prefixSegment = string
+
+// awChan is one announcement subscription of a node.
+type awChan struct {
+	aw *AnnouncementWriter
+	ch chan *Announcement
+}
+
+// notify hands announcement to every subscription of node without blocking,
+// reusing buf for the snapshot, and returns buf. A subscription that is not
+// keeping up is removed and its writer closed.
+func (node *announcingNode) notify(announcement *Announcement, buf []awChan) []awChan {
+	// Snapshot subscriptions under RLock and send without holding the lock
+	node.mu.RLock()
+	buf = buf[:0]
+	for aw, ch := range node.subscriptions {
+		buf = append(buf, awChan{aw: aw, ch: ch})
+	}
+	node.mu.RUnlock()
+
+	for _, ac := range buf {
+		// Non-blocking send to avoid deadlocks; drop if buffer is full
+		select {
+		case ac.ch <- announcement:
+		case <-announcement.Done():
+		default:
+			// Drop the message if the subscriber is not keeping up. Remove subscription
+			// from the node and close the channel safely to signal the writer side.
+			node.mu.Lock()
+			delete(node.subscriptions, ac.aw)
+			node.mu.Unlock()
+			// Close the AW to signal the writer to cleanup and close its channel.
+			go func(a *AnnouncementWriter) {
+				_ = a.CloseWithError(AnnounceErrorCodeInternal)
+			}(ac.aw)
+		}
+	}
+	return buf
+}
+
+// walkDescendants calls fn for node's descendants, and for node itself when
+// self is set.
+func (node *announcingNode) walkDescendants(fn func(*announcingNode), self bool) {
+	if self {
+		fn(node)
+	}
+	node.mu.RLock()
+	children := make([]*announcingNode, 0, len(node.children))
+	for _, child := range node.children {
+		children = append(children, child)
+	}
+	node.mu.RUnlock()
+	for _, child := range children {
+		child.walkDescendants(fn, true)
+	}
+}
 
 type announcingNode struct {
 	mu sync.RWMutex

@@ -10,8 +10,7 @@ Deno.test("SubscribeMessage - encode/decode roundtrip - multiple scenarios", asy
 			broadcastPath: "path",
 			trackName: "track",
 			subscriberPriority: 1,
-			subscriberOrdered: 1,
-			subscriberMaxLatency: 100,
+			subscriberMaxAge: 100,
 			groupStart: 5,
 			groupEnd: 10,
 		},
@@ -20,8 +19,7 @@ Deno.test("SubscribeMessage - encode/decode roundtrip - multiple scenarios", asy
 			broadcastPath: "long/path/to/resource",
 			trackName: "long-track-name-with-hyphens",
 			subscriberPriority: 255,
-			subscriberOrdered: 0,
-			subscriberMaxLatency: 0,
+			subscriberMaxAge: 0,
 			groupStart: 0,
 			groupEnd: 0,
 		},
@@ -30,8 +28,7 @@ Deno.test("SubscribeMessage - encode/decode roundtrip - multiple scenarios", asy
 			broadcastPath: "",
 			trackName: "",
 			subscriberPriority: 0,
-			subscriberOrdered: 0,
-			subscriberMaxLatency: 0,
+			subscriberMaxAge: 0,
 			groupStart: 0,
 			groupEnd: 0,
 		},
@@ -40,8 +37,7 @@ Deno.test("SubscribeMessage - encode/decode roundtrip - multiple scenarios", asy
 			broadcastPath: "a",
 			trackName: "b",
 			subscriberPriority: 1,
-			subscriberOrdered: 1,
-			subscriberMaxLatency: 500,
+			subscriberMaxAge: 500,
 			groupStart: 0,
 			groupEnd: 20,
 		},
@@ -84,14 +80,9 @@ Deno.test("SubscribeMessage - encode/decode roundtrip - multiple scenarios", asy
 				`subscriberPriority mismatch for ${caseName}`,
 			);
 			assertEquals(
-				decodedMessage.subscriberOrdered,
-				input.subscriberOrdered,
-				`subscriberOrdered mismatch for ${caseName}`,
-			);
-			assertEquals(
-				decodedMessage.subscriberMaxLatency,
-				input.subscriberMaxLatency,
-				`subscriberMaxLatency mismatch for ${caseName}`,
+				decodedMessage.subscriberMaxAge,
+				input.subscriberMaxAge,
+				`subscriberMaxAge mismatch for ${caseName}`,
 			);
 			assertEquals(
 				decodedMessage.groupStart,
@@ -171,4 +162,36 @@ Deno.test("SubscribeMessage - encode/decode roundtrip - multiple scenarios", asy
 			assertEquals(err instanceof Error, true);
 		},
 	);
+});
+
+Deno.test("SubscribeMessage - decode rejects a malformed body", async (t) => {
+	// A valid SUBSCRIBE body, then variants that cut a varint short or leave
+	// bytes over. Each must be an error, never a NaN field.
+	const full = new Buffer(new ArrayBuffer(0));
+	await new SubscribeMessage({
+		subscribeId: 1,
+		broadcastPath: "/a",
+		trackName: "v",
+		subscriberMaxAge: 1500, // a 2-byte varint
+	}).encode(full);
+	const encoded = full.bytes();
+	// encoded[0] is the 1-byte length prefix; the body follows.
+	const body = encoded.subarray(1);
+
+	const cases: Record<string, Uint8Array> = {
+		"a truncated Max Age varint": body.subarray(0, 9), // id, path, track, priority, first byte of Max Age
+		"a body that ends before Frame End": body.subarray(0, body.length - 1),
+		"trailing bytes": new Uint8Array([...body, 0x00]),
+		"a string longer than the body": new Uint8Array([0x01, 0x3f, 0x2f]),
+	};
+	for (const [name, b] of Object.entries(cases)) {
+		await t.step(name, async () => {
+			const buf = new Buffer(new ArrayBuffer(0));
+			await buf.write(new Uint8Array([b.length, ...b]));
+			const msg = new SubscribeMessage();
+			const err = await msg.decode(buf);
+			assert(err instanceof Error, `${name}: decode should fail`);
+			assert(!Number.isNaN(msg.subscriberMaxAge), `${name}: no NaN field`);
+		});
+	}
 });

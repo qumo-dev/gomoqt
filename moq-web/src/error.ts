@@ -4,7 +4,11 @@
 
 import { StreamConnError, WebTransportStreamError } from "./internal/webtransport/error.ts";
 
-/** Error codes for session-level termination as defined in MOQ Lite. */
+/**
+ * Error codes for session-level termination (moq-lite-06 §4.4.1). The session
+ * and stream code spaces are independent: the same number means different
+ * things in each. Codes from 0x40 up are the application's.
+ */
 export const SessionErrorCode = {
 	/** No error occurred */
 	NoError: 0x0,
@@ -14,16 +18,19 @@ export const SessionErrorCode = {
 	Unauthorized: 0x2,
 	/** Protocol violation */
 	ProtocolViolation: 0x3,
-	/** Duplicate track alias */
-	DuplicateTrackAlias: 0x4,
-	/** Parameter length mismatch */
-	ParameterLengthMismatch: 0x5,
-	/** Too many subscribers */
-	TooManySubscribers: 0x6,
+	/** A key-value pair was malformed, or repeated more than allowed */
+	KeyValueFormattingError: 0x6,
 	/** GOAWAY timeout */
 	GoAwayTimeout: 0x10,
-	/** The peer does not verify tokens on an Auth Stream */
-	NotSupported: 0x30,
+	/** The peer took too long to respond to a control message */
+	ControlMessageTimeout: 0x11,
+	/** No version could be negotiated */
+	VersionNegotiationFailed: 0x15,
+	/**
+	 * The peer does not verify tokens on an Auth Stream. The Auth Stream is a
+	 * gomoqt extension, so the code sits in the application range.
+	 */
+	NotSupported: 0x40,
 } as const;
 
 /** Numeric session error code type. */
@@ -45,14 +52,14 @@ export class SessionError extends StreamConnError {
 				return "unauthorized";
 			case SessionErrorCode.ProtocolViolation:
 				return "protocol violation";
-			case SessionErrorCode.DuplicateTrackAlias:
-				return "duplicate track alias";
-			case SessionErrorCode.ParameterLengthMismatch:
-				return "parameter length mismatch";
-			case SessionErrorCode.TooManySubscribers:
-				return "too many subscribers";
+			case SessionErrorCode.KeyValueFormattingError:
+				return "key-value formatting error";
 			case SessionErrorCode.GoAwayTimeout:
 				return "goaway timeout";
+			case SessionErrorCode.ControlMessageTimeout:
+				return "control message timeout";
+			case SessionErrorCode.VersionNegotiationFailed:
+				return "version negotiation failed";
 			case SessionErrorCode.NotSupported:
 				return "not supported";
 			default:
@@ -69,25 +76,95 @@ export class SessionError extends StreamConnError {
 }
 
 // =============================================================================
+// Stream Error Codes (moq-lite-06 §4.4.2)
+// =============================================================================
+
+/**
+ * The one stream error code space. The typed tables below
+ * ({@link AnnounceErrorCode}, {@link SubscribeErrorCode}, ...) are views of it:
+ * where two kinds share a meaning they share the value. Codes 0x30-0x39 are
+ * moq-lite's own; codes from 0x40 up are the application's, and gomoqt assigns
+ * the few it needs there (0x40-0x45), which a non-gomoqt peer treats as
+ * unspecified errors.
+ */
+const StreamCode = {
+	InternalError: 0x0,
+	Cancelled: 0x1,
+	DeliveryTimeout: 0x2,
+	SessionClosed: 0x3,
+	GoingAway: 0x4,
+	TooFarBehind: 0x5,
+	MalformedTrack: 0x12,
+	NoCapacity: 0x30,
+	ControlTimeout: 0x31,
+	GroupTooLarge: 0x32,
+	NotFound: 0x33,
+	Old: 0x34,
+	Evicted: 0x35,
+	Unroutable: 0x36,
+	WrongSize: 0x37,
+	FrameTooLarge: 0x38,
+	TimestampMismatch: 0x39,
+	// gomoqt, application range
+	Unauthorized: 0x40,
+	ProtocolViolation: 0x41,
+	DuplicateID: 0x42,
+	InvalidPrefix: 0x43,
+	BannedPrefix: 0x44,
+	NotSupported: 0x45,
+} as const;
+
+const streamCodeText: ReadonlyMap<number, string> = new Map<number, string>([
+	[StreamCode.InternalError, "internal error"],
+	[StreamCode.Cancelled, "cancelled"],
+	[StreamCode.DeliveryTimeout, "delivery timeout"],
+	[StreamCode.SessionClosed, "session closed"],
+	[StreamCode.GoingAway, "going away"],
+	[StreamCode.TooFarBehind, "too far behind"],
+	[StreamCode.MalformedTrack, "malformed track"],
+	[StreamCode.NoCapacity, "no capacity"],
+	[StreamCode.ControlTimeout, "control timeout"],
+	[StreamCode.GroupTooLarge, "group too large"],
+	[StreamCode.NotFound, "not found"],
+	[StreamCode.Old, "old group"],
+	[StreamCode.Evicted, "evicted"],
+	[StreamCode.Unroutable, "unroutable"],
+	[StreamCode.WrongSize, "wrong size"],
+	[StreamCode.FrameTooLarge, "frame too large"],
+	[StreamCode.TimestampMismatch, "timestamp mismatch"],
+	[StreamCode.Unauthorized, "unauthorized"],
+	[StreamCode.ProtocolViolation, "protocol violation"],
+	[StreamCode.DuplicateID, "duplicate id"],
+	[StreamCode.InvalidPrefix, "invalid prefix"],
+	[StreamCode.BannedPrefix, "banned prefix"],
+	[StreamCode.NotSupported, "not supported"],
+]);
+
+/** Text for a stream code, with kind-specific overrides first. */
+function streamText(
+	code: number,
+	kind: string,
+	overrides: ReadonlyMap<number, string>,
+): string {
+	return overrides.get(code) ?? streamCodeText.get(code) ?? `unknown ${kind} error (${code})`;
+}
+
+// =============================================================================
 // Announce Error Codes
 // =============================================================================
 
 /** Error codes for announce stream failures. */
 export const AnnounceErrorCode = {
 	/** Internal error */
-	InternalError: 0x00,
-	/** Duplicated announcement */
-	DuplicatedAnnounce: 0x01,
-	/** Invalid announce status */
-	InvalidAnnounceStatus: 0x02,
-	/** Uninterested */
-	Uninterested: 0x03,
-	/** Banned prefix */
-	BannedPrefix: 0x04,
-	/** Invalid prefix */
-	InvalidPrefix: 0x05,
-	/** The prefix lies outside the root of every grant in force */
-	Unauthorized: 0x06,
+	InternalError: StreamCode.InternalError,
+	/** The subscriber no longer wants the stream: moq-lite's CANCELLED */
+	Uninterested: StreamCode.Cancelled,
+	/** Banned prefix (gomoqt) */
+	BannedPrefix: StreamCode.BannedPrefix,
+	/** Invalid prefix (gomoqt) */
+	InvalidPrefix: StreamCode.InvalidPrefix,
+	/** The prefix lies outside the root of every grant in force (gomoqt) */
+	Unauthorized: StreamCode.Unauthorized,
 } as const;
 
 /** Numeric announce error code type. */
@@ -100,24 +177,11 @@ export class AnnounceError extends WebTransportStreamError {
 	}
 
 	static textOf(code: AnnounceErrorCode): string {
-		switch (code) {
-			case AnnounceErrorCode.InternalError:
-				return "internal error";
-			case AnnounceErrorCode.DuplicatedAnnounce:
-				return "duplicated announce";
-			case AnnounceErrorCode.InvalidAnnounceStatus:
-				return "invalid announce status";
-			case AnnounceErrorCode.Uninterested:
-				return "uninterested";
-			case AnnounceErrorCode.BannedPrefix:
-				return "banned prefix";
-			case AnnounceErrorCode.InvalidPrefix:
-				return "invalid prefix";
-			case AnnounceErrorCode.Unauthorized:
-				return "unauthorized";
-			default:
-				return `unknown announce error (${code})`;
-		}
+		return streamText(
+			code,
+			"announce",
+			new Map<number, string>([[AnnounceErrorCode.Uninterested, "uninterested"]]),
+		);
 	}
 
 	constructor(code: AnnounceErrorCode, remote: boolean) {
@@ -135,17 +199,21 @@ export class AnnounceError extends WebTransportStreamError {
 /** Error codes for subscribe stream failures. */
 export const SubscribeErrorCode = {
 	/** Internal error */
-	InternalError: 0x00,
-	/** Invalid range */
-	InvalidRange: 0x01,
-	/** Duplicate subscribe ID */
-	DuplicateSubscribeID: 0x02,
-	/** Track not found */
-	TrackNotFound: 0x03,
-	/** Unauthorized */
-	Unauthorized: 0x04,
-	/** Subscribe timeout */
-	SubscribeTimeout: 0x05,
+	InternalError: StreamCode.InternalError,
+	/** A routine cancellation, such as giving up on an unanswered request */
+	Canceled: StreamCode.Cancelled,
+	/** Track not found: moq-lite's NOT_FOUND */
+	TrackNotFound: StreamCode.NotFound,
+	/** The only source is excluded by the subscriber's Hop ID: UNROUTABLE */
+	Unroutable: StreamCode.Unroutable,
+	/** The peer never answered: moq-lite's CONTROL_TIMEOUT */
+	SubscribeTimeout: StreamCode.ControlTimeout,
+	/** Unauthorized (gomoqt) */
+	Unauthorized: StreamCode.Unauthorized,
+	/** A range breaking a moq-lite rule, a protocol violation (gomoqt) */
+	InvalidRange: StreamCode.ProtocolViolation,
+	/** Duplicate subscribe ID (gomoqt) */
+	DuplicateSubscribeID: StreamCode.DuplicateID,
 } as const;
 
 /** Numeric subscribe error code type. */
@@ -158,22 +226,16 @@ export class SubscribeError extends WebTransportStreamError {
 	}
 
 	static textOf(code: SubscribeErrorCode): string {
-		switch (code) {
-			case SubscribeErrorCode.InternalError:
-				return "internal error";
-			case SubscribeErrorCode.InvalidRange:
-				return "invalid range";
-			case SubscribeErrorCode.DuplicateSubscribeID:
-				return "duplicate subscribe id";
-			case SubscribeErrorCode.TrackNotFound:
-				return "track not found";
-			case SubscribeErrorCode.Unauthorized:
-				return "unauthorized";
-			case SubscribeErrorCode.SubscribeTimeout:
-				return "subscribe timeout";
-			default:
-				return `unknown subscribe error (${code})`;
-		}
+		return streamText(
+			code,
+			"subscribe",
+			new Map<number, string>([
+				[SubscribeErrorCode.TrackNotFound, "track not found"],
+				[SubscribeErrorCode.InvalidRange, "invalid range"],
+				[SubscribeErrorCode.SubscribeTimeout, "subscribe timeout"],
+				[SubscribeErrorCode.DuplicateSubscribeID, "duplicate subscribe id"],
+			]),
+		);
 	}
 
 	constructor(code: SubscribeErrorCode, remote: boolean) {
@@ -191,9 +253,9 @@ export class SubscribeError extends WebTransportStreamError {
 /** Error codes for fetch stream failures. */
 export const FetchErrorCode = {
 	/** Internal error */
-	InternalError: 0x00,
-	/** Timeout */
-	Timeout: 0x01,
+	InternalError: StreamCode.InternalError,
+	/** The peer never answered: moq-lite's CONTROL_TIMEOUT */
+	Timeout: StreamCode.ControlTimeout,
 } as const;
 
 /** Numeric fetch error code type. */
@@ -206,14 +268,11 @@ export class FetchError extends WebTransportStreamError {
 	}
 
 	static textOf(code: FetchErrorCode): string {
-		switch (code) {
-			case FetchErrorCode.InternalError:
-				return "internal error";
-			case FetchErrorCode.Timeout:
-				return "timeout";
-			default:
-				return `unknown fetch error (${code})`;
-		}
+		return streamText(
+			code,
+			"fetch",
+			new Map<number, string>([[FetchErrorCode.Timeout, "timeout"]]),
+		);
 	}
 
 	constructor(code: FetchErrorCode, remote: boolean) {
@@ -231,21 +290,27 @@ export class FetchError extends WebTransportStreamError {
 /** Error codes for group stream failures. */
 export const GroupErrorCode = {
 	/** Internal error */
-	InternalError: 0x00,
-	/** Out of range */
-	OutOfRange: 0x02,
-	/** Expired group */
-	ExpiredGroup: 0x03,
-	/** Subscribe canceled */
-	SubscribeCanceled: 0x04,
-	/** Publish aborted */
-	PublishAborted: 0x05,
-	/** Closed session */
-	ClosedSession: 0x06,
-	/** Invalid subscribe ID */
-	InvalidSubscribeID: 0x07,
-	/** The session's scope does not cover the group, as for a refused fetch */
-	Unauthorized: 0x08,
+	InternalError: StreamCode.InternalError,
+	/** The group is no longer wanted, by either end: CANCELLED */
+	SubscribeCanceled: StreamCode.Cancelled,
+	/** The group aged out of the subscriber's Max Age: DELIVERY_TIMEOUT */
+	ExpiredGroup: StreamCode.DeliveryTimeout,
+	/** The session is closing: SESSION_CLOSED */
+	ClosedSession: StreamCode.SessionClosed,
+	/** The group grew past the publisher's cache budget */
+	GroupTooLarge: StreamCode.GroupTooLarge,
+	/** The group was never here */
+	NotFound: StreamCode.NotFound,
+	/** The group was superseded by a newer one and dropped */
+	Old: StreamCode.Old,
+	/** The group was dropped under memory pressure */
+	Evicted: StreamCode.Evicted,
+	/** A frame declared a payload larger than the receiver accepts */
+	FrameTooLarge: StreamCode.FrameTooLarge,
+	/** A fetch frame range breaking a moq-lite rule (gomoqt) */
+	InvalidRange: StreamCode.ProtocolViolation,
+	/** The session's scope does not cover the group, as for a refused fetch (gomoqt) */
+	Unauthorized: StreamCode.Unauthorized,
 } as const;
 
 /** Numeric group error code type. */
@@ -258,26 +323,16 @@ export class GroupError extends WebTransportStreamError {
 	}
 
 	static textOf(code: GroupErrorCode): string {
-		switch (code) {
-			case GroupErrorCode.InternalError:
-				return "internal error";
-			case GroupErrorCode.OutOfRange:
-				return "out of range";
-			case GroupErrorCode.ExpiredGroup:
-				return "expired group";
-			case GroupErrorCode.SubscribeCanceled:
-				return "subscribe canceled";
-			case GroupErrorCode.PublishAborted:
-				return "publish aborted";
-			case GroupErrorCode.ClosedSession:
-				return "closed session";
-			case GroupErrorCode.InvalidSubscribeID:
-				return "invalid subscribe id";
-			case GroupErrorCode.Unauthorized:
-				return "unauthorized";
-			default:
-				return `unknown group error (${code})`;
-		}
+		return streamText(
+			code,
+			"group",
+			new Map<number, string>([
+				[GroupErrorCode.SubscribeCanceled, "subscribe canceled"],
+				[GroupErrorCode.ExpiredGroup, "expired group"],
+				[GroupErrorCode.ClosedSession, "closed session"],
+				[GroupErrorCode.InvalidRange, "invalid range"],
+			]),
+		);
 	}
 
 	constructor(code: GroupErrorCode, remote: boolean) {
@@ -295,11 +350,11 @@ export class GroupError extends WebTransportStreamError {
 /** Error codes for probe stream failures. Mirrors Go's `moqt.ProbeErrorCode`. */
 export const ProbeErrorCode = {
 	/** Internal error */
-	Internal: 0x00,
-	/** Timeout */
-	Timeout: 0x01,
-	/** Not supported */
-	NotSupported: 0x02,
+	Internal: StreamCode.InternalError,
+	/** The peer never answered: moq-lite's CONTROL_TIMEOUT */
+	Timeout: StreamCode.ControlTimeout,
+	/** A Probe Stream at Probe level None (gomoqt) */
+	NotSupported: StreamCode.NotSupported,
 } as const;
 
 /** Numeric probe error code type. */
@@ -312,16 +367,11 @@ export class ProbeError extends WebTransportStreamError {
 	}
 
 	static textOf(code: ProbeErrorCode): string {
-		switch (code) {
-			case ProbeErrorCode.Internal:
-				return "internal error";
-			case ProbeErrorCode.Timeout:
-				return "timeout";
-			case ProbeErrorCode.NotSupported:
-				return "not supported";
-			default:
-				return `unknown probe error (${code})`;
-		}
+		return streamText(
+			code,
+			"probe",
+			new Map<number, string>([[ProbeErrorCode.Timeout, "timeout"]]),
+		);
 	}
 
 	constructor(code: ProbeErrorCode, remote: boolean) {

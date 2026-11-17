@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	moqtVersion = "moq-lite-05"
+	moqtVersion = "moq-lite-06"
 )
 
 // sessionSetup carries the binding-specific SETUP state that a Session cannot
@@ -119,6 +119,14 @@ type Session struct {
 	// peerFollowsRedirect is whether the peer advertised the Redirect
 	// parameter. Written and read like peerProbeLevel.
 	peerFollowsRedirect bool
+	// peerHopID and peerCost are the Hop ID and Cost the peer declared in
+	// its SETUP (0 and message.DefaultCost when absent). Written and read
+	// like peerProbeLevel.
+	peerHopID uint64
+	peerCost  uint64
+
+	// goawayReceived guards against a second GOAWAY, a protocol violation.
+	goawayReceived atomic.Bool
 
 	// probe stream state (subscriber side, lazily initialized)
 	outgoingProbeMu     sync.Mutex
@@ -196,6 +204,7 @@ func newSession(
 		trackWriters:    make(map[SubscribeID]*TrackWriter),
 		connManager:     manager,
 		peerSetupCh:     make(chan struct{}),
+		peerCost:        message.DefaultCost,
 		probeResponseCh: make(chan ProbeResult, 1), // latest-value semantics
 		probeTargetsCh:  make(chan ProbeResult, 1), // latest-value semantics
 		counters:        counters,
@@ -209,8 +218,7 @@ func newSession(
 	// launched so handleSetupStream's duplicate-guard sees it, and Probe() does
 	// not block on waitPeerSetup.
 	if setup.peerSetup != nil {
-		sess.peerProbeLevel = setup.peerSetup.ProbeLevel()
-		sess.peerFollowsRedirect = setup.peerSetup.FollowsRedirect()
+		sess.applyPeerSetup(*setup.peerSetup)
 		sess.peerSetupReceived.Store(true)
 		close(sess.peerSetupCh)
 	}
@@ -281,8 +289,12 @@ func (sess *Session) RequestURI() string {
 }
 
 // openSetupStream sends this endpoint's SETUP message on a unidirectional
-// Setup Stream and closes it (FIN), per moq-lite-05. A client on a binding
+// Setup Stream and closes it (FIN), per moq-lite-06. A client on a binding
 // without a request URI (native QUIC) includes the Path parameter.
+//
+// An endpoint with a Hop ID (TrackMux.HopID) declares it with the Hop
+// parameter. No Cost is declared: an absent Cost is the default of 1, the
+// neutral choice for an endpoint (route costs are relay policy).
 func (sess *Session) openSetupStream() {
 	stream, err := sess.conn.OpenUniStreamSync(sess.ctx)
 	if err != nil {
@@ -290,7 +302,7 @@ func (sess *Session) openSetupStream() {
 	}
 
 	if err := message.StreamTypeSetup.Encode(stream); err != nil {
-		stream.CancelWrite(transport.StreamErrorCode(InternalSessionErrorCode))
+		stream.CancelWrite(streamInternalError)
 		return
 	}
 
@@ -300,6 +312,9 @@ func (sess *Session) openSetupStream() {
 	}
 	// Session.Subscribe follows SUBSCRIBE_REDIRECT on every binding.
 	sm.AddRedirect()
+	if hop := sess.mux.hopID; hop != 0 {
+		sm.AddHop(hop)
+	}
 	// Only the native-QUIC client conveys a request path via SETUP; its
 	// binding has no handshake-time request URI. Every other role (WebTransport
 	// both directions; native-QUIC server) knows its path but must not send it.
@@ -311,7 +326,7 @@ func (sess *Session) openSetupStream() {
 	}
 
 	if err := sm.Encode(stream); err != nil {
-		stream.CancelWrite(transport.StreamErrorCode(InternalSessionErrorCode))
+		stream.CancelWrite(streamInternalError)
 		return
 	}
 
@@ -348,10 +363,57 @@ func (sess *Session) handleSetupStream(stream transport.ReceiveStream) {
 		sess.terminateProtocolViolation("unexpected Path parameter")
 		return
 	}
+	// Only a client sends the Role parameter (moq-lite-06 §7.3.3). A server
+	// takes it as a hint and enforces authorization per request anyway.
+	if !sess.server && sm.Has(message.SetupParamRole) {
+		sess.terminateProtocolViolation("unexpected Role parameter")
+		return
+	}
 
+	sess.applyPeerSetup(sm)
+	close(sess.peerSetupCh)
+}
+
+// applyPeerSetup records the capabilities the peer's SETUP advertises. It runs
+// once, before peerSetupCh is closed.
+func (sess *Session) applyPeerSetup(sm message.SetupMessage) {
 	sess.peerProbeLevel = sm.ProbeLevel()
 	sess.peerFollowsRedirect = sm.FollowsRedirect()
-	close(sess.peerSetupCh)
+	sess.peerHopID = sm.HopID()
+	sess.peerCost = sm.Cost()
+}
+
+// peerHop returns the Hop ID the peer declared in its SETUP, and whether its
+// SETUP has arrived. It does not wait.
+func (sess *Session) peerHop() (uint64, bool) {
+	select {
+	case <-sess.peerSetupCh:
+		return sess.peerHopID, true
+	default:
+		return 0, false
+	}
+}
+
+// waitPeerHop returns the Hop ID the peer declared in its SETUP, waiting for
+// the SETUP like waitPeerSetup. A peer whose SETUP does not arrive in time has
+// declared none.
+func (sess *Session) waitPeerHop() (uint64, error) {
+	if err := sess.waitPeerSetup(); err != nil {
+		if errors.Is(err, errPeerSetupTimeout) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return sess.peerHopID, nil
+}
+
+// waitPeerCost returns the Cost the peer declared in its SETUP, waiting for the
+// SETUP like waitPeerSetup; without one it is the default.
+func (sess *Session) waitPeerCost() uint64 {
+	if err := sess.waitPeerSetup(); err != nil {
+		return message.DefaultCost
+	}
+	return sess.peerCost
 }
 
 // terminateProtocolViolation closes the session with PROTOCOL_VIOLATION.
@@ -545,15 +607,15 @@ func (sess *Session) subscribe(ctx context.Context, path BroadcastPath, name Tra
 		return nil, fmt.Errorf("failed to encode stream type message: %w", err)
 	}
 
+	groupStart, groupEnd := subscribeRangeToWire(config)
 	err = message.SubscribeMessage{
-		SubscribeID:          uint64(id),
-		BroadcastPath:        string(path),
-		TrackName:            string(name),
-		SubscriberPriority:   uint8(config.Priority),
-		SubscriberOrdered:    boolToWireFlag(config.Ordered),
-		SubscriberMaxLatency: config.MaxLatency,
-		GroupStart:           groupSequenceToWire(config.StartGroup),
-		GroupEnd:             groupSequenceToWire(config.EndGroup),
+		SubscribeID:        uint64(id),
+		BroadcastPath:      string(path),
+		TrackName:          string(name),
+		SubscriberPriority: uint8(config.Priority),
+		SubscriberMaxAge:   config.MaxAge,
+		GroupStart:         groupStart,
+		GroupEnd:           groupEnd,
 	}.Encode(stream)
 	if err != nil {
 		if strErr, ok := errors.AsType[*transport.StreamError](err); ok && strErr.Remote {
@@ -708,9 +770,7 @@ func (sess *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
 		return nil, err
 	}
 
-	// A fetch delivers a single group on its own stream, so there is no group
-	// ordering to express.
-	stream.SetPriority(urgencyFor(req.Priority, false))
+	stream.SetPriority(urgencyFor(req.Priority))
 
 	err = message.StreamTypeFetch.Encode(stream)
 	if err != nil {
@@ -728,6 +788,9 @@ func (sess *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
 		BroadcastPath: string(req.BroadcastPath),
 		TrackName:     string(req.TrackName),
 		Priority:      uint8(req.Priority),
+		// The whole group, even for a request taken from a peer's FETCH (as a
+		// relay forwarding one upstream passes it): gomoqt asks for whole
+		// groups, as Subscribe does.
 		GroupSequence: uint64(req.GroupSequence),
 	}.Encode(stream)
 	if err != nil {
@@ -750,7 +813,7 @@ func (sess *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
 	// finished fetch reachable until it ends. The callback cancels the stream
 	// itself rather than through the reader: it may run before stop is set.
 	group.stop = context.AfterFunc(req.Context(), func() {
-		stream.CancelRead(transport.StreamErrorCode(ExpiredGroupErrorCode))
+		stream.CancelRead(streamCancelled)
 	})
 
 	return group, nil
@@ -791,7 +854,6 @@ func (sess *Session) AcceptAnnounce(prefix string) (*AnnouncementReader, error) 
 
 	err = message.AnnounceRequestMessage{
 		BroadcastPathPrefix: prefix,
-		ExcludeHop:          sess.mux.hopID,
 	}.Encode(stream)
 	if err != nil {
 		if strErr, ok := errors.AsType[*transport.StreamError](err); ok {
@@ -806,7 +868,11 @@ func (sess *Session) AcceptAnnounce(prefix string) (*AnnouncementReader, error) 
 		return nil, fmt.Errorf("failed to send ANNOUNCE_REQUEST message: %w", err)
 	}
 
-	return newAnnouncementReader(stream, prefix, nil, sess.scope), nil
+	return newAnnouncementReader(stream, prefix, sess.scope, announceReaderConfig{
+		localHopID:          sess.mux.hopID,
+		peerCost:            sess.waitPeerCost,
+		onProtocolViolation: sess.terminateProtocolViolation,
+	}), nil
 }
 
 // SessionStats is a point-in-time snapshot of a Session's operational metrics.
@@ -905,7 +971,7 @@ func (sess *Session) Probe(targetBitrate uint64) (<-chan ProbeResult, error) {
 		probeStream = stream
 	}
 
-	// Send PROBE with the new target bitrate. Per moq-lite-05 the subscriber MAY send
+	// Send PROBE with the new target bitrate. Per moq-lite-06 the subscriber MAY send
 	// additional PROBE messages on the same stream to update the target.
 	err := message.ProbeMessage{
 		Bitrate: targetBitrate,
@@ -995,12 +1061,14 @@ func (sess *Session) processBiStream(stream transport.Stream) {
 	case message.StreamTypeGoaway:
 		if err := sess.handleGoawayStream(stream); err != nil {
 			sess.logError("goaway stream error", err)
-			cancelStreamWithError(stream, transport.StreamErrorCode(InternalSessionErrorCode))
+			cancelStreamWithError(stream, streamInternalError)
 			return
 		}
 	default:
+		// An unknown stream type is reset, never fatal: it is how an
+		// extension stream fails against a peer that did not negotiate it.
 		sess.logError("unknown stream type", fmt.Errorf("stream type %d", streamType))
-		cancelStreamWithError(stream, transport.StreamErrorCode(InternalSessionErrorCode))
+		cancelStreamWithError(stream, streamNotSupported)
 		return
 	}
 }
@@ -1022,7 +1090,14 @@ func (sess *Session) handleAnnounceStream(stream transport.Stream) {
 		cancelStreamWithError(stream, transport.StreamErrorCode(AnnounceErrorCodeInternal))
 		return
 	}
-	annstr := newAnnouncementWriter(stream, prefix, sess.mux.hopID, aim.ExcludeHop, sess.logger, sess.scope)
+	// A path through the Hop ID the peer declared in its SETUP is never
+	// advertised to it (moq-lite-06 §5.1.1.1), so the SETUP is waited for.
+	excludeHop, err := sess.waitPeerHop()
+	if err != nil {
+		cancelStreamWithError(stream, transport.StreamErrorCode(AnnounceErrorCodeInternal))
+		return
+	}
+	annstr := newAnnouncementWriter(stream, prefix, sess.mux.hopID, excludeHop, sess.logger, sess.scope)
 	// The peer lists only prefixes within the root of a grant. The writer
 	// watches the scope from its making, so the check follows it.
 	if !sess.scope.canList(prefix) {
@@ -1076,15 +1151,23 @@ func (sess *Session) handleSubscribeStream(stream transport.Stream) {
 		return
 	}
 
-	config := &SubscribeConfig{
-		Priority:   TrackPriority(sm.SubscriberPriority),
-		Ordered:    boolFromWireFlag(sm.SubscriberOrdered),
-		MaxLatency: sm.SubscriberMaxLatency,
+	config := subscribeConfigFromWire(sm.SubscriberPriority, sm.SubscriberMaxAge,
+		sm.GroupStart, sm.GroupEnd, sm.FrameStart, sm.FrameEnd)
+	if err := config.validate(); err != nil {
+		// moq-lite-06 §3.6: a protocol violation that resets the stream.
+		cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeInvalidRange))
+		return
 	}
 
-	// Decode 0-sentinel / +1-encoded fields (matching SUBSCRIBE_UPDATE logic)
-	config.StartGroup = groupSequenceFromWire(sm.GroupStart)
-	config.EndGroup = groupSequenceFromWire(sm.GroupEnd)
+	// A subscription is served by the same Hop ID exclusion as the
+	// announcements (moq-lite-06 §5.1.1.1): a broadcast whose path runs
+	// through the subscriber is unroutable to it. The check uses the peer's
+	// SETUP only if it has arrived, so it never delays a subscription.
+	ann, handler := sess.mux.TrackHandler(BroadcastPath(sm.BroadcastPath))
+	if peerHop, ok := sess.peerHop(); ok && ann != nil && pathThroughHop(ann, sess.mux.hopID, peerHop) {
+		cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeUnroutable))
+		return
+	}
 
 	substr := newReceiveSubscribeStream(SubscribeID(sm.SubscribeID), stream, config)
 
@@ -1102,6 +1185,12 @@ func (sess *Session) handleSubscribeStream(stream transport.Stream) {
 		func() { sess.removeTrackWriter(SubscribeID(sm.SubscribeID)) },
 	)
 	track.redirectAllowed = sess.redirectAllowed
+	// Max Age is measured in the track's own timestamps.
+	if provider, ok := handler.(TrackInfoProvider); ok {
+		if info, found := provider.TrackInfo(TrackName(sm.TrackName)); found {
+			track.ages.timescale = info.timescaleOrDefault()
+		}
+	}
 	trackCtx, cancelTrack := sess.streamContext(stream)
 	track.ctx = context.WithValue(trackCtx, biStreamTypeCtxKey, message.StreamTypeSubscribe)
 	sess.addTrackWriter(SubscribeID(sm.SubscribeID), track)
@@ -1158,10 +1247,9 @@ func (sess *Session) handleTrackStream(stream transport.Stream) {
 	}
 
 	err := message.TrackInfoMessage{
-		PublisherPriority:   uint8(info.Priority),
-		PublisherOrdered:    boolToWireFlag(info.Ordered),
-		PublisherMaxLatency: info.MaxLatency,
-		Timescale:           info.timescaleOrDefault(),
+		PublisherPriority: uint8(info.Priority),
+		PublisherMaxAge:   info.MaxAge,
+		Timescale:         info.timescaleOrDefault(),
 	}.Encode(stream)
 	if err != nil {
 		sess.logError("failed to encode TRACK_INFO message", err)
@@ -1225,15 +1313,15 @@ func (sess *Session) TrackInfo(ctx context.Context, path BroadcastPath, name Tra
 	_ = stream.Close()
 
 	if tim.Timescale == 0 {
-		cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeInternal))
+		// moq-lite-06 §7.12: reset the stream with a protocol violation.
+		cancelStreamWithError(stream, streamProtocolViolation)
 		return nil, errors.New("moqt: received TRACK_INFO with zero Timescale")
 	}
 
 	return &PublishInfo{
-		Priority:   TrackPriority(tim.PublisherPriority),
-		Ordered:    boolFromWireFlag(tim.PublisherOrdered),
-		MaxLatency: tim.PublisherMaxLatency,
-		Timescale:  tim.Timescale,
+		Priority:  TrackPriority(tim.PublisherPriority),
+		MaxAge:    tim.PublisherMaxAge,
+		Timescale: tim.Timescale,
 	}, nil
 }
 
@@ -1264,20 +1352,27 @@ func (sess *Session) handleFetchStream(stream transport.Stream) {
 		TrackName:     TrackName(fm.TrackName),
 		Priority:      TrackPriority(fm.Priority),
 		GroupSequence: GroupSequence(fm.GroupSequence),
+		frameStart:    fm.FrameStart,
+		frameEnd:      fm.FrameEnd,
 		ctx:           reqCtx,
+	}
+	if err := req.validate(); err != nil {
+		// moq-lite-06 §7.16: a Frame End below Frame Start is a protocol
+		// violation.
+		cancelStreamWithError(stream, transport.StreamErrorCode(InvalidRangeGroupErrorCode))
+		return
 	}
 
 	// Priority is per-endpoint and not negotiated, so the requester's call on
 	// its own end does not cover the response data written from this side.
-	// A fetch delivers a single group on its own stream, so there is no group
-	// ordering to express.
-	stream.SetPriority(urgencyFor(req.Priority, false))
+	stream.SetPriority(urgencyFor(req.Priority))
 
 	group := newGroupWriter(stream, req.GroupSequence, nil)
+	group.frameStart, group.frameEnd = req.frameStart, req.frameEnd
 
 	stop := context.AfterFunc(req.Context(), func() {
 		// Cancel the stream when the context is done
-		group.CancelWrite(ExpiredGroupErrorCode)
+		group.CancelWrite(SubscribeCanceledErrorCode)
 	})
 	defer stop()
 
@@ -1325,7 +1420,9 @@ func (sess *Session) processUniStream(stream transport.ReceiveStream) {
 		track, ok := sess.trackReaders[SubscribeID(gm.SubscribeID)]
 		sess.trackReaderMapLocker.RUnlock()
 		if !ok {
-			stream.CancelRead(transport.StreamErrorCode(InvalidSubscribeIDErrorCode))
+			// Most often a subscription this side has already ended: the
+			// group is no longer wanted.
+			stream.CancelRead(streamCancelled)
 			return
 		}
 
@@ -1334,7 +1431,7 @@ func (sess *Session) processUniStream(stream transport.ReceiveStream) {
 	default:
 		// Unknown stream types are stream-local and non-fatal for extension probing.
 		sess.logError("unknown uni stream type", fmt.Errorf("stream type %d", streamType))
-		stream.CancelRead(transport.StreamErrorCode(InternalSessionErrorCode))
+		stream.CancelRead(streamNotSupported)
 		return
 	}
 }
@@ -1373,7 +1470,7 @@ func (sess *Session) removeTrackReader(id SubscribeID) {
 // in which case the caller has given up and the response, if any, is void.
 func abandonOnDone(ctx context.Context, stream transport.Stream) func() bool {
 	stop := context.AfterFunc(ctx, func() {
-		code := SubscribeErrorCodeInternal
+		code := SubscribeErrorCodeCanceled
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			code = SubscribeErrorCodeTimeout
 		}
@@ -1658,7 +1755,23 @@ func (sess *Session) handleGoawayStream(stream transport.Stream) error {
 	var gm message.GoawayMessage
 	err := gm.Decode(stream)
 	if err != nil {
+		if errors.Is(err, message.ErrNewSessionURITooLong) {
+			sess.terminateProtocolViolation("GOAWAY new session URI too long")
+		}
 		return err
+	}
+	// moq-lite-06 §7.18: more than one GOAWAY is a protocol violation. Only a
+	// GOAWAY that decoded counts, so a stream reset mid-message does not use
+	// up the one the peer may send.
+	if !sess.goawayReceived.CompareAndSwap(false, true) {
+		sess.terminateProtocolViolation("duplicate GOAWAY")
+		return nil
+	}
+	// Only a server may redirect: a client cannot tell a server where to
+	// connect.
+	if sess.server && gm.NewSessionURI != "" {
+		sess.terminateProtocolViolation("GOAWAY with a new session URI sent to a server")
+		return nil
 	}
 
 	if sess.onGoaway != nil {

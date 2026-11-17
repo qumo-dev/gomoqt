@@ -5,7 +5,7 @@ title: "Server"
 `moqt.Server` manages server-side operations for the MoQ protocol. It listens for incoming QUIC connections, dispatches them based on ALPN negotiation, and manages their lifecycle.
 
 The server uses ALPN (Application-Layer Protocol Negotiation) to determine the transport:
-- `moq-lite-05` (`moqt.NextProtoMOQ`) — Native QUIC, dispatched to `Server.Handler`
+- `moq-lite-06` (`moqt.NextProtoMOQ`) — Native QUIC, dispatched to `Server.Handler`
 - `h3` (`moqt.NextProtoH3`) — WebTransport via HTTP/3, dispatched to `Server.WebTransportServer`
 
 <Accordion title="Overview">
@@ -127,13 +127,13 @@ type WebTransportServer interface {
 `ServeQUICConn` detects the negotiated ALPN protocol and dispatches the connection accordingly:
 
 ```go
-    // Native QUIC (moq-lite-05) → Server.Handler.ServeMOQ(sess)
+    // Native QUIC (moq-lite-06) → Server.Handler.ServeMOQ(sess)
     // HTTP/3 (h3)               → Server.WebTransportServer.ServeQUICConn(conn)
 ```
 
 ### Native QUIC Handler
 
-For native QUIC connections (ALPN `moq-lite-05`), the `Handler` field receives a `*moqt.Session` directly:
+For native QUIC connections (ALPN `moq-lite-06`), the `Handler` field receives a `*moqt.Session` directly:
 
 ```go
 type Handler interface {
@@ -212,7 +212,7 @@ WebTransport does not work in every browser: on WebKit, which is every browser o
 
 - **Set `CheckOrigin`.** Browsers do not apply CORS to WebSocket, so this is the only origin check. Without it only same-origin requests are accepted.
 - **`Server` ties the sessions to a `moqt.Server`:** its `Shutdown` (GOAWAY) and `Close` reach them, its `ConnContext` derives their context from the upgrade request's, and its `QUICConfig` configures them: stream limits, receive windows, keep-alive, and idle and handshake timeouts are set once for every transport.
-- **The subprotocol is the version negotiation.** A client offers `moqt.NextProtoQMux` (`qmux-02.moq-lite-05`); a request that does not is refused with 400.
+- **The subprotocol is the version negotiation.** A client offers `moqt.NextProtoQMux` (`qmux-02.moq-lite-06`); a request that does not is refused with 400.
 - **Serve it on the TCP port of the same number as the QUIC listener.** `@qumo/moq` dials `wss:` at the host and port of the `https:` URL it was given, so one URL then reaches the server over either transport.
 - A session behaves as a WebTransport one: the request URI is its path. Everything shares one TCP connection, so a lost segment delays every stream, and there are no unreliable datagrams.
 

@@ -14,6 +14,18 @@ import { GroupErrorCode } from "./error.ts";
 import { GroupSequence } from "./alias.ts";
 import { BytesBuffer, ByteSink, ByteSinkFunc, ByteSource, Frame } from "./frame.ts";
 import { EOFError } from "@okdaichi/golikejs/io";
+import type { GroupAges } from "./group_ages.ts";
+
+/** How a {@link GroupWriter} limits the frames it sends, and who ages it. */
+export interface GroupWriterOptions {
+	/**
+	 * Exclusive end of the frames sent: frames from this index on are counted
+	 * but skipped (0 = the whole group).
+	 */
+	frameEnd?: number;
+	/** Expires the track's groups the subscriber's Max Age leaves behind. */
+	ages?: GroupAges;
+}
 
 /**
  * Maximum frame payload size accepted by {@link GroupReader.readFrame} (50 MB).
@@ -31,6 +43,11 @@ export const MAX_FRAME_SIZE = 50 * 1024 * 1024;
  *
  * Obtained from {@link TrackWriter.openGroup}. Each frame is length-prefixed
  * on the wire.
+ *
+ * Frames are numbered from 0 within the group, in the order {@link writeFrame}
+ * is called. When the subscription (or fetch) asked for only part of the
+ * group, the frames outside that range are counted but not sent: write the
+ * group whole and the writer sends the part that was asked for.
  */
 export class GroupWriter {
 	/** The group sequence number. */
@@ -41,11 +58,36 @@ export class GroupWriter {
 	// Previous frame's timestamp on this stream, used to delta-encode the
 	// next frame (the first frame is encoded relative to 0).
 	#prevTimestamp: number = 0;
+	// Index within the group of the next frame written, and the range sent.
+	#frameIndex: number = 0;
+	readonly #frameStart: number;
+	readonly #frameEnd: number;
+	readonly #ages?: GroupAges;
 
-	constructor(trackCtx: Context, writer: SendStream, group: GroupMessage) {
+	constructor(
+		trackCtx: Context,
+		writer: SendStream,
+		group: GroupMessage,
+		options?: GroupWriterOptions,
+	) {
 		this.sequence = group.sequence;
 		this.#stream = writer;
+		this.#frameStart = group.frameStart;
+		this.#frameEnd = options?.frameEnd ?? 0;
+		this.#ages = options?.ages;
 		[this.context, this.#cancelFunc] = withCancelCause(trackCtx);
+		if (this.#ages) {
+			const ages = this.#ages;
+			const aged = {
+				sequence: this.sequence,
+				expire: () => {
+					this.cancel(GroupErrorCode.ExpiredGroup).catch(() => {});
+				},
+			};
+			ages.add(aged);
+			this.#aged = aged;
+			this.context.done().then(() => ages.closed(aged));
+		}
 
 		trackCtx.done().then(() => {
 			this.cancel(GroupErrorCode.SubscribeCanceled);
@@ -72,6 +114,16 @@ export class GroupWriter {
 
 		const ts = timestamp ?? (src instanceof BytesBuffer ? src.timestamp : 0);
 
+		if (this.#ages && this.#aged) {
+			this.#ages.observe(this.#aged, ts);
+		}
+		const idx = this.#frameIndex;
+		if (idx < this.#frameStart || (this.#frameEnd !== 0 && idx >= this.#frameEnd)) {
+			// Outside the range the subscriber asked for: counted, not sent.
+			this.#frameIndex++;
+			return undefined;
+		}
+
 		// Write the timestamp delta (zigzag varint) relative to the previous
 		// frame on this stream, then the length prefix, then the payload.
 		let [, err] = await writeVarint(this.#stream, zigzagEncode(ts - this.#prevTimestamp));
@@ -91,9 +143,12 @@ export class GroupWriter {
 		}
 
 		this.#prevTimestamp = ts;
+		this.#frameIndex++;
 
 		return undefined;
 	}
+
+	#aged?: { readonly sequence: number; expire(): void };
 
 	/** Close the group stream normally. */
 	async close(): Promise<void> {
@@ -148,12 +203,15 @@ export class GroupReader {
 		onDone?: () => void,
 	) {
 		this.sequence = group.sequence;
+		// The GROUP message's Frame Start (moq-lite-06 §7.19) is not kept: this
+		// endpoint only asks for whole groups, so it is 0 from a conforming
+		// peer.
 		this.#reader = reader;
 		this.#onDone = onDone;
 		[this.context, this.#cancelFunc] = withCancelCause(trackCtx);
 
 		trackCtx.done().then(() => {
-			this.cancel(GroupErrorCode.PublishAborted);
+			this.cancel(GroupErrorCode.SubscribeCanceled);
 		});
 	}
 

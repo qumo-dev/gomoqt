@@ -21,7 +21,7 @@ To fetch a specific group, use the `Session.Fetch` method with a `moqt.FetchRequ
         // Handle error
         return
     }
-    defer gr.CancelRead(moqt.ExpiredGroupErrorCode)
+    defer gr.CancelRead(moqt.SubscribeCanceledErrorCode)
 
     // Read frames from the fetched group
     frame := moqt.NewFrame(0)

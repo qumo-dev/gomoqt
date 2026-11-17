@@ -21,6 +21,16 @@ func TestFetchMessage_EncodeDecode(t *testing.T) {
 				GroupSequence: 42,
 			},
 		},
+		"frame range": {
+			input: message.FetchMessage{
+				BroadcastPath: "/live/alice",
+				TrackName:     "video",
+				Priority:      3,
+				GroupSequence: 42,
+				FrameStart:    2,
+				FrameEnd:      7,
+			},
+		},
 		"empty_strings": {
 			input: message.FetchMessage{
 				BroadcastPath: "",

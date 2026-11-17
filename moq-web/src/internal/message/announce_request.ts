@@ -3,16 +3,23 @@ import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.
 
 export interface AnnounceRequestMessageInit {
 	prefix?: string;
-	excludeHop?: number;
 }
 
+/**
+ * ANNOUNCE_REQUEST message.
+ *
+ * ```text
+ * ANNOUNCE_REQUEST Message {
+ *   Message Length (i)
+ *   Broadcast Path Prefix (s),
+ * }
+ * ```
+ */
 export class AnnounceRequestMessage {
 	prefix: string;
-	excludeHop: number;
 
 	constructor(init: AnnounceRequestMessageInit = {}) {
 		this.prefix = init.prefix ?? "";
-		this.excludeHop = init.excludeHop ?? 0;
 	}
 
 	/**
@@ -21,7 +28,6 @@ export class AnnounceRequestMessage {
 	async encode(w: Writer): Promise<Error | undefined> {
 		const e = new MessageEncoder();
 		e.string(this.prefix);
-		e.varint(this.excludeHop);
 		const [, err] = await w.write(e.frame());
 		return err;
 	}
@@ -40,7 +46,6 @@ export class AnnounceRequestMessage {
 		const d = new MessageDecoder(buf);
 
 		this.prefix = d.string();
-		this.excludeHop = d.varint();
 
 		return undefined;
 	}

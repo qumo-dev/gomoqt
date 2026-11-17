@@ -261,8 +261,7 @@ func TestSession_Subscribe(t *testing.T) {
 			name: TrackName("video"),
 			config: &SubscribeConfig{
 				Priority:   TrackPriority(1),
-				Ordered:    true,
-				MaxLatency: 250,
+				MaxAge:     250,
 				StartGroup: 4,
 				EndGroup:   9,
 			},
@@ -302,8 +301,7 @@ func TestSession_Subscribe(t *testing.T) {
 				assert.Equal(t, tt.name, track.TrackName)
 				gotConfig := track.TrackConfig()
 				assert.Equal(t, tt.config, gotConfig)
-				assert.Equal(t, tt.config.Ordered, gotConfig.Ordered)
-				assert.Equal(t, tt.config.MaxLatency, gotConfig.MaxLatency)
+				assert.Equal(t, tt.config.MaxAge, gotConfig.MaxAge)
 				assert.Equal(t, tt.config.StartGroup, gotConfig.StartGroup)
 				assert.Equal(t, tt.config.EndGroup, gotConfig.EndGroup)
 			}
@@ -740,7 +738,7 @@ func TestSession_TrackInfo_PendingEndsWhenTheCallerCancels(t *testing.T) {
 		default:
 			t.Fatal("TrackInfo still waits after the caller cancelled")
 		}
-		assert.Contains(t, stream.CancelReadCodes(), transport.StreamErrorCode(SubscribeErrorCodeInternal))
+		assert.Contains(t, stream.CancelReadCodes(), transport.StreamErrorCode(SubscribeErrorCodeCanceled))
 	})
 }
 
@@ -856,8 +854,9 @@ func TestSession_WithRealMux(t *testing.T) {
 
 	mux := NewTrackMux(0)
 
-	session := newTestSession(conn)
-	session.mux = mux
+	// The mux is passed at construction: the Setup Stream goroutine reads it
+	// (for the Hop ID) as soon as the session starts.
+	session := newSession(conn, mux, nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
 
 	assert.Equal(t, mux, session.mux, "Mux should be set correctly in the session")
 
@@ -1275,14 +1274,13 @@ func TestSession_ProcessBiStream_Subscribe(t *testing.T) {
 	err := message.StreamTypeSubscribe.Encode(&buf)
 	assert.NoError(t, err)
 	sm := message.SubscribeMessage{
-		SubscribeID:          1,
-		BroadcastPath:        "/test/path",
-		TrackName:            "video",
-		SubscriberPriority:   7,
-		SubscriberOrdered:    1,
-		SubscriberMaxLatency: 500,
-		GroupStart:           5,
-		GroupEnd:             10,
+		SubscribeID:        1,
+		BroadcastPath:      "/test/path",
+		TrackName:          "video",
+		SubscriberPriority: 7,
+		SubscriberMaxAge:   500,
+		GroupStart:         4, // a plain floor since moq-lite-06
+		GroupEnd:           10,
 	}
 	err = sm.Encode(&buf)
 	assert.NoError(t, err)
@@ -1322,8 +1320,7 @@ func TestSession_ProcessBiStream_Subscribe(t *testing.T) {
 
 	gotConfig := track.TrackConfig()
 	assert.Equal(t, TrackPriority(7), gotConfig.Priority)
-	assert.True(t, gotConfig.Ordered)
-	assert.Equal(t, uint64(500), gotConfig.MaxLatency)
+	assert.Equal(t, uint64(500), gotConfig.MaxAge)
 	assert.Equal(t, GroupSequence(4), gotConfig.StartGroup)
 	assert.Equal(t, GroupSequence(9), gotConfig.EndGroup)
 
@@ -1373,13 +1370,13 @@ func TestSession_ProcessBiStream_InvalidStreamType(t *testing.T) {
 	// CancelWrite check
 	var cancelWriteErr *transport.StreamError
 	require.ErrorAs(t, context.Cause(mockStream.Context()), &cancelWriteErr)
-	assert.Equal(t, transport.StreamErrorCode(InternalSessionErrorCode), cancelWriteErr.ErrorCode)
+	assert.Equal(t, streamNotSupported, cancelWriteErr.ErrorCode)
 
 	// CancelRead check
 	_, readErr := mockStream.Read(make([]byte, 1))
 	var cancelReadErr *transport.StreamError
 	require.ErrorAs(t, readErr, &cancelReadErr)
-	assert.Equal(t, transport.StreamErrorCode(InternalSessionErrorCode), cancelReadErr.ErrorCode)
+	assert.Equal(t, streamNotSupported, cancelReadErr.ErrorCode)
 
 	assert.ErrorIs(t, mockStream.Context().Err(), context.Canceled)
 }
@@ -1484,7 +1481,7 @@ func TestSession_ProcessBiStream_Fetch(t *testing.T) {
 	require.NotNil(t, gotWriter)
 	assert.Equal(t, GroupSequence(req.GroupSequence), gotWriter.GroupSequence())
 
-	wantUrgency, wantIncremental := urgencyFor(TrackPriority(req.Priority), false)
+	wantUrgency, wantIncremental := urgencyFor(TrackPriority(req.Priority))
 	gotUrgency, gotIncremental, ok := mockStream.LastPriority()
 	assert.True(t, ok, "SetPriority should have been called")
 	assert.Equal(t, wantUrgency, gotUrgency)
@@ -2119,7 +2116,7 @@ func TestSession_ProcessUniStream_UnknownSubscribeID(t *testing.T) {
 	_, cancelReadErr := mockRecvStream.Read(make([]byte, 1))
 	var cancelReadStreamErr *transport.StreamError
 	require.ErrorAs(t, cancelReadErr, &cancelReadStreamErr)
-	assert.Equal(t, transport.StreamErrorCode(InvalidSubscribeIDErrorCode), cancelReadStreamErr.ErrorCode)
+	assert.Equal(t, transport.StreamErrorCode(SubscribeCanceledErrorCode), cancelReadStreamErr.ErrorCode)
 
 	_ = session.CloseWithError(NoError, "")
 }
@@ -2437,7 +2434,7 @@ func TestSession_Fetch_SetsPriority(t *testing.T) {
 	_, err := session.Fetch(req)
 	require.NoError(t, err)
 
-	wantUrgency, wantIncremental := urgencyFor(200, false)
+	wantUrgency, wantIncremental := urgencyFor(200)
 	gotUrgency, gotIncremental, ok := mockStream.LastPriority()
 	assert.True(t, ok, "SetPriority should have been called")
 	assert.Equal(t, wantUrgency, gotUrgency)
@@ -3130,4 +3127,261 @@ func TestSession_ProcessUniStream_TrackReadersRace(t *testing.T) {
 		<-decodeDone
 		<-writerDone
 	}
+}
+
+// TestTrackReader_Update_SendsWholeGroups verifies gomoqt never asks for part
+// of a group: even a config carrying a peer's frame bounds, as one taken from
+// TrackWriter.TrackConfig would, goes out with Frame Start and Frame End 0.
+func TestTrackReader_Update_SendsWholeGroups(t *testing.T) {
+	stream := &fakeQUICStream{}
+	substr := newSendSubscribeStream(SubscribeID(1), stream, &SubscribeConfig{})
+	reader := newTrackReader("/live", "video", substr, func() {})
+
+	fromPeer := subscribeConfigFromWire(1, 500, 4, 9, 3, 2) // groups 4..8, frames from 3 / before 2
+	require.NoError(t, reader.Update(fromPeer))
+
+	var msg message.SubscribeUpdateMessage
+	require.NoError(t, msg.Decode(bytes.NewReader(stream.Written())))
+	assert.Equal(t, uint64(4), msg.GroupStart)
+	assert.Equal(t, uint64(9), msg.GroupEnd)
+	assert.Zero(t, msg.FrameStart)
+	assert.Zero(t, msg.FrameEnd)
+	assert.Equal(t, uint64(3), fromPeer.startFrame, "the caller's config is left as it was")
+}
+
+func TestSession_Fetch_AsksForWholeGroup(t *testing.T) {
+	session, conn := newTestSessionWithConn(t)
+	stream := &fakeQUICStream{}
+	conn.openStreams = []biStreamResult{{Stream: stream}}
+
+	// Bounds taken from a peer's FETCH, as a relay forwarding it passes them.
+	group, err := session.Fetch(&FetchRequest{BroadcastPath: "/live", TrackName: "video", GroupSequence: 7, frameStart: 2, frameEnd: 5})
+	require.NoError(t, err)
+	require.NotNil(t, group)
+
+	r := bytes.NewReader(stream.Written())
+	var st message.StreamType
+	require.NoError(t, st.Decode(r))
+	var fm message.FetchMessage
+	require.NoError(t, fm.Decode(r))
+	assert.Equal(t, uint64(7), fm.GroupSequence)
+	assert.Zero(t, fm.FrameStart)
+	assert.Zero(t, fm.FrameEnd)
+}
+
+func TestFetchRequest_Validate(t *testing.T) {
+	tests := map[string]struct {
+		start, end uint64
+		wantErr    bool
+	}{
+		"whole group":          {},
+		"from a frame":         {start: 4},
+		"single frame":         {start: 4, end: 5},
+		"end below start":      {start: 4, end: 3, wantErr: true},
+		"end equal to start":   {start: 4, end: 4, wantErr: true},
+		"end without a start":  {end: 2},
+		"end at the first one": {start: 0, end: 1},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := (&FetchRequest{frameStart: tt.start, frameEnd: tt.end}).validate()
+			if tt.wantErr {
+				assert.ErrorIs(t, err, errFetchFrameRange)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}
+
+// TestSession_HandleSubscribeStream_ServesPartialGroup drives a peer SUBSCRIBE
+// that starts partway into group 2 and ends partway into group 3 (moq-lite-06
+// §3.6): group 2 goes out from frame 2 with GROUP Frame Start 2, group 3 up to
+// before frame 1, and group 1 is below the floor.
+func TestSession_HandleSubscribeStream_ServesPartialGroup(t *testing.T) {
+	var opened []*fakeQUICSendStream
+	var mu sync.Mutex
+	conn := &recordingUniConn{fakeStreamConn: &fakeStreamConn{}, opened: &opened, mu: &mu}
+	session := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
+	defer session.CloseWithError(NoError, "")
+	served := make(chan struct{})
+	session.mux.PublishFunc(t.Context(), "/live", func(tw *TrackWriter) {
+		defer close(served)
+		for seq := GroupSequence(1); seq <= 3; seq++ {
+			gw, err := tw.OpenGroupAt(tw.Context(), seq)
+			if seq == 1 {
+				assert.ErrorIs(t, err, ErrGroupOutOfRange)
+				continue
+			}
+			if !assert.NoError(t, err) {
+				return
+			}
+			for i := uint64(0); i < 4; i++ {
+				f := NewFrame(0)
+				f.Timestamp = uint64(seq)*100 + i
+				assert.NoError(t, gw.WriteFrame(f))
+			}
+			assert.NoError(t, gw.Close())
+		}
+	})
+	stream := subscribeStreamFor(t, message.SubscribeMessage{
+		SubscribeID: 5, BroadcastPath: "/live", TrackName: "video",
+		GroupStart: 2, FrameStart: 2, GroupEnd: 4, FrameEnd: 1, // groups 2..3
+	})
+	go session.processBiStream(stream)
+	select {
+	case <-served:
+	case <-time.After(time.Second):
+		t.Fatal("the handler did not finish")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	type group struct {
+		seq, frameStart uint64
+		timestamps      []uint64
+	}
+	var got []group
+	for _, s := range opened {
+		r := bytes.NewReader(s.Written())
+		var st message.StreamType
+		require.NoError(t, st.Decode(r))
+		if st != message.StreamTypeGroup {
+			continue // the Setup Stream
+		}
+		var gm message.GroupMessage
+		require.NoError(t, gm.Decode(r))
+		g := group{seq: gm.GroupSequence, frameStart: gm.FrameStart}
+		prev := uint64(0)
+		for r.Len() > 0 {
+			f := NewFrame(0)
+			require.NoError(t, f.decode(r, prev))
+			prev = f.Timestamp
+			g.timestamps = append(g.timestamps, f.Timestamp)
+		}
+		got = append(got, g)
+	}
+	assert.Equal(t, []group{
+		{seq: 2, frameStart: 2, timestamps: []uint64{202, 203}},
+		{seq: 3, frameStart: 0, timestamps: []uint64{300}},
+	}, got)
+}
+
+// recordingUniConn opens a fresh fake send stream for every group and keeps
+// them, so a test can read what each group stream carried.
+type recordingUniConn struct {
+	*fakeStreamConn
+	mu     *sync.Mutex
+	opened *[]*fakeQUICSendStream
+}
+
+func (c *recordingUniConn) OpenUniStreamSync(context.Context) (transport.SendStream, error) {
+	s := &fakeQUICSendStream{}
+	c.mu.Lock()
+	*c.opened = append(*c.opened, s)
+	c.mu.Unlock()
+	return s, nil
+}
+
+// subscribeStreamFor returns a bidirectional stream carrying a SUBSCRIBE.
+func subscribeStreamFor(tb testing.TB, sm message.SubscribeMessage) *fakeQUICStream {
+	tb.Helper()
+	var buf bytes.Buffer
+	require.NoError(tb, message.StreamTypeSubscribe.Encode(&buf))
+	require.NoError(tb, sm.Encode(&buf))
+	return &fakeQUICStream{reads: []streamResult{{Data: buf.Bytes()}, {Block: true}}}
+}
+
+func TestSession_HandleSubscribeStream_Refusals(t *testing.T) {
+	tests := map[string]struct {
+		sm       message.SubscribeMessage
+		hopIDs   []uint64 // the served broadcast's hop path
+		peerHop  uint64   // the subscriber's SETUP Hop ID
+		wantCode transport.StreamErrorCode
+	}{
+		"frame end without group end": {
+			sm:       message.SubscribeMessage{BroadcastPath: "/live", TrackName: "video", FrameEnd: 2},
+			wantCode: transport.StreamErrorCode(SubscribeErrorCodeInvalidRange),
+		},
+		"a path through the subscriber is unroutable": {
+			sm:       message.SubscribeMessage{BroadcastPath: "/live", TrackName: "video"},
+			hopIDs:   []uint64{11, 22},
+			peerHop:  22,
+			wantCode: transport.StreamErrorCode(SubscribeErrorCodeUnroutable),
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			conn := &fakeStreamConn{}
+			session := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
+			defer session.CloseWithError(NoError, "")
+			session.peerSetupReceived.Store(true)
+			session.peerHopID = tt.peerHop
+			close(session.peerSetupCh)
+
+			ann, end := NewAnnouncement(t.Context(), "/live")
+			defer end()
+			ann.setRoute(announceRoute{hopIDs: tt.hopIDs})
+			session.mux.Announce(ann, TrackHandlerFunc(func(tw *TrackWriter) {
+				t.Error("the handler must not be reached")
+			}))
+
+			stream := subscribeStreamFor(t, tt.sm)
+			session.processBiStream(stream)
+
+			assert.Equal(t, []transport.StreamErrorCode{tt.wantCode}, stream.CancelWriteCodes())
+		})
+	}
+}
+
+func TestSession_HandleFetchStream_RejectsFrameRange(t *testing.T) {
+	session, _ := newTestSessionWithConn(t)
+	session.fetchHandler = FetchHandlerFunc(func(*GroupWriter, *FetchRequest) {
+		t.Error("the handler must not be reached")
+	})
+
+	var buf bytes.Buffer
+	require.NoError(t, message.StreamTypeFetch.Encode(&buf))
+	require.NoError(t, message.FetchMessage{BroadcastPath: "/live", TrackName: "video", FrameStart: 5, FrameEnd: 5}.Encode(&buf))
+	stream := &fakeQUICStream{reads: []streamResult{{Data: buf.Bytes()}, {Block: true}}}
+
+	session.processBiStream(stream)
+
+	assert.Equal(t, []transport.StreamErrorCode{transport.StreamErrorCode(InvalidRangeGroupErrorCode)}, stream.CancelWriteCodes())
+}
+
+func TestSession_HandleFetchStream_ServesFrameRange(t *testing.T) {
+	session, _ := newTestSessionWithConn(t)
+	session.fetchHandler = FetchHandlerFunc(func(w *GroupWriter, r *FetchRequest) {
+		for ts := uint64(0); ts < 6; ts++ {
+			f := NewFrame(0)
+			f.Timestamp = ts
+			if err := w.WriteFrame(f); err != nil {
+				t.Error(err)
+			}
+		}
+		if err := w.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	var buf bytes.Buffer
+	require.NoError(t, message.StreamTypeFetch.Encode(&buf))
+	require.NoError(t, message.FetchMessage{BroadcastPath: "/live", TrackName: "video", FrameStart: 2, FrameEnd: 4}.Encode(&buf))
+	stream := &fakeQUICStream{reads: []streamResult{{Data: buf.Bytes()}, {Err: io.EOF}}}
+
+	session.processBiStream(stream)
+
+	r := bytes.NewReader(stream.Written())
+	var got []uint64
+	prev := uint64(0)
+	for r.Len() > 0 {
+		f := NewFrame(0)
+		require.NoError(t, f.decode(r, prev))
+		prev = f.Timestamp
+		got = append(got, f.Timestamp)
+	}
+	assert.Equal(t, []uint64{2, 3}, got, "frames 2 and 3 of the group, the first delta-encoded from 0")
 }

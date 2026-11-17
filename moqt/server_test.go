@@ -37,15 +37,23 @@ func newTestNativeQUICConn(tb testing.TB, opts ...func(*fakeStreamConn)) *fakeSt
 // Path parameter. Subsequent AcceptUniStream calls return io.EOF, modeling a
 // connection with no further inbound uni streams.
 func withClientSetup(path string) func(*fakeStreamConn) {
+	return withClientSetupMessage(func(sm *message.SetupMessage) {
+		if path != "" {
+			sm.AddPath(path)
+		}
+	})
+}
+
+// withClientSetupMessage queues the client's Setup Stream carrying the SETUP
+// build fills in.
+func withClientSetupMessage(build func(*message.SetupMessage)) func(*fakeStreamConn) {
 	return func(conn *fakeStreamConn) {
 		var buf bytes.Buffer
 		if err := message.StreamTypeSetup.Encode(&buf); err != nil {
 			panic(err)
 		}
 		var sm message.SetupMessage
-		if path != "" {
-			sm.AddPath(path)
-		}
+		build(&sm)
 		if err := sm.Encode(&buf); err != nil {
 			panic(err)
 		}
@@ -601,8 +609,7 @@ func TestServer_handleNativeQUIC_ClosesConnOnSetupFailure(t *testing.T) {
 		reason string
 	}{
 		"no setup stream": {reason: "setup failed"},
-		"missing path":    {opts: []func(*fakeStreamConn){withClientSetup("")}, reason: "missing or invalid Path parameter"},
-		"unrooted path":   {opts: []func(*fakeStreamConn){withClientSetup("live")}, reason: "missing or invalid Path parameter"},
+		"unrooted path":   {opts: []func(*fakeStreamConn){withClientSetup("live")}, reason: "invalid Path parameter"},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -670,32 +677,30 @@ func TestServer_handleNativeQUIC_HandlerSeesSetupQuery(t *testing.T) {
 	}
 }
 
-// TestServer_handleNativeQUIC_RejectsQueryWithoutPath verifies a SETUP Path
-// that is only a query has no rooted path, and is rejected like any other.
-func TestServer_handleNativeQUIC_RejectsQueryWithoutPath(t *testing.T) {
-	s := &Server{
-		Handler: HandleFunc(func(*Session) { t.Fatal("handler must not be called") }),
+// TestServer_handleNativeQUIC_DefaultPath verifies moq-lite-06 §7.3.2: an
+// omitted Path, an empty one, and one that is only a query all ask for the
+// server's default path, "/".
+func TestServer_handleNativeQUIC_DefaultPath(t *testing.T) {
+	tests := map[string]struct {
+		build func(*message.SetupMessage)
+		want  string
+	}{
+		"omitted":    {build: func(*message.SetupMessage) {}, want: "/"},
+		"empty":      {build: func(sm *message.SetupMessage) { sm.AddPath("") }, want: "/"},
+		"query only": {build: func(sm *message.SetupMessage) { sm.AddPath("?jwt=a.b.c") }, want: "/?jwt=a.b.c"},
 	}
-	conn := newTestNativeQUICConn(t, withClientSetup("?jwt=a.b.c"))
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			var got string
+			s := &Server{
+				Handler: HandleFunc(func(sess *Session) { got = sess.RequestURI() }),
+			}
+			conn := newTestNativeQUICConn(t, withClientSetupMessage(tt.build))
 
-	err := s.handleNativeQUIC(conn)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Path")
-}
-
-// TestServer_handleNativeQUIC_RejectsMissingPath verifies the router rejects a
-// SETUP that omits the mandatory Path parameter (native QUIC has no other way
-// to convey the request path).
-func TestServer_handleNativeQUIC_RejectsMissingPath(t *testing.T) {
-	s := &Server{
-		Handler: HandleFunc(func(*Session) { t.Fatal("handler must not be called") }),
+			require.NoError(t, s.handleNativeQUIC(conn))
+			assert.Equal(t, tt.want, got)
+		})
 	}
-	conn := newTestNativeQUICConn(t, withClientSetup(""))
-
-	err := s.handleNativeQUIC(conn)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Path")
 }
 
 func TestListenAndServe_PackageLevel(t *testing.T) {

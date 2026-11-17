@@ -2,16 +2,38 @@ package moqt
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
+// FetchRequest asks for one group of a track.
 type FetchRequest struct {
 	BroadcastPath BroadcastPath
 	TrackName     TrackName
 	Priority      TrackPriority
 	GroupSequence GroupSequence
 
+	// frameStart and frameEnd bound the frames to return within the group
+	// (moq-lite-06 §7.16), in their wire form: frameStart is the first index,
+	// frameEnd the exclusive end (0 through the end of the group). They are
+	// set only from a peer's FETCH, whose GroupWriter then sends just those
+	// frames; a fetch this endpoint makes asks for the whole group.
+	frameStart uint64
+	frameEnd   uint64
+
 	ctx context.Context
+}
+
+// errFetchFrameRange is returned for a FETCH whose Frame End is not above its
+// Frame Start, which moq-lite-06 §7.16 makes a protocol violation.
+var errFetchFrameRange = errors.New("moqt: fetch Frame End must be above Frame Start")
+
+// validate checks the frame range rule of moq-lite-06 §7.16.
+func (r *FetchRequest) validate() error {
+	if r.frameEnd != 0 && r.frameEnd <= r.frameStart {
+		return errFetchFrameRange
+	}
+	return nil
 }
 
 // Context returns the request's context. To change the context, use

@@ -32,7 +32,8 @@ func (gs GroupSequence) Next() GroupSequence {
 	return gs + 1
 }
 
-// groupSequenceToWire converts a group sequence into the +1 wire form used by SUBSCRIBE Group Start/Group End.
+// groupSequenceToWire converts a group sequence into the +1 wire form used by
+// SUBSCRIBE Group End (Group Start is a plain floor since moq-lite-06).
 // Zero stays zero so it can continue to represent an omitted field.
 func groupSequenceToWire(gs GroupSequence) uint64 {
 	if gs == MinGroupSequence {
@@ -52,18 +53,24 @@ func groupSequenceFromWire(v uint64) GroupSequence {
 	return GroupSequence(v - 1)
 }
 
-// boolToWireFlag converts a boolean into the uint8 flag form.
-// false => 0, true => 1.
-func boolToWireFlag(v bool) uint8 {
-	if v {
-		return 1
-	}
-
-	return 0
+// subscribeRangeToWire encodes a config's group range as SUBSCRIBE and
+// SUBSCRIBE_UPDATE carry it: Group Start plain, Group End +1. Frame Start and
+// Frame End are left 0: gomoqt asks for whole groups, even with a config
+// taken from a peer's subscription (as a relay forwarding
+// TrackWriter.TrackConfig upstream passes one).
+func subscribeRangeToWire(c *SubscribeConfig) (groupStart, groupEnd uint64) {
+	return uint64(c.StartGroup), groupSequenceToWire(c.EndGroup)
 }
 
-// boolFromWireFlag converts a uint8 wire flag into a boolean.
-// Any non-zero value is treated as true.
-func boolFromWireFlag(v uint8) bool {
-	return v != 0
+// subscribeConfigFromWire builds the config a SUBSCRIBE or SUBSCRIBE_UPDATE
+// carries.
+func subscribeConfigFromWire(priority uint8, maxAge, groupStart, groupEnd, frameStart, frameEnd uint64) *SubscribeConfig {
+	return &SubscribeConfig{
+		Priority:   TrackPriority(priority),
+		MaxAge:     maxAge,
+		StartGroup: GroupSequence(groupStart),
+		EndGroup:   groupSequenceFromWire(groupEnd),
+		startFrame: frameStart,
+		endFrame:   frameEnd,
+	}
 }

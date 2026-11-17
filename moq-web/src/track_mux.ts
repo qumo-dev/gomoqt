@@ -1,5 +1,5 @@
 import type { AnnouncementWriter } from "./announce_stream.ts";
-import { Announcement } from "./announce_stream.ts";
+import { Announcement, routeSuffix } from "./announce_stream.ts";
 import type { BroadcastPath } from "./broadcast_path.ts";
 import { NotFoundTrackHandler } from "./broadcast.ts";
 
@@ -54,7 +54,9 @@ export class TrackMux {
 		const completePromises: Promise<void>[] = [];
 
 		for (const [prefix, announcers] of this.#announcers.entries()) {
-			if (path.startsWith(prefix)) {
+			// A route covers every path beneath it, so a request for a prefix
+			// at or below it sees it too, clamped (moq-lite-06 §5.1.1).
+			if (routeSuffix(path, prefix) !== undefined) {
 				const sendPromises: Promise<void>[] = [];
 				const failed: AnnouncementWriter[] = [];
 
@@ -141,7 +143,7 @@ export class TrackMux {
 			return provider.trackInfo(name);
 		}
 		// Handler exists but declares no explicit properties: serve defaults.
-		return { priority: 0, ordered: false, maxLatency: 0, timescale: DEFAULT_TIMESCALE };
+		return { priority: 0, maxAge: 0, timescale: DEFAULT_TIMESCALE };
 	}
 
 	/**
@@ -179,7 +181,8 @@ export class TrackMux {
 		let announced: AnnouncedTrackHandler;
 		const init: Announcement[] = [];
 		for (announced of this.#handlers.values()) {
-			if (announced.announcement.broadcastPath.startsWith(prefix)) {
+			// Routes at or above the prefix are included, clamped to it.
+			if (routeSuffix(announced.announcement.broadcastPath, prefix) !== undefined) {
 				init.push(announced.announcement);
 			}
 		}

@@ -199,7 +199,7 @@ To abort a track and indicate that no more groups will exist due to an error, ca
 - **Subscribe Error Code**:
   The subscribe error code is used to indicate the reason for closing the track subscription. It helps the publisher understand why the subscription finished.
 
-If any groups belong to the track, they will be closed automatically with an error code `moqt.PublishAbortedErrorCode` when the track is closed. This ensures that all resources are released properly and no data is lost.
+If any groups belong to the track, they will be closed automatically with an error code `moqt.InternalGroupErrorCode` when the track is closed with an error. This ensures that all resources are released properly and no data is lost.
 
 ## Track Info
 
@@ -222,15 +222,14 @@ func (h *trackHandler) ServeTrack(tw *moqt.TrackWriter) {
 // whether the track exists.
 func (h *trackHandler) TrackInfo(name moqt.TrackName) (moqt.PublishInfo, bool) {
 	return moqt.PublishInfo{
-		Priority:   128,
-		Ordered:    true,
-		MaxLatency: 2000,
-		Timescale:  1000,
+		Priority:  128,
+		MaxAge:    2000,
+		Timescale: 1000,
 	}, true
 }
 ```
 
-TRACK_INFO is intentionally out-of-band from the catalog: catalog fields (`msf.Track`) describe *content*, while `PublishInfo` carries *transport scheduling* hints, and the two live in different layers by design — `msf.Track` has no `Priority`/`Ordered` fields to source them from.
+TRACK_INFO is intentionally out-of-band from the catalog: catalog fields (`msf.Track`) describe *content*, while `PublishInfo` carries *transport scheduling* hints, and the two live in different layers by design — `msf.Track` has no `Priority` field to source it from.
 
 The `TrackInfoProvider` type assertion runs against the handler registered with `mux.Publish` for the broadcast path — not against the per-track handler passed to `RegisterTrack`. `msf.Broadcast` does not implement `TrackInfoProvider` itself, so publishing one directly means every track reports the default zero-valued properties. To supply real ones, embed `*msf.Broadcast` in your own type and implement `TrackInfo` on it, then publish that type instead of the `*msf.Broadcast` value:
 
@@ -251,4 +250,4 @@ func (b *broadcast) TrackInfo(name moqt.TrackName) (moqt.PublishInfo, bool) {
 // mux.Publish(ctx, "/broadcast_path", &broadcast{Broadcast: msfBroadcast, info: infoByTrack})
 ```
 
-`msf.Track` has spec-defined `TargetLatency`/`Timescale` fields that already carry the same meaning as `PublishInfo.MaxLatency`/`Timescale`, so a wrapper can forward those straight from the catalog. `Priority`/`Ordered` have no catalog equivalent to source from — they are tracked in [issue #420](https://github.com/qumo-dev/gomoqt/issues/420) as a possible future vendor extension to the catalog.
+`msf.Track` has spec-defined `TargetLatency`/`Timescale` fields that already carry the same meaning as `PublishInfo.MaxAge`/`Timescale`, so a wrapper can forward those straight from the catalog. `Priority` has no catalog equivalent to source from — they are tracked in [issue #420](https://github.com/qumo-dev/gomoqt/issues/420) as a possible future vendor extension to the catalog.

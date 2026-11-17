@@ -17,25 +17,16 @@ func TestAnnounceRequestMessage_EncodeDecode(t *testing.T) {
 		"valid message": {
 			input: message.AnnounceRequestMessage{
 				BroadcastPathPrefix: "part1/part2",
-				ExcludeHop:          0,
 			},
 		},
 		"empty prefix": {
 			input: message.AnnounceRequestMessage{
 				BroadcastPathPrefix: "",
-				ExcludeHop:          0,
-			},
-		},
-		"with exclude hop": {
-			input: message.AnnounceRequestMessage{
-				BroadcastPathPrefix: "path",
-				ExcludeHop:          42,
 			},
 		},
 		"long path": {
 			input: message.AnnounceRequestMessage{
 				BroadcastPathPrefix: "very/long/path/with/many/segments",
-				ExcludeHop:          12345,
 			},
 		},
 	}

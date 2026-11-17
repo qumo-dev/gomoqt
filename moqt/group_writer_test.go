@@ -41,7 +41,7 @@ func TestNewGroupWriter(t *testing.T) {
 
 			assert.NotNil(t, sgs)
 			assert.Equal(t, tt.sequence, sgs.sequence)
-			assert.Equal(t, uint64(0), sgs.frameCount)
+			assert.Equal(t, uint64(0), sgs.frameIndex)
 			assert.NotNil(t, sgs.ctx)
 			assert.Equal(t, mockStream, sgs.stream)
 			assert.Equal(t, groupManager, sgs.groupManager)
@@ -78,7 +78,7 @@ func TestGroupWriter_WriteFrame(t *testing.T) {
 			expectError:      false,
 			expectFrameCount: 1,
 			verifyData: func(t *testing.T, stream *fakeQUICSendStream) {
-				// draft-05 frame format: varint(timestamp_delta) + varint(length) + payload.
+				// moq-lite frame format: varint(timestamp_delta) + varint(length) + payload.
 				// For the first frame with Timestamp 0: delta=0 (1 byte 0x00), length=9 (1 byte 0x09), payload="test data".
 				assert.Equal(t, append([]byte{0, 9}, []byte("test data")...), stream.Written())
 			},
@@ -122,7 +122,7 @@ func TestGroupWriter_WriteFrame(t *testing.T) {
 				assert.NoError(t, err)
 			}
 
-			assert.Equal(t, tt.expectFrameCount, sgs.frameCount, "frame count should match")
+			assert.Equal(t, tt.expectFrameCount, sgs.frameIndex, "frame count should match")
 
 			if tt.verifyData != nil {
 				tt.verifyData(t, mockStream)
@@ -170,7 +170,7 @@ func TestGroupWriter_ContextCancellation(t *testing.T) {
 		_, _ = frameLocal.Write([]byte("test"))
 		err := sgs.WriteFrame(frameLocal)
 		assert.NoError(t, err)
-		assert.Equal(t, uint64(1), sgs.frameCount)
+		assert.Equal(t, uint64(1), sgs.frameIndex)
 	})
 }
 

@@ -61,9 +61,8 @@ func BenchmarkReceiveSubscribeStream_WriteDrop(b *testing.B) {
 // subscriber update.
 func BenchmarkSendSubscribeStream_UpdateSubscribe(b *testing.B) {
 	cfg := &SubscribeConfig{
-		Priority:   TrackPriority(3),
-		Ordered:    true,
-		MaxLatency: 1000,
+		Priority: TrackPriority(3),
+		MaxAge:   1000,
 	}
 	substr := &sendSubscribeStream{stream: discardStream()}
 

@@ -178,8 +178,7 @@ Deno.test("Session.subscribe follows redirects on the same session", async (t) =
 
 		const [track, err] = await session.subscribe("/alias", "video", {
 			priority: 7,
-			ordered: true,
-			maxLatency: 100,
+			maxAge: 100,
 			startGroup: 0,
 			endGroup: 0,
 		});
@@ -193,8 +192,7 @@ Deno.test("Session.subscribe follows redirects on the same session", async (t) =
 		assertEquals(second.broadcastPath, "/real");
 		assertEquals(second.trackName, "audio");
 		assertEquals(second.subscriberPriority, 7);
-		assertEquals(second.subscriberOrdered, 1);
-		assertEquals(second.subscriberMaxLatency, 100);
+		assertEquals(second.subscriberMaxAge, 100);
 		await session.close();
 	});
 

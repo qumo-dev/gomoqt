@@ -3,8 +3,7 @@ import { MessageDecoder, MessageEncoder, readFull, readVarint } from "./message.
 
 export interface TrackInfoMessageInit {
 	publisherPriority?: number;
-	publisherOrdered?: number;
-	publisherMaxLatency?: number;
+	publisherMaxAge?: number;
 	timescale?: number;
 }
 
@@ -17,22 +16,19 @@ export interface TrackInfoMessageInit {
  * TRACK_INFO Message {
  *   Message Length (i)
  *   Publisher Priority (8)
- *   Publisher Ordered (8)
- *   Publisher Max Latency (i)
+ *   Publisher Max Age (i)
  *   Timescale (i)
  * }
  * ```
  */
 export class TrackInfoMessage {
 	publisherPriority: number;
-	publisherOrdered: number;
-	publisherMaxLatency: number;
+	publisherMaxAge: number;
 	timescale: number;
 
 	constructor(init: TrackInfoMessageInit = {}) {
 		this.publisherPriority = init.publisherPriority ?? 0;
-		this.publisherOrdered = init.publisherOrdered ?? 0;
-		this.publisherMaxLatency = init.publisherMaxLatency ?? 0;
+		this.publisherMaxAge = init.publisherMaxAge ?? 0;
 		this.timescale = init.timescale ?? 0;
 	}
 
@@ -42,8 +38,7 @@ export class TrackInfoMessage {
 	async encode(w: Writer): Promise<Error | undefined> {
 		const e = new MessageEncoder();
 		e.uint8(this.publisherPriority);
-		e.uint8(this.publisherOrdered);
-		e.varint(this.publisherMaxLatency);
+		e.varint(this.publisherMaxAge);
 		e.varint(this.timescale);
 		const [, err] = await w.write(e.frame());
 		return err;
@@ -62,8 +57,7 @@ export class TrackInfoMessage {
 
 		const d = new MessageDecoder(buf);
 		this.publisherPriority = d.uint8();
-		this.publisherOrdered = d.uint8();
-		this.publisherMaxLatency = d.varint();
+		this.publisherMaxAge = d.varint();
 		this.timescale = d.varint();
 
 		return undefined;

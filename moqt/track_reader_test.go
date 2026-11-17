@@ -226,7 +226,7 @@ func TestTrackReader_Drops(t *testing.T) {
 	// Write a SUBSCRIBE_DROP response (readSubscribeResponses returns after one drop)
 	_, _ = buf.Write([]byte{byte(message.MessageTypeSubscribeDrop)})
 	require.NoError(t, (message.SubscribeDropMessage{
-		GroupStart: 11, // plain absolute sequence per draft-05
+		GroupStart: 11, // plain absolute sequence
 		GroupEnd:   21,
 		ErrorCode:  3,
 	}).Encode(&buf))
@@ -298,7 +298,7 @@ func TestTrackReader_AcceptGroup_EndsAfterSubscribeEnd(t *testing.T) {
 	tests := map[string]struct {
 		queued   []GroupSequence // queued before SUBSCRIBE_END
 		late     []GroupSequence // queued after it
-		end      GroupSequence
+		end      GroupSequence   // SUBSCRIBE_END's exclusive Group
 		closed   bool            // the publisher closes the subscribe stream after END
 		afterFIN []GroupSequence // queued after the close, within the grace
 		dropped  *SubscribeDrop  // SUBSCRIBE_DROP received after END
@@ -306,14 +306,14 @@ func TestTrackReader_AcceptGroup_EndsAfterSubscribeEnd(t *testing.T) {
 		want     int             // groups returned before io.EOF
 	}{
 		"no groups":                                {end: 0, want: 0},
-		"END without SUBSCRIBE_OK":                 {noOK: true, end: 2, want: 0},
-		"last group already taken":                 {queued: []GroupSequence{1, 2}, end: 2, want: 2},
-		"last group arrives after END":             {queued: []GroupSequence{1}, late: []GroupSequence{2}, end: 2, want: 2},
-		"earlier group still in flight":            {queued: []GroupSequence{2}, late: []GroupSequence{1}, end: 2, want: 2},
-		"out of order, all before END":             {queued: []GroupSequence{3, 1, 2}, end: 3, want: 3},
-		"gap closed by SUBSCRIBE_DROP":             {queued: []GroupSequence{1, 4}, end: 4, dropped: &SubscribeDrop{StartGroup: 2, EndGroup: 3}, want: 2},
-		"named group never arrives, stream closed": {queued: []GroupSequence{1}, end: 2, closed: true, want: 1},
-		"named group arrives just after the close": {queued: []GroupSequence{1}, end: 2, closed: true, afterFIN: []GroupSequence{2}, want: 2},
+		"END without SUBSCRIBE_OK":                 {noOK: true, end: 3, want: 0},
+		"last group already taken":                 {queued: []GroupSequence{1, 2}, end: 3, want: 2},
+		"last group arrives after END":             {queued: []GroupSequence{1}, late: []GroupSequence{2}, end: 3, want: 2},
+		"earlier group still in flight":            {queued: []GroupSequence{2}, late: []GroupSequence{1}, end: 3, want: 2},
+		"out of order, all before END":             {queued: []GroupSequence{3, 1, 2}, end: 4, want: 3},
+		"gap closed by SUBSCRIBE_DROP":             {queued: []GroupSequence{1, 4}, end: 5, dropped: &SubscribeDrop{StartGroup: 2, EndGroup: 3}, want: 2},
+		"named group never arrives, stream closed": {queued: []GroupSequence{1}, end: 3, closed: true, want: 1},
+		"named group arrives just after the close": {queued: []GroupSequence{1}, end: 3, closed: true, afterFIN: []GroupSequence{2}, want: 2},
 	}
 	for name, tt := range tests {
 		// t.Run outside the bubble: synctest does not support t.Run inside it.

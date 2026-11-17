@@ -8,7 +8,7 @@ export interface SubscribeRedirectMessageInit {
 }
 
 /**
- * SUBSCRIBE_REDIRECT message (type 0x3), a gomoqt extension of moq-lite-05.
+ * SUBSCRIBE_REDIRECT message (type 0x3), a gomoqt extension of moq-lite-06.
  * The publisher sends it in place of SUBSCRIBE_OK, as the only message on the
  * Subscribe Stream, to say where to subscribe instead. It is sent only to a
  * peer that advertised the Redirect Setup Parameter. The type varint is

@@ -19,6 +19,16 @@ func TestSubscribeUpdateMessage_EncodeDecode(t *testing.T) {
 				SubscriberPriority: 5,
 			},
 		},
+		"frame bounds": {
+			input: message.SubscribeUpdateMessage{
+				SubscriberPriority: 1,
+				SubscriberMaxAge:   0,
+				GroupStart:         9,
+				GroupEnd:           10,
+				FrameStart:         4,
+				FrameEnd:           8,
+			},
+		},
 		"zero priority": {
 			input: message.SubscribeUpdateMessage{
 				SubscriberPriority: 0,
