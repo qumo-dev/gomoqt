@@ -513,6 +513,20 @@ func (s *authScope) canPublish(path BroadcastPath) bool {
 	return s.anyGrant(func(g scopeGrant) bool { return matchAny(g.publish, path) })
 }
 
+// canPublishBeneath reports whether a grant in force lets the peer publish
+// every path beneath path, as an announcement of path claims under
+// moq-lite-06. A nil scope enforces nothing.
+func (s *authScope) canPublishBeneath(path BroadcastPath) bool {
+	return s.anyGrant(func(g scopeGrant) bool {
+		for _, p := range g.publish {
+			if p.coversBeneath(path) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
 // canSubscribe reports whether a grant in force lets the peer subscribe to
 // path. A nil scope enforces nothing.
 func (s *authScope) canSubscribe(path BroadcastPath) bool {

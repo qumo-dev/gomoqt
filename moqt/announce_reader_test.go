@@ -562,3 +562,33 @@ func TestAnnouncementReader_WiderScopeRestoresHiddenRoute(t *testing.T) {
 
 	assert.Equal(t, BroadcastPath("/room/2/bob"), receiveN(t, ar, 1)[0].BroadcastPath())
 }
+
+func TestAnnouncementReader_RouteBeyondGrantServesOnlyItsPath(t *testing.T) {
+	tests := map[string]struct {
+		publish  []string
+		wantDeep bool
+	}{
+		"grant covers the subtree": {publish: []string{"/"}, wantDeep: true},
+		"grant is the exact path":  {publish: []string{"/alice"}, wantDeep: false},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			scope := newAuthScope(func() {})
+			require.NoError(t, (&AuthWriter{scope: scope}).Grant(Grant{Root: "/room/1/", Publish: tt.publish}))
+			data := announceWire(t, 0, message.AnnounceStartMessage{RoutePrefixSuffix: "1/alice"})
+			ar := newAnnouncementReader(&fakeQUICStream{reads: []streamResult{{Data: data}, {Block: true}}}, "/room/", scope, announceReaderConfig{})
+			defer func() { _ = ar.Close() }() // not actionable: the test is over
+			ann := receiveN(t, ar, 1)[0]
+			// A relay re-serves the peer's announcement from its own mux.
+			mux := NewTrackMux(0)
+			mux.Announce(ann, TrackHandlerFunc(func(*TrackWriter) {}))
+
+			exact, _ := mux.TrackHandler("/room/1/alice")
+			deep, _ := mux.TrackHandler("/room/1/alice/cam1")
+
+			assert.Same(t, ann, exact, "the announced path itself is always served")
+			assert.Equal(t, tt.wantDeep, deep != nil)
+		})
+	}
+}

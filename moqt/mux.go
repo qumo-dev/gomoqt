@@ -108,6 +108,8 @@ func (mux *TrackMux) PublishFunc(ctx context.Context, path BroadcastPath, f func
 // The path is announced as a route (moq-lite-06 §5.1.1): the handler also
 // serves subscriptions to paths beneath it that no more specific published
 // path covers, and reads the requested path from TrackWriter.BroadcastPath.
+// An Announcement received from a peer whose Auth grant does not cover the
+// paths beneath it, passed to Announce, serves only its own path.
 func (mux *TrackMux) Publish(ctx context.Context, path BroadcastPath, handler TrackHandler) {
 	if ctx == nil {
 		panic("[TrackMux] nil context")
@@ -285,7 +287,9 @@ func (mux *TrackMux) findTrackHandler(path BroadcastPath) *announcedTrackHandler
 		if n >= len(path) || (path[n-1] != '/' && path[n] != '/') {
 			continue
 		}
-		if ath := usableHandler(mux.trackHandlerIndex[path[:n]]); ath != nil {
+		// A route whose publisher may not publish beneath it serves only its
+		// own path.
+		if ath := usableHandler(mux.trackHandlerIndex[path[:n]]); ath != nil && !ath.exactOnly.Load() {
 			return ath
 		}
 	}

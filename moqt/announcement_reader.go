@@ -391,12 +391,20 @@ func (cr *countingReader) Read(p []byte) (int, error) {
 func (ar *AnnouncementReader) activateLocked(sfx suffix, route announceRoute) *Announcement {
 	ann, _ := NewAnnouncement(ar.ctx, BroadcastPath(ar.prefix+sfx))
 	ann.setRoute(route)
+	ar.limitLocked(ann)
 	ar.pendings = append(ar.pendings, ann)
 	select {
 	case ar.announcedCh <- struct{}{}:
 	default:
 	}
 	return ann
+}
+
+// limitLocked makes ann exact-only when the scope lets the peer publish its
+// path but not every path beneath it, which an announcement claims as a
+// route. Caller MUST hold announcementsMu.
+func (ar *AnnouncementReader) limitLocked(ann *Announcement) {
+	ann.exactOnly.Store(ar.scope != nil && !ar.scope.canPublishBeneath(ann.BroadcastPath()))
 }
 
 // rescope re-applies the scope after it changed: it ends each active
@@ -421,6 +429,8 @@ func (ar *AnnouncementReader) rescope() {
 		case !admitted && adv.ann != nil:
 			adv.ann.end()
 			adv.ann = nil
+		case admitted:
+			ar.limitLocked(adv.ann)
 		}
 	}
 }

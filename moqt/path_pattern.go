@@ -174,6 +174,55 @@ func (p PathPattern) matchSegments(path BroadcastPath) bool {
 	return false
 }
 
+// coversBeneath reports whether the pattern matches every path beneath route,
+// the paths an announcement of route claims (moq-lite-06 §5.1.1): those that
+// continue it past a "/", "/live/" and "/live/alice" for route "/live".
+func (p PathPattern) coversBeneath(route BroadcastPath) bool {
+	base := string(route)
+	if !strings.HasSuffix(base, "/") {
+		base += "/"
+	}
+	if p.segs == nil {
+		// A literal pattern covers a subtree only as a prefix leading it.
+		return isValidPrefix(p.raw) && strings.HasPrefix(base, p.raw)
+	}
+	// Walk base's segments; whatever follows them is arbitrary, so the
+	// pattern must accept anything from there: a rest wildcard, or a prefix
+	// ending right there.
+	rest := strings.TrimSuffix(base[1:], "/")
+	for i, seg := range p.segs {
+		if seg.kind == segRest {
+			return true
+		}
+		if rest == "" && base == "/" {
+			return false
+		}
+		got, after, more := strings.Cut(rest, "/")
+		switch seg.kind {
+		case segAnchor:
+			return false
+		case segWildcard:
+			if got == "" {
+				return false
+			}
+		default:
+			if got != seg.lit {
+				return false
+			}
+		}
+		if !more {
+			// base is used up: the pattern must go on with a rest wildcard,
+			// or end here as a prefix.
+			if i == len(p.segs)-1 {
+				return p.trailing
+			}
+			return p.segs[i+1].kind == segRest
+		}
+		rest = after
+	}
+	return false
+}
+
 // String returns the pattern as it was parsed.
 func (p PathPattern) String() string {
 	return p.raw
