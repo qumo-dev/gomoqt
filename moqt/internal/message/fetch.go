@@ -2,11 +2,27 @@ package message
 
 import "io"
 
+/*
+ *	FETCH Message {
+ *	  Message Length (i)
+ *	  Broadcast Path (s)
+ *	  Track Name (s)
+ *	  Subscriber Priority (8)
+ *	  Group Sequence (i)
+ *	  Frame Start (i)
+ *	  Frame End (i)
+ *	}
+ *
+ * Frame Start is a plain index; Frame End is the last index + 1, 0 meaning
+ * through the end of the group.
+ */
 type FetchMessage struct {
 	BroadcastPath string
 	TrackName     string
 	Priority      uint8
 	GroupSequence uint64
+	FrameStart    uint64
+	FrameEnd      uint64
 }
 
 func (f FetchMessage) Len() int {
@@ -15,6 +31,8 @@ func (f FetchMessage) Len() int {
 	l += StringLen(f.TrackName)
 	l += 1 // Priority (uint8)
 	l += VarintLen(f.GroupSequence)
+	l += VarintLen(f.FrameStart)
+	l += VarintLen(f.FrameEnd)
 	return l
 }
 
@@ -28,6 +46,8 @@ func (f FetchMessage) Encode(w io.Writer) error {
 	b = append(b, f.TrackName...)
 	b = append(b, f.Priority)
 	b, _ = WriteVarint(b, f.GroupSequence)
+	b, _ = WriteVarint(b, f.FrameStart)
+	b, _ = WriteVarint(b, f.FrameEnd)
 	_, err := w.Write(b)
 	return err
 }
@@ -58,12 +78,14 @@ func (f *FetchMessage) Decode(src io.Reader) error {
 	f.Priority = b[0]
 	b = b[1:]
 
-	num, n, err := ReadVarint(b)
-	if err != nil {
-		return err
+	for _, field := range [...]*uint64{&f.GroupSequence, &f.FrameStart, &f.FrameEnd} {
+		num, n, err := ReadVarint(b)
+		if err != nil {
+			return err
+		}
+		*field = num
+		b = b[n:]
 	}
-	f.GroupSequence = num
-	b = b[n:]
 
 	if len(b) != 0 {
 		return ErrMessageTooShort

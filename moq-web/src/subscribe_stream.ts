@@ -17,18 +17,92 @@ import { WebTransportStreamError } from "./internal/webtransport/mod.ts";
 import type { SubscribeID, TrackPriority } from "./alias.ts";
 import { SubscribeErrorCode, SubscriptionAnsweredError } from "./error.ts";
 
-/** Subscriber-side configuration sent in a SUBSCRIBE message. */
+/**
+ * Subscriber-side configuration sent in a SUBSCRIBE message.
+ *
+ * Group order within a track is always newest first (moq-lite-06 §6.1.2).
+ *
+ * moq-lite-06 can also bound a subscription by frame within its start and end
+ * groups (a Position, §3.6). That is handled internally: this endpoint always
+ * subscribes to whole groups, and serves a peer that asks for part of a group,
+ * but exposes no frame-level option.
+ */
 export interface TrackConfig {
 	/** Subscriber priority for this track. */
 	priority: TrackPriority;
-	/** Whether the subscriber requires ordered delivery. */
-	ordered: boolean;
-	/** Maximum acceptable latency in milliseconds. */
-	maxLatency: number;
-	/** First group the subscriber wants to receive. */
+	/**
+	 * Subscriber Max Age, in milliseconds: how far behind the newest frame of
+	 * the latest group a non-latest group may fall before it is dropped from
+	 * live delivery. It also picks where the subscription starts: the oldest
+	 * group at or above `startGroup` still within it, so 0 starts at the
+	 * latest group.
+	 */
+	maxAge: number;
+	/** An absolute floor: no group below it is delivered (0 = no floor). */
 	startGroup: number;
-	/** Last group the subscriber wants to receive (0 = unbounded). */
+	/** Last group the subscriber wants to receive, inclusive (0 = unbounded). */
 	endGroup: number;
+}
+
+/**
+ * The frame bounds of a subscription (moq-lite-06 §3.6), in their wire form:
+ * `frameStart` is the index of the first frame to deliver within the start
+ * group, `frameEnd` the exclusive end within the end group (0 = the whole
+ * group). Only a peer's SUBSCRIBE sets them; this endpoint sends both as 0.
+ * @internal
+ */
+export interface FrameRange {
+	frameStart: number;
+	frameEnd: number;
+}
+
+/**
+ * Returns an error when a peer's range breaks moq-lite-06 §3.6: a Frame End
+ * without a Group End. @internal
+ */
+export function validateFrameRange(config: TrackConfig, range: FrameRange): Error | undefined {
+	if (range.frameEnd !== 0 && config.endGroup === 0) {
+		return new Error("moq: Frame End requires Group End");
+	}
+	return undefined;
+}
+
+/** The range fields of a SUBSCRIBE or SUBSCRIBE_UPDATE, as encoded. */
+interface WireRange {
+	groupStart: number;
+	groupEnd: number;
+	frameStart: number;
+	frameEnd: number;
+}
+
+/**
+ * Encodes a config's range: Group Start plain, Group End + 1, and no frame
+ * bounds, since this endpoint asks for whole groups. @internal
+ */
+export function trackRangeToWire(config: TrackConfig): WireRange {
+	return {
+		groupStart: config.startGroup,
+		groupEnd: groupSequenceToWire(config.endGroup),
+		frameStart: 0,
+		frameEnd: 0,
+	};
+}
+
+/** Builds the config a SUBSCRIBE or SUBSCRIBE_UPDATE carries. */
+function trackConfigFromWire(
+	m: WireRange & { subscriberPriority: number; subscriberMaxAge: number },
+): TrackConfig {
+	return {
+		priority: m.subscriberPriority,
+		maxAge: m.subscriberMaxAge,
+		startGroup: m.groupStart,
+		endGroup: groupSequenceFromWire(m.groupEnd),
+	};
+}
+
+/** Reads the frame bounds a SUBSCRIBE or SUBSCRIBE_UPDATE carries. */
+function frameRangeFromWire(m: WireRange): FrameRange {
+	return { frameStart: m.frameStart, frameEnd: m.frameEnd };
 }
 
 /** Notification that the publisher dropped a range of groups. */
@@ -92,13 +166,7 @@ export class SendSubscribeStream {
 	) {
 		[this.context, this.#cancelFunc] = withCancelCause(sessCtx);
 		this.#stream = stream;
-		this.#config = {
-			priority: subscribe.subscriberPriority,
-			ordered: subscribe.subscriberOrdered !== 0,
-			maxLatency: subscribe.subscriberMaxLatency,
-			startGroup: groupSequenceFromWire(subscribe.groupStart),
-			endGroup: groupSequenceFromWire(subscribe.groupEnd),
-		};
+		this.#config = trackConfigFromWire(subscribe);
 		this.#id = subscribe.subscribeId;
 		if (ok) {
 			this.#resolvedStart = ok.group;
@@ -133,7 +201,10 @@ export class SendSubscribeStream {
 		return this.#ended;
 	}
 
-	/** The last group that may be delivered, from SUBSCRIBE_END. */
+	/**
+	 * The exclusive end from SUBSCRIBE_END: the first group that will never be
+	 * delivered (0 when the track produced none).
+	 */
 	get endGroup(): number {
 		return this.#endGroup;
 	}
@@ -195,10 +266,8 @@ export class SendSubscribeStream {
 	async update(update: TrackConfig): Promise<Error | undefined> {
 		const msg = new SubscribeUpdateMessage({
 			subscriberPriority: update.priority,
-			subscriberOrdered: update.ordered ? 1 : 0,
-			subscriberMaxLatency: update.maxLatency,
-			groupStart: groupSequenceToWire(update.startGroup),
-			groupEnd: groupSequenceToWire(update.endGroup),
+			subscriberMaxAge: update.maxAge,
+			...trackRangeToWire(update),
 		});
 		const err = await msg.encode(this.#stream.writable);
 		if (err) {
@@ -235,6 +304,7 @@ export class SendSubscribeStream {
 export class ReceiveSubscribeStream {
 	readonly subscribeId: SubscribeID;
 	#trackConfig: TrackConfig;
+	#frameRange: FrameRange;
 	#readMu: Mutex = new Mutex();
 	#stream: Stream;
 	#responseStarted: boolean = false;
@@ -254,14 +324,26 @@ export class ReceiveSubscribeStream {
 	) {
 		this.#stream = stream;
 		this.subscribeId = subscribe.subscribeId;
-		this.#trackConfig = {
-			priority: subscribe.subscriberPriority,
-			ordered: subscribe.subscriberOrdered !== 0,
-			maxLatency: subscribe.subscriberMaxLatency,
-			startGroup: groupSequenceFromWire(subscribe.groupStart),
-			endGroup: groupSequenceFromWire(subscribe.groupEnd),
-		};
+		this.#trackConfig = trackConfigFromWire(subscribe);
+		this.#frameRange = frameRangeFromWire(subscribe);
 		[this.context, this.#cancelFunc] = withCancelCause(sessCtx);
+	}
+
+	/**
+	 * The peer's current frame bounds (moq-lite-06 §3.6), advanced with
+	 * trackConfig by readUpdate. The track writer serves the start and end
+	 * groups partially by them. @internal
+	 */
+	get frameRange(): FrameRange {
+		return this.#frameRange;
+	}
+
+	/**
+	 * Returns an error when the peer's current range breaks moq-lite-06 §3.6.
+	 * @internal
+	 */
+	validateRange(): Error | undefined {
+		return validateFrameRange(this.#trackConfig, this.#frameRange);
 	}
 
 	/**
@@ -295,13 +377,16 @@ export class ReceiveSubscribeStream {
 				return [undefined, err];
 			}
 
-			this.#trackConfig = {
-				priority: msg.subscriberPriority,
-				ordered: msg.subscriberOrdered !== 0,
-				maxLatency: msg.subscriberMaxLatency,
-				startGroup: groupSequenceFromWire(msg.groupStart),
-				endGroup: groupSequenceFromWire(msg.groupEnd),
-			};
+			const config = trackConfigFromWire(msg);
+			const range = frameRangeFromWire(msg);
+			const invalid = validateFrameRange(config, range);
+			if (invalid) {
+				// moq-lite-06 §3.6: a protocol violation that resets the stream.
+				await this.closeWithError(SubscribeErrorCode.InvalidRange);
+				return [undefined, invalid];
+			}
+			this.#trackConfig = config;
+			this.#frameRange = range;
 			return [this.#trackConfig, undefined];
 		} finally {
 			this.#readMu.unlock();
@@ -383,9 +468,10 @@ export class ReceiveSubscribeStream {
 	}
 
 	/**
-	 * Send SUBSCRIBE_END with the last group that may be delivered. Per
-	 * moq-lite-05, SUBSCRIBE_END without a preceding SUBSCRIBE_OK signals a
-	 * track that ended with no matching groups.
+	 * Send SUBSCRIBE_END with the exclusive end: the first group that will never
+	 * be delivered (0 when none was produced). Per moq-lite-06, SUBSCRIBE_END
+	 * without a preceding SUBSCRIBE_OK signals a track that ended with no
+	 * matching groups.
 	 */
 	async writeEnd(group: number): Promise<Error | undefined> {
 		if (this.#endSent) {

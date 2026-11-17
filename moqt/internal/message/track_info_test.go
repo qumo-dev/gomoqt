@@ -15,10 +15,9 @@ func TestTrackInfoMessage_EncodeDecode(t *testing.T) {
 	}{
 		"millisecond timescale": {
 			input: message.TrackInfoMessage{
-				PublisherPriority:   5,
-				PublisherOrdered:    1,
-				PublisherMaxLatency: 2000,
-				Timescale:           1000,
+				PublisherPriority: 5,
+				PublisherMaxAge:   2000,
+				Timescale:         1000,
 			},
 		},
 		"rtp video clock": {

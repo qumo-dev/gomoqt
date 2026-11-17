@@ -120,8 +120,7 @@ func TestSendSubscribeStream_UpdateSubscribe_EncodesWireFormat(t *testing.T) {
 
 	newConfig := &SubscribeConfig{
 		Priority:   TrackPriority(7),
-		Ordered:    true,
-		MaxLatency: 42,
+		MaxAge:     42,
 		StartGroup: GroupSequence(10),
 		EndGroup:   GroupSequence(20),
 	}
@@ -132,10 +131,9 @@ func TestSendSubscribeStream_UpdateSubscribe_EncodesWireFormat(t *testing.T) {
 	var decoded message.SubscribeUpdateMessage
 	require.NoError(t, decoded.Decode(bytes.NewReader(mockStream.Written())))
 	assert.Equal(t, uint8(7), decoded.SubscriberPriority)
-	assert.Equal(t, uint8(1), decoded.SubscriberOrdered)
-	assert.Equal(t, uint64(42), decoded.SubscriberMaxLatency)
-	assert.Equal(t, uint64(11), decoded.GroupStart)
-	assert.Equal(t, uint64(21), decoded.GroupEnd)
+	assert.Equal(t, uint64(42), decoded.SubscriberMaxAge)
+	assert.Equal(t, uint64(10), decoded.GroupStart, "Group Start is a plain floor")
+	assert.Equal(t, uint64(21), decoded.GroupEnd, "Group End is +1")
 	assert.Equal(t, newConfig, sss.TrackConfig())
 }
 

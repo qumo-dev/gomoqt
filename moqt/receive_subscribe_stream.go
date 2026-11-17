@@ -52,12 +52,12 @@ func (substr *receiveSubscribeStream) readUpdate() (*SubscribeConfig, error) {
 		return nil, err
 	}
 
-	config := &SubscribeConfig{
-		Priority:   TrackPriority(updateMsg.SubscriberPriority),
-		Ordered:    boolFromWireFlag(updateMsg.SubscriberOrdered),
-		MaxLatency: updateMsg.SubscriberMaxLatency,
-		StartGroup: groupSequenceFromWire(updateMsg.GroupStart),
-		EndGroup:   groupSequenceFromWire(updateMsg.GroupEnd),
+	config := subscribeConfigFromWire(updateMsg.SubscriberPriority, updateMsg.SubscriberMaxAge,
+		updateMsg.GroupStart, updateMsg.GroupEnd, updateMsg.FrameStart, updateMsg.FrameEnd)
+	if err := config.validate(); err != nil {
+		// moq-lite-06 §3.6: a protocol violation that resets the stream.
+		cancelStreamWithError(substr.stream, transport.StreamErrorCode(SubscribeErrorCodeInvalidRange))
+		return nil, err
 	}
 
 	substr.mu.Lock()
@@ -108,8 +108,9 @@ func (substr *receiveSubscribeStream) writeOkLocked(group GroupSequence) error {
 	return nil
 }
 
-// writeEnd sends SUBSCRIBE_END with the last group that may be delivered.
-// Per moq-lite-05, SUBSCRIBE_END without a preceding SUBSCRIBE_OK signals a
+// writeEnd sends SUBSCRIBE_END with the exclusive end: the first group that
+// will never be delivered.
+// Per moq-lite-06, SUBSCRIBE_END without a preceding SUBSCRIBE_OK signals a
 // track that ended with no matching groups.
 func (substr *receiveSubscribeStream) writeEnd(group GroupSequence) error {
 	substr.mu.Lock()

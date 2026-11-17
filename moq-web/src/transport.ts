@@ -1,11 +1,11 @@
 import QMuxSession from "@moq/qmux";
 
-/** ALPN protocol identifier for MOQ Lite draft-05. */
-export const ALPN = "moq-lite-05";
+/** ALPN protocol identifier for MOQ Lite draft-06. */
+export const ALPN = "moq-lite-06";
 
 /**
  * The QMux draft spoken over WebSocket. The WebSocket subprotocol names it
- * with the application protocol: `qmux-02.moq-lite-05`.
+ * with the application protocol: `qmux-02.moq-lite-06`.
  */
 export const QMUX_VERSION = "qmux-02";
 

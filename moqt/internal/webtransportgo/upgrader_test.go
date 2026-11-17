@@ -26,7 +26,7 @@ func TestWrapSession_NilSession(t *testing.T) {
 
 func TestUpgrader_Upgrade_ProtocolMismatch(t *testing.T) {
 	u := &Upgrader{
-		ApplicationProtocols: []string{"moq-lite-05"},
+		ApplicationProtocols: []string{"moq-lite-06"},
 	}
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("CONNECT", "https://example.com/moq", nil)
@@ -41,21 +41,21 @@ func TestUpgrader_Upgrade_ProtocolMismatch(t *testing.T) {
 func TestUpgrader_hasMatchingProtocol(t *testing.T) {
 	t.Run("empty application protocols", func(t *testing.T) {
 		u := &Upgrader{}
-		assert.False(t, u.hasMatchingProtocol([]string{`"moq-lite-05"`}))
+		assert.False(t, u.hasMatchingProtocol([]string{`"moq-lite-06"`}))
 	})
 
 	t.Run("invalid structured header syntax", func(t *testing.T) {
-		u := &Upgrader{ApplicationProtocols: []string{"moq-lite-05"}}
+		u := &Upgrader{ApplicationProtocols: []string{"moq-lite-06"}}
 		assert.False(t, u.hasMatchingProtocol([]string{`invalid,,,///`}))
 	})
 
 	t.Run("non-string items in list", func(t *testing.T) {
-		u := &Upgrader{ApplicationProtocols: []string{"moq-lite-05"}}
+		u := &Upgrader{ApplicationProtocols: []string{"moq-lite-06"}}
 		assert.False(t, u.hasMatchingProtocol([]string{`12345`}))
 	})
 
 	t.Run("matching protocol found", func(t *testing.T) {
-		u := &Upgrader{ApplicationProtocols: []string{"moq-lite-05"}}
-		assert.True(t, u.hasMatchingProtocol([]string{`"moq-lite-04", "moq-lite-05"`}))
+		u := &Upgrader{ApplicationProtocols: []string{"moq-lite-06"}}
+		assert.True(t, u.hasMatchingProtocol([]string{`"moq-lite-04", "moq-lite-06"`}))
 	})
 }

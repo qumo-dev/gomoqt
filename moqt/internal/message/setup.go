@@ -5,11 +5,18 @@ import (
 	"io"
 )
 
-// Setup Parameter IDs defined by moq-lite-05.
+// Setup Parameter IDs defined by moq-lite-06.
 const (
 	SetupParamProbe uint64 = 0x1
 	SetupParamPath  uint64 = 0x2
+	SetupParamRole  uint64 = 0x3
+	SetupParamCost  uint64 = 0x4
+	SetupParamHop   uint64 = 0x5
 )
+
+// DefaultCost is the Cost an absent Cost parameter declares: one unit per
+// link, under which accumulated Route Costs equal the hop count.
+const DefaultCost uint64 = 1
 
 // SetupParamRedirect advertises that the sender follows SUBSCRIBE_REDIRECT.
 // It is a gomoqt extension, not assigned by moq-lite, so its ID sits far from
@@ -59,7 +66,9 @@ func (sm *SetupMessage) AddProbe(level uint64) {
 	sm.Parameters = append(sm.Parameters, SetupParameter{ID: SetupParamProbe, Value: value})
 }
 
-// AddPath appends a Path parameter carrying the request path.
+// AddPath appends a Path parameter carrying the request target: the path,
+// followed by "?" and the query when the request has one. An empty value is
+// legal and asks for the server's default path, as omitting it does.
 func (sm *SetupMessage) AddPath(path string) {
 	sm.Parameters = append(sm.Parameters, SetupParameter{ID: SetupParamPath, Value: []byte(path)})
 }
@@ -81,6 +90,45 @@ func (sm SetupMessage) ProbeLevel() uint64 {
 	return ProbeLevelNone
 }
 
+// Cost returns the declared Cost, or DefaultCost when the parameter is absent
+// or malformed. A declared 0 is meaningful (a free link) and returned as is.
+func (sm SetupMessage) Cost() uint64 {
+	for _, p := range sm.Parameters {
+		if p.ID != SetupParamCost {
+			continue
+		}
+		cost, n, err := ReadVarint(p.Value)
+		if err != nil || n != len(p.Value) {
+			return DefaultCost
+		}
+		return cost
+	}
+	return DefaultCost
+}
+
+// AddHop appends a Hop parameter declaring the sender's Hop ID. A Hop ID of 0
+// carries no identity; callers omit the parameter instead.
+func (sm *SetupMessage) AddHop(hopID uint64) {
+	value, _ := WriteVarint(nil, hopID)
+	sm.Parameters = append(sm.Parameters, SetupParameter{ID: SetupParamHop, Value: value})
+}
+
+// HopID returns the declared Hop ID, or 0 (no identity) when the parameter is
+// absent or malformed.
+func (sm SetupMessage) HopID() uint64 {
+	for _, p := range sm.Parameters {
+		if p.ID != SetupParamHop {
+			continue
+		}
+		id, n, err := ReadVarint(p.Value)
+		if err != nil || n != len(p.Value) {
+			return 0
+		}
+		return id
+	}
+	return 0
+}
+
 // AddRedirect appends the Redirect parameter.
 func (sm *SetupMessage) AddRedirect() {
 	sm.Parameters = append(sm.Parameters, SetupParameter{ID: SetupParamRedirect})
@@ -100,6 +148,16 @@ func (sm SetupMessage) FollowsRedirect() bool {
 		}
 		_, n, err := ReadVarint(p.Value)
 		return err == nil && n == len(p.Value)
+	}
+	return false
+}
+
+// Has reports whether the parameter with the given ID is present.
+func (sm SetupMessage) Has(id uint64) bool {
+	for _, p := range sm.Parameters {
+		if p.ID == id {
+			return true
+		}
 	}
 	return false
 }

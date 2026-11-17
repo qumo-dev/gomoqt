@@ -32,50 +32,151 @@ var (
 )
 
 /*
+ * Error code spaces (moq-lite-06 §4.4)
+ *
+ * A session close and a stream reset carry codes from two independent
+ * spaces; the same number means different things in each. Both spaces share
+ * the same ranges:
+ *
+ *   0x00-0x1f  codes reused unchanged from moq-transport (draft-18+)
+ *   0x20-0x2f  reserved; never sent, and never interpreted when received
+ *   0x30-0x3f  moq-lite's own (assigned in the stream space only)
+ *   0x40-      the application's, opaque to moq-lite
+ *
+ * gomoqt needs a few stream codes moq-lite does not define (an unauthorized
+ * request, a malformed range, ...). They are gomoqt's, so they sit in the
+ * application range from 0x40 up; a peer that is not gomoqt treats them as
+ * unspecified errors, as §4.4 requires of any code it does not recognize.
+ * The typed codes below (AnnounceErrorCode, SubscribeErrorCode, ...) are
+ * views of the one stream space: where two kinds share a meaning they share
+ * the value.
+ */
+
+// Stream error codes defined by moq-lite-06 (Table 3).
+const (
+	streamInternalError     transport.StreamErrorCode = 0x0
+	streamCancelled         transport.StreamErrorCode = 0x1
+	streamDeliveryTimeout   transport.StreamErrorCode = 0x2
+	streamSessionClosed     transport.StreamErrorCode = 0x3
+	streamGoingAway         transport.StreamErrorCode = 0x4
+	streamTooFarBehind      transport.StreamErrorCode = 0x5
+	streamMalformedTrack    transport.StreamErrorCode = 0x12
+	streamNoCapacity        transport.StreamErrorCode = 0x30
+	streamControlTimeout    transport.StreamErrorCode = 0x31
+	streamGroupTooLarge     transport.StreamErrorCode = 0x32
+	streamNotFound          transport.StreamErrorCode = 0x33
+	streamOld               transport.StreamErrorCode = 0x34
+	streamEvicted           transport.StreamErrorCode = 0x35
+	streamUnroutable        transport.StreamErrorCode = 0x36
+	streamWrongSize         transport.StreamErrorCode = 0x37
+	streamFrameTooLarge     transport.StreamErrorCode = 0x38
+	streamTimestampMismatch transport.StreamErrorCode = 0x39
+)
+
+// Stream error codes gomoqt assigns in the application range (64+), for
+// conditions moq-lite has no code for.
+const (
+	// streamUnauthorized refuses a request outside the session's grant.
+	streamUnauthorized transport.StreamErrorCode = 0x40
+	// streamProtocolViolation resets a stream whose peer broke a rule that
+	// moq-lite resolves with a stream reset rather than a session close,
+	// such as a SUBSCRIBE Frame End without a Group End.
+	streamProtocolViolation transport.StreamErrorCode = 0x41
+	// streamDuplicateID refuses a SUBSCRIBE that reuses a Subscribe ID.
+	streamDuplicateID transport.StreamErrorCode = 0x42
+	// streamInvalidPrefix refuses an ANNOUNCE_REQUEST with a malformed prefix.
+	streamInvalidPrefix transport.StreamErrorCode = 0x43
+	// streamBannedPrefix refuses an ANNOUNCE_REQUEST the publisher bans.
+	streamBannedPrefix transport.StreamErrorCode = 0x44
+	// streamNotSupported refuses a stream for a capability this endpoint did
+	// not advertise, such as a Probe Stream at Probe level None.
+	streamNotSupported transport.StreamErrorCode = 0x45
+)
+
+// streamCodeText returns the text for a stream error code, or "" when the code
+// is not one gomoqt knows.
+func streamCodeText(code transport.StreamErrorCode) string {
+	switch code {
+	case streamInternalError:
+		return "moqt: internal error"
+	case streamCancelled:
+		return "moqt: cancelled"
+	case streamDeliveryTimeout:
+		return "moqt: delivery timeout"
+	case streamSessionClosed:
+		return "moqt: session closed"
+	case streamGoingAway:
+		return "moqt: going away"
+	case streamTooFarBehind:
+		return "moqt: too far behind"
+	case streamMalformedTrack:
+		return "moqt: malformed track"
+	case streamNoCapacity:
+		return "moqt: no capacity"
+	case streamControlTimeout:
+		return "moqt: control timeout"
+	case streamGroupTooLarge:
+		return "moqt: group too large"
+	case streamNotFound:
+		return "moqt: not found"
+	case streamOld:
+		return "moqt: old group"
+	case streamEvicted:
+		return "moqt: evicted"
+	case streamUnroutable:
+		return "moqt: unroutable"
+	case streamWrongSize:
+		return "moqt: wrong size"
+	case streamFrameTooLarge:
+		return "moqt: frame too large"
+	case streamTimestampMismatch:
+		return "moqt: timestamp mismatch"
+	case streamUnauthorized:
+		return "moqt: unauthorized"
+	case streamProtocolViolation:
+		return "moqt: protocol violation"
+	case streamDuplicateID:
+		return "moqt: duplicated id"
+	case streamInvalidPrefix:
+		return "moqt: invalid prefix"
+	case streamBannedPrefix:
+		return "moqt: banned prefix"
+	case streamNotSupported:
+		return "moqt: not supported"
+	default:
+		return ""
+	}
+}
+
+/*
  * Announce Errors
  */
 
-// AnnounceErrorCode represents error codes for track announcement operations.
-// These codes are used when an announcement is rejected or fails.
+// AnnounceErrorCode is a stream error code that resets an Announce Stream.
 type AnnounceErrorCode uint32
 
 const (
-	AnnounceErrorCodeInternal AnnounceErrorCode = 0x0
+	AnnounceErrorCodeInternal AnnounceErrorCode = AnnounceErrorCode(streamInternalError)
 
-	// Subscriber-side errors.
-	AnnounceErrorCodeDuplicated    AnnounceErrorCode = 0x1
-	AnnounceErrorCodeInvalidStatus AnnounceErrorCode = 0x2
-	UninterestedErrorCode          AnnounceErrorCode = 0x3
+	// UninterestedErrorCode ends an Announce Stream the subscriber no
+	// longer wants: moq-lite's CANCELLED.
+	UninterestedErrorCode AnnounceErrorCode = AnnounceErrorCode(streamCancelled)
 
-	// Publisher-side errors.
-	BannedPrefixErrorCode          AnnounceErrorCode = 0x4
-	AnnounceErrorCodeInvalidPrefix AnnounceErrorCode = 0x5
+	// Publisher-side refusals, in gomoqt's application range.
+	BannedPrefixErrorCode          AnnounceErrorCode = AnnounceErrorCode(streamBannedPrefix)
+	AnnounceErrorCodeInvalidPrefix AnnounceErrorCode = AnnounceErrorCode(streamInvalidPrefix)
 	// AnnounceErrorCodeUnauthorized refuses, or ends, announcements for a
 	// prefix outside the root of every grant in force on the session.
-	AnnounceErrorCodeUnauthorized AnnounceErrorCode = 0x6
+	AnnounceErrorCodeUnauthorized AnnounceErrorCode = AnnounceErrorCode(streamUnauthorized)
 )
 
 // String returns a text for the announce error code.
 // It returns an empty string if the code is unknown.
 func (code AnnounceErrorCode) String() string {
-	switch code {
-	case AnnounceErrorCodeInternal:
-		return "moqt: internal error"
-	case AnnounceErrorCodeDuplicated:
-		return "moqt: duplicated broadcast path"
-	case AnnounceErrorCodeInvalidStatus:
-		return "moqt: invalid announce status"
-	case UninterestedErrorCode:
+	if code == UninterestedErrorCode {
 		return "moqt: uninterested"
-	case BannedPrefixErrorCode:
-		return "moqt: banned prefix"
-	case AnnounceErrorCodeInvalidPrefix:
-		return "moqt: invalid prefix"
-	case AnnounceErrorCodeUnauthorized:
-		return "moqt: unauthorized"
-	default:
-		return ""
 	}
+	return streamCodeText(transport.StreamErrorCode(code))
 }
 
 // AnnounceError wraps a QUIC stream error with announcement-specific error codes.
@@ -100,42 +201,51 @@ func (err *AnnounceError) AnnounceErrorCode() AnnounceErrorCode {
  * Subscribe Errors
  */
 
-// SubscribeErrorCode represents error codes for subscription operations.
-// These codes are used when a subscription request is rejected or fails.
+// SubscribeErrorCode is a stream error code that refuses or ends a
+// subscription (and a Track Stream).
 type SubscribeErrorCode uint32
 
 const (
-	SubscribeErrorCodeInternal SubscribeErrorCode = 0x00
+	SubscribeErrorCodeInternal SubscribeErrorCode = SubscribeErrorCode(streamInternalError)
 
-	// Range and identity validation errors.
-	SubscribeErrorCodeInvalidRange SubscribeErrorCode = 0x01
-	SubscribeErrorCodeDuplicateID  SubscribeErrorCode = 0x02
-	SubscribeErrorCodeNotFound     SubscribeErrorCode = 0x03
-	SubscribeErrorCodeUnauthorized SubscribeErrorCode = 0x04
+	// SubscribeErrorCodeCanceled ends a subscription routinely: moq-lite's
+	// CANCELLED, sent by a subscriber that gives up on an unanswered request.
+	SubscribeErrorCodeCanceled SubscribeErrorCode = SubscribeErrorCode(streamCancelled)
 
-	// Subscriber-side timeout.
-	SubscribeErrorCodeTimeout SubscribeErrorCode = 0x05
+	// SubscribeErrorCodeNotFound refuses a track or broadcast that is not
+	// here: moq-lite's NOT_FOUND.
+	SubscribeErrorCodeNotFound SubscribeErrorCode = SubscribeErrorCode(streamNotFound)
+
+	// SubscribeErrorCodeUnroutable refuses a subscription whose only source
+	// the subscriber's own Hop ID excludes: moq-lite's UNROUTABLE.
+	SubscribeErrorCodeUnroutable SubscribeErrorCode = SubscribeErrorCode(streamUnroutable)
+
+	// SubscribeErrorCodeTimeout ends a request the peer never answered:
+	// moq-lite's CONTROL_TIMEOUT.
+	SubscribeErrorCodeTimeout SubscribeErrorCode = SubscribeErrorCode(streamControlTimeout)
+
+	// Refusals in gomoqt's application range.
+	SubscribeErrorCodeUnauthorized SubscribeErrorCode = SubscribeErrorCode(streamUnauthorized)
+	// SubscribeErrorCodeInvalidRange refuses a SUBSCRIBE or SUBSCRIBE_UPDATE
+	// whose range breaks a moq-lite rule, such as a Frame End without a
+	// Group End (moq-lite-06 §3.6 calls this a protocol violation that
+	// resets the stream).
+	SubscribeErrorCodeInvalidRange SubscribeErrorCode = SubscribeErrorCode(streamProtocolViolation)
+	SubscribeErrorCodeDuplicateID  SubscribeErrorCode = SubscribeErrorCode(streamDuplicateID)
 )
 
 // String returns a text for the subscribe error code.
 // It returns an empty string if the code is unknown.
 func (code SubscribeErrorCode) String() string {
 	switch code {
-	case SubscribeErrorCodeInternal:
-		return "moqt: internal error"
-	case SubscribeErrorCodeInvalidRange:
-		return "moqt: invalid range"
-	case SubscribeErrorCodeDuplicateID:
-		return "moqt: duplicated id"
 	case SubscribeErrorCodeNotFound:
 		return "moqt: track does not exist"
-	case SubscribeErrorCodeUnauthorized:
-		return "moqt: unauthorized"
+	case SubscribeErrorCodeInvalidRange:
+		return "moqt: invalid range"
 	case SubscribeErrorCodeTimeout:
 		return "moqt: timeout"
-	default:
-		return ""
 	}
+	return streamCodeText(transport.StreamErrorCode(code))
 }
 
 // SubscribeError wraps a QUIC stream error with subscription-specific error codes.
@@ -156,24 +266,24 @@ func (err *SubscribeError) SubscribeErrorCode() SubscribeErrorCode {
 	return SubscribeErrorCode(err.ErrorCode)
 }
 
+// FetchErrorCode is a stream error code that ends a Fetch Stream from the
+// requesting side. A publisher's refusal arrives as a *GroupError instead,
+// since the answer to a fetch is its group.
 type FetchErrorCode uint32
 
 const (
-	FetchErrorCodeInternal FetchErrorCode = 0x00
-	FetchErrorCodeTimeout  FetchErrorCode = 0x01
+	FetchErrorCodeInternal FetchErrorCode = FetchErrorCode(streamInternalError)
+	// FetchErrorCodeTimeout is moq-lite's CONTROL_TIMEOUT.
+	FetchErrorCodeTimeout FetchErrorCode = FetchErrorCode(streamControlTimeout)
 )
 
 // String returns a text for the fetch error code.
 // It returns an empty string if the code is unknown.
 func (code FetchErrorCode) String() string {
-	switch code {
-	case FetchErrorCodeInternal:
-		return "moqt: internal error"
-	case FetchErrorCodeTimeout:
+	if code == FetchErrorCodeTimeout {
 		return "moqt: timeout"
-	default:
-		return ""
 	}
+	return streamCodeText(transport.StreamErrorCode(code))
 }
 
 type FetchError struct{ *transport.StreamError }
@@ -193,27 +303,25 @@ func (err *FetchError) FetchErrorCode() FetchErrorCode {
 	return FetchErrorCode(err.ErrorCode)
 }
 
+// ProbeErrorCode is a stream error code that resets a Probe Stream.
 type ProbeErrorCode uint32
 
 const (
-	ProbeErrorCodeInternal     ProbeErrorCode = 0x00
-	ProbeErrorCodeTimeout      ProbeErrorCode = 0x01
-	ProbeErrorCodeNotSupported ProbeErrorCode = 0x02
+	ProbeErrorCodeInternal ProbeErrorCode = ProbeErrorCode(streamInternalError)
+	// ProbeErrorCodeTimeout is moq-lite's CONTROL_TIMEOUT.
+	ProbeErrorCodeTimeout ProbeErrorCode = ProbeErrorCode(streamControlTimeout)
+	// ProbeErrorCodeNotSupported resets a Probe Stream opened against an
+	// endpoint that advertised Probe level None (gomoqt's application range).
+	ProbeErrorCodeNotSupported ProbeErrorCode = ProbeErrorCode(streamNotSupported)
 )
 
 // String returns a text for the probe error code.
 // It returns an empty string if the code is unknown.
 func (code ProbeErrorCode) String() string {
-	switch code {
-	case ProbeErrorCodeInternal:
-		return "moqt: internal error"
-	case ProbeErrorCodeTimeout:
+	if code == ProbeErrorCodeTimeout {
 		return "moqt: timeout"
-	case ProbeErrorCodeNotSupported:
-		return "moqt: not supported"
-	default:
-		return ""
 	}
+	return streamCodeText(transport.StreamErrorCode(code))
 }
 
 type ProbeError struct{ *transport.StreamError }
@@ -237,26 +345,31 @@ func (err *ProbeError) ProbeErrorCode() ProbeErrorCode {
  * Session Error
  */
 
-// SessionErrorCode represents error codes for MOQ session operations.
-// These codes are used at the connection level for protocol errors.
+// SessionErrorCode is a session error code (moq-lite-06 Table 2), sent when
+// closing the session. Codes from 0x40 up are the application's.
 type SessionErrorCode uint32
 
 const (
 	NoError SessionErrorCode = 0x0
 
-	InternalSessionErrorCode         SessionErrorCode = 0x1
-	UnauthorizedSessionErrorCode     SessionErrorCode = 0x2
-	ProtocolViolationErrorCode       SessionErrorCode = 0x3
-	ParameterLengthMismatchErrorCode SessionErrorCode = 0x5
-	TooManySubscribeErrorCode        SessionErrorCode = 0x6
-	GoAwayTimeoutErrorCode           SessionErrorCode = 0x10
-	UnsupportedVersionErrorCode      SessionErrorCode = 0x12
-
-	SetupFailedErrorCode SessionErrorCode = 0x13
+	InternalSessionErrorCode     SessionErrorCode = 0x1
+	UnauthorizedSessionErrorCode SessionErrorCode = 0x2
+	ProtocolViolationErrorCode   SessionErrorCode = 0x3
+	// KeyValueFormattingErrorCode closes a session whose peer sent a
+	// malformed key-value pair, or repeated one more than allowed.
+	KeyValueFormattingErrorCode SessionErrorCode = 0x6
+	GoAwayTimeoutErrorCode      SessionErrorCode = 0x10
+	// ControlMessageTimeoutErrorCode closes a session whose peer took too
+	// long to respond to a control message.
+	ControlMessageTimeoutErrorCode SessionErrorCode = 0x11
+	// VersionNegotiationFailedErrorCode closes a session for which no
+	// version could be negotiated.
+	VersionNegotiationFailedErrorCode SessionErrorCode = 0x15
 
 	// NotSupportedErrorCode refuses a token, or a grant, that the acceptor
-	// cannot verify or express (see AuthWriter).
-	NotSupportedErrorCode SessionErrorCode = 0x30
+	// cannot verify or express (see AuthWriter). The Auth Stream is a gomoqt
+	// extension, so the code sits in the application range.
+	NotSupportedErrorCode SessionErrorCode = 0x40
 )
 
 // String returns a text for the session error code.
@@ -271,16 +384,14 @@ func (code SessionErrorCode) String() string {
 		return "moqt: unauthorized"
 	case ProtocolViolationErrorCode:
 		return "moqt: protocol violation"
-	case ParameterLengthMismatchErrorCode:
-		return "moqt: parameter length mismatch"
-	case TooManySubscribeErrorCode:
-		return "moqt: too many subscribes"
+	case KeyValueFormattingErrorCode:
+		return "moqt: key-value formatting error"
 	case GoAwayTimeoutErrorCode:
 		return "moqt: goaway timeout"
-	case UnsupportedVersionErrorCode:
-		return "moqt: unsupported version"
-	case SetupFailedErrorCode:
-		return "moqt: setup failed"
+	case ControlMessageTimeoutErrorCode:
+		return "moqt: control message timeout"
+	case VersionNegotiationFailedErrorCode:
+		return "moqt: version negotiation failed"
 	case NotSupportedErrorCode:
 		return "moqt: not supported"
 	default:
@@ -317,46 +428,56 @@ func (err *SessionError) SessionErrorCode() SessionErrorCode {
  * Group Error
  */
 
-// GroupErrorCode represents error codes for group operations.
+// GroupErrorCode is a stream error code that resets a Group Stream, or the
+// group a Fetch Stream answers with.
 type GroupErrorCode uint32
 
 const (
-	InternalGroupErrorCode GroupErrorCode = 0x00
+	InternalGroupErrorCode GroupErrorCode = GroupErrorCode(streamInternalError)
 
-	OutOfRangeErrorCode         GroupErrorCode = 0x02
-	ExpiredGroupErrorCode       GroupErrorCode = 0x03
-	SubscribeCanceledErrorCode  GroupErrorCode = 0x04
-	PublishAbortedErrorCode     GroupErrorCode = 0x05
-	ClosedSessionGroupErrorCode GroupErrorCode = 0x06
-	InvalidSubscribeIDErrorCode GroupErrorCode = 0x07
+	// SubscribeCanceledErrorCode is moq-lite's CANCELLED: the group is no
+	// longer wanted, by either end.
+	SubscribeCanceledErrorCode GroupErrorCode = GroupErrorCode(streamCancelled)
+	// ExpiredGroupErrorCode is moq-lite's DELIVERY_TIMEOUT: the group aged
+	// out of the subscriber's Max Age before it was delivered.
+	ExpiredGroupErrorCode GroupErrorCode = GroupErrorCode(streamDeliveryTimeout)
+	// ClosedSessionGroupErrorCode is moq-lite's SESSION_CLOSED.
+	ClosedSessionGroupErrorCode GroupErrorCode = GroupErrorCode(streamSessionClosed)
+	// GroupTooLargeErrorCode aborts a group that grew past the publisher's
+	// cache budget.
+	GroupTooLargeErrorCode GroupErrorCode = GroupErrorCode(streamGroupTooLarge)
+	// NotFoundGroupErrorCode refuses a group that was never here, such as a
+	// fetch of a group the publisher does not hold.
+	NotFoundGroupErrorCode GroupErrorCode = GroupErrorCode(streamNotFound)
+	// OldGroupErrorCode refuses a group superseded by a newer one and dropped.
+	OldGroupErrorCode GroupErrorCode = GroupErrorCode(streamOld)
+	// EvictedGroupErrorCode refuses a group dropped under memory pressure
+	// while still current; unlike an old one it may be fetched again.
+	EvictedGroupErrorCode GroupErrorCode = GroupErrorCode(streamEvicted)
+	// FrameTooLargeErrorCode resets a group with a frame declaring a payload
+	// larger than the receiver accepts.
+	FrameTooLargeErrorCode GroupErrorCode = GroupErrorCode(streamFrameTooLarge)
+	// InvalidRangeGroupErrorCode refuses a fetch whose frame range breaks a
+	// moq-lite rule (Frame End below Frame Start), or one the publisher cannot
+	// serve in full (gomoqt's application range).
+	InvalidRangeGroupErrorCode GroupErrorCode = GroupErrorCode(streamProtocolViolation)
 	// UnauthorizedGroupErrorCode refuses a group the session's scope does not
 	// cover, such as the one a FETCH outside it asks for (see AuthHandler).
-	UnauthorizedGroupErrorCode GroupErrorCode = 0x08
+	UnauthorizedGroupErrorCode GroupErrorCode = GroupErrorCode(streamUnauthorized)
 )
 
 // String returns a text for the group error code.
 // It returns an empty string if the code is unknown.
 func (code GroupErrorCode) String() string {
 	switch code {
-	case InternalGroupErrorCode:
-		return "moqt: internal error"
-	case OutOfRangeErrorCode:
-		return "moqt: out of range"
-	case ExpiredGroupErrorCode:
-		return "moqt: group expires"
 	case SubscribeCanceledErrorCode:
 		return "moqt: subscribe canceled"
-	case PublishAbortedErrorCode:
-		return "moqt: publish aborted"
-	case ClosedSessionGroupErrorCode:
-		return "moqt: session closed"
-	case InvalidSubscribeIDErrorCode:
-		return "moqt: invalid subscribe id"
-	case UnauthorizedGroupErrorCode:
-		return "moqt: unauthorized"
-	default:
-		return ""
+	case ExpiredGroupErrorCode:
+		return "moqt: group expires"
+	case InvalidRangeGroupErrorCode:
+		return "moqt: invalid range"
 	}
+	return streamCodeText(transport.StreamErrorCode(code))
 }
 
 // GroupError wraps a QUIC stream error with group-specific error codes.

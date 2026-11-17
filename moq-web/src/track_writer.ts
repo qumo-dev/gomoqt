@@ -8,6 +8,20 @@ import { type BroadcastPath, isValidBroadcastPath } from "./broadcast_path.ts";
 import type { SubscribeErrorCode } from "./error.ts";
 import { GroupErrorCode, InvalidBroadcastPathError, RedirectNotSupportedError } from "./error.ts";
 import { SubscribeRedirectMessage } from "./internal/message/mod.ts";
+import { GroupAges } from "./group_ages.ts";
+import { DEFAULT_TIMESCALE } from "./info.ts";
+
+/**
+ * Returned by {@link TrackWriter.openGroup} and {@link TrackWriter.openGroupAt}
+ * for a group outside the subscription's range: below its `startGroup` floor
+ * or above its `endGroup`.
+ */
+export class GroupOutOfRangeError extends Error {
+	constructor(seq: number) {
+		super(`moq: group ${seq} is outside the subscription's range`);
+		this.name = "GroupOutOfRangeError";
+	}
+}
 
 /** Where {@link TrackWriter.redirect} sends a subscriber. */
 export interface RedirectTarget {
@@ -45,7 +59,11 @@ export class TrackWriter {
 	>;
 	#groups: GroupWriter[] = [];
 	#groupCount: number = 0;
+	// Set once group 0 is opened, which openGroupAt alone does without
+	// advancing #groupCount.
+	#usedZero: boolean = false;
 	#peerFollowsRedirect?: PeerFollowsRedirect;
+	readonly #ages: GroupAges;
 
 	constructor(
 		broadcastPath: BroadcastPath,
@@ -55,12 +73,15 @@ export class TrackWriter {
 			[SendStream, undefined] | [undefined, Error]
 		>,
 		peerFollowsRedirect?: PeerFollowsRedirect,
+		timescale: number = DEFAULT_TIMESCALE,
 	) {
 		this.broadcastPath = broadcastPath;
 		this.trackName = trackName;
 		this.#subscribeStream = subscribeStream;
 		this.#openUniStreamFunc = openUniStreamFunc;
 		this.#peerFollowsRedirect = peerFollowsRedirect;
+		// Max Age is measured in the track's own timestamps.
+		this.#ages = new GroupAges(() => this.config.maxAge, timescale);
 	}
 
 	/**
@@ -131,6 +152,12 @@ export class TrackWriter {
 	/**
 	 * Open a new group with an auto-incremented sequence number.
 	 *
+	 * A sequence below the subscription's `startGroup`, or above its
+	 * `endGroup`, is refused with a {@link GroupOutOfRangeError}. When the peer
+	 * bounded its subscription by frame (moq-lite-06 §3.6), the start and end
+	 * groups are sent partially: write them whole and the {@link GroupWriter}
+	 * sends only the frames asked for.
+	 *
 	 * The group opens on a fresh unidirectional stream; when the peer's
 	 * concurrent-stream limit is reached this blocks until a stream is granted.
 	 * Pass `options.signal` to cancel or time out the open. If aborted, no group
@@ -156,6 +183,9 @@ export class TrackWriter {
 	): Promise<[GroupWriter, undefined] | [undefined, Error]> {
 		if (seq > this.#groupCount) {
 			this.#groupCount = seq;
+		}
+		if (seq === 0) {
+			this.#usedZero = true;
 		}
 		return this.#openGroupWithSequence(seq, options?.signal);
 	}
@@ -223,6 +253,19 @@ export class TrackWriter {
 			return [undefined, this.context.err()!];
 		}
 
+		// Group Start is a floor the publisher MUST NOT deliver below
+		// (moq-lite-06 §7.9), and Group End the last group to deliver.
+		const config = this.config;
+		if (seq < config.startGroup || (config.endGroup !== 0 && seq > config.endGroup)) {
+			return [undefined, new GroupOutOfRangeError(seq)];
+		}
+		// A partial group goes only to a subscriber that asked for one
+		// (moq-lite-06 §3.6): the start group from the peer's Frame Start, the
+		// end group up to its Frame End, every other group whole.
+		const range = this.#subscribeStream.frameRange;
+		const frameStart = seq === config.startGroup ? range.frameStart : 0;
+		const frameEnd = config.endGroup !== 0 && seq === config.endGroup ? range.frameEnd : 0;
+
 		// ensureOk is not raced against the signal (Go passes no ctx here).
 		// The first opened group resolves the subscription's absolute start.
 		let err: Error | undefined;
@@ -268,6 +311,7 @@ export class TrackWriter {
 		const msg = new GroupMessage({
 			subscribeId: this.subscribeId,
 			sequence: seq,
+			frameStart,
 		});
 		err = await msg.encode(writer!);
 		if (err) {
@@ -275,7 +319,7 @@ export class TrackWriter {
 			return [undefined, new Error("Failed to create group message")];
 		}
 
-		const group = new GroupWriter(this.context, writer!, msg);
+		const group = new GroupWriter(this.context, writer!, msg, { frameEnd, ages: this.#ages });
 
 		this.#groups.push(group);
 
@@ -285,7 +329,7 @@ export class TrackWriter {
 	async closeWithError(code: SubscribeErrorCode): Promise<void> {
 		// Cancel all groups with the error first
 		await Promise.allSettled(this.#groups.map(
-			(group) => group.cancel(GroupErrorCode.PublishAborted),
+			(group) => group.cancel(GroupErrorCode.InternalError),
 		));
 
 		// Then close the subscribe stream with the error
@@ -297,11 +341,19 @@ export class TrackWriter {
 			(group) => group.close(),
 		));
 
-		// Signal that no group after the last opened sequence will be
-		// produced. When no groups were opened, this is a SUBSCRIBE_END
-		// without a preceding SUBSCRIBE_OK (a track that ended with no
-		// matching groups).
-		await this.#subscribeStream.writeEnd(this.#groupCount);
+		// Signal that no group at or after the one following the last sequence
+		// used will be produced: SUBSCRIBE_END's Group is exclusive. When no
+		// group was used it is 0, and without a preceding SUBSCRIBE_OK it says
+		// the track ended with no matching groups.
+		let end = this.#groupCount === 0 && !this.#usedZero ? 0 : this.#groupCount + 1;
+		// A sequence past endGroup was refused (GroupOutOfRangeError) and never
+		// sent. Naming it would leave the subscriber waiting for groups that
+		// cannot arrive, so the range ends right after endGroup.
+		const endGroup = this.config.endGroup;
+		if (endGroup !== 0 && end > endGroup + 1) {
+			end = endGroup + 1;
+		}
+		await this.#subscribeStream.writeEnd(end);
 
 		await this.#subscribeStream.close();
 	}

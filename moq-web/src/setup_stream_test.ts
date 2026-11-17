@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { Session } from "./session.ts";
 import { MockWebTransportSession } from "./session_test.ts";
-import { ProbeLevels, SetupMessage, writeVarint } from "./internal/message/mod.ts";
+import { ProbeLevels, SetupMessage, SetupParamIDs, writeVarint } from "./internal/message/mod.ts";
 import { UniStreamTypes } from "./stream_type.ts";
 import { SessionErrorCode } from "./error.ts";
 import { Buffer } from "@okdaichi/golikejs/bytes";
@@ -63,5 +63,18 @@ Deno.test("Session SETUP handshake: server-sent Path parameter terminates the se
 	await session.ready;
 
 	const info = await session.closed;
+	assertEquals(info.code, SessionErrorCode.ProtocolViolation);
+});
+
+Deno.test("Session SETUP handshake: server-sent Role parameter terminates the session", async () => {
+	const setup = await setupUniStream((sm) =>
+		sm.parameters.push({ id: SetupParamIDs.Role, value: new Uint8Array([0]) })
+	);
+	const mock = new MockWebTransportSession({ acceptUniStreamData: [setup] });
+	const session = new Session({ transport: mock });
+	await session.ready;
+
+	const info = await session.closed;
+
 	assertEquals(info.code, SessionErrorCode.ProtocolViolation);
 });

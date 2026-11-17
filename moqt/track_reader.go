@@ -46,14 +46,11 @@ func newTrackReader(path BroadcastPath, name TrackName, subscribeStream *sendSub
 		TrackName:           name,
 		sendSubscribeStream: subscribeStream,
 		queuedCh:            make(chan struct{}, 1),
-		queueing: make([]struct {
-			sequence GroupSequence
-			stream   transport.ReceiveStream
-		}, 0, 1<<3),
-		dequeued:     make(map[*GroupReader]struct{}),
-		groupManager: newGroupReaderManager(),
-		onCloseFunc:  onCloseFunc,
-		ctx:          context.WithValue(subscribeStream.stream.Context(), biStreamTypeCtxKey, message.StreamTypeSubscribe),
+		queueing:            make([]queuedGroup, 0, 1<<3),
+		dequeued:            make(map[*GroupReader]struct{}),
+		groupManager:        newGroupReaderManager(),
+		onCloseFunc:         onCloseFunc,
+		ctx:                 context.WithValue(subscribeStream.stream.Context(), biStreamTypeCtxKey, message.StreamTypeSubscribe),
 	}
 	// Set before readSubscribeResponses starts, which is the only caller.
 	subscribeStream.onDrop = track.settleDropped
@@ -75,10 +72,7 @@ type TrackReader struct {
 
 	sendSubscribeStream *sendSubscribeStream
 
-	queueing []struct {
-		sequence GroupSequence
-		stream   transport.ReceiveStream
-	}
+	queueing []queuedGroup
 	queuedCh chan struct{}
 	trackMu  sync.Mutex
 	// settled records the groups received or dropped (SUBSCRIBE_DROP), so
@@ -115,7 +109,7 @@ func (r *TrackReader) ResolvedStart() GroupSequence {
 }
 
 // Ended reports whether the publisher signaled SUBSCRIBE_END, meaning no group
-// after the resolved range will be produced.
+// at or after the end it named will be produced.
 func (r *TrackReader) Ended() bool {
 	return r.sendSubscribeStream.hasEnded()
 }
@@ -183,8 +177,8 @@ const subscribeEndGraceRTTs = 3
 //
 // When the publisher ends the track (SUBSCRIBE_END), AcceptGroup returns the
 // groups still queued and still in flight, then io.EOF once every group from
-// the subscription's start to the last one SUBSCRIBE_END named has arrived or
-// been dropped (SUBSCRIBE_DROP). Group streams arrive in any order, so EOF
+// the subscription's start up to the end SUBSCRIBE_END named (exclusive) has
+// arrived or been dropped (SUBSCRIBE_DROP). Group streams arrive in any order, so EOF
 // waits for the gaps, not only for the named group. A gap that never fills
 // is waited for until the publisher has closed the subscribe stream and a
 // grace period has passed. io.EOF is sticky: later calls return it again,
@@ -217,10 +211,11 @@ func (r *TrackReader) AcceptGroup(ctx context.Context) (*GroupReader, error) {
 		closedAt, closed := r.sendSubscribeStream.closedSince()
 		var graceLeft <-chan time.Time
 		if ended {
-			start := r.sendSubscribeStream.resolvedStartGroup()
-			// start is 0 when SUBSCRIBE_END came without SUBSCRIBE_OK: the
-			// track ended with no groups for this subscription.
-			if start == 0 || end < start || r.settled.covers(start, end) {
+			// end is exclusive: the first group never delivered. With no
+			// SUBSCRIBE_OK the track ended with no groups for this
+			// subscription.
+			start, ok := r.sendSubscribeStream.resolvedStartOK()
+			if !ok || end <= start || r.settled.covers(start, end-1) {
 				r.eof = true
 				r.trackMu.Unlock()
 				return nil, io.EOF
@@ -336,6 +331,12 @@ func (r *TrackReader) Update(config *SubscribeConfig) error {
 	return r.sendSubscribeStream.updateSubscribe(config)
 }
 
+// queuedGroup is a group stream waiting for AcceptGroup.
+type queuedGroup struct {
+	sequence GroupSequence
+	stream   transport.ReceiveStream
+}
+
 func (r *TrackReader) enqueueGroup(sequence GroupSequence, stream transport.ReceiveStream) {
 	if stream == nil {
 		return
@@ -350,14 +351,7 @@ func (r *TrackReader) enqueueGroup(sequence GroupSequence, stream transport.Rece
 	}
 	r.settled.add(sequence, sequence)
 
-	entry := struct {
-		sequence GroupSequence
-		stream   transport.ReceiveStream
-	}{
-		sequence: sequence,
-		stream:   stream,
-	}
-	r.queueing = append(r.queueing, entry)
+	r.queueing = append(r.queueing, queuedGroup{sequence: sequence, stream: stream})
 
 	select {
 	case r.queuedCh <- struct{}{}:

@@ -92,7 +92,7 @@ func TestSession_HandleSetupStream(t *testing.T) {
 	// parameter (WebTransport both roles; the native-QUIC client receiving the
 	// server's SETUP). The native-QUIC server peer does send a Path, but that
 	// stream is consumed by the router above Session — see the router tests in
-	// session_draft05_test.go. So one uniform rule applies here: any Path
+	// session_native_setup_test.go. So one uniform rule applies here: any Path
 	// parameter is a protocol violation.
 	tests := map[string]struct {
 		setup        func() message.SetupMessage
@@ -187,4 +187,91 @@ func TestSession_Probe_PeerWithoutProbeCapability(t *testing.T) {
 
 	_, err := sess.Probe(1_000_000)
 	assert.ErrorIs(t, err, ErrProbeNotSupported)
+}
+
+func TestSession_HandleSetupStream_Role(t *testing.T) {
+	tests := map[string]struct {
+		server       bool
+		wantViolated bool
+	}{
+		"a client receiving Role closes the session": {server: false, wantViolated: true},
+		"a server takes Role as a hint":              {server: true, wantViolated: false},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			conn := &fakeStreamConn{}
+			sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{server: tt.server}, nil)
+			defer sess.CloseWithError(NoError, "")
+
+			sm := message.SetupMessage{Parameters: []message.SetupParameter{{ID: message.SetupParamRole, Value: []byte{0x02}}}}
+			var buf bytes.Buffer
+			require.NoError(t, sm.Encode(&buf))
+			sess.handleSetupStream(&fakeQUICReceiveStream{reads: []streamResult{{Data: buf.Bytes()}}})
+
+			if tt.wantViolated {
+				select {
+				case <-conn.Context().Done():
+				case <-time.After(time.Second):
+					t.Fatal("session was not terminated on protocol violation")
+				}
+				return
+			}
+			select {
+			case <-sess.peerSetupCh:
+			case <-time.After(time.Second):
+				t.Fatal("peer setup was not recorded")
+			}
+			assert.NoError(t, conn.Context().Err())
+		})
+	}
+}
+
+func TestSession_HandleSetupStream_CostAndHop(t *testing.T) {
+	conn := &fakeStreamConn{}
+	sess := newSession(conn, NewTrackMux(0), nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
+	defer sess.CloseWithError(NoError, "")
+
+	var sm message.SetupMessage
+	zeroCost, _ := message.WriteVarint(nil, 0)
+	sm.Parameters = append(sm.Parameters, message.SetupParameter{ID: message.SetupParamCost, Value: zeroCost})
+	sm.AddHop(77)
+	var buf bytes.Buffer
+	require.NoError(t, sm.Encode(&buf))
+	sess.handleSetupStream(&fakeQUICReceiveStream{reads: []streamResult{{Data: buf.Bytes()}}})
+
+	hop, err := sess.waitPeerHop()
+	require.NoError(t, err)
+	assert.Equal(t, uint64(77), hop)
+	assert.Equal(t, uint64(0), sess.waitPeerCost(), "a declared 0 is kept")
+}
+
+func TestSession_OpenSetupStream_DeclaresHop(t *testing.T) {
+	tests := map[string]struct {
+		hopID   uint64
+		wantHop bool
+	}{
+		"an endpoint without a hop id declares none": {hopID: 0},
+		"a relay declares its hop id":                {hopID: 99, wantHop: true},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			setup := &fakeQUICSendStream{}
+			conn := &fakeStreamConn{openUniStreams: []sendStreamResult{{Stream: setup}}}
+			sess := newSession(conn, NewTrackMux(tt.hopID), nil, nil, nil, nil, nil, nil, sessionSetup{}, nil)
+			defer sess.CloseWithError(NoError, "")
+
+			require.Eventually(t, func() bool { return setup.Context().Err() != nil }, time.Second, time.Millisecond)
+
+			r := bytes.NewReader(setup.Written())
+			var st message.StreamType
+			require.NoError(t, st.Decode(r))
+			var sm message.SetupMessage
+			require.NoError(t, sm.Decode(r))
+			assert.Equal(t, tt.wantHop, sm.Has(message.SetupParamHop))
+			assert.Equal(t, tt.hopID, sm.HopID())
+			assert.False(t, sm.Has(message.SetupParamCost), "an endpoint leaves Cost at its default")
+		})
+	}
 }

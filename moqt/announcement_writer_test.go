@@ -366,11 +366,15 @@ func TestAnnouncementWriter_SendAnnouncement_EncodesHops(t *testing.T) {
 	require.NoError(t, okMsg.Decode(r))
 	assert.Equal(t, uint64(0), okMsg.ActiveCount)
 
-	var decoded message.AnnounceBroadcastMessage
+	typ, err := message.ReadMessageType(r)
+	require.NoError(t, err)
+	assert.Equal(t, message.MessageTypeAnnounceStart, typ)
+	var decoded message.AnnounceStartMessage
 	require.NoError(t, decoded.Decode(r))
-	assert.Equal(t, message.ACTIVE, decoded.AnnounceStatus)
-	assert.Equal(t, "stream1", decoded.BroadcastPathSuffix)
+	assert.Equal(t, "stream1", decoded.RoutePrefixSuffix)
 	assert.Empty(t, decoded.HopIDs)
+	assert.Zero(t, decoded.WarmRouteCost, "a local route costs nothing")
+	assert.Zero(t, decoded.ColdRouteCost)
 
 }
 
@@ -522,7 +526,7 @@ func TestAnnouncementWriter_RegisterEndHandlerLocked_StreamEnded(t *testing.T) {
 	assert.Empty(t, aw.actives)
 }
 
-func TestAnnouncementWriter_RegisterEndHandlerLocked_Closed(t *testing.T) {
+func TestAnnouncementWriter_WatchLocked_Closed(t *testing.T) {
 	aw := newTestAnnouncementWriter(t)
 	require.NoError(t, aw.init(map[*Announcement]struct{}{}))
 	ann, end := NewAnnouncement(t.Context(), BroadcastPath("/test/active"))
@@ -530,7 +534,7 @@ func TestAnnouncementWriter_RegisterEndHandlerLocked_Closed(t *testing.T) {
 	aw.stopAll()
 
 	aw.mu.Lock()
-	assert.NotPanics(t, func() { aw.registerEndHandlerLocked("active", ann) })
+	assert.NotPanics(t, func() { aw.watchLocked("active", &activeAnnouncement{announcement: ann}) })
 	aw.mu.Unlock()
 }
 
@@ -542,8 +546,8 @@ func TestAnnouncementWriter_CloseWithError(t *testing.T) {
 			"internal error": {
 				errorCode: AnnounceErrorCodeInternal,
 			},
-			"duplicated announce error": {
-				errorCode: AnnounceErrorCodeDuplicated,
+			"uninterested": {
+				errorCode: UninterestedErrorCode,
 			},
 		}
 
@@ -1155,4 +1159,181 @@ func TestAnnouncementWriter_StressTest_HeavyConcurrentAccess(t *testing.T) {
 	// Verify that we still have some active announcements
 	assert.True(t, len(aw.actives) > 0, "Should have some active announcements remaining")
 
+}
+
+// announceEvent is one announcement decoded from a writer's output.
+type announceEvent struct {
+	typ    uint64
+	suffix string // START only
+	id     uint64 // END and UPDATE only
+	hops   []uint64
+}
+
+// readAnnounceEvents decodes ANNOUNCE_OK and the announcements after it.
+func readAnnounceEvents(tb testing.TB, written []byte) []announceEvent {
+	tb.Helper()
+	r := bytes.NewReader(written)
+	var ok message.AnnounceOkMessage
+	require.NoError(tb, ok.Decode(r))
+	var events []announceEvent
+	for r.Len() > 0 {
+		typ, err := message.ReadMessageType(r)
+		require.NoError(tb, err)
+		switch typ {
+		case message.MessageTypeAnnounceStart:
+			var m message.AnnounceStartMessage
+			require.NoError(tb, m.Decode(r))
+			events = append(events, announceEvent{typ: typ, suffix: m.RoutePrefixSuffix, hops: m.HopIDs})
+		case message.MessageTypeAnnounceEnd:
+			var m message.AnnounceEndMessage
+			require.NoError(tb, m.Decode(r))
+			events = append(events, announceEvent{typ: typ, id: m.AnnounceID})
+		case message.MessageTypeAnnounceUpdate:
+			var m message.AnnounceUpdateMessage
+			require.NoError(tb, m.Decode(r))
+			events = append(events, announceEvent{typ: typ, id: m.AnnounceID, hops: m.HopIDs})
+		default:
+			tb.Fatalf("unexpected announcement type %d", typ)
+		}
+	}
+	return events
+}
+
+func TestAnnouncementWriter_AnnounceIDs(t *testing.T) {
+	aw := newTestAnnouncementWriter(t)
+	require.NoError(t, aw.init(map[*Announcement]struct{}{}))
+
+	a, endA := NewAnnouncement(t.Context(), "/test/a")
+	b, endB := NewAnnouncement(t.Context(), "/test/b")
+	defer endB()
+	require.NoError(t, aw.SendAnnouncement(a))
+	require.NoError(t, aw.SendAnnouncement(b))
+	endA()
+	assert.Eventually(t, func() bool {
+		aw.mu.RLock()
+		defer aw.mu.RUnlock()
+		return len(aw.actives) == 1
+	}, time.Second, time.Millisecond)
+	a2, endA2 := NewAnnouncement(t.Context(), "/test/a")
+	defer endA2()
+	require.NoError(t, aw.SendAnnouncement(a2))
+
+	events := readAnnounceEvents(t, aw.stream.(*fakeQUICStream).Written())
+	assert.Equal(t, []announceEvent{
+		{typ: message.MessageTypeAnnounceStart, suffix: "a", hops: []uint64{}}, // id 0
+		{typ: message.MessageTypeAnnounceStart, suffix: "b", hops: []uint64{}}, // id 1
+		{typ: message.MessageTypeAnnounceEnd, id: 0},
+		{typ: message.MessageTypeAnnounceStart, suffix: "a", hops: []uint64{}}, // a fresh id 2
+	}, events)
+}
+
+func TestAnnouncementWriter_ReplacementIsAnUpdate(t *testing.T) {
+	aw := newTestAnnouncementWriter(t)
+	require.NoError(t, aw.init(map[*Announcement]struct{}{}))
+
+	first, endFirst := NewAnnouncement(t.Context(), "/test/a")
+	defer endFirst()
+	first.setRoute(announceRoute{hopIDs: []uint64{1}})
+	second, endSecond := NewAnnouncement(t.Context(), "/test/a")
+	second.setRoute(announceRoute{hopIDs: []uint64{2}})
+
+	require.NoError(t, aw.SendAnnouncement(first))
+	require.NoError(t, aw.SendAnnouncement(second))
+	require.NoError(t, aw.SendAnnouncement(second), "a repeat sends nothing")
+	// The newer one ends while the older lasts: the route moves back.
+	endSecond()
+	assert.Eventually(t, func() bool {
+		return len(readAnnounceEvents(t, aw.stream.(*fakeQUICStream).Written())) == 3
+	}, time.Second, time.Millisecond)
+
+	events := readAnnounceEvents(t, aw.stream.(*fakeQUICStream).Written())
+	assert.Equal(t, []announceEvent{
+		{typ: message.MessageTypeAnnounceStart, suffix: "a", hops: []uint64{1}},
+		{typ: message.MessageTypeAnnounceUpdate, id: 0, hops: []uint64{2}},
+		{typ: message.MessageTypeAnnounceUpdate, id: 0, hops: []uint64{1}},
+	}, events, "one route keeps one Announce ID")
+}
+
+func TestAnnouncementWriter_ClampsCoveringRoutes(t *testing.T) {
+	stream := &fakeQUICStream{}
+	aw := newAnnouncementWriter(stream, "/live/alice/", 0, 0, nil, nil)
+
+	exact, endExact := NewAnnouncement(t.Context(), "/live/alice/video")
+	defer endExact()
+	covering, endCovering := NewAnnouncement(t.Context(), "/live")
+	defer endCovering()
+	root, endRoot := NewAnnouncement(t.Context(), "/")
+	defer endRoot()
+	sibling, endSibling := NewAnnouncement(t.Context(), "/live/alicex")
+	defer endSibling()
+
+	require.NoError(t, aw.init(map[*Announcement]struct{}{exact: {}, covering: {}}))
+	require.NoError(t, aw.SendAnnouncement(root), "a second covering route joins the clamped one")
+	assert.Error(t, aw.SendAnnouncement(sibling), "a prefix never matches half a segment")
+
+	events := readAnnounceEvents(t, stream.Written())
+	suffixes := make([]string, 0, len(events))
+	for _, e := range events {
+		if e.typ == message.MessageTypeAnnounceStart {
+			suffixes = append(suffixes, e.suffix)
+		}
+	}
+	assert.ElementsMatch(t, []string{"video", ""}, suffixes, "the covering routes present as the prefix itself, once")
+}
+
+func TestAnnouncementWriter_ExcludesPeerHop(t *testing.T) {
+	tests := map[string]struct {
+		localHop, excludeHop uint64
+		hops                 []uint64
+		wantSent             bool
+	}{
+		"no declared hop":           {hops: []uint64{5}, wantSent: true},
+		"path through the peer":     {excludeHop: 5, hops: []uint64{4, 5}, wantSent: false},
+		"path avoiding the peer":    {excludeHop: 6, hops: []uint64{4, 5}, wantSent: true},
+		"the peer is this endpoint": {localHop: 6, excludeHop: 6, hops: []uint64{4}, wantSent: false},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			stream := &fakeQUICStream{}
+			aw := newAnnouncementWriter(stream, "/test/", tt.localHop, tt.excludeHop, nil, nil)
+			require.NoError(t, aw.init(map[*Announcement]struct{}{}))
+
+			ann, end := NewAnnouncement(t.Context(), "/test/a")
+			defer end()
+			ann.setRoute(announceRoute{hopIDs: tt.hops})
+			require.NoError(t, aw.SendAnnouncement(ann))
+
+			sent := len(readAnnounceEvents(t, stream.Written())) == 1
+			assert.Equal(t, tt.wantSent, sent)
+		})
+	}
+}
+
+func TestRouteSuffix(t *testing.T) {
+	tests := map[string]struct {
+		path   BroadcastPath
+		prefix string
+		want   string
+		wantOK bool
+	}{
+		"beneath the prefix":                   {path: "/live/a", prefix: "/live/", want: "a", wantOK: true},
+		"deep beneath":                         {path: "/live/a/b", prefix: "/live/", want: "a/b", wantOK: true},
+		"the prefix's own path":                {path: "/live", prefix: "/live/", want: "", wantOK: true},
+		"above the prefix":                     {path: "/live", prefix: "/live/a/", want: "", wantOK: true},
+		"the root":                             {path: "/", prefix: "/live/a/", want: "", wantOK: true},
+		"a route ending in / above the prefix": {path: "/live/", prefix: "/live/a/", want: "", wantOK: true},
+		"half a segment ending in /":           {path: "/li/", prefix: "/live/a/", wantOK: false},
+		"half a segment":                       {path: "/li", prefix: "/live/", wantOK: false},
+		"a sibling":                            {path: "/other", prefix: "/live/", wantOK: false},
+		"a longer sibling":                     {path: "/livex/a", prefix: "/live/", wantOK: false},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, ok := routeSuffix(tt.path, tt.prefix)
+			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }

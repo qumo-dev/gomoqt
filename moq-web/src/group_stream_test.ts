@@ -78,7 +78,7 @@ Deno.test("GroupWriter", async (t) => {
 			const gw = new GroupWriter(ctx, writer, msg);
 			await gw.close();
 			assertEquals(closeCalls, 1);
-			await gw.cancel(GroupErrorCode.PublishAborted);
+			await gw.cancel(GroupErrorCode.InternalError);
 		},
 	);
 

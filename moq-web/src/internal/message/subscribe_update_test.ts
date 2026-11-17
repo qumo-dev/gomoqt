@@ -6,29 +6,25 @@ Deno.test("SubscribeUpdateMessage - encode/decode roundtrip - multiple scenarios
 	const testCases = {
 		"normal case": {
 			subscriberPriority: 1,
-			subscriberOrdered: 1,
-			subscriberMaxLatency: 100,
+			subscriberMaxAge: 100,
 			groupStart: 5,
 			groupEnd: 10,
 		},
 		"zero values": {
 			subscriberPriority: 0,
-			subscriberOrdered: 0,
-			subscriberMaxLatency: 0,
+			subscriberMaxAge: 0,
 			groupStart: 0,
 			groupEnd: 0,
 		},
 		"max priority": {
 			subscriberPriority: 255,
-			subscriberOrdered: 0,
-			subscriberMaxLatency: 0,
+			subscriberMaxAge: 0,
 			groupStart: 0,
 			groupEnd: 0,
 		},
 		"mid priority": {
 			subscriberPriority: 10,
-			subscriberOrdered: 1,
-			subscriberMaxLatency: 500,
+			subscriberMaxAge: 500,
 			groupStart: 0,
 			groupEnd: 20,
 		},
@@ -54,14 +50,9 @@ Deno.test("SubscribeUpdateMessage - encode/decode roundtrip - multiple scenarios
 				`subscriberPriority mismatch for ${caseName}`,
 			);
 			assertEquals(
-				decodedMessage.subscriberOrdered,
-				input.subscriberOrdered,
-				`subscriberOrdered mismatch for ${caseName}`,
-			);
-			assertEquals(
-				decodedMessage.subscriberMaxLatency,
-				input.subscriberMaxLatency,
-				`subscriberMaxLatency mismatch for ${caseName}`,
+				decodedMessage.subscriberMaxAge,
+				input.subscriberMaxAge,
+				`subscriberMaxAge mismatch for ${caseName}`,
 			);
 			assertEquals(
 				decodedMessage.groupStart,

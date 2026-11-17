@@ -13,10 +13,10 @@ import (
  */
 type AnnounceOkMessage struct {
 	// HopID is the publisher's own Hop ID. It is the implicit trailing
-	// entry of every ANNOUNCE_BROADCAST's Hop ID list on this stream.
+	// entry of every ANNOUNCE_START and ANNOUNCE_UPDATE Hop ID list on this stream.
 	// 0 means unknown (non-relay endpoints send 0).
 	HopID uint64
-	// ActiveCount is the number of active ANNOUNCE_BROADCAST messages the
+	// ActiveCount is the number of ANNOUNCE_START messages the
 	// publisher will send immediately as the initial set.
 	ActiveCount uint64
 }

@@ -286,9 +286,9 @@ func (s *Server) init() {
 // Set Handler (and the other fields) before the server starts serving.
 func (s *Server) defaultWebTransportHandler() http.Handler {
 	return &WebTransportHandler{
-		Config:       s.Config,
-		TrackMux:     s.TrackMux,
-		Handler:      s.Handler,
+		Config:        s.Config,
+		TrackMux:      s.TrackMux,
+		Handler:       s.Handler,
 		FetchHandler:  s.FetchHandler,
 		AuthHandler:   s.AuthHandler,
 		CheckRedirect: s.CheckRedirect,
@@ -604,10 +604,10 @@ func (s *Server) handleNativeQUIC(conn StreamConn) error {
 	}
 	// The Path parameter carries the query too, after "?", when the client
 	// dialed one (see Dialer.Dial); RequestURI reports it as received.
-	path, ok := sm.Path()
-	if !ok || len(path) == 0 || path[0] != '/' {
-		_ = conn.CloseWithError(transport.ConnErrorCode(ProtocolViolationErrorCode), "missing or invalid Path parameter") // not actionable: the connection is being refused
-		return fmt.Errorf("native QUIC setup: missing or invalid Path parameter")
+	path, ok := setupRequestURI(sm)
+	if !ok {
+		_ = conn.CloseWithError(transport.ConnErrorCode(ProtocolViolationErrorCode), "invalid Path parameter") // not actionable: the connection is being refused
+		return fmt.Errorf("native QUIC setup: invalid Path parameter")
 	}
 
 	// Hand the Session the learned path (exposed as Session.RequestURI, mirroring
@@ -623,6 +623,26 @@ func (s *Server) handleNativeQUIC(conn StreamConn) error {
 	defer sess.CloseWithError(NoError, "session ended")
 	s.Handler.ServeMOQ(sess)
 	return nil
+}
+
+// setupRequestURI returns the request URI a native-QUIC client's SETUP Path
+// parameter names (moq-lite-06 §7.3.2): the path-abempty component of the URI,
+// then "?" and the query when there is one. An omitted or empty value asks for
+// the server's default path, "/", as does a value that is only a query
+// ("?jwt=x" is "/?jwt=x"). Anything else not rooted at "/" is invalid, which
+// is a protocol violation.
+func setupRequestURI(sm message.SetupMessage) (string, bool) {
+	path, _ := sm.Path()
+	switch {
+	case path == "":
+		return "/", true
+	case path[0] == '?':
+		return "/" + path, true
+	case path[0] == '/':
+		return path, true
+	default:
+		return "", false
+	}
 }
 
 // readClientSetup reads the client's mandatory Setup Stream (the first uni

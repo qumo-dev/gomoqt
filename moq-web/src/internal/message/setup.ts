@@ -9,12 +9,18 @@ import {
 } from "./message.ts";
 import { varintLen } from "../webtransport/len.ts";
 
-/** Setup Parameter IDs defined by moq-lite-05. */
+/** Setup Parameter IDs defined by moq-lite-06. */
 export const SetupParamIDs = {
 	/** Probe capability level advertisement. */
 	Probe: 0x1,
-	/** Request path for bindings without a request URI. */
+	/** Request path (and query) for bindings without a request URI. */
 	Path: 0x2,
+	/** The client's intended direction; only a client sends it. */
+	Role: 0x3,
+	/** What subscribing from the sender costs (absent means {@link DEFAULT_COST}). */
+	Cost: 0x4,
+	/** The sender's Hop ID (absent or 0 means no identity). */
+	Hop: 0x5,
 	/**
 	 * Advertises that the sender follows SUBSCRIBE_REDIRECT, a gomoqt
 	 * extension. Its value is the newest version the sender understands, as a
@@ -22,6 +28,26 @@ export const SetupParamIDs = {
 	 */
 	Redirect: 0x7d01,
 } as const;
+
+/**
+ * The Cost an absent Cost parameter declares: one unit per link, under which
+ * accumulated Route Costs equal the hop count.
+ */
+export const DEFAULT_COST = 1;
+
+/** Reads a value that must be exactly one varint, or undefined if malformed. */
+function exactVarint(value: Uint8Array): number | undefined {
+	if (value.length === 0) return undefined;
+	const [v, n] = parseVarint(value, 0);
+	if (n !== value.length || Number.isNaN(v)) return undefined;
+	return v;
+}
+
+function varintParam(id: number, v: number): SetupParameter {
+	const value = new Uint8Array(varintLen(v));
+	putVarint(value, 0, v);
+	return { id, value };
+}
 
 /**
  * Probe capability levels carried by the Probe Setup Parameter.
@@ -71,7 +97,49 @@ export class SetupMessage {
 		this.parameters.push({ id: SetupParamIDs.Probe, value });
 	}
 
-	/** Appends a Path parameter carrying the request path. */
+	/** Appends a Cost parameter declaring what subscribing from the sender costs. */
+	addCost(cost: number): void {
+		this.parameters.push(varintParam(SetupParamIDs.Cost, cost));
+	}
+
+	/**
+	 * Returns the declared Cost, or {@link DEFAULT_COST} when absent or
+	 * malformed. A declared 0 (a free link) is returned as is.
+	 */
+	cost(): number {
+		for (const p of this.parameters) {
+			if (p.id === SetupParamIDs.Cost) {
+				return exactVarint(p.value) ?? DEFAULT_COST;
+			}
+		}
+		return DEFAULT_COST;
+	}
+
+	/** Appends a Hop parameter declaring the sender's Hop ID. */
+	addHop(hopId: number): void {
+		this.parameters.push(varintParam(SetupParamIDs.Hop, hopId));
+	}
+
+	/** Returns the declared Hop ID, or 0 (no identity) when absent or malformed. */
+	hopId(): number {
+		for (const p of this.parameters) {
+			if (p.id === SetupParamIDs.Hop) {
+				return exactVarint(p.value) ?? 0;
+			}
+		}
+		return 0;
+	}
+
+	/** Reports whether the parameter with the given ID is present. */
+	has(id: number): boolean {
+		return this.parameters.some((p) => p.id === id);
+	}
+
+	/**
+	 * Appends a Path parameter carrying the request target: the path, then "?"
+	 * and the query when there is one. An empty value asks for the server's
+	 * default path, as omitting it does.
+	 */
 	addPath(path: string): void {
 		this.parameters.push({
 			id: SetupParamIDs.Path,

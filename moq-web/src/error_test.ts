@@ -30,16 +30,16 @@ Deno.test("Error", async (t) => {
 			"protocol violation",
 		);
 		assertEquals(
-			SessionError.textOf(SessionErrorCode.DuplicateTrackAlias),
-			"duplicate track alias",
+			SessionError.textOf(SessionErrorCode.KeyValueFormattingError),
+			"key-value formatting error",
 		);
 		assertEquals(
-			SessionError.textOf(SessionErrorCode.ParameterLengthMismatch),
-			"parameter length mismatch",
+			SessionError.textOf(SessionErrorCode.ControlMessageTimeout),
+			"control message timeout",
 		);
 		assertEquals(
-			SessionError.textOf(SessionErrorCode.TooManySubscribers),
-			"too many subscribers",
+			SessionError.textOf(SessionErrorCode.VersionNegotiationFailed),
+			"version negotiation failed",
 		);
 		assertEquals(
 			SessionError.textOf(SessionErrorCode.GoAwayTimeout),
@@ -53,14 +53,6 @@ Deno.test("Error", async (t) => {
 		assertEquals(
 			AnnounceError.textOf(AnnounceErrorCode.InternalError),
 			"internal error",
-		);
-		assertEquals(
-			AnnounceError.textOf(AnnounceErrorCode.DuplicatedAnnounce),
-			"duplicated announce",
-		);
-		assertEquals(
-			AnnounceError.textOf(AnnounceErrorCode.InvalidAnnounceStatus),
-			"invalid announce status",
 		);
 		assertEquals(
 			AnnounceError.textOf(AnnounceErrorCode.Uninterested),
@@ -111,7 +103,9 @@ Deno.test("Error", async (t) => {
 			GroupError.textOf(GroupErrorCode.InternalError),
 			"internal error",
 		);
-		assertEquals(GroupError.textOf(GroupErrorCode.OutOfRange), "out of range");
+		assertEquals(GroupError.textOf(GroupErrorCode.NotFound), "not found");
+		assertEquals(GroupError.textOf(GroupErrorCode.Old), "old group");
+		assertEquals(GroupError.textOf(GroupErrorCode.InvalidRange), "invalid range");
 		assertEquals(
 			GroupError.textOf(GroupErrorCode.ExpiredGroup),
 			"expired group",
@@ -121,16 +115,8 @@ Deno.test("Error", async (t) => {
 			"subscribe canceled",
 		);
 		assertEquals(
-			GroupError.textOf(GroupErrorCode.PublishAborted),
-			"publish aborted",
-		);
-		assertEquals(
 			GroupError.textOf(GroupErrorCode.ClosedSession),
 			"closed session",
-		);
-		assertEquals(
-			GroupError.textOf(GroupErrorCode.InvalidSubscribeID),
-			"invalid subscribe id",
 		);
 		assertEquals(GroupError.textOf(GroupErrorCode.Unauthorized), "unauthorized");
 		assertEquals(GroupError.textOf(9999), "unknown group error (9999)");

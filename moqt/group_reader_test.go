@@ -104,7 +104,7 @@ func TestReceiveGroupStream_CancelRead(t *testing.T) {
 			withManager: false,
 		},
 		"out of range error without manager": {
-			errorCode:   OutOfRangeErrorCode,
+			errorCode:   NotFoundGroupErrorCode,
 			withManager: false,
 		},
 		"expired group error without manager": {

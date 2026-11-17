@@ -10,7 +10,7 @@ import (
 func TestBroadcast_RegisterWithInfo_AndTrackInfo(t *testing.T) {
 	b := NewBroadcast()
 
-	info := PublishInfo{Priority: 7, Ordered: true, MaxLatency: 500, Timescale: 48000}
+	info := PublishInfo{Priority: 7, MaxAge: 500, Timescale: 48000}
 	require.NoError(t, b.RegisterWithInfo("audio", info, TrackHandlerFunc(func(*TrackWriter) {})))
 	require.NoError(t, b.Register("video", TrackHandlerFunc(func(*TrackWriter) {})))
 

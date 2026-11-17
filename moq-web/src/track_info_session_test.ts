@@ -9,8 +9,7 @@ async function trackInfoBytes(timescale: number): Promise<Uint8Array> {
 	const buf = Buffer.make(128);
 	await new TrackInfoMessage({
 		publisherPriority: 5,
-		publisherOrdered: 1,
-		publisherMaxLatency: 2000,
+		publisherMaxAge: 2000,
 		timescale,
 	}).encode(buf);
 	return buf.bytes();
@@ -26,8 +25,7 @@ Deno.test("Session.trackInfo returns parsed publisher properties", async () => {
 	assertEquals(err, undefined);
 	assertExists(info);
 	assertEquals(info!.priority, 5);
-	assertEquals(info!.ordered, true);
-	assertEquals(info!.maxLatency, 2000);
+	assertEquals(info!.maxAge, 2000);
 	assertEquals(info!.timescale, 90000);
 
 	// The request must be a Track stream: first written byte is TrackStreamType.

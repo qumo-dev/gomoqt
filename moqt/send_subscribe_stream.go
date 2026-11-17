@@ -32,7 +32,8 @@ type sendSubscribeStream struct {
 	resolvedStart GroupSequence
 	okReceived    bool
 
-	// endGroup is the last group that may be delivered, from SUBSCRIBE_END.
+	// endGroup is the exclusive end from SUBSCRIBE_END: the first group that
+	// will never be delivered.
 	endGroup GroupSequence
 	ended    bool
 	// endCh is closed when SUBSCRIBE_END arrives, and closedCh when the
@@ -105,12 +106,7 @@ type subscribeResponse struct {
 }
 
 func readSubscribeResponse(stream io.Reader) (subscribeResponse, error) {
-	head := make([]byte, 1)
-	if _, err := io.ReadFull(stream, head); err != nil {
-		return subscribeResponse{}, err
-	}
-
-	msgType, _, err := message.ReadVarint(head)
+	msgType, err := message.ReadMessageType(stream)
 	if err != nil {
 		return subscribeResponse{}, err
 	}
@@ -172,6 +168,14 @@ func (substr *sendSubscribeStream) resolvedStartGroup() GroupSequence {
 	return substr.resolvedStart
 }
 
+// resolvedStartOK returns the absolute start group resolved by SUBSCRIBE_OK
+// and whether SUBSCRIBE_OK has arrived.
+func (substr *sendSubscribeStream) resolvedStartOK() (GroupSequence, bool) {
+	substr.mu.Lock()
+	defer substr.mu.Unlock()
+	return substr.resolvedStart, substr.okReceived
+}
+
 // ended reports whether the publisher signaled SUBSCRIBE_END.
 func (substr *sendSubscribeStream) hasEnded() bool {
 	substr.mu.Lock()
@@ -191,8 +195,8 @@ func (substr *sendSubscribeStream) setEnd(seq GroupSequence) {
 	close(substr.endCh)
 }
 
-// end returns the last group the publisher will deliver, once SUBSCRIBE_END
-// has arrived.
+// end returns the exclusive end of the range the publisher will deliver,
+// once SUBSCRIBE_END has arrived.
 func (substr *sendSubscribeStream) end() (GroupSequence, bool) {
 	substr.mu.Lock()
 	defer substr.mu.Unlock()
@@ -201,23 +205,16 @@ func (substr *sendSubscribeStream) end() (GroupSequence, bool) {
 
 func (substr *sendSubscribeStream) updateSubscribe(newConfig *SubscribeConfig) error {
 	if newConfig == nil {
-		// TODO: Handle nil config case if necessary (e.g., return an error, ignore the update, etc.)
 		return nil
 	}
 
 	// Send the message first before updating config
-	ordered := boolToWireFlag(newConfig.Ordered)
-
-	groupStart := groupSequenceToWire(newConfig.StartGroup)
-
-	groupEnd := groupSequenceToWire(newConfig.EndGroup)
-
+	groupStart, groupEnd := subscribeRangeToWire(newConfig)
 	sum := message.SubscribeUpdateMessage{
-		SubscriberPriority:   uint8(newConfig.Priority),
-		SubscriberOrdered:    ordered,
-		SubscriberMaxLatency: newConfig.MaxLatency,
-		GroupStart:           groupStart,
-		GroupEnd:             groupEnd,
+		SubscriberPriority: uint8(newConfig.Priority),
+		SubscriberMaxAge:   newConfig.MaxAge,
+		GroupStart:         groupStart,
+		GroupEnd:           groupEnd,
 	}
 	err := sum.Encode(substr.stream)
 	if err != nil {

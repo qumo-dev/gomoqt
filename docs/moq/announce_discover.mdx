@@ -53,5 +53,5 @@ for {
 <Note>
 **Note: Loop Avoidance**
 
-When `AcceptAnnounce` is called, the `TrackMux`'s hop ID is automatically sent as `ExcludeHop` in the ANNOUNCE_REQUEST message. This prevents announcement loops in relay topologies. See [Relay — Hop ID and Loop Avoidance](/moq/relay#hop-id-and-loop-avoidance) for details.
+A `TrackMux` with a hop ID declares it in the session's SETUP (the Hop parameter). The peer never advertises a path through that hop, and an announcement that loops back through it anyway is discarded on arrival. This prevents announcement loops in relay topologies. See [Relay — Hop ID and Loop Avoidance](/moq/relay#hop-id-and-loop-avoidance) for details.
 </Note>

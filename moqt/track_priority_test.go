@@ -111,23 +111,11 @@ func TestUrgencyFor(t *testing.T) {
 			wantUrgency:     4,
 			wantIncremental: true,
 		},
-		"ordered asks for non-incremental scheduling": {
-			priority:        128,
-			ordered:         true,
-			wantUrgency:     4,
-			wantIncremental: false,
-		},
-		"ordering does not disturb the urgency mapping": {
-			priority:        255,
-			ordered:         true,
-			wantUrgency:     0,
-			wantIncremental: false,
-		},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			urgency, incremental := urgencyFor(tt.priority, tt.ordered)
+			urgency, incremental := urgencyFor(tt.priority)
 			assert.Equal(t, tt.wantUrgency, urgency)
 			assert.Equal(t, tt.wantIncremental, incremental)
 		})
@@ -138,9 +126,9 @@ func TestUrgencyFor_MonotonicWithPriority(t *testing.T) {
 	// Higher TrackPriority (more important) must never produce a higher
 	// (less important) urgency than a lower TrackPriority, across the full
 	// range including the 0/1 boundary.
-	prevUrgency, _ := urgencyFor(0, false)
+	prevUrgency, _ := urgencyFor(0)
 	for p := 1; p <= 255; p++ {
-		urgency, _ := urgencyFor(TrackPriority(p), false)
+		urgency, _ := urgencyFor(TrackPriority(p))
 		assert.LessOrEqual(t, urgency, prevUrgency)
 		prevUrgency = urgency
 	}

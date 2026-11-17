@@ -66,3 +66,18 @@ Deno.test("GoawayMessage - encode/decode roundtrip - multiple scenarios", async 
 		},
 	);
 });
+
+Deno.test("GoawayMessage decodes a URI whose length uses a longer varint", async () => {
+	const uri = "a".repeat(8191);
+	// Message length 8195 (2-byte varint), then 8191 in the 4-byte varint form.
+	const head = new Uint8Array([0x60, 0x03, 0x80, 0x00, 0x1f, 0xff]);
+	const buffer = Buffer.make(head.length + uri.length);
+	await buffer.write(head);
+	await buffer.write(new TextEncoder().encode(uri));
+	const message = new GoawayMessage({});
+
+	const err = await message.decode(buffer);
+
+	assertEquals(err, undefined);
+	assertEquals(message.newSessionURI, uri);
+});

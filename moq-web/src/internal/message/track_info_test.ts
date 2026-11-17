@@ -6,14 +6,12 @@ Deno.test("TrackInfoMessage - encode/decode roundtrip", async (t) => {
 	const testCases = {
 		"millisecond timescale": {
 			publisherPriority: 5,
-			publisherOrdered: 1,
-			publisherMaxLatency: 2000,
+			publisherMaxAge: 2000,
 			timescale: 1000,
 		},
 		"rtp video clock": {
 			publisherPriority: 128,
-			publisherOrdered: 0,
-			publisherMaxLatency: 0,
+			publisherMaxAge: 0,
 			timescale: 90000,
 		},
 	};
@@ -27,8 +25,7 @@ Deno.test("TrackInfoMessage - encode/decode roundtrip", async (t) => {
 			const decoded = new TrackInfoMessage({});
 			assertEquals(await decoded.decode(buffer), undefined);
 			assertEquals(decoded.publisherPriority, input.publisherPriority);
-			assertEquals(decoded.publisherOrdered, input.publisherOrdered);
-			assertEquals(decoded.publisherMaxLatency, input.publisherMaxLatency);
+			assertEquals(decoded.publisherMaxAge, input.publisherMaxAge);
 			assertEquals(decoded.timescale, input.timescale);
 		});
 	}
