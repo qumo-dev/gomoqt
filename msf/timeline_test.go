@@ -434,3 +434,63 @@ func TestTemplate_Clone_RoundTrip(t *testing.T) {
 	clone.DeltaMediaTime = 999
 	assert.Equal(t, int64(2), tmpl.DeltaMediaTime, "original must not be mutated")
 }
+
+func TestValidateMediaTimeline(t *testing.T) {
+	entry := func(mediaTime int64, group uint64) MediaTimelineEntry {
+		return MediaTimelineEntry{MediaTime: mediaTime, Location: Location{GroupID: group}}
+	}
+
+	tests := map[string]struct {
+		entries []MediaTimelineEntry
+		wantErr bool
+	}{
+		"empty":                        {},
+		"ordered":                      {entries: []MediaTimelineEntry{entry(0, 0), entry(2002, 1), entry(4004, 2)}},
+		"sparse non-sequential groups": {entries: []MediaTimelineEntry{entry(0, 7), entry(2002, 3), entry(9000, 40)}},
+		"equal media times":            {entries: []MediaTimelineEntry{entry(0, 0), entry(0, 1)}},
+		"out of order":                 {entries: []MediaTimelineEntry{entry(2002, 1), entry(0, 0)}, wantErr: true},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := ValidateMediaTimeline(tt.entries)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestEventTimelineRecord_Draft02Keys(t *testing.T) {
+	tests := map[string]struct {
+		input   string
+		wantErr bool
+	}{
+		"wallclock index":         {input: `{"T":1756885678361,"data":{"homeScore":2}}`},
+		"location index":          {input: `{"L":[1,0],"data":[47.1662,8.5155]}`},
+		"media time index":        {input: `{"M":23051,"data":"text"}`},
+		"null data":               {input: `{"M":1,"data":null}`},
+		"number data":             {input: `{"M":1,"data":42}`},
+		"lowercase key is legacy": {input: `{"t":1,"data":{}}`, wantErr: true},
+		"missing data":            {input: `{"T":1}`, wantErr: true},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			var record EventTimelineRecord
+			require.NoError(t, json.Unmarshal([]byte(tt.input), &record))
+			err := record.Validate()
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+
+			data, err := json.Marshal(record)
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.input, string(data))
+		})
+	}
+}

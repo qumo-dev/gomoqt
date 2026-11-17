@@ -183,6 +183,9 @@ func (d CatalogDelta) Validate() error {
 // ParseCatalog it rejects documents that begin with a byte order mark, are not
 // UTF-8, or contain an unpaired surrogate escape.
 func ParseCatalogDelta(data []byte) (CatalogDelta, error) {
+	if err := checkNoBOM(data); err != nil {
+		return CatalogDelta{}, err
+	}
 	var delta CatalogDelta
 	if err := json.Unmarshal(data, &delta); err != nil {
 		return CatalogDelta{}, err

@@ -83,8 +83,8 @@ func validateNameText(s string) error {
 // a Go string cannot carry an unpaired surrogate, so the decoder cannot
 // preserve such a value in any field.
 func checkCatalogText(data []byte) error {
-	if bytes.HasPrefix(data, utf8BOM) {
-		return errors.New("msf: catalog must not begin with a byte order mark")
+	if err := checkNoBOM(data); err != nil {
+		return err
 	}
 	if !utf8.Valid(data) {
 		return errors.New("msf: catalog is not valid UTF-8")
@@ -119,6 +119,15 @@ func checkCatalogText(data []byte) error {
 		default:
 			i += 5
 		}
+	}
+	return nil
+}
+
+// checkNoBOM rejects a catalog document that begins with a byte order mark
+// (draft-ietf-moq-msf-02 §11.2.1).
+func checkNoBOM(data []byte) error {
+	if bytes.HasPrefix(data, utf8BOM) {
+		return errors.New("msf: catalog must not begin with a byte order mark")
 	}
 	return nil
 }

@@ -82,6 +82,9 @@ func (d *Dependency) UnmarshalJSON(data []byte) error {
 	if len(data) > 0 && data[0] == '"' {
 		return json.Unmarshal(data, &d.TrackName)
 	}
+	if bytes.Equal(data, []byte("null")) {
+		return errors.New("msf: depends entry must be a track name string or a renderGroup integer, not null")
+	}
 	var group int64
 	if err := json.Unmarshal(data, &group); err != nil {
 		return fmt.Errorf("msf: depends entry must be a track name string or a renderGroup integer: %w", err)

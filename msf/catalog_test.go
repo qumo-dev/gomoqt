@@ -2234,3 +2234,328 @@ func TestAccessibilityDescriptor_RoundTrip(t *testing.T) {
 	assert.Equal(t, "708", decoded.Value)
 	assert.Contains(t, decoded.ExtraFields, "channel")
 }
+
+// --- draft-02 validation rules ----------------------------------------------
+
+func TestCatalogValidate_Version(t *testing.T) {
+	tests := map[string]struct {
+		version  string
+		errMatch string
+	}{
+		"current":        {version: CurrentVersion},
+		"missing":        {version: "", errMatch: "catalog version is required"},
+		"previous draft": {version: "draft-01", errMatch: `unsupported catalog version "draft-01"`},
+		"numeric":        {version: "1", errMatch: "unsupported catalog version"},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := Catalog{Version: tt.version}.Validate()
+			if tt.errMatch == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errMatch)
+		})
+	}
+}
+
+func TestCatalogValidate_RequiredFieldsPerPackagingAndRole(t *testing.T) {
+	tests := map[string]struct {
+		track   Track
+		missing []string
+	}{
+		"loc audio":            {track: Track{Packaging: PackagingLOC, Role: RoleAudio}, missing: []string{"codec", "bitrate", "samplerate", "channelConfig"}},
+		"loc video":            {track: Track{Packaging: PackagingLOC, Role: RoleVideo}, missing: []string{"codec", "bitrate", "framerate"}},
+		"loc audiodescription": {track: Track{Packaging: PackagingLOC, Role: RoleAudioDescription}, missing: []string{"codec", "samplerate", "channelConfig", "lang"}},
+		"loc signlanguage":     {track: Track{Packaging: PackagingLOC, Role: RoleSignLanguage}, missing: []string{"codec", "framerate"}},
+		"loc without role":     {track: Track{Packaging: PackagingLOC}},
+		"loc caption":          {track: Track{Packaging: PackagingLOC, Role: RoleCaption}},
+		"loc data":             {track: Track{Packaging: PackagingLOC, Role: RoleData}},
+		"complete loc audio": {
+			track: Track{Packaging: PackagingLOC, Role: RoleAudio, Codec: "opus", Bitrate: new(int64(32000)), SampleRate: new(int64(48000)), ChannelConfig: "2"},
+		},
+		"catalog reference": {track: Track{Packaging: PackagingCatalog}},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			track := tt.track
+			track.Name = "track"
+			track.IsLive = new(true)
+
+			var want []string
+			for _, field := range tt.missing {
+				want = append(want, field+" is required for loc tracks with role "+string(track.Role))
+			}
+			assert.Equal(t, want, track.validate(trackListTracks))
+		})
+	}
+}
+
+func TestTrackValidate_Draft02Rules(t *testing.T) {
+	tests := map[string]struct {
+		track    Track
+		list     trackList
+		errMatch string
+	}{
+		"empty namespace field": {
+			track:    Track{Namespace: "live//demo", Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+			errMatch: "contains an empty field",
+		},
+		"NUL in name": {
+			track:    Track{Name: "vi\x00deo", Packaging: PackagingLOC, IsLive: new(true)},
+			errMatch: "contains a NUL character",
+		},
+		"targetLatency with buffers": {
+			track:    Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true), TargetLatency: new(int64(1)), Buffers: &Buffers{}},
+			errMatch: "targetLatency and buffers must not both be present",
+		},
+		"bad packagingMetadata": {
+			track:    Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true), PackagingMetadata: "streamMapping=frame"},
+			errMatch: "streamMapping",
+		},
+		"empty depends entry": {
+			track:    Track{Name: "timeline", Packaging: PackagingMediaTimeline, IsLive: new(true), Depends: []Dependency{{}}},
+			errMatch: "depends[0]: depends entry must not be an empty track name",
+		},
+		"mediatimeline with template": {
+			track:    Track{Name: "timeline", Packaging: PackagingMediaTimeline, IsLive: new(true), Depends: []Dependency{DependsOnTrack("v")}, Template: &Template{}},
+			errMatch: "mediatimeline tracks must not also carry a template",
+		},
+		"moqlog in tracks": {
+			track:    Track{Name: "6", Packaging: PackagingMoqLog, Role: RoleLog, IsLive: new(true)},
+			list:     trackListTracks,
+			errMatch: "moqlog tracks must be declared in publishTracks",
+		},
+		"moqlog without role": {
+			track:    Track{Name: "6", Packaging: PackagingMoqLog, IsLive: new(true)},
+			list:     trackListPublishTracks,
+			errMatch: "moqlog tracks must have role log",
+		},
+		"moqmetrics binary level name": {
+			track:    Track{Name: "\x04", Packaging: PackagingMoqMetrics, Role: RoleMetrics, IsLive: new(true)},
+			list:     trackListPublishTracks,
+			errMatch: `moqmetrics track name must be a level from "0" to "7"`,
+		},
+		"moqmetrics level out of range": {
+			track:    Track{Name: "8", Packaging: PackagingMoqMetrics, Role: RoleMetrics, IsLive: new(true)},
+			list:     trackListPublishTracks,
+			errMatch: "moqmetrics track name must be a level",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			problems := tt.track.validate(tt.list)
+			require.NotEmpty(t, problems)
+			assert.Contains(t, strings.Join(problems, "; "), tt.errMatch)
+		})
+	}
+}
+
+func TestTrackValidate_ExplicitEmptyNamespace(t *testing.T) {
+	var track Track
+	require.NoError(t, json.Unmarshal([]byte(`{"namespace":"","name":"video","packaging":"loc","isLive":true}`), &track))
+
+	assert.Equal(t, []string{"namespace must not be empty"}, track.validate(trackListTracks))
+}
+
+func TestTrackValidate_ParentFieldsOnlyInCloneOrUpdate(t *testing.T) {
+	catalog, err := ParseCatalogString(`{"version":"draft-02","tracks":[
+		{"name":"video","packaging":"loc","isLive":true,"parentName":"x","parentNamespace":"y"}]}`)
+	require.NoError(t, err)
+
+	err = catalog.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parentName must only appear in a clone or update operation")
+	assert.Contains(t, err.Error(), "parentNamespace must only appear in a clone or update operation")
+}
+
+// TestCatalogValidate_PublishTracksSpecExample uses the catalog of
+// draft-ietf-moq-msf-02 §5.6.17, after variable substitution.
+func TestCatalogValidate_PublishTracksSpecExample(t *testing.T) {
+	catalog, err := ParseCatalogString(`{
+		"version": "draft-02",
+		"generatedAt": 1746104606044,
+		"tracks": [{
+			"name": "video", "namespace": "broadcast.example.com/live/stream1", "packaging": "loc",
+			"isLive": true, "targetLatency": 2000, "role": "video", "renderGroup": 1,
+			"codec": "av01.0.08M.10.0.110.09", "width": 1920, "height": 1080, "framerate": 30, "bitrate": 1500000
+		}],
+		"publishTracks": [
+			{"namespace": "metrics.moq.arpa/metrics-v1/r1", "name": "4", "isLive": true,
+			 "packaging": "moqmetrics", "role": "metrics", "authInfo": {"cat": "eyJ"}},
+			{"namespace": "moq-syslog.arpa/logs-v1/r1", "name": "6", "isLive": true, "packaging": "moqlog",
+			 "role": "log", "connectionURI": "moqt://logs.example.com:4443", "authInfo": {"cat": "eyJ"}}
+		]
+	}`)
+	require.NoError(t, err)
+	require.NoError(t, catalog.Validate())
+	assert.Equal(t, "moqt://logs.example.com:4443", catalog.PublishTracks[1].ConnectionURI)
+	assert.Contains(t, catalog.PublishTracks[0].AuthInfo, "cat")
+}
+
+func TestCatalogValidate_Dependencies(t *testing.T) {
+	video := Track{Name: "video", Packaging: PackagingLOC, IsLive: new(true), RenderGroup: new(int64(1))}
+	timeline := func(deps ...Dependency) Track {
+		return Track{Name: "timeline", Packaging: PackagingMediaTimeline, IsLive: new(true), Depends: deps}
+	}
+
+	tests := map[string]struct {
+		tracks        []Track
+		publishTracks []Track
+		errMatch      string
+	}{
+		"track name resolves":   {tracks: []Track{video, timeline(DependsOnTrack("video"))}},
+		"render group resolves": {tracks: []Track{video, timeline(DependsOnRenderGroup(1))}},
+		"publish track depends on a media track": {
+			tracks:        []Track{video},
+			publishTracks: []Track{{Name: "events", Packaging: PackagingEventTimeline, EventType: "com.example.e", IsLive: new(true), Depends: []Dependency{DependsOnTrack("video")}}},
+		},
+		"unknown track name": {
+			tracks:   []Track{video, timeline(DependsOnTrack("audio"))},
+			errMatch: `tracks[1]: depends[0]: track name "audio" does not match any other track`,
+		},
+		"self reference": {
+			tracks:   []Track{video, timeline(DependsOnTrack("timeline"))},
+			errMatch: `track name "timeline" does not match any other track`,
+		},
+		"ambiguous track name": {
+			tracks: []Track{
+				video,
+				{Namespace: "other/ns", Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+				timeline(DependsOnTrack("video")),
+			},
+			errMatch: `track name "video" matches 2 tracks; it must match exactly one`,
+		},
+		"unknown render group": {
+			tracks:   []Track{video, timeline(DependsOnRenderGroup(2))},
+			errMatch: "tracks[1]: depends[0]: renderGroup 2 does not match any track",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := Catalog{Version: CurrentVersion, Tracks: tt.tracks, PublishTracks: tt.publishTracks}.Validate()
+			if tt.errMatch == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errMatch)
+		})
+	}
+}
+
+func TestCatalogValidate_AccessibleWindowTimeMatchesAcrossAltGroup(t *testing.T) {
+	track := func(name string, altGroup int64, window *int64) Track {
+		return Track{Name: name, Packaging: PackagingLOC, IsLive: new(true), AltGroup: new(altGroup), AccessibleWindowTime: window}
+	}
+
+	tests := map[string]struct {
+		tracks  []Track
+		wantErr bool
+	}{
+		"same window":              {tracks: []Track{track("a", 1, new(int64(30000))), track("b", 1, new(int64(30000)))}},
+		"different alt groups":     {tracks: []Track{track("a", 1, new(int64(30000))), track("b", 2, new(int64(60000)))}},
+		"both absent":              {tracks: []Track{track("a", 1, nil), track("b", 1, nil)}},
+		"different windows":        {tracks: []Track{track("a", 1, new(int64(30000))), track("b", 1, new(int64(60000)))}, wantErr: true},
+		"one absent and one set":   {tracks: []Track{track("a", 1, nil), track("b", 1, new(int64(60000)))}, wantErr: true},
+		"third track of the group": {tracks: []Track{track("a", 1, new(int64(1))), track("b", 1, new(int64(1))), track("c", 1, new(int64(2)))}, wantErr: true},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := Catalog{Version: CurrentVersion, Tracks: tt.tracks}.Validate()
+			if !tt.wantErr {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "accessibleWindowTime must match the other tracks of altGroup 1")
+		})
+	}
+}
+
+func TestCatalogValidate_InitDataListTypes(t *testing.T) {
+	tests := map[string]struct {
+		ref      InitDataRef
+		errMatch string
+	}{
+		"inline":                    {ref: InitDataRef{ID: "i", Type: InitDataTypeInline, Data: "AAAA"}},
+		"track property":            {ref: InitDataRef{ID: "i", Type: InitDataTypeTrackProperty, Data: "0x0D"}},
+		"object property":           {ref: InitDataRef{ID: "i", Type: InitDataTypeObjectProperty, Data: "0F"}},
+		"property type not hex":     {ref: InitDataRef{ID: "i", Type: InitDataTypeTrackProperty, Data: "video"}, errMatch: `initDataList[0]: data "video" must be a property type in hex notation`},
+		"unknown type":              {ref: InitDataRef{ID: "i", Type: "url", Data: "x"}, errMatch: `initDataList[0]: type "url" must be`},
+		"empty type stays accepted": {ref: InitDataRef{ID: "i", Data: "AAAA"}},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			catalog := Catalog{
+				Version:      CurrentVersion,
+				Tracks:       []Track{{Name: "video", Packaging: PackagingLOC, IsLive: new(true), InitRef: "i"}},
+				InitDataList: []InitDataRef{tt.ref},
+			}
+			err := catalog.Validate()
+			if tt.errMatch == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errMatch)
+		})
+	}
+}
+
+func TestCatalogValidate_FullTrackNameUniqueness(t *testing.T) {
+	tests := map[string]struct {
+		tracks  []Track
+		wantErr bool
+	}{
+		"same name in different namespaces": {
+			tracks: []Track{
+				{Namespace: "a/b", Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+				{Namespace: "a/c", Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+			},
+		},
+		"declared namespace replaces the inherited one": {
+			tracks: []Track{
+				{Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+				{Namespace: "live", Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+			},
+		},
+		"declared namespace equal to the inherited one": {
+			tracks: []Track{
+				{Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+				{Namespace: "catalog-ns", Name: "video", Packaging: PackagingLOC, IsLive: new(true)},
+			},
+			wantErr: true,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := Catalog{Version: CurrentVersion, DefaultNamespace: "catalog-ns", Tracks: tt.tracks}.Validate()
+			if !tt.wantErr {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "duplicate track identity")
+		})
+	}
+}
+
+// TestCatalogMarshalJSON_EmptyTracksIsAnArray uses the terminating catalog of
+// draft-ietf-moq-msf-02 §5.6.13.
+func TestCatalogMarshalJSON_EmptyTracksIsAnArray(t *testing.T) {
+	generatedAt := int64(1746104606044)
+	catalog := Catalog{Version: CurrentVersion, GeneratedAt: &generatedAt, IsComplete: true}
+
+	data, err := json.Marshal(catalog)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"version":"draft-02","generatedAt":1746104606044,"isComplete":true,"tracks":[]}`, string(data))
+}

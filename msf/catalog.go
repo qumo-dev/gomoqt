@@ -658,6 +658,11 @@ func (c Catalog) hasInheritedNamespaceTracks() bool {
 // (draft-ietf-moq-msf-02 §11.2.1). Validation must be performed separately if
 // desired.
 func ParseCatalog(data []byte) (Catalog, error) {
+	// The JSON decoder rejects a leading BOM before UnmarshalJSON runs, with
+	// a less helpful message.
+	if err := checkNoBOM(data); err != nil {
+		return Catalog{}, err
+	}
 	var catalog Catalog
 	if err := json.Unmarshal(data, &catalog); err != nil {
 		return Catalog{}, err
