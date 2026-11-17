@@ -30,6 +30,12 @@ sends neutral defaults and leaves route selection to the relay.
   refuses a request for a covered path it does not publish (NOT_FOUND), which
   section 3.2 allows.
 
+Frame positions (Section 3.6) are handled internally, with no public API.
+gomoqt always requests whole groups: it sends Frame Start and Frame End as 0
+on SUBSCRIBE, SUBSCRIBE_UPDATE and FETCH. It serves a peer's frame-bounded
+SUBSCRIBE or FETCH correctly: the start and end groups go out partially, with
+GROUP's Frame Start set, and a range that breaks Section 3.6 or 7.16 is reset.
+
 Stream error codes gomoqt needs and moq-lite does not define are assigned in
 the application range: 0x40 unauthorized, 0x41 protocol violation (a range or
 frame rule broken on a stream), 0x42 duplicate Subscribe ID, 0x43 invalid

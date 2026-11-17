@@ -186,12 +186,6 @@ export class GroupWriter {
 export class GroupReader {
 	/** The group sequence number. */
 	readonly sequence: GroupSequence;
-	/**
-	 * Index within the group of the first frame on this stream. It is 0 unless
-	 * the group arrived partially: a subscription that asked to start partway
-	 * into it, or a fetch of a frame range. Earlier frames are not here.
-	 */
-	readonly frameStart: number;
 	#reader: ReceiveStream;
 	readonly context: Context;
 	#cancelFunc: CancelCauseFunc;
@@ -209,7 +203,10 @@ export class GroupReader {
 		onDone?: () => void,
 	) {
 		this.sequence = group.sequence;
-		this.frameStart = group.frameStart;
+		// The GROUP message's Frame Start (moq-lite-06 §7.19) is not kept: this
+		// endpoint only asks for whole groups, so it is 0 from a conforming
+		// peer. A future resume partway into a group would keep it here to
+		// number the frames the stream delivers.
 		this.#reader = reader;
 		this.#onDone = onDone;
 		[this.context, this.#cancelFunc] = withCancelCause(trackCtx);

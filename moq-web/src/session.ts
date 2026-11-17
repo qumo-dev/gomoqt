@@ -38,7 +38,7 @@ import {
 	SendSubscribeStream,
 } from "./subscribe_stream.ts";
 import type { TrackConfig } from "./subscribe_stream.ts";
-import { trackRangeToWire, validateTrackConfig } from "./subscribe_stream.ts";
+import { trackRangeToWire } from "./subscribe_stream.ts";
 import { type BroadcastPath, validateBroadcastPath } from "./broadcast_path.ts";
 import { TrackReader } from "./track_reader.ts";
 import { TrackWriter } from "./track_writer.ts";
@@ -593,12 +593,6 @@ export class Session {
 		config: TrackConfig | undefined,
 		via: Redirect[],
 	): Promise<[TrackReader, undefined] | [undefined, Error]> {
-		if (config) {
-			const invalid = validateTrackConfig(config);
-			if (invalid) {
-				return [undefined, invalid];
-			}
-		}
 		const subscribeId = this.#subscribeIDCounter++;
 		// Check for subscribe ID collision
 		if (this.#queues.has(subscribeId)) {
@@ -749,10 +743,6 @@ export class Session {
 	async fetch(
 		req: FetchRequest,
 	): Promise<[GroupReader, undefined] | [undefined, Error]> {
-		const invalid = req.validate();
-		if (invalid) {
-			return [undefined, invalid];
-		}
 		const [stream, openErr] = await this.#webtransport.openStream();
 		if (openErr) {
 			console.error("moq: failed to open fetch stream:", openErr);
@@ -775,8 +765,6 @@ export class Session {
 			trackName: req.trackName,
 			priority: req.priority,
 			groupSequence: req.groupSequence,
-			frameStart: req.frameStart,
-			frameEnd: req.frameEnd,
 		});
 		err = await msg.encode(stream.writable);
 		if (err) {
@@ -787,8 +775,8 @@ export class Session {
 		const group = new GroupReader(
 			this.#ctx,
 			stream.readable,
-			// The first returned frame is implicit from the request.
-			new GroupMessage({ sequence: req.groupSequence, frameStart: req.frameStart }),
+			// A fetch asks for the whole group, so it starts at frame 0.
+			new GroupMessage({ sequence: req.groupSequence }),
 		);
 
 		// Cancel the group when the request is done
@@ -1021,7 +1009,7 @@ export class Session {
 		}
 
 		const subscribeStream = new ReceiveSubscribeStream(this.#ctx, stream, req);
-		if (validateTrackConfig(subscribeStream.trackConfig)) {
+		if (subscribeStream.validateRange()) {
 			// moq-lite-06 §3.6: a protocol violation that resets the stream.
 			await subscribeStream.closeWithError(SubscribeErrorCode.InvalidRange);
 			return;
@@ -1193,11 +1181,9 @@ export class Session {
 			trackName: fm.trackName,
 			priority: fm.priority,
 			groupSequence: fm.groupSequence,
-			frameStart: fm.frameStart,
-			frameEnd: fm.frameEnd,
 			done: fetchCtx.done(),
 		});
-		if (req.validate()) {
+		if (fm.frameEnd !== 0 && fm.frameEnd <= fm.frameStart) {
 			// moq-lite-06 §7.16: a Frame End below Frame Start is a protocol
 			// violation.
 			cancelFetch(undefined);

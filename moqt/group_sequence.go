@@ -55,9 +55,9 @@ func groupSequenceFromWire(v uint64) GroupSequence {
 
 // subscribeRangeToWire encodes a config's range as SUBSCRIBE and
 // SUBSCRIBE_UPDATE carry it: Group Start and Frame Start plain, Group End
-// +1, and Frame End as given (the API already holds its exclusive form).
+// +1, and Frame End as held (already its exclusive wire form).
 func subscribeRangeToWire(c *SubscribeConfig) (groupStart, groupEnd, frameStart, frameEnd uint64) {
-	return uint64(c.StartGroup), groupSequenceToWire(c.EndGroup), c.StartFrame, c.EndFrame
+	return uint64(c.StartGroup), groupSequenceToWire(c.EndGroup), c.startFrame, c.endFrame
 }
 
 // subscribeConfigFromWire builds the config a SUBSCRIBE or SUBSCRIBE_UPDATE
@@ -68,7 +68,7 @@ func subscribeConfigFromWire(priority uint8, maxAge, groupStart, groupEnd, frame
 		MaxAge:     maxAge,
 		StartGroup: GroupSequence(groupStart),
 		EndGroup:   groupSequenceFromWire(groupEnd),
-		StartFrame: frameStart,
-		EndFrame:   frameEnd,
+		startFrame: frameStart,
+		endFrame:   frameEnd,
 	}
 }

@@ -80,7 +80,7 @@ A malformed or out-of-order announcement (an unknown Announce ID, a second ANNOU
 | `moqt.SubscribeErrorCodeNotFound`    | 0x33  | Track not found (NOT_FOUND)   |
 | `moqt.SubscribeErrorCodeUnroutable`  | 0x36  | The only source runs through the subscriber (UNROUTABLE) |
 | `moqt.SubscribeErrorCodeUnauthorized`| 0x40  | Unauthorized (gomoqt)         |
-| `moqt.SubscribeErrorCodeInvalidRange`| 0x41  | A range rule broken, such as EndFrame without EndGroup (gomoqt) |
+| `moqt.SubscribeErrorCodeInvalidRange`| 0x41  | A peer's range broke a moq-lite rule, such as a Frame End without a Group End (gomoqt) |
 | `moqt.SubscribeErrorCodeDuplicateID` | 0x42  | Duplicate subscribe ID (gomoqt) |
 </Tab>
 
@@ -97,7 +97,7 @@ A malformed or out-of-order announcement (an unknown Announce ID, a second ANNOU
 | `moqt.EvictedGroupErrorCode`        | 0x35  | Dropped under memory pressure while current |
 | `moqt.FrameTooLargeErrorCode`       | 0x38  | A frame larger than the receiver accepts |
 | `moqt.UnauthorizedGroupErrorCode`   | 0x40  | Outside the session's scope, as for a refused fetch (gomoqt) |
-| `moqt.InvalidRangeGroupErrorCode`   | 0x41  | A fetch frame range rule broken (gomoqt) |
+| `moqt.InvalidRangeGroupErrorCode`   | 0x41  | A peer's FETCH frame range broke a moq-lite rule (gomoqt) |
 </Tab>
 
 <Tab title="FetchErrorCode">

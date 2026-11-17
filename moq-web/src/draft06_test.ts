@@ -2,7 +2,11 @@ import { assertEquals, assertInstanceOf } from "@std/assert";
 import { background, withCancelCause } from "@okdaichi/golikejs/context";
 import { Buffer } from "@okdaichi/golikejs/bytes";
 import { GroupOutOfRangeError, TrackWriter } from "./track_writer.ts";
-import { ReceiveSubscribeStream, validateTrackConfig } from "./subscribe_stream.ts";
+import {
+	ReceiveSubscribeStream,
+	trackRangeToWire,
+	validateFrameRange,
+} from "./subscribe_stream.ts";
 import type { SendStream } from "./internal/webtransport/mod.ts";
 import { MockSendStream, MockStream } from "./mock_stream_test.ts";
 import {
@@ -23,7 +27,6 @@ import {
 	writeVarint,
 } from "./internal/message/mod.ts";
 import { GroupAges } from "./group_ages.ts";
-import { FetchRequest } from "./fetch.ts";
 import { Session } from "./session.ts";
 import { MockWebTransportSession } from "./session_test.ts";
 import { BiStreamTypes } from "./stream_type.ts";
@@ -218,29 +221,17 @@ Deno.test("draft-06 SETUP Cost and Hop", async (t) => {
 });
 
 Deno.test("draft-06 range rules", async (t) => {
-	await t.step("endFrame without endGroup is refused before sending", () => {
-		const err = validateTrackConfig({
-			priority: 0,
-			maxAge: 0,
-			startGroup: 0,
-			endGroup: 0,
-			endFrame: 3,
-		});
+	await t.step("a peer's Frame End without Group End is a violation", () => {
+		const config = { priority: 0, maxAge: 0, startGroup: 0, endGroup: 0 };
 
-		assertInstanceOf(err, Error);
+		assertInstanceOf(validateFrameRange(config, { frameStart: 0, frameEnd: 3 }), Error);
+		assertEquals(validateFrameRange(config, { frameStart: 2, frameEnd: 0 }), undefined);
 	});
 
-	await t.step("a fetch frameEnd not above frameStart is refused", () => {
-		const req = new FetchRequest({
-			broadcastPath: "/a",
-			trackName: "t",
-			priority: 0,
-			groupSequence: 1,
-			frameStart: 4,
-			frameEnd: 4,
-		});
+	await t.step("this endpoint subscribes to whole groups", () => {
+		const wire = trackRangeToWire({ priority: 0, maxAge: 0, startGroup: 4, endGroup: 8 });
 
-		assertInstanceOf(req.validate(), Error);
+		assertEquals(wire, { groupStart: 4, groupEnd: 9, frameStart: 0, frameEnd: 0 });
 	});
 });
 
@@ -407,4 +398,51 @@ Deno.test("draft-06 GOAWAY: a second GOAWAY is a protocol violation", async () =
 	const info = await session.closed;
 
 	assertEquals(info.code, SessionErrorCode.ProtocolViolation);
+});
+
+Deno.test("draft-06 a peer's FETCH frame range is served partially", async () => {
+	// The peer asks for frames [2, 4) of group 10; the handler writes the
+	// group whole and only frames 2 and 3 go out.
+	const req = Buffer.make(64);
+	await writeVarint(req, BiStreamTypes.FetchStreamType);
+	await new FetchMessage({
+		broadcastPath: "/live",
+		trackName: "v",
+		groupSequence: 10,
+		frameStart: 2,
+		frameEnd: 4,
+	}).encode(req);
+	const mock = new MockWebTransportSession({
+		openStreamResponses: [],
+		acceptStreamData: [{ type: BiStreamTypes.FetchStreamType, data: req.bytes() }],
+	});
+	let served!: () => void;
+	const done = new Promise<void>((resolve) => served = resolve);
+	const session = new Session({
+		transport: mock,
+		fetchHandler: {
+			serveFetch: async (w) => {
+				for (let i = 0; i < 6; i++) await w.writeFrame(new Uint8Array([i]), 100 + i);
+				await w.close();
+				served();
+			},
+		},
+	});
+	await session.ready;
+	await done;
+
+	const out = Buffer.make(64);
+	for (const chunk of mock.acceptStreamWrittenData[0] ?? []) await out.write(chunk);
+	const timestamps: number[] = [];
+	let prev = 0;
+	while (out.len() > 0) {
+		const [zz] = await readVarint(out);
+		const delta = zz % 2 === 0 ? zz / 2 : -(zz + 1) / 2;
+		prev += delta;
+		timestamps.push(prev);
+		const [len] = await readVarint(out);
+		out.read(new Uint8Array(len));
+	}
+	assertEquals(timestamps, [102, 103], "the first frame sent is delta-encoded from 0");
+	await session.close();
 });

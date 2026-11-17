@@ -6,18 +6,17 @@ import (
 )
 
 // SubscribeConfig holds subscription parameters for a track: the
-// subscriber's delivery priority, its Max Age, and the range to deliver.
-//
-// A range is bounded by Positions (moq-lite-06 §3.6): a group, refined by a
-// frame index within it. StartGroup/StartFrame name the first frame to
-// deliver; EndGroup/EndFrame the end. Two subscriptions abut exactly when the
-// first ends where the second starts with the same numbers: a subscriber that
-// has frames 0..N-1 of group G caps one subscription at EndGroup = G,
-// EndFrame = N and asks another for StartGroup = G, StartFrame = N.
+// subscriber's delivery priority, its Max Age, and the range of groups to
+// deliver.
 //
 // Group order within a track is always newest first; a subscriber that wants
 // groups in sequence order reads them in that order (and raises MaxAge so the
 // older ones are still delivered when it gets to them).
+//
+// moq-lite-06 can also bound a subscription by frame within its start and end
+// groups (a Position, §3.6). gomoqt handles that internally: it always
+// subscribes to whole groups, and serves a peer that asks for part of a group
+// correctly, but exposes no frame-level knob.
 type SubscribeConfig struct {
 	Priority TrackPriority
 
@@ -35,34 +34,44 @@ type SubscribeConfig struct {
 	// EndGroup is the last group to deliver, inclusive. Zero means unbounded.
 	EndGroup GroupSequence
 
-	// StartFrame is the index of the first frame to deliver within
-	// StartGroup; zero delivers it whole. It applies only when delivery
-	// begins at StartGroup itself: a start resolved at a later group begins
-	// at that group's frame 0. Send zero unless StartGroup is a group you
-	// have already begun receiving, since frames cannot be numbered in a
-	// group you have not seen.
-	StartFrame uint64
-
-	// EndFrame is the exclusive end within EndGroup: frames below it are
-	// delivered. Zero delivers EndGroup whole. It must be zero when EndGroup
-	// is zero, since an unbounded subscription has no end group.
-	EndFrame uint64
+	// startFrame and endFrame refine StartGroup and EndGroup by frame
+	// (moq-lite-06 §3.6), in their wire form: startFrame is the index of the
+	// first frame to deliver within StartGroup, and endFrame the exclusive
+	// end within EndGroup (0 for the whole group, and always 0 when EndGroup
+	// is 0). They are set only from a peer's SUBSCRIBE or SUBSCRIBE_UPDATE;
+	// a subscription this endpoint makes sends both as 0. A future resume
+	// partway into a group (after a redirect or a GOAWAY reconnect) would set
+	// them on the config it re-subscribes with: two subscriptions abut when
+	// the first ends at EndGroup = G, endFrame = N and the second starts at
+	// StartGroup = G, startFrame = N.
+	startFrame uint64
+	endFrame   uint64
 }
 
 func (sc SubscribeConfig) String() string {
-	return fmt.Sprintf("{ subscriber_priority: %d, max_age_ms: %d, start_group: %d, start_frame: %d, end_group: %d, end_frame: %d }",
-		sc.Priority, sc.MaxAge, sc.StartGroup, sc.StartFrame, sc.EndGroup, sc.EndFrame)
+	return fmt.Sprintf("{ subscriber_priority: %d, max_age_ms: %d, start_group: %d, end_group: %d }",
+		sc.Priority, sc.MaxAge, sc.StartGroup, sc.EndGroup)
 }
 
-// errFrameEndWithoutGroupEnd is returned for a range with an EndFrame but no
-// EndGroup, which moq-lite-06 §3.6 makes a protocol violation.
-var errFrameEndWithoutGroupEnd = errors.New("moqt: EndFrame requires EndGroup")
+// errFrameEndWithoutGroupEnd is returned for a range with a Frame End but no
+// Group End, which moq-lite-06 §3.6 makes a protocol violation.
+var errFrameEndWithoutGroupEnd = errors.New("moqt: Frame End requires Group End")
 
-// validate checks the rules of moq-lite-06 §3.6 that a range can break on its
-// own.
+// validate checks the rule of moq-lite-06 §3.6 that a range can break on its
+// own: a Frame End without a Group End.
 func (sc SubscribeConfig) validate() error {
-	if sc.EndFrame != 0 && sc.EndGroup == MinGroupSequence {
+	if sc.endFrame != 0 && sc.EndGroup == MinGroupSequence {
 		return errFrameEndWithoutGroupEnd
 	}
 	return nil
+}
+
+// wholeGroups returns a copy of sc that asks for whole groups. The public
+// entry points send it, so a config taken from a peer's subscription (as a
+// relay forwarding TrackWriter.TrackConfig upstream would) never carries the
+// peer's frame bounds along.
+func (sc *SubscribeConfig) wholeGroups() *SubscribeConfig {
+	c := *sc
+	c.startFrame, c.endFrame = 0, 0
+	return &c
 }

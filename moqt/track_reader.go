@@ -329,7 +329,8 @@ func (r *TrackReader) Update(config *SubscribeConfig) error {
 		return errors.New("subscribe config cannot be nil")
 	}
 
-	return r.sendSubscribeStream.updateSubscribe(config)
+	// gomoqt subscribes to whole groups (see SubscribeConfig).
+	return r.sendSubscribeStream.updateSubscribe(config.wholeGroups())
 }
 
 // queuedGroup is a group stream waiting for AcceptGroup.

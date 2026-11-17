@@ -812,11 +812,11 @@ func TestTrackWriter_OpenGroupAt_FrameStart(t *testing.T) {
 		wantFrameStart uint64
 		wantFrameEnd   uint64
 	}{
-		"start group from a frame":      {config: SubscribeConfig{StartGroup: 5, StartFrame: 15}, seq: 5, wantFrameStart: 15},
-		"a later group is whole":        {config: SubscribeConfig{StartGroup: 5, StartFrame: 15}, seq: 6},
-		"end group up to a frame":       {config: SubscribeConfig{EndGroup: 8, EndFrame: 4}, seq: 8, wantFrameEnd: 4},
-		"an earlier group is whole":     {config: SubscribeConfig{EndGroup: 8, EndFrame: 4}, seq: 7},
-		"start and end in one group":    {config: SubscribeConfig{StartGroup: 3, StartFrame: 2, EndGroup: 3, EndFrame: 6}, seq: 3, wantFrameStart: 2, wantFrameEnd: 6},
+		"start group from a frame":      {config: SubscribeConfig{StartGroup: 5, startFrame: 15}, seq: 5, wantFrameStart: 15},
+		"a later group is whole":        {config: SubscribeConfig{StartGroup: 5, startFrame: 15}, seq: 6},
+		"end group up to a frame":       {config: SubscribeConfig{EndGroup: 8, endFrame: 4}, seq: 8, wantFrameEnd: 4},
+		"an earlier group is whole":     {config: SubscribeConfig{EndGroup: 8, endFrame: 4}, seq: 7},
+		"start and end in one group":    {config: SubscribeConfig{StartGroup: 3, startFrame: 2, EndGroup: 3, endFrame: 6}, seq: 3, wantFrameStart: 2, wantFrameEnd: 6},
 		"no frame bounds, whole groups": {config: SubscribeConfig{StartGroup: 3, EndGroup: 3}, seq: 3},
 	}
 

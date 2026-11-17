@@ -242,8 +242,8 @@ func (w *TrackWriter) CloseWithError(code SubscribeErrorCode) {
 //
 // A sequence below the subscription's StartGroup, or above its EndGroup, is
 // refused with ErrGroupOutOfRange, and nothing is sent for it. When the group
-// is the subscription's StartGroup or EndGroup, the writer sends only the
-// frames from StartFrame and before EndFrame (see GroupWriter).
+// is the start or end group of a peer subscription bounded by frame
+// (moq-lite-06 §3.6), the writer sends only the frames it asked for.
 //
 // The group is opened on a fresh unidirectional QUIC stream. ctx controls
 // cancellation and backpressure: when the peer's concurrent-stream limit
@@ -402,14 +402,14 @@ func (w *TrackWriter) openGroupWithSequence(ctx context.Context, seq GroupSequen
 		return nil, ErrGroupOutOfRange
 	}
 	// A partial group goes only to a subscriber that asked for one
-	// (moq-lite-06 §3.6): the start group from StartFrame, the end group up
-	// to EndFrame, every other group whole.
+	// (moq-lite-06 §3.6): the start group from its Frame Start, the end group
+	// up to its Frame End, every other group whole.
 	var frameStart, frameEnd uint64
 	if seq == config.StartGroup {
-		frameStart = config.StartFrame
+		frameStart = config.startFrame
 	}
 	if config.EndGroup != MinGroupSequence && seq == config.EndGroup {
-		frameEnd = config.EndFrame
+		frameEnd = config.endFrame
 	}
 
 	// Ensure the first SUBSCRIBE_OK has been sent before opening a group.

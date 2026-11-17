@@ -6,35 +6,31 @@ import (
 	"fmt"
 )
 
-// FetchRequest asks for one group of a track, or a run of frames within it.
+// FetchRequest asks for one group of a track.
 type FetchRequest struct {
 	BroadcastPath BroadcastPath
 	TrackName     TrackName
 	Priority      TrackPriority
 	GroupSequence GroupSequence
 
-	// FrameStart is the index of the first frame to return; zero returns the
-	// group from its beginning.
-	FrameStart uint64
-	// FrameEnd is the exclusive end of the frames to return; zero returns
-	// through the end of the group. A non-zero FrameEnd must be above
-	// FrameStart.
-	//
-	// A publisher that cannot serve the whole range resets the fetch rather
-	// than return a shorter run. A group that ends before FrameEnd is not
-	// short: its frames from FrameStart on are returned.
-	FrameEnd uint64
+	// frameStart and frameEnd bound the frames to return within the group
+	// (moq-lite-06 §7.16), in their wire form: frameStart is the first index,
+	// frameEnd the exclusive end (0 through the end of the group). They are
+	// set only from a peer's FETCH, whose GroupWriter then sends just those
+	// frames; a fetch this endpoint makes asks for the whole group.
+	frameStart uint64
+	frameEnd   uint64
 
 	ctx context.Context
 }
 
-// errFetchFrameRange is returned for a FetchRequest whose FrameEnd is not
-// above its FrameStart, which moq-lite-06 §7.16 makes a protocol violation.
-var errFetchFrameRange = errors.New("moqt: fetch FrameEnd must be above FrameStart")
+// errFetchFrameRange is returned for a FETCH whose Frame End is not above its
+// Frame Start, which moq-lite-06 §7.16 makes a protocol violation.
+var errFetchFrameRange = errors.New("moqt: fetch Frame End must be above Frame Start")
 
 // validate checks the frame range rule of moq-lite-06 §7.16.
 func (r *FetchRequest) validate() error {
-	if r.FrameEnd != 0 && r.FrameEnd <= r.FrameStart {
+	if r.frameEnd != 0 && r.frameEnd <= r.frameStart {
 		return errFetchFrameRange
 	}
 	return nil

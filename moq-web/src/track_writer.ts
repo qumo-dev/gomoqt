@@ -153,9 +153,10 @@ export class TrackWriter {
 	 * Open a new group with an auto-incremented sequence number.
 	 *
 	 * A sequence below the subscription's `startGroup`, or above its
-	 * `endGroup`, is refused with a {@link GroupOutOfRangeError}. When the group
-	 * is the subscription's `startGroup` or `endGroup`, the writer sends only the
-	 * frames from `startFrame` and before `endFrame` (see {@link GroupWriter}).
+	 * `endGroup`, is refused with a {@link GroupOutOfRangeError}. When the peer
+	 * bounded its subscription by frame (moq-lite-06 §3.6), the start and end
+	 * groups are sent partially: write them whole and the {@link GroupWriter}
+	 * sends only the frames asked for.
 	 *
 	 * The group opens on a fresh unidirectional stream; when the peer's
 	 * concurrent-stream limit is reached this blocks until a stream is granted.
@@ -259,12 +260,11 @@ export class TrackWriter {
 			return [undefined, new GroupOutOfRangeError(seq)];
 		}
 		// A partial group goes only to a subscriber that asked for one
-		// (moq-lite-06 §3.6): the start group from startFrame, the end group up
-		// to endFrame, every other group whole.
-		const frameStart = seq === config.startGroup ? (config.startFrame ?? 0) : 0;
-		const frameEnd = config.endGroup !== 0 && seq === config.endGroup
-			? (config.endFrame ?? 0)
-			: 0;
+		// (moq-lite-06 §3.6): the start group from the peer's Frame Start, the
+		// end group up to its Frame End, every other group whole.
+		const range = this.#subscribeStream.frameRange;
+		const frameStart = seq === config.startGroup ? range.frameStart : 0;
+		const frameEnd = config.endGroup !== 0 && seq === config.endGroup ? range.frameEnd : 0;
 
 		// ensureOk is not raced against the signal (Go passes no ctx here).
 		// The first opened group resolves the subscription's absolute start.

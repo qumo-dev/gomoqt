@@ -20,13 +20,12 @@ import { SubscribeErrorCode, SubscriptionAnsweredError } from "./error.ts";
 /**
  * Subscriber-side configuration sent in a SUBSCRIBE message.
  *
- * A range is bounded by Positions (moq-lite-06 §3.6): a group, refined by a
- * frame index within it. Two subscriptions abut exactly when the first ends
- * where the second starts with the same numbers: a subscriber holding frames
- * 0..N-1 of group G caps one at `endGroup: G, endFrame: N` and asks another for
- * `startGroup: G, startFrame: N`.
- *
  * Group order within a track is always newest first (moq-lite-06 §6.1.2).
+ *
+ * moq-lite-06 can also bound a subscription by frame within its start and end
+ * groups (a Position, §3.6). That is handled internally: this endpoint always
+ * subscribes to whole groups, and serves a peer that asks for part of a group,
+ * but exposes no frame-level option.
  */
 export interface TrackConfig {
 	/** Subscriber priority for this track. */
@@ -43,30 +42,31 @@ export interface TrackConfig {
 	startGroup: number;
 	/** Last group the subscriber wants to receive, inclusive (0 = unbounded). */
 	endGroup: number;
-	/**
-	 * Index of the first frame to deliver within `startGroup` (0 = whole
-	 * group). It applies only when delivery begins at `startGroup` itself.
-	 */
-	startFrame?: number;
-	/**
-	 * Exclusive end within `endGroup`: frames below it are delivered (0 = the
-	 * whole group). Must be 0 when `endGroup` is 0.
-	 */
-	endFrame?: number;
 }
 
-/** Raised for a {@link TrackConfig} that breaks a moq-lite-06 §3.6 rule. */
-export class InvalidTrackConfigError extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "InvalidTrackConfigError";
-	}
+/**
+ * The frame bounds of a subscription (moq-lite-06 §3.6), in their wire form:
+ * `frameStart` is the index of the first frame to deliver within the start
+ * group, `frameEnd` the exclusive end within the end group (0 = the whole
+ * group). Only a peer's SUBSCRIBE sets them; this endpoint sends both as 0.
+ * A future resume partway into a group would send the run it still needs.
+ * @internal
+ */
+export interface FrameRange {
+	frameStart: number;
+	frameEnd: number;
 }
 
-/** Returns an error when `config` breaks a rule of moq-lite-06 §3.6. */
-export function validateTrackConfig(config: TrackConfig): Error | undefined {
-	if ((config.endFrame ?? 0) !== 0 && config.endGroup === 0) {
-		return new InvalidTrackConfigError("moq: endFrame requires endGroup");
+/** Whole groups: what this endpoint always asks for. @internal */
+export const WHOLE_GROUPS: FrameRange = Object.freeze({ frameStart: 0, frameEnd: 0 });
+
+/**
+ * Returns an error when a peer's range breaks moq-lite-06 §3.6: a Frame End
+ * without a Group End. @internal
+ */
+export function validateFrameRange(config: TrackConfig, range: FrameRange): Error | undefined {
+	if (range.frameEnd !== 0 && config.endGroup === 0) {
+		return new Error("moq: Frame End requires Group End");
 	}
 	return undefined;
 }
@@ -80,15 +80,15 @@ interface WireRange {
 }
 
 /**
- * Encodes a config's range: Group Start and Frame Start plain, Group End + 1,
- * Frame End as given (the config already holds its exclusive form).
+ * Encodes a config's range: Group Start plain, Group End + 1, and the frame
+ * bounds (whole groups unless given). @internal
  */
-export function trackRangeToWire(config: TrackConfig): WireRange {
+export function trackRangeToWire(config: TrackConfig, range: FrameRange = WHOLE_GROUPS): WireRange {
 	return {
 		groupStart: config.startGroup,
 		groupEnd: groupSequenceToWire(config.endGroup),
-		frameStart: config.startFrame ?? 0,
-		frameEnd: config.endFrame ?? 0,
+		frameStart: range.frameStart,
+		frameEnd: range.frameEnd,
 	};
 }
 
@@ -101,9 +101,12 @@ function trackConfigFromWire(
 		maxAge: m.subscriberMaxAge,
 		startGroup: m.groupStart,
 		endGroup: groupSequenceFromWire(m.groupEnd),
-		startFrame: m.frameStart,
-		endFrame: m.frameEnd,
 	};
+}
+
+/** Reads the frame bounds a SUBSCRIBE or SUBSCRIBE_UPDATE carries. */
+function frameRangeFromWire(m: WireRange): FrameRange {
+	return { frameStart: m.frameStart, frameEnd: m.frameEnd };
 }
 
 /** Notification that the publisher dropped a range of groups. */
@@ -265,10 +268,6 @@ export class SendSubscribeStream {
 	}
 
 	async update(update: TrackConfig): Promise<Error | undefined> {
-		const invalid = validateTrackConfig(update);
-		if (invalid) {
-			return invalid;
-		}
 		const msg = new SubscribeUpdateMessage({
 			subscriberPriority: update.priority,
 			subscriberMaxAge: update.maxAge,
@@ -309,6 +308,7 @@ export class SendSubscribeStream {
 export class ReceiveSubscribeStream {
 	readonly subscribeId: SubscribeID;
 	#trackConfig: TrackConfig;
+	#frameRange: FrameRange;
 	#readMu: Mutex = new Mutex();
 	#stream: Stream;
 	#responseStarted: boolean = false;
@@ -329,7 +329,25 @@ export class ReceiveSubscribeStream {
 		this.#stream = stream;
 		this.subscribeId = subscribe.subscribeId;
 		this.#trackConfig = trackConfigFromWire(subscribe);
+		this.#frameRange = frameRangeFromWire(subscribe);
 		[this.context, this.#cancelFunc] = withCancelCause(sessCtx);
+	}
+
+	/**
+	 * The peer's current frame bounds (moq-lite-06 §3.6), advanced with
+	 * trackConfig by readUpdate. The track writer serves the start and end
+	 * groups partially by them. @internal
+	 */
+	get frameRange(): FrameRange {
+		return this.#frameRange;
+	}
+
+	/**
+	 * Returns an error when the peer's current range breaks moq-lite-06 §3.6.
+	 * @internal
+	 */
+	validateRange(): Error | undefined {
+		return validateFrameRange(this.#trackConfig, this.#frameRange);
 	}
 
 	/**
@@ -364,13 +382,15 @@ export class ReceiveSubscribeStream {
 			}
 
 			const config = trackConfigFromWire(msg);
-			const invalid = validateTrackConfig(config);
+			const range = frameRangeFromWire(msg);
+			const invalid = validateFrameRange(config, range);
 			if (invalid) {
 				// moq-lite-06 §3.6: a protocol violation that resets the stream.
 				await this.closeWithError(SubscribeErrorCode.InvalidRange);
 				return [undefined, invalid];
 			}
 			this.#trackConfig = config;
+			this.#frameRange = range;
 			return [this.#trackConfig, undefined];
 		} finally {
 			this.#readMu.unlock();

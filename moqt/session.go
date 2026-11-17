@@ -567,6 +567,10 @@ func (sess *Session) CloseWithError(code SessionErrorCode, msg string) error {
 // with ErrStopRedirect, returns a *RedirectError; any other refusal returns
 // CheckRedirect's error, or ErrTooManyRedirects, joined with one.
 func (sess *Session) Subscribe(ctx context.Context, path BroadcastPath, name TrackName, config *SubscribeConfig) (*TrackReader, error) {
+	if config != nil {
+		// gomoqt subscribes to whole groups (see SubscribeConfig).
+		config = config.wholeGroups()
+	}
 	return sess.subscribe(ctx, path, name, config, nil)
 }
 
@@ -797,8 +801,8 @@ func (sess *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
 		TrackName:     string(req.TrackName),
 		Priority:      uint8(req.Priority),
 		GroupSequence: uint64(req.GroupSequence),
-		FrameStart:    req.FrameStart,
-		FrameEnd:      req.FrameEnd,
+		FrameStart:    req.frameStart,
+		FrameEnd:      req.frameEnd,
 	}.Encode(stream)
 	if err != nil {
 		if strErr, ok := errors.AsType[*transport.StreamError](err); ok && strErr.Remote {
@@ -815,7 +819,7 @@ func (sess *Session) Fetch(req *FetchRequest) (*GroupReader, error) {
 
 	group := newGroupReader(req.GroupSequence, stream, nil)
 	// The first returned frame is implicit from the request.
-	group.frameStart = req.FrameStart
+	group.frameStart = req.frameStart
 
 	// Cancel the stream when the request's context ends first. Once the group
 	// has ended, stop watching, so a long-lived context does not keep every
@@ -1362,8 +1366,8 @@ func (sess *Session) handleFetchStream(stream transport.Stream) {
 		TrackName:     TrackName(fm.TrackName),
 		Priority:      TrackPriority(fm.Priority),
 		GroupSequence: GroupSequence(fm.GroupSequence),
-		FrameStart:    fm.FrameStart,
-		FrameEnd:      fm.FrameEnd,
+		frameStart:    fm.FrameStart,
+		frameEnd:      fm.FrameEnd,
 		ctx:           reqCtx,
 	}
 	if err := req.validate(); err != nil {
@@ -1378,7 +1382,7 @@ func (sess *Session) handleFetchStream(stream transport.Stream) {
 	stream.SetPriority(urgencyFor(req.Priority))
 
 	group := newGroupWriter(stream, req.GroupSequence, nil)
-	group.frameStart, group.frameEnd = req.FrameStart, req.FrameEnd
+	group.frameStart, group.frameEnd = req.frameStart, req.frameEnd
 
 	stop := context.AfterFunc(req.Context(), func() {
 		// Cancel the stream when the context is done
