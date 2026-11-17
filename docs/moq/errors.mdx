@@ -38,65 +38,73 @@ Each error type implements the `error` interface as a pointer, which is how the 
 
 ## Built-in Error Codes
 
-Error codes for each custom error type are summarized below. Click each section to toggle visibility.
+moq-lite-06 defines two independent code spaces: one for closing the session and one for resetting a stream. The same number means different things in each. Both reserve 0x20–0x2F (never sent, never interpreted), reuse moq-transport's codes below 0x20, and leave 0x40 and up to the application. moq-lite's own stream codes sit at 0x30–0x39.
+
+Every stream code type below (`AnnounceErrorCode`, `SubscribeErrorCode`, `GroupErrorCode`, `FetchErrorCode`, `ProbeErrorCode`) is a view of the one stream space, so two types share a value where they share a meaning. Where gomoqt needs a code moq-lite does not define, it is assigned from 0x40 up; a peer that is not gomoqt treats it as an unspecified error.
+
+Note that a stream reset with 0x0 is INTERNAL_ERROR, not a routine cancellation: CANCELLED is 0x1.
 
 <Tabs>
 <Tab title="SessionErrorCode">
 | Code Name                    | Value | Description                    |
 |------------------------------|-------|-------------------------------|
-| `moqt.NoError`                      | 0x0   | Normal termination            |
-| `moqt.InternalSessionErrorCode`     | 0x1   | Internal error                |
-| `moqt.UnauthorizedSessionErrorCode` | 0x2   | Authentication/authorization  |
-| `moqt.ProtocolViolationErrorCode`   | 0x3   | Protocol violation            |
-| `moqt.ParameterLengthMismatchErrorCode` | 0x5 | Parameter length mismatch     |
-| `moqt.TooManySubscribeErrorCode`    | 0x6   | Too many subscriptions        |
-| `moqt.GoAwayTimeoutErrorCode`       | 0x10  | GoAway timeout                |
-| `moqt.UnsupportedVersionErrorCode`  | 0x12  | Unsupported version           |
-| `moqt.SetupFailedErrorCode`         | 0x13  | Setup failed                  |
-| `moqt.NotSupportedErrorCode`        | 0x30  | Tokens are not verified on an Auth Stream |
+| `moqt.NoError`                           | 0x0   | Normal termination            |
+| `moqt.InternalSessionErrorCode`          | 0x1   | Internal error                |
+| `moqt.UnauthorizedSessionErrorCode`      | 0x2   | Authentication/authorization  |
+| `moqt.ProtocolViolationErrorCode`        | 0x3   | Protocol violation            |
+| `moqt.KeyValueFormattingErrorCode`       | 0x6   | A malformed or repeated key-value pair |
+| `moqt.GoAwayTimeoutErrorCode`            | 0x10  | GoAway timeout                |
+| `moqt.ControlMessageTimeoutErrorCode`    | 0x11  | The peer took too long to answer a control message |
+| `moqt.VersionNegotiationFailedErrorCode` | 0x15  | No version could be negotiated |
+| `moqt.NotSupportedErrorCode`             | 0x40  | Tokens are not verified on an Auth Stream (gomoqt) |
 </Tab>
 
 <Tab title="AnnounceErrorCode">
 | Code Name                    | Value | Description                    |
 |------------------------------|-------|-------------------------------|
 | `moqt.AnnounceErrorCodeInternal`     | 0x0   | Internal error                |
-| `moqt.AnnounceErrorCodeDuplicated`   | 0x1   | Duplicated broadcast path     |
-| `moqt.AnnounceErrorCodeInvalidStatus`| 0x2   | Invalid announce status       |
-| `moqt.UninterestedErrorCode`         | 0x3   | Uninterested                  |
-| `moqt.BannedPrefixErrorCode`         | 0x4   | Banned prefix                 |
-| `moqt.AnnounceErrorCodeInvalidPrefix`| 0x5   | Invalid prefix                |
-| `moqt.AnnounceErrorCodeUnauthorized` | 0x6   | Prefix outside the root of every grant |
+| `moqt.UninterestedErrorCode`         | 0x1   | Uninterested (CANCELLED)      |
+| `moqt.AnnounceErrorCodeUnauthorized` | 0x40  | Prefix outside the root of every grant (gomoqt) |
+| `moqt.AnnounceErrorCodeInvalidPrefix`| 0x43  | Invalid prefix (gomoqt)       |
+| `moqt.BannedPrefixErrorCode`         | 0x44  | Banned prefix (gomoqt)        |
+
+A malformed or out-of-order announcement (an unknown Announce ID, a second ANNOUNCE_START for a route, a repeated Hop ID) is a protocol violation that closes the session, not a stream reset.
 </Tab>
 
 <Tab title="SubscribeErrorCode">
 | Code Name                    | Value | Description                    |
 |------------------------------|-------|-------------------------------|
-| `moqt.SubscribeErrorCodeInternal`    | 0x00  | Internal error                |
-| `moqt.SubscribeErrorCodeInvalidRange`| 0x01  | Invalid range                 |
-| `moqt.SubscribeErrorCodeDuplicateID` | 0x02  | Duplicate subscribe ID        |
-| `moqt.SubscribeErrorCodeNotFound`    | 0x03  | Track not found               |
-| `moqt.SubscribeErrorCodeUnauthorized`| 0x04  | Unauthorized                  |
-| `moqt.SubscribeErrorCodeTimeout`     | 0x05  | Subscribe timeout             |
+| `moqt.SubscribeErrorCodeInternal`    | 0x0   | Internal error                |
+| `moqt.SubscribeErrorCodeCanceled`    | 0x1   | Cancelled by the subscriber   |
+| `moqt.SubscribeErrorCodeTimeout`     | 0x31  | The peer never answered (CONTROL_TIMEOUT) |
+| `moqt.SubscribeErrorCodeNotFound`    | 0x33  | Track not found (NOT_FOUND)   |
+| `moqt.SubscribeErrorCodeUnroutable`  | 0x36  | The only source runs through the subscriber (UNROUTABLE) |
+| `moqt.SubscribeErrorCodeUnauthorized`| 0x40  | Unauthorized (gomoqt)         |
+| `moqt.SubscribeErrorCodeInvalidRange`| 0x41  | A range rule broken, such as EndFrame without EndGroup (gomoqt) |
+| `moqt.SubscribeErrorCodeDuplicateID` | 0x42  | Duplicate subscribe ID (gomoqt) |
 </Tab>
 
 <Tab title="GroupErrorCode">
 | Code Name                    | Value | Description                    |
 |------------------------------|-------|-------------------------------|
-| `moqt.InternalGroupErrorCode`       | 0x00  | Internal error                |
-| `moqt.OutOfRangeErrorCode`          | 0x02  | Out of range                  |
-| `moqt.ExpiredGroupErrorCode`        | 0x03  | Expired group                 |
-| `moqt.SubscribeCanceledErrorCode`   | 0x04  | Subscribe canceled            |
-| `moqt.PublishAbortedErrorCode`      | 0x05  | Publish aborted               |
-| `moqt.ClosedSessionGroupErrorCode`  | 0x06  | Closed session                |
-| `moqt.InvalidSubscribeIDErrorCode`  | 0x07  | Invalid subscribe ID          |
-| `moqt.UnauthorizedGroupErrorCode`   | 0x08  | Outside the session's scope, as for a refused fetch |
+| `moqt.InternalGroupErrorCode`       | 0x0   | Internal error                |
+| `moqt.SubscribeCanceledErrorCode`   | 0x1   | Cancelled by either end       |
+| `moqt.ExpiredGroupErrorCode`        | 0x2   | Aged out of the subscriber's Max Age (DELIVERY_TIMEOUT) |
+| `moqt.ClosedSessionGroupErrorCode`  | 0x3   | The session is closing        |
+| `moqt.GroupTooLargeErrorCode`       | 0x32  | Past the publisher's cache budget |
+| `moqt.NotFoundGroupErrorCode`       | 0x33  | The group was never here      |
+| `moqt.OldGroupErrorCode`            | 0x34  | Superseded by a newer group and dropped |
+| `moqt.EvictedGroupErrorCode`        | 0x35  | Dropped under memory pressure while current |
+| `moqt.FrameTooLargeErrorCode`       | 0x38  | A frame larger than the receiver accepts |
+| `moqt.UnauthorizedGroupErrorCode`   | 0x40  | Outside the session's scope, as for a refused fetch (gomoqt) |
+| `moqt.InvalidRangeGroupErrorCode`   | 0x41  | A fetch frame range rule broken (gomoqt) |
 </Tab>
 
 <Tab title="FetchErrorCode">
 | Code Name                    | Value | Description                    |
 |------------------------------|-------|-------------------------------|
-| `moqt.FetchErrorCodeInternal`       | 0x00  | Internal error                |
-| `moqt.FetchErrorCodeTimeout`        | 0x01  | Fetch timeout                 |
+| `moqt.FetchErrorCodeInternal`       | 0x0   | Internal error                |
+| `moqt.FetchErrorCodeTimeout`        | 0x31  | Fetch timeout (CONTROL_TIMEOUT) |
 
 A fetch's answer is the group itself, so a publisher that refuses a fetch resets the group: the refusal is a `*moqt.GroupError` from `GroupReader.ReadFrame`, such as `UnauthorizedGroupErrorCode`.
 </Tab>
@@ -104,9 +112,9 @@ A fetch's answer is the group itself, so a publisher that refuses a fetch resets
 <Tab title="ProbeErrorCode">
 | Code Name                    | Value | Description                    |
 |------------------------------|-------|-------------------------------|
-| `moqt.ProbeErrorCodeInternal`       | 0x00  | Internal error                |
-| `moqt.ProbeErrorCodeTimeout`        | 0x01  | Probe timeout                 |
-| `moqt.ProbeErrorCodeNotSupported`   | 0x02  | Probe not supported           |
+| `moqt.ProbeErrorCodeInternal`       | 0x0   | Internal error                |
+| `moqt.ProbeErrorCodeTimeout`        | 0x31  | Probe timeout (CONTROL_TIMEOUT) |
+| `moqt.ProbeErrorCodeNotSupported`   | 0x45  | Probe not supported (gomoqt)  |
 </Tab>
 </Tabs>
 

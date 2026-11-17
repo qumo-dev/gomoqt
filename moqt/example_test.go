@@ -270,8 +270,10 @@ func ExampleGroupReader_Frames() {
 // the live tail (latest groups) with default priority and no range filter.
 //
 // To customize delivery, pass a *SubscribeConfig: Priority affects relative
-// scheduling, Ordered requests in-order group delivery, MaxAge caps
-// buffering, and StartGroup/EndGroup select a range (useful for seek/rewind).
+// scheduling, MaxAge says how far behind the live edge a group may fall (and
+// so how far back the subscription starts), and StartGroup/EndGroup, refined
+// by StartFrame/EndFrame, bound the range. Groups arrive newest first; read
+// them in sequence order if that is what you need.
 //
 // Then loop: AcceptGroup blocks for the next group, and group.Frames iterates
 // its frames. The loop ends with an error when the track ends or the
