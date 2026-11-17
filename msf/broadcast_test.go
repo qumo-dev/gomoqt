@@ -11,7 +11,7 @@ import (
 )
 
 func TestBroadcastRegisterTrack_UpdatesCatalogAndHandler(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	handler := &fakeTrackHandler{}
@@ -32,7 +32,7 @@ func TestBroadcastRegisterTrack_UpdatesCatalogAndHandler(t *testing.T) {
 }
 
 func TestBroadcastHandler_ResolvesCatalogAndTrackHandlers(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	handler := &fakeTrackHandler{}
@@ -52,7 +52,7 @@ func TestBroadcastHandler_ResolvesCatalogAndTrackHandlers(t *testing.T) {
 }
 
 func TestBroadcastRemoveTrack_RemovesCatalogEntryAndHandler(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	handler := &fakeTrackHandler{}
@@ -72,7 +72,7 @@ func TestBroadcastRemoveTrack_RemovesCatalogEntryAndHandler(t *testing.T) {
 }
 
 func TestBroadcastCatalogBytes_EncodesCurrentCatalog(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 	handler := &fakeTrackHandler{}
 
@@ -93,7 +93,7 @@ func TestBroadcastCatalogBytes_EncodesCurrentCatalog(t *testing.T) {
 }
 
 func TestBroadcastRegisterTrack_RejectsReservedCatalogTrackName(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 	handler := &fakeTrackHandler{}
 
@@ -131,7 +131,7 @@ func TestBroadcastRegisterTrack_RejectsInvalidInput(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			broadcast, err := NewBroadcast(Catalog{Version: 1})
+			broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 			require.NoError(t, err)
 
 			err = broadcast.RegisterTrack(tt.track, tt.handler)
@@ -142,7 +142,7 @@ func TestBroadcastRegisterTrack_RejectsInvalidInput(t *testing.T) {
 }
 
 func TestBroadcastRegisterTrack_ReplacesExistingTrackAndHandler(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	firstHandler := &fakeTrackHandler{}
@@ -183,9 +183,9 @@ func TestBroadcastZeroValue_UsesDefaultCatalogTrackName(t *testing.T) {
 	assert.Zero(t, broadcast.Catalog().Version)
 	assert.Empty(t, broadcast.Catalog().Tracks)
 
-	require.NoError(t, broadcast.SetCatalog(Catalog{Version: 1}))
+	require.NoError(t, broadcast.SetCatalog(Catalog{Version: CurrentVersion}))
 	assert.Equal(t, DefaultCatalogTrackName, broadcast.CatalogTrackName())
-	assert.Equal(t, 1, broadcast.Catalog().Version)
+	assert.Equal(t, CurrentVersion, broadcast.Catalog().Version)
 	assert.NotNil(t, broadcast.Handler(DefaultCatalogTrackName))
 	assert.False(t, broadcast.RemoveTrack(DefaultCatalogTrackName))
 	assert.False(t, broadcast.RemoveTrack(""))
@@ -194,7 +194,7 @@ func TestBroadcastZeroValue_UsesDefaultCatalogTrackName(t *testing.T) {
 }
 
 func TestBroadcastSetCatalog_PrunesRemovedTrackHandlers(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	handler := &fakeTrackHandler{}
@@ -205,7 +205,7 @@ func TestBroadcastSetCatalog_PrunesRemovedTrackHandlers(t *testing.T) {
 	}, handler)
 	require.NoError(t, err)
 
-	err = broadcast.SetCatalog(Catalog{Version: 1, Tracks: []Track{{
+	err = broadcast.SetCatalog(Catalog{Version: CurrentVersion, Tracks: []Track{{
 		Name:      "audio",
 		Packaging: PackagingLOC,
 		IsLive:    new(false),
@@ -218,10 +218,10 @@ func TestBroadcastSetCatalog_PrunesRemovedTrackHandlers(t *testing.T) {
 }
 
 func TestBroadcastSetCatalog_RejectsReservedCatalogTrackName(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
-	err = broadcast.SetCatalog(Catalog{Version: 1, Tracks: []Track{{
+	err = broadcast.SetCatalog(Catalog{Version: CurrentVersion, Tracks: []Track{{
 		Name:      string(DefaultCatalogTrackName),
 		Packaging: PackagingLOC,
 		IsLive:    new(false),
@@ -231,7 +231,7 @@ func TestBroadcastSetCatalog_RejectsReservedCatalogTrackName(t *testing.T) {
 }
 
 func TestNewBroadcast_RejectsReservedCatalogTrackName(t *testing.T) {
-	_, err := NewBroadcast(Catalog{Version: 1, Tracks: []Track{{
+	_, err := NewBroadcast(Catalog{Version: CurrentVersion, Tracks: []Track{{
 		Name:      string(DefaultCatalogTrackName),
 		Packaging: PackagingLOC,
 		IsLive:    new(false),
@@ -241,7 +241,7 @@ func TestNewBroadcast_RejectsReservedCatalogTrackName(t *testing.T) {
 }
 
 func TestBroadcast_ServeTrack_NilTrackWriter(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	// Should not panic with nil TrackWriter.
@@ -249,7 +249,7 @@ func TestBroadcast_ServeTrack_NilTrackWriter(t *testing.T) {
 }
 
 func TestBroadcast_ServeTrack_DispatchesToHandler(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	handler := &fakeTrackHandler{}
@@ -276,7 +276,7 @@ func TestBroadcast_NilReceiver(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil broadcast")
 
-	err = broadcast.SetCatalog(Catalog{Version: 1})
+	err = broadcast.SetCatalog(Catalog{Version: CurrentVersion})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil broadcast")
 
@@ -291,7 +291,7 @@ func TestBroadcast_NilReceiver(t *testing.T) {
 }
 
 func TestBroadcast_SetCatalog_RejectsInvalidCatalog(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	err = broadcast.SetCatalog(Catalog{})
@@ -300,7 +300,7 @@ func TestBroadcast_SetCatalog_RejectsInvalidCatalog(t *testing.T) {
 }
 
 func TestBroadcast_RegisterTrack_RejectsInvalidCatalogAfterAdd(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	handler := &fakeTrackHandler{}
@@ -320,11 +320,11 @@ func TestBroadcast_staleTrackNamesLocked_EmptyCurrent(t *testing.T) {
 }
 
 func TestBroadcastSetCatalog_RejectsDuplicateTrackNamesAcrossNamespaces(t *testing.T) {
-	broadcast, err := NewBroadcast(Catalog{Version: 1})
+	broadcast, err := NewBroadcast(Catalog{Version: CurrentVersion})
 	require.NoError(t, err)
 
 	err = broadcast.SetCatalog(Catalog{
-		Version:          1,
+		Version:          CurrentVersion,
 		DefaultNamespace: "live/main",
 		Tracks: []Track{
 			{Name: "video", Packaging: PackagingLOC, IsLive: new(false)},
@@ -337,7 +337,7 @@ func TestBroadcastSetCatalog_RejectsDuplicateTrackNamesAcrossNamespaces(t *testi
 
 func TestBroadcastRegisterTrack_RejectsDuplicateTrackNamesAcrossNamespaces(t *testing.T) {
 	broadcast, err := NewBroadcast(Catalog{
-		Version:          1,
+		Version:          CurrentVersion,
 		DefaultNamespace: "live/main",
 		Tracks: []Track{{
 			Name:      "video",

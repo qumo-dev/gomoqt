@@ -8,7 +8,9 @@ import (
 	"github.com/qumo-dev/gomoqt/moqt"
 )
 
-// DefaultCatalogTrackName is the reserved MSF catalog track name from draft-ietf-moq-msf-01.
+// DefaultCatalogTrackName is the Track Name the top-level MSF catalog track
+// MUST have (draft-ietf-moq-msf-02 §5). Catalogs referenced from it through
+// packaging "catalog" tracks may use other names.
 const DefaultCatalogTrackName moqt.TrackName = "catalog"
 
 // Broadcast is an MSF-aware moqt.TrackHandler that serves the catalog track and
@@ -28,8 +30,11 @@ const DefaultCatalogTrackName moqt.TrackName = "catalog"
 //
 // Because the underlying moqt routing key is a single TrackName, Broadcast
 // requires track names to be unique across namespaces within the current
-// catalog snapshot. Catalogs that contain the same track name in multiple
-// namespaces are rejected rather than being mapped to synthetic routing names.
+// catalog snapshot. This is a routing constraint of Broadcast, stricter than
+// the MSF rule that only Full Track Names (namespace and name) be unique,
+// which Catalog.Validate enforces. Catalogs that contain the same track name
+// in multiple namespaces are rejected rather than being mapped to synthetic
+// routing names, and no catalog track may use the catalog track's own name.
 type Broadcast struct {
 	mu sync.RWMutex
 

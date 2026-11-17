@@ -22,7 +22,7 @@ func BenchmarkCatalog_Validate_Sweep(b *testing.B) {
 					IsLive:    new(false),
 				}
 			}
-			catalog := Catalog{Version: 1, DefaultNamespace: "ns1", Tracks: tracks}
+			catalog := Catalog{Version: CurrentVersion, DefaultNamespace: "ns1", Tracks: tracks}
 
 			b.ReportAllocs()
 			b.ResetTimer()

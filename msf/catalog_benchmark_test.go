@@ -7,7 +7,7 @@ import "testing"
 // every iteration regardless of whether problems exist.
 func BenchmarkCatalog_Validate(b *testing.B) {
 	catalog := Catalog{
-		Version:          1,
+		Version:          CurrentVersion,
 		DefaultNamespace: "live/demo",
 		Tracks: []Track{
 			{Name: "video", Packaging: PackagingLOC, IsLive: new(true)},

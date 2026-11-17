@@ -20,7 +20,7 @@ func BenchmarkCatalog_ApplyDelta(b *testing.B) {
 					IsLive:    new(true),
 				}
 			}
-			base := Catalog{Version: 1, Tracks: tracks}
+			base := Catalog{Version: CurrentVersion, Tracks: tracks}
 			delta := CatalogDelta{
 				GeneratedAt:  &generatedAt,
 				RemoveTracks: []TrackRef{{Name: "track-0"}},
