@@ -432,7 +432,11 @@ export function effectiveNamespace(
 	return INHERITED_NAMESPACE;
 }
 
-/** Return a composite identifier string for a track (`namespace|name`). */
+/**
+ * Return a composite identifier string for a track (`namespace|name`), for
+ * display. It is not unique: a namespace may contain `|`, so `a|b` + `c` and
+ * `a` + `b|c` give the same string.
+ */
 export function trackId(
 	value: { namespace?: string; name?: string },
 	defaultNamespace?: string,

@@ -31,12 +31,6 @@ func DependsOnRenderGroup(group int64) Dependency {
 	return Dependency{RenderGroup: &group}
 }
 
-// IsRenderGroup reports whether the dependency references a render group
-// rather than a track name.
-func (d Dependency) IsRenderGroup() bool {
-	return d.RenderGroup != nil
-}
-
 // String returns the track name, or "renderGroup N" for a render-group
 // dependency.
 func (d Dependency) String() string {

@@ -14,8 +14,6 @@ func TestDependency_JSONRoundTrip(t *testing.T) {
 	var deps []Dependency
 	require.NoError(t, json.Unmarshal([]byte(input), &deps))
 	assert.Equal(t, []Dependency{DependsOnTrack("video"), DependsOnRenderGroup(1), DependsOnTrack("audio")}, deps)
-	assert.False(t, deps[0].IsRenderGroup())
-	assert.True(t, deps[1].IsRenderGroup())
 
 	data, err := json.Marshal(deps)
 	require.NoError(t, err)
