@@ -5,8 +5,8 @@
  * @module
  */
 
-// Any string, while editors still suggest the listed literals.
-type OpenString = string & Record<never, never>;
+/** Any string, while editors still suggest the listed literals. @internal */
+export type OpenString = string & Record<never, never>;
 
 /**
  * The LOC to MOQT stream mapping mode of a loc track (draft-ietf-moq-msf-02

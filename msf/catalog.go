@@ -481,19 +481,21 @@ func (c Catalog) Validate() error {
 	}
 	// An initRef must resolve even when the catalog declares no
 	// initDataList at all.
-	checkRef := func(prefix, ref string) {
+	// The list and index are formatted only for a problem, so a catalog
+	// without one allocates nothing here.
+	checkRef := func(list string, i int, ref string) {
 		if ref == "" {
 			return
 		}
 		if _, ok := initIDs[ref]; !ok {
-			problems = append(problems, fmt.Sprintf("%s: initRef %q does not match any initDataList id", prefix, ref))
+			problems = append(problems, fmt.Sprintf("%s[%d]: initRef %q does not match any initDataList id", list, i, ref))
 		}
 	}
 	for i := range c.Tracks {
-		checkRef("tracks["+itoa(i)+"]", c.Tracks[i].InitRef)
+		checkRef("tracks", i, c.Tracks[i].InitRef)
 	}
 	for i := range c.PublishTracks {
-		checkRef("publishTracks["+itoa(i)+"]", c.PublishTracks[i].InitRef)
+		checkRef("publishTracks", i, c.PublishTracks[i].InitRef)
 	}
 
 	if hasDepends {
@@ -724,10 +726,6 @@ func (c *Catalog) cloneTrack(track TrackClone) error {
 
 	cloned := parent.Clone()
 	cloned.applyOverrides(track.Track)
-
-	if cloned.Name == "" {
-		return fmt.Errorf("msf: cloned track derived from %q is missing name", parentID.String())
-	}
 
 	newID := cloned.ID(c.DefaultNamespace)
 	if _, idx, exists := c.findTrack(newID); exists {

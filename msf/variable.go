@@ -24,13 +24,6 @@ import (
 // Catalog.ResolveVariables leaves unsubstituted (§13.5).
 const connectionURIKey = "connectionURI"
 
-// isValidVariableName reports whether s can name a variable. Draft-02 places
-// no restriction on the characters of a name; it only has to be non-empty,
-// and it cannot contain '%', which delimits the reference.
-func isValidVariableName(s string) bool {
-	return s != ""
-}
-
 // isValidVariableValue reports whether s is a legal substituted value per the
 // spec: alphanumeric characters, hyphens, underscores, plus signs, forward
 // slashes, equals signs, periods and the at sign (@). This restriction
@@ -95,8 +88,9 @@ func ResolveVariables(s string, vars map[string]string) (string, bool) {
 		if end < 0 {
 			return b.String(), false
 		}
+		// Draft-02 restricts a name only to be non-empty; '%' ends it.
 		name := s[i+1 : i+1+end]
-		if !isValidVariableName(name) {
+		if name == "" {
 			return b.String(), false
 		}
 		value, ok := vars[name]
@@ -216,7 +210,7 @@ func ValidateVariableSyntax(s string) error {
 			return fmt.Errorf("msf: unterminated variable reference in %q", s)
 		}
 		name := s[i+1 : i+1+end]
-		if !isValidVariableName(name) {
+		if name == "" {
 			return fmt.Errorf("msf: empty variable name in %q", s)
 		}
 		i = i + 1 + end + 1

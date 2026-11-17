@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -95,8 +96,9 @@ func (c Catalog) CatalogRefs() []TrackID {
 // returned wrapped.
 func WalkCatalogRefs(ctx context.Context, root TrackID, limits CatalogWalkLimits, load func(context.Context, TrackID) (Catalog, error), visit func(TrackID, Catalog) error) error {
 	// The root's namespace is what the root catalog's tracks inherit, so the
-	// walk cannot resolve references without it. Rejecting it here also keeps
-	// the internal inherited-namespace marker away from load.
+	// walk cannot resolve references without it. The internal
+	// inherited-namespace marker would be rejected anyway (it holds a NUL);
+	// mapping it to "" makes the error say the namespace is empty.
 	if root.Namespace == inheritedNamespaceSentinel {
 		root.Namespace = ""
 	}
@@ -108,7 +110,6 @@ func WalkCatalogRefs(ctx context.Context, root TrackID, limits CatalogWalkLimits
 		visit:   visit,
 		limits:  limits.withDefaults(),
 		visited: make(map[TrackID]struct{}),
-		onPath:  make(map[TrackID]struct{}),
 	}
 	return w.walk(ctx, root, 0)
 }
@@ -119,13 +120,14 @@ type catalogWalk struct {
 	visit   func(TrackID, Catalog) error
 	limits  CatalogWalkLimits
 	visited map[TrackID]struct{}
-	onPath  map[TrackID]struct{}
-	path    []TrackID
+	// path is the chain of references from the root to the catalog being
+	// walked; a reference back into it is a cycle.
+	path []TrackID
 }
 
 // walk visits id and the catalogs it references.
 func (w *catalogWalk) walk(ctx context.Context, id TrackID, depth int) error {
-	if _, ok := w.onPath[id]; ok {
+	if slices.Contains(w.path, id) {
 		return fmt.Errorf("%w: %s", ErrCatalogCycle, w.describePath(id))
 	}
 	if _, ok := w.visited[id]; ok {
@@ -157,12 +159,8 @@ func (w *catalogWalk) walk(ctx context.Context, id TrackID, depth int) error {
 		return fmt.Errorf("msf: visit catalog %q: %w", id.String(), err)
 	}
 
-	w.onPath[id] = struct{}{}
 	w.path = append(w.path, id)
-	defer func() {
-		delete(w.onPath, id)
-		w.path = w.path[:len(w.path)-1]
-	}()
+	defer func() { w.path = w.path[:len(w.path)-1] }()
 
 	for _, ref := range refs {
 		// The referencing catalog is not validated, so a reference may carry

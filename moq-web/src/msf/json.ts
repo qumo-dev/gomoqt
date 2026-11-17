@@ -5,9 +5,7 @@
  * @module
  */
 import type { z } from "zod";
-
-/** Matches a lone (unpaired) UTF-16 surrogate. */
-const LONE_SURROGATE = /\p{Cs}/u;
+import { LONE_SURROGATE } from "./names.ts";
 
 /**
  * Decodes a catalog document. It rejects what draft-ietf-moq-msf-02 §11.2.1

@@ -195,7 +195,7 @@ export function validateEventTimelineRecord(record: EventTimelineRecord): void {
 	if (indexes !== 1) {
 		throw new Error("msf: event timeline record must contain exactly one of T, L, or M");
 	}
-	if (!("data" in record) || record.data === undefined) {
+	if (record.data === undefined) {
 		throw new Error("msf: event timeline record must contain data");
 	}
 }

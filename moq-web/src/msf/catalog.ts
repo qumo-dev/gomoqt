@@ -1,11 +1,8 @@
 import { z } from "zod";
 import { asRecord, decodeCatalogJSON, splitKnown, withoutNullish, zodSchemaError } from "./json.ts";
 import { namespaceProblem, nameTextProblem } from "./names.ts";
-import { packagingMetadataProblem } from "./track_fields.ts";
+import { type OpenString, packagingMetadataProblem } from "./track_fields.ts";
 import { decodeTemplate, encodeTemplate, type Template } from "./timeline.ts";
-
-// Any string, while editors still suggest the listed literals.
-type OpenString = string & Record<never, never>;
 
 /**
  * The MSF version of the catalogs this package produces and accepts
@@ -303,7 +300,7 @@ export const EMPTY_NAMESPACE_MESSAGE =
 	"msf: namespace must not be empty; omit it to inherit the catalog namespace";
 
 /** Reports whether a track field value counts as present. */
-export function isPresent(value: unknown): boolean {
+function isPresent(value: unknown): boolean {
 	return value !== undefined && value !== null && value !== "";
 }
 
@@ -349,7 +346,7 @@ export function parseTrack(value: unknown): Track {
 	if (buffers !== undefined) {
 		track.buffers = parseBuffers(buffers);
 	}
-	if (template !== undefined && template !== null) {
+	if (template !== undefined) {
 		track.template = decodeTemplate(template);
 	}
 	if (accessibility !== undefined) {
@@ -473,7 +470,7 @@ export function displayTrack(
 }
 
 /** The catalog array a track is declared in. */
-export type TrackList = "tracks" | "publishTracks";
+type TrackList = "tracks" | "publishTracks";
 
 // The rows of draft-ietf-moq-msf-02 §5.2.4.1 Table 6 for loc packaging.
 const REQUIRED_LOC_FIELDS: ReadonlyMap<string, readonly TrackFieldKey[]> = new Map([

@@ -1,6 +1,11 @@
 package msf
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
 
 // BenchmarkCatalog_Validate measures the happy-path (no errors) cost of
 // Catalog.Validate, where per-track fmt.Sprintf prefix formatting is paid on
@@ -39,4 +44,21 @@ func BenchmarkCatalogDelta_Validate(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = delta.Validate()
 	}
+}
+
+func TestCatalog_Validate_SmallCatalogDoesNotAllocate(t *testing.T) {
+	catalog := Catalog{
+		Version:          CurrentVersion,
+		DefaultNamespace: "live/demo",
+		Tracks: []Track{
+			{Name: "video", Packaging: PackagingLOC, IsLive: new(true), InitRef: "v"},
+			{Name: "audio", Packaging: PackagingLOC, IsLive: new(true)},
+		},
+		InitDataList: []InitDataRef{{ID: "v", Type: "inline", Data: "AAAA"}},
+	}
+	require.NoError(t, catalog.Validate())
+
+	allocs := testing.AllocsPerRun(100, func() { _ = catalog.Validate() })
+
+	assert.Zero(t, allocs, "a valid catalog of 16 tracks or fewer validates without allocating")
 }

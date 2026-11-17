@@ -9,8 +9,11 @@
 /** The most Track Namespace Fields a catalog namespace may yield. */
 const MAX_NAMESPACE_FIELDS = 32;
 
-/** Matches a lone (unpaired) UTF-16 surrogate, which has no UTF-8 encoding. */
-const LONE_SURROGATE = /\p{Cs}/u;
+/**
+ * Matches a lone (unpaired) UTF-16 surrogate, which has no UTF-8 encoding.
+ * @internal
+ */
+export const LONE_SURROGATE = /\p{Cs}/u;
 
 /**
  * Splits a catalog namespace string into the Track Namespace Fields it

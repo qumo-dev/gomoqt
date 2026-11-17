@@ -270,21 +270,27 @@ func TestCatalog_ResolveVariables_KeepsLargeIntegers(t *testing.T) {
 	assert.Equal(t, generatedAt, *resolved.GeneratedAt)
 }
 
-func TestIsValidVariableName(t *testing.T) {
+func TestValidateVariableSyntax_Names(t *testing.T) {
 	tests := map[string]struct {
-		name string
-		want bool
+		s       string
+		wantErr bool
 	}{
-		"empty":        {"", false},
-		"alphanumeric": {"abc123", true},
-		"slash":        {"bad/name", true},
-		"space":        {"bad name", true},
-		"unicode":      {"naïve", true},
+		"empty name":   {s: "x%%y", wantErr: true},
+		"alphanumeric": {s: "%abc123%"},
+		"slash":        {s: "%bad/name%"},
+		"space":        {s: "%bad name%"},
+		"unicode":      {s: "%naïve%"},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, tt.want, isValidVariableName(tt.name))
+			err := ValidateVariableSyntax(tt.s)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
 		})
 	}
 }

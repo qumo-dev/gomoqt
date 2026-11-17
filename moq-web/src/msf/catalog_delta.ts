@@ -97,19 +97,6 @@ export class CatalogCompleteError extends Error {
 	}
 }
 
-// Wire op name <-> in-memory operation kind.
-const OP_TO_KIND: ReadonlyMap<string, DeltaOperationKind> = new Map([
-	["add", "addTracks"],
-	["remove", "removeTracks"],
-	["clone", "cloneTracks"],
-	["update", "updateTracks"],
-]);
-const KIND_TO_OP: Readonly<Record<DeltaOperationKind, string>> = {
-	addTracks: "add",
-	removeTracks: "remove",
-	cloneTracks: "clone",
-	updateTracks: "update",
-};
 /** The order code-built operations apply and encode in. */
 const KINDS: readonly DeltaOperationKind[] = [
 	"addTracks",
@@ -117,6 +104,16 @@ const KINDS: readonly DeltaOperationKind[] = [
 	"cloneTracks",
 	"updateTracks",
 ];
+// In-memory operation kind -> wire op name, and back.
+const KIND_TO_OP: Readonly<Record<DeltaOperationKind, string>> = {
+	addTracks: "add",
+	removeTracks: "remove",
+	cloneTracks: "clone",
+	updateTracks: "update",
+};
+const OP_TO_KIND: ReadonlyMap<string, DeltaOperationKind> = new Map(
+	KINDS.map((kind) => [KIND_TO_OP[kind], kind]),
+);
 
 /** Root catalog fields a delta must not carry (§5.3). */
 const FORBIDDEN_DELTA_KEYS = ["version", "isComplete", "tracks", "publishTracks", "initDataList"];
@@ -452,11 +449,6 @@ function cloneInto(catalog: Catalog, clone: TrackClone): void {
 		throw new Error(`msf: cannot clone unknown parent track ${JSON.stringify(parent.display)}`);
 	}
 	const derived = applyTrackOverrides(base, clone.track);
-	if (!derived.name) {
-		throw new Error(
-			`msf: cloned track derived from ${JSON.stringify(parent.display)} is missing name`,
-		);
-	}
 	const index = findTrack(catalog, trackKey(derived, catalog.defaultNamespace));
 	if (index >= 0) {
 		throw new Error(

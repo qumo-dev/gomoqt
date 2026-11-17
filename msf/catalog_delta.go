@@ -67,16 +67,7 @@ var deltaKinds = [...]deltaOperationKind{deltaOperationAdd, deltaOperationRemove
 
 // kindIndex returns the position of kind in deltaKinds.
 func kindIndex(kind deltaOperationKind) int {
-	switch kind {
-	case deltaOperationAdd:
-		return 0
-	case deltaOperationRemove:
-		return 1
-	case deltaOperationClone:
-		return 2
-	default:
-		return 3
-	}
+	return slices.Index(deltaKinds[:], kind)
 }
 
 // TrackRef identifies a track by namespace and name.

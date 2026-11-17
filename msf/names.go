@@ -40,12 +40,8 @@ func validateNamespace(namespace string) error {
 	}
 	fields := 1
 	start := 0
-	plainASCII := true
 	for i := 0; i < len(namespace); i++ {
-		if b := namespace[i]; b != '/' {
-			if b == 0 || b >= utf8.RuneSelf {
-				plainASCII = false
-			}
+		if namespace[i] != '/' {
 			continue
 		}
 		if i == start {
@@ -59,9 +55,6 @@ func validateNamespace(namespace string) error {
 	}
 	if fields > maxNamespaceFields {
 		return fmt.Errorf("namespace %q has %d fields; at most %d are allowed", namespace, fields, maxNamespaceFields)
-	}
-	if plainASCII {
-		return nil
 	}
 	return validateNameText(namespace)
 }
