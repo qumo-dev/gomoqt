@@ -46,8 +46,8 @@ never sent it.
 
 A publisher may answer a SUBSCRIBE with SUBSCRIBE_REDIRECT instead of
 SUBSCRIBE_OK, telling the subscriber where to subscribe instead. It is modelled
-on moq-transport's REDIRECT error code and Redirect structure
-(draft-ietf-moq-transport-22, sections 9.4.1 and 12.3), carried as a typed
+on moq-transport's REDIRECT error code and REDIRECT Error Detail
+(draft-ietf-moq-transport-23, sections 9.4.2.1 and 12.3), carried as a typed
 message on the Subscribe Stream next to SUBSCRIBE_OK (0x0), SUBSCRIBE_END (0x1)
 and SUBSCRIBE_DROP (0x2).
 
@@ -64,7 +64,8 @@ SUBSCRIBE_REDIRECT Message {
 - **Connect URI**: the session to subscribe on. Empty means the current
   session. A server that receives a non-empty Connect URI MUST close the
   session with PROTOCOL_VIOLATION: only a server may send a subscriber to
-  another host.
+  another host. (moq-transport-23 uses ROLE_VIOLATION here; moq-lite has no
+  such code, so PROTOCOL_VIOLATION is kept.)
 - **Broadcast Path** and **Track Name**: the track to subscribe to instead.
 
 Rules:
