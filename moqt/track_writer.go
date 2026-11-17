@@ -150,7 +150,14 @@ func (w *TrackWriter) endGroup() GroupSequence {
 	if last == 0 && !w.usedZero.Load() {
 		return 0
 	}
-	return GroupSequence(last + 1)
+	end := GroupSequence(last + 1)
+	// A sequence past EndGroup was refused with ErrGroupOutOfRange and never
+	// sent. Naming it would leave the subscriber waiting for groups that
+	// cannot arrive, so the range ends right after EndGroup.
+	if eg := w.TrackConfig().EndGroup; eg != MinGroupSequence && end > eg+1 {
+		end = eg + 1
+	}
+	return end
 }
 
 // stopLocked ends the writer's open groups with endGroup and unregisters the
@@ -258,8 +265,8 @@ func (w *TrackWriter) OpenGroup(ctx context.Context) (*GroupWriter, error) {
 
 // OpenGroupAt opens a new group with the specified sequence number.
 // It advances the internal counter to at least seq, so the next OpenGroup
-// opens seq+1 and Close's SUBSCRIBE_END names seq rather than a group that
-// was never opened.
+// opens seq+1 and Close's SUBSCRIBE_END ends the range right after seq
+// rather than after a group that was never opened.
 //
 // ctx controls cancellation and backpressure the same way as OpenGroup.
 func (w *TrackWriter) OpenGroupAt(ctx context.Context, seq GroupSequence) (*GroupWriter, error) {

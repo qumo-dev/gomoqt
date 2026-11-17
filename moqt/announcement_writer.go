@@ -356,6 +356,9 @@ func (aw *AnnouncementWriter) SendAnnouncement(announcement *Announcement) error
 		if active.stop != nil {
 			active.stop()
 		}
+		// Ended standbys are dropped here, so a long-lived route that is
+		// re-announced over and over does not collect them.
+		active.standby = slices.DeleteFunc(active.standby, func(s *Announcement) bool { return !s.IsActive() })
 		if prev := active.announcement; prev.IsActive() {
 			active.standby = append(active.standby, prev)
 		}

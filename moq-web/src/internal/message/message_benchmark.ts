@@ -224,10 +224,9 @@ const LONG_PATH = "/" + "segment/".repeat(16) + "track.mp4";
 		broadcastPath: SHORT_PATH,
 		trackName: "camera-hd",
 		subscriberPriority: 5,
-		subscriberOrdered: 1,
 		subscriberMaxAge: 100,
-		startGroup: 0,
-		endGroup: 1000,
+		groupStart: 0,
+		groupEnd: 1000,
 	};
 	const w = new BufWriter(128);
 	const msg = new SubscribeMessage(init);

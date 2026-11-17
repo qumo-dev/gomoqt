@@ -212,12 +212,20 @@ export class AnnouncementWriter {
 		);
 	}
 
-	// Writes an announcement: its Type tag, then its length-prefixed body.
-	async #send(msg: AnnounceMessage): Promise<Error | undefined> {
-		const [, typeErr] = await writeVarint(this.#stream.writable, msg.type);
-		if (typeErr) return typeErr;
-		return msg.encode(this.#stream.writable);
+	// Writes an announcement: its Type tag, then its length-prefixed body. The
+	// two writes are separate awaits, and a route's end (#ended) sends
+	// concurrently with send(), so writes are chained: another message's bytes
+	// must never land between one message's tag and body.
+	#send(msg: AnnounceMessage): Promise<Error | undefined> {
+		const result = this.#sendChain.then(async () => {
+			const [, typeErr] = await writeVarint(this.#stream.writable, msg.type);
+			if (typeErr) return typeErr;
+			return msg.encode(this.#stream.writable);
+		});
+		this.#sendChain = result.catch(() => {});
+		return result;
 	}
+	#sendChain: Promise<unknown> = Promise.resolve();
 
 	// Watches the announcement active advertises, re-advertising or ending the
 	// route when it ends.
@@ -278,6 +286,13 @@ export class AnnouncementWriter {
 					`[AnnouncementWriter] announcement to end for path ${this.prefix}${sfx} is not active`,
 				);
 			}
+			// A standby that ended only leaves the fallback list; the route
+			// keeps advertising the announcement behind it.
+			const i = active.standby.indexOf(announcement);
+			if (i !== -1) {
+				active.standby.splice(i, 1);
+				return undefined;
+			}
 			// End the announcement the route advertises; its watch sends the
 			// ANNOUNCE_UPDATE or ANNOUNCE_END.
 			active.announcement.end();
@@ -295,7 +310,10 @@ export class AnnouncementWriter {
 			// A second ANNOUNCE_START for an advertised route would be a
 			// protocol violation: move it to the newer announcement in place,
 			// keeping the older one to fall back on while it lasts.
+			// Ended standbys are dropped here, so a long-lived route that is
+			// re-announced over and over does not collect them.
 			const prev = active.announcement;
+			active.standby = active.standby.filter((s) => s.isActive());
 			if (prev.isActive()) {
 				active.standby.push(prev);
 			}
@@ -376,6 +394,13 @@ export interface AnnouncementReaderOptions {
 	 * (moq-lite-06 §5.1.1). Omitted, a violation only ends the reader.
 	 */
 	onProtocolViolation?: (reason: string) => void;
+}
+
+// The stream ending inside a message whose Type tag has been read is a
+// message cut short, which is malformed (as Go's reader treats it), not the
+// stream ending between messages.
+function truncated(err: Error): Error {
+	return err instanceof EOFError ? new MessageDecodeError("truncated announcement") : err;
 }
 
 /** Raised for an Announce Stream message that breaks moq-lite-06 §5.1.1. */
@@ -483,7 +508,7 @@ export class AnnouncementReader {
 			case AnnounceMessageTypes.Start: {
 				const msg = new AnnounceStartMessage();
 				const err = await msg.decode(this.#stream.readable);
-				if (err) return err;
+				if (err) return truncated(err);
 				const route = await this.#received(msg.hopIDs, msg.warmCost, msg.coldCost);
 				if (route instanceof Error) return route;
 				return this.#start(msg.suffix, route);
@@ -491,13 +516,13 @@ export class AnnouncementReader {
 			case AnnounceMessageTypes.End: {
 				const msg = new AnnounceEndMessage();
 				const err = await msg.decode(this.#stream.readable);
-				if (err) return err;
+				if (err) return truncated(err);
 				return this.#retract(msg.announceId);
 			}
 			case AnnounceMessageTypes.Update: {
 				const msg = new AnnounceUpdateMessage();
 				const err = await msg.decode(this.#stream.readable);
-				if (err) return err;
+				if (err) return truncated(err);
 				const route = await this.#received(msg.hopIDs, msg.warmCost, msg.coldCost);
 				if (route instanceof Error) return route;
 				return this.#update(msg.announceId, route);

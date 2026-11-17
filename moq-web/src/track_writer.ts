@@ -345,7 +345,14 @@ export class TrackWriter {
 		// used will be produced: SUBSCRIBE_END's Group is exclusive. When no
 		// group was used it is 0, and without a preceding SUBSCRIBE_OK it says
 		// the track ended with no matching groups.
-		const end = this.#groupCount === 0 && !this.#usedZero ? 0 : this.#groupCount + 1;
+		let end = this.#groupCount === 0 && !this.#usedZero ? 0 : this.#groupCount + 1;
+		// A sequence past endGroup was refused (GroupOutOfRangeError) and never
+		// sent. Naming it would leave the subscriber waiting for groups that
+		// cannot arrive, so the range ends right after endGroup.
+		const endGroup = this.config.endGroup;
+		if (endGroup !== 0 && end > endGroup + 1) {
+			end = endGroup + 1;
+		}
 		await this.#subscribeStream.writeEnd(end);
 
 		await this.#subscribeStream.close();

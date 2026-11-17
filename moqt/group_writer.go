@@ -102,11 +102,13 @@ func (sgs *GroupWriter) CancelWrite(code GroupErrorCode) {
 // Close closes the group stream gracefully.
 func (sgs *GroupWriter) Close() error {
 	err := sgs.stream.Close()
+	// The stream has ended either way: release it even when Close failed, or
+	// the group's Max Age tracking would hold it as open, keeping every later
+	// closed group from being pruned.
+	sgs.release()
 	if err != nil {
 		return Cause(sgs.ctx)
 	}
-
-	sgs.release()
 
 	return nil
 }

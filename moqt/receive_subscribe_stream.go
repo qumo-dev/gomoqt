@@ -108,7 +108,8 @@ func (substr *receiveSubscribeStream) writeOkLocked(group GroupSequence) error {
 	return nil
 }
 
-// writeEnd sends SUBSCRIBE_END with the last group that may be delivered.
+// writeEnd sends SUBSCRIBE_END with the exclusive end: the first group that
+// will never be delivered.
 // Per moq-lite-06, SUBSCRIBE_END without a preceding SUBSCRIBE_OK signals a
 // track that ended with no matching groups.
 func (substr *receiveSubscribeStream) writeEnd(group GroupSequence) error {
