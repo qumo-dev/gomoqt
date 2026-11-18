@@ -5,7 +5,7 @@ go 1.27.0
 require (
 	github.com/coder/websocket v1.8.15
 	github.com/dunglas/httpsfv v1.1.2
-	github.com/okdaichi/qmux-go v0.3.0
+	github.com/okdaichi/qmux-go v0.3.1
 	github.com/okdaichi/webtransport-go v0.13.0-okdaichi.5
 	github.com/quic-go/quic-go v0.65.0
 	github.com/stretchr/testify v1.12.1
