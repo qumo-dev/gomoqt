@@ -208,3 +208,30 @@ func TestPathPattern_CoversBeneath(t *testing.T) {
 		})
 	}
 }
+
+func TestPathPattern_values(t *testing.T) {
+	tests := map[string]struct {
+		pattern string
+		path    BroadcastPath
+		want    map[string]string
+	}{
+		"segment":            {pattern: "/room/{id}/host", path: "/room/1/host", want: map[string]string{"id": "1"}},
+		"rest":               {pattern: "/room/{id}/{rest...}", path: "/room/1/alice/cam", want: map[string]string{"id": "1", "rest": "alice/cam"}},
+		"empty rest":         {pattern: "/room/{rest...}", path: "/room/", want: map[string]string{"rest": ""}},
+		"beneath a prefix":   {pattern: "/room/{id}/", path: "/room/1/alice", want: map[string]string{"id": "1"}},
+		"anchor":             {pattern: "/room/{id}/{$}", path: "/room/1/", want: map[string]string{"id": "1"}},
+		"no named wildcard":  {pattern: "/room/{$}", path: "/room/", want: nil},
+		"no wildcard at all": {pattern: "/room/", path: "/room/1", want: nil},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			p := mustPathPattern(t, tt.pattern)
+			require.True(t, p.Match(tt.path))
+
+			got := p.values(tt.path)
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

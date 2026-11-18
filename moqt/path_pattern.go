@@ -31,6 +31,8 @@ type patternSeg struct {
 	kind segKind
 	// lit is the text of a literal segment, and empty for a wildcard.
 	lit string
+	// name is the name of a "{name}" or "{name...}" wildcard.
+	name string
 }
 
 // ParsePathPattern parses s, an absolute pattern: a path starting with "/"
@@ -61,7 +63,7 @@ func ParsePathPattern(s string) (PathPattern, error) {
 		if name != "" {
 			names = append(names, name)
 		}
-		ps := patternSeg{kind: kind}
+		ps := patternSeg{kind: kind, name: name}
 		if kind == segLiteral {
 			ps.lit = seg
 		}
@@ -174,6 +176,34 @@ func (p PathPattern) matchSegments(path BroadcastPath) bool {
 	return false
 }
 
+// values returns what each named wildcard of p matched in path, which p
+// matches: a "{name}" its segment, a "{name...}" the rest of the path, with
+// no leading "/". It returns nil for a pattern without a named wildcard.
+func (p PathPattern) values(path BroadcastPath) map[string]string {
+	var vals map[string]string
+	rest := string(path[1:])
+	for _, seg := range p.segs {
+		if seg.kind == segAnchor {
+			break
+		}
+		got, after, _ := strings.Cut(rest, "/")
+		if seg.kind == segRest {
+			got = rest
+		}
+		if seg.name != "" {
+			if vals == nil {
+				vals = make(map[string]string, len(p.segs))
+			}
+			vals[seg.name] = got
+		}
+		if seg.kind == segRest {
+			break
+		}
+		rest = after
+	}
+	return vals
+}
+
 // coversBeneath reports whether the pattern matches every path beneath route,
 // the paths an announcement of route claims (moq-lite-06 §5.1.1): those that
 // continue it past a "/", "/live/" and "/live/alice" for route "/live".
@@ -250,4 +280,115 @@ func joinPattern(root, pattern string) (PathPattern, error) {
 		return PathPattern{}, fmt.Errorf("%w: %q", ErrInvalidPathPattern, pattern)
 	}
 	return ParsePathPattern(strings.TrimSuffix(root, "/") + pattern)
+}
+
+// patternRelation is how the sets of paths two patterns match relate, as
+// http.ServeMux relates its patterns.
+type patternRelation int
+
+const (
+	relEquivalent   patternRelation = iota // the same set
+	relMoreSpecific                        // a strict subset
+	relMoreGeneral                         // a strict superset
+	relOverlaps                            // neither, but they share a path
+	relDisjoint                            // they share no path
+)
+
+// compare relates the set of paths p matches to the set q matches.
+func (p PathPattern) compare(q PathPattern) patternRelation {
+	a, b := p.elems(), q.elems()
+	rel := relEquivalent
+	for i := 0; ; i++ {
+		if i == len(a) || i == len(b) {
+			if len(a) == len(b) {
+				return rel
+			}
+			return relDisjoint
+		}
+		ea, eb := a[i], b[i]
+		switch {
+		case ea.multi && eb.multi:
+			return rel
+		case ea.multi:
+			return combineRelations(rel, relMoreGeneral)
+		case eb.multi:
+			return combineRelations(rel, relMoreSpecific)
+		}
+		if rel = combineRelations(rel, ea.compare(eb)); rel == relDisjoint {
+			return rel
+		}
+	}
+}
+
+// combineRelations relates two patterns from how two consecutive parts of
+// them relate.
+func combineRelations(r1, r2 patternRelation) patternRelation {
+	switch {
+	case r1 == relDisjoint || r2 == relDisjoint:
+		return relDisjoint
+	case r1 == relEquivalent:
+		return r2
+	case r2 == relEquivalent || r1 == r2:
+		return r1
+	default:
+		return relOverlaps
+	}
+}
+
+// patternElem is one segment of a pattern: a literal, a "{name}" wildcard,
+// or the rest of a path ("{name...}" or what a trailing "/" leaves).
+type patternElem struct {
+	literal  string
+	wildcard bool
+	multi    bool
+}
+
+// compare relates the segments e and f match.
+func (e patternElem) compare(f patternElem) patternRelation {
+	switch {
+	case e.wildcard && f.wildcard:
+		return relEquivalent
+	case e.wildcard:
+		// "{name}" matches no empty segment.
+		if f.literal == "" {
+			return relDisjoint
+		}
+		return relMoreGeneral
+	case f.wildcard:
+		if e.literal == "" {
+			return relDisjoint
+		}
+		return relMoreSpecific
+	case e.literal == f.literal:
+		return relEquivalent
+	default:
+		return relDisjoint
+	}
+}
+
+// elems returns the segments of p. "{$}" is the empty literal segment it
+// matches.
+func (p PathPattern) elems() []patternElem {
+	if p.raw == "" {
+		return nil
+	}
+	var elems []patternElem
+	if p.raw != "/" {
+		for _, seg := range strings.Split(strings.TrimSuffix(p.raw[1:], "/"), "/") {
+			switch _, kind := parseWildcard(seg); kind {
+			case segAnchor:
+				elems = append(elems, patternElem{})
+			case segRest:
+				return append(elems, patternElem{multi: true})
+			case segWildcard:
+				elems = append(elems, patternElem{wildcard: true})
+			default:
+				elems = append(elems, patternElem{literal: seg})
+			}
+		}
+	}
+	if strings.HasSuffix(p.raw, "/") {
+		elems = append(elems, patternElem{multi: true})
+	}
+	return elems
 }
