@@ -88,6 +88,10 @@ type TrackWriter struct {
 	// The value is set when the subscription is accepted and does not change.
 	TrackName TrackName
 
+	// pathValues holds what the wildcards of the TrackMux pattern serving
+	// the track matched.
+	pathValues map[string]string
+
 	subscribeStream *receiveSubscribeStream
 
 	groupManager *groupWriterManager
@@ -112,6 +116,17 @@ type TrackWriter struct {
 	redirectAllowed func(ctx context.Context, uri string) error
 
 	ctx context.Context
+}
+
+// PathValue returns what the named wildcard of the TrackMux pattern that last
+// routed the subscription matched, like http.Request.PathValue: for a handler
+// registered for "/room/{id}/", a subscription to "/room/1/alice" gives "1"
+// for "id". It records the routing, not the current path: rewriting
+// BroadcastPath leaves it as it was, and handing the TrackWriter to a
+// TrackMux routes it again and sets it anew. It returns "" if there is no such
+// wildcard, or an announced path served the subscription.
+func (w *TrackWriter) PathValue(name string) string {
+	return w.pathValues[name]
 }
 
 // Close stops publishing and cancels active groups.

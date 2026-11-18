@@ -1230,14 +1230,17 @@ func (sess *Session) handleTrackStream(stream transport.Stream) {
 		return
 	}
 
-	ann, handler := sess.mux.TrackHandler(BroadcastPath(tm.BroadcastPath))
-	if ann == nil {
+	ann, handler, ok := sess.mux.handler(BroadcastPath(tm.BroadcastPath))
+	provider, isProvider := handler.(TrackInfoProvider)
+	// A pattern says nothing of which tracks exist: a path it serves is
+	// described only by a handler that knows its tracks.
+	if !ok || ann == nil && !isProvider {
 		cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeNotFound))
 		return
 	}
 
 	var info PublishInfo
-	if provider, ok := handler.(TrackInfoProvider); ok {
+	if isProvider {
 		i, found := provider.TrackInfo(TrackName(tm.TrackName))
 		if !found {
 			cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeNotFound))

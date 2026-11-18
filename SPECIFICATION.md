@@ -29,7 +29,9 @@ sends neutral defaults and leaves route selection to the relay.
   above a requested prefix clamped to it. It serves a subscription from the
   most specific route covering its path: the path itself if published, else
   the longest published route above it, matched per segment. A path no route
-  covers is refused with NOT_FOUND. A route received from a peer whose Auth
+  covers goes to the most specific local pattern registered with
+  TrackMux.Handle, which announces nothing; with none, it is refused with
+  NOT_FOUND. A route received from a peer whose Auth
   grant does not cover every path beneath it serves only its own path.
 
 Frame positions (Section 3.6) are handled internally, with no public API.

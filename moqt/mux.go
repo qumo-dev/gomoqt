@@ -86,6 +86,7 @@ type TrackMux struct {
 
 	mu                sync.RWMutex
 	trackHandlerIndex map[BroadcastPath]*announcedTrackHandler
+	patternHandlers   []*patternHandler
 	// routeLens counts the paths in trackHandlerIndex by length, and
 	// routeLensDesc lists those lengths, longest first. findTrackHandler
 	// tries only prefixes of those lengths, so its cost does not grow with
@@ -120,6 +121,114 @@ func (mux *TrackMux) Publish(ctx context.Context, path BroadcastPath, handler Tr
 	}
 	ann, _ := NewAnnouncement(ctx, path)
 	mux.Announce(ann, handler)
+}
+
+// HandleFunc registers f to serve tracks of every broadcast path that pattern
+// matches. It wraps f into a TrackHandlerFunc; see Handle.
+func (mux *TrackMux) HandleFunc(ctx context.Context, pattern string, f func(tw *TrackWriter)) {
+	mux.Handle(ctx, pattern, TrackHandlerFunc(f))
+}
+
+// Handle registers handler to serve tracks of every broadcast path that
+// pattern matches, until ctx is canceled. The pattern is read as a
+// PathPattern, and Handle panics if it is invalid, the way
+// http.ServeMux.Handle does.
+//
+// A pattern announces nothing: it serves subscriptions to paths no announced
+// route covers, such as broadcasts made on demand. A path announced through
+// Publish or Announce, or beneath such a route, is served by that route's
+// handler (see TrackHandler). Among the
+// patterns that match a path, the most specific serves it, as in
+// http.ServeMux: the one matching a strict subset of the paths the others
+// match, so the order of registration never decides. Handle panics if pattern
+// conflicts with a registered one, matching the same paths or sharing some
+// with neither more specific, such as "/{a}/host" and "/room/{b}".
+// Registering the same pattern again replaces it, as Publish replaces a path:
+// the tracks the old handler serves end with SubscribeErrorCodeNotFound, as
+// they do when ctx ends. A ctx already ended registers
+// nothing.
+//
+// The handler reads the values the pattern's wildcards matched with
+// TrackWriter.PathValue.
+func (mux *TrackMux) Handle(ctx context.Context, pattern string, handler TrackHandler) {
+	if ctx == nil {
+		panic("[TrackMux] nil context")
+	}
+	if err := validateTrackHandler(handler); err != nil {
+		panic("[TrackMux] " + err.Error())
+	}
+	if m, ok := handler.(*TrackMux); ok && (m == nil || m == mux) {
+		panic("[TrackMux] a TrackMux cannot handle its own paths, or be nil")
+	}
+	p, err := ParsePathPattern(pattern)
+	if err != nil {
+		panic("[TrackMux] " + err.Error())
+	}
+	if ctx.Err() != nil {
+		return
+	}
+
+	hctx, end := context.WithCancel(ctx)
+	ph := &patternHandler{ctx: hctx, end: end, pattern: p, handler: handler}
+
+	mux.mu.Lock()
+	var replaced *patternHandler
+	for _, h := range mux.patternHandlers {
+		if h.pattern.raw == p.raw {
+			replaced = h
+			continue
+		}
+		if rel := p.compare(h.pattern); rel == relEquivalent || rel == relOverlaps {
+			mux.mu.Unlock()
+			end()
+			panic(fmt.Sprintf("[TrackMux] pattern %q conflicts with pattern %q", pattern, h.pattern.raw))
+		}
+	}
+	handlers := slices.DeleteFunc(mux.patternHandlers, func(h *patternHandler) bool { return h == replaced })
+	// Kept with each pattern before every pattern more general than it, so the
+	// first that matches a path is the most specific.
+	at := slices.IndexFunc(handlers, func(h *patternHandler) bool {
+		return p.compare(h.pattern) == relMoreSpecific
+	})
+	if at < 0 {
+		at = len(handlers)
+	}
+	mux.patternHandlers = slices.Insert(handlers, at, ph)
+	mux.mu.Unlock()
+
+	if replaced != nil {
+		replaced.end()
+	}
+	context.AfterFunc(hctx, func() {
+		mux.mu.Lock()
+		defer mux.mu.Unlock()
+		mux.patternHandlers = slices.DeleteFunc(mux.patternHandlers, func(h *patternHandler) bool {
+			return h == ph
+		})
+	})
+}
+
+// patternHandler is a handler registered for a path pattern. Its ctx ends
+// when the registration ends, ending the tracks it serves.
+type patternHandler struct {
+	ctx     context.Context
+	end     context.CancelFunc
+	pattern PathPattern
+	handler TrackHandler
+}
+
+// findPatternHandler returns the handler of the most specific pattern that
+// matches path, or nil.
+func (mux *TrackMux) findPatternHandler(path BroadcastPath) *patternHandler {
+	mux.mu.RLock()
+	defer mux.mu.RUnlock()
+
+	for _, ph := range mux.patternHandlers {
+		if ph.pattern.Match(path) {
+			return ph
+		}
+	}
+	return nil
 }
 
 func (mux *TrackMux) registerHandler(ann *Announcement, handler TrackHandler) *announcedTrackHandler {
@@ -256,13 +365,28 @@ func (mux *TrackMux) Announce(announcement *Announcement, handler TrackHandler) 
 // announcement of path itself, or else of the longest announced route that
 // covers it (moq-lite-06 §5.1.1), so an announcement of "/live" serves
 // "/live/alice/cam1" unless "/live/alice" or "/live/alice/cam1" is announced.
-// If no announcement covers path, it returns nil and NotFoundTrackHandler.
+// A path no announcement covers is served by the handler of the most
+// specific pattern registered with Handle that matches it, returned with a
+// nil Announcement. If neither serves path, it returns nil and
+// NotFoundTrackHandler.
 func (mux *TrackMux) TrackHandler(path BroadcastPath) (*Announcement, TrackHandler) {
-	ath := mux.findTrackHandler(path)
-	if ath == nil {
+	ann, handler, ok := mux.handler(path)
+	if !ok {
 		return nil, NotFoundTrackHandler
 	}
-	return ath.Announcement, ath.TrackHandler
+	return ann, handler
+}
+
+// handler returns the handler serving path: its announced handler, with the
+// Announcement, or else the handler of the most specific pattern matching it.
+func (mux *TrackMux) handler(path BroadcastPath) (*Announcement, TrackHandler, bool) {
+	if ath := mux.findTrackHandler(path); ath != nil {
+		return ath.Announcement, ath.TrackHandler, true
+	}
+	if ph := mux.findPatternHandler(path); ph != nil {
+		return nil, ph.handler, true
+	}
+	return nil, nil, false
 }
 
 // findTrackHandler returns the handler of the most specific announced route
@@ -308,6 +432,18 @@ func usableHandler(ath *announcedTrackHandler) *announcedTrackHandler {
 	return ath
 }
 
+var _ TrackHandler = (*TrackMux)(nil)
+
+// ServeTrack routes tw by its BroadcastPath, as an http.ServeMux nested in
+// another handler routes a request: a handler that rewrites tw.BroadcastPath
+// to proxy it hands tw to a TrackMux to route it again. Routing sets what
+// TrackWriter.PathValue returns anew, empty when an announced path serves tw.
+// What the TrackMux announces reaches a peer only when it is the session's
+// own TrackMux.
+func (mux *TrackMux) ServeTrack(tw *TrackWriter) {
+	mux.serveTrack(tw)
+}
+
 // serveTrack serves the track at the specified path using the registered handler.
 func (mux *TrackMux) serveTrack(tw *TrackWriter) {
 	if tw == nil {
@@ -316,10 +452,25 @@ func (mux *TrackMux) serveTrack(tw *TrackWriter) {
 
 	path := tw.BroadcastPath
 
-	// Use findTrackHandler for consistent lookup with optimized locking
+	// Routing sets the path values anew, whichever way it goes.
+	tw.pathValues = nil
+
+	// An announced route serves first; a pattern serves what none covers.
 	ath := mux.findTrackHandler(path)
 	if ath == nil {
-		tw.CloseWithError(SubscribeErrorCodeNotFound)
+		ph := mux.findPatternHandler(path)
+		if ph == nil {
+			tw.CloseWithError(SubscribeErrorCodeNotFound)
+			return
+		}
+		tw.pathValues = ph.pattern.values(path)
+		// A path whose registration ended is served by nothing: the track
+		// ends as one would be refused now.
+		stop := context.AfterFunc(ph.ctx, func() {
+			tw.CloseWithError(SubscribeErrorCodeNotFound)
+		})
+		defer stop()
+		ph.handler.ServeTrack(tw)
 		return
 	}
 
@@ -332,8 +483,8 @@ func (mux *TrackMux) serveTrack(tw *TrackWriter) {
 	ath.TrackHandler.ServeTrack(tw)
 }
 
-// serveAnnouncements serves the announcements under the writer's prefix.
-// It registers the AnnouncementWriter and sends the matching announcements.
+// serveAnnouncements serves announcements for tracks matching the given pattern.
+// It registers the AnnouncementWriter and sends announcements for matching tracks.
 func (mux *TrackMux) serveAnnouncements(aw *AnnouncementWriter) {
 	if aw == nil {
 		return
