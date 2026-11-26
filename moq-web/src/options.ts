@@ -54,8 +54,9 @@ export interface ConnectInit {
 	/**
 	 * Decides whether {@link Session.subscribe} follows a redirect to another
 	 * track on the same session, as Go's `Dialer.CheckRedirect` and
-	 * `http.Client.CheckRedirect` do. `via` holds the redirects already
-	 * followed for this subscription, oldest first, as a copy. Return
+	 * `http.Client.CheckRedirect` do. `via` holds the initial subscription
+	 * (`{ uri: "", broadcastPath, trackName }`) followed by each redirect
+	 * already followed for this subscription, oldest first, as a copy. Return
 	 * `undefined` to follow, {@link StopRedirect} to get the redirect back as a
 	 * {@link RedirectError}, or any other error to get it back as that error's
 	 * {@link RedirectError} cause. A redirect to another session is never

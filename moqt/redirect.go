@@ -19,7 +19,8 @@ const (
 
 // CheckRedirectFunc decides whether Session.Subscribe follows a redirect to
 // another track on the same session, as http.Client.CheckRedirect does for
-// HTTP. to is the next redirect; via holds the redirects already followed for
+// HTTP. to is the next redirect; via holds the initial subscription
+// (BroadcastPath and TrackName) followed by each redirect already followed for
 // this subscription, oldest first, as a copy. Returning nil follows it.
 // Returning ErrStopRedirect makes Subscribe return a *RedirectError for to
 // without following it; any other error is returned joined with one. A
@@ -105,4 +106,27 @@ func (to Redirect) validate() error {
 		return fmt.Errorf("moqt: invalid redirect path: %q", to.BroadcastPath)
 	}
 	return nil
+}
+
+// RedirectHandler returns a TrackHandler that answers every subscription it
+// receives with a redirect to to, as http.RedirectHandler does for HTTP. An
+// empty TrackName in to keeps the subscriber's track name. When
+// TrackWriter.Redirect returns an error (for example ErrRedirectNotSupported
+// or ErrClientRedirectURI), the subscription is closed with
+// SubscribeErrorCodeNotFound.
+func RedirectHandler(to Redirect) TrackHandler {
+	return &redirectHandler{to: to}
+}
+
+type redirectHandler struct {
+	to Redirect
+}
+
+func (h *redirectHandler) ServeTrack(tw *TrackWriter) {
+	if tw == nil {
+		return
+	}
+	if err := tw.Redirect(tw.Context(), h.to); err != nil {
+		tw.CloseWithError(SubscribeErrorCodeNotFound)
+	}
 }

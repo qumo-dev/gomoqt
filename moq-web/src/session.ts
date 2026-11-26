@@ -151,8 +151,9 @@ export interface SessionInit {
 	/**
 	 * Decides whether {@link Session.subscribe} follows a redirect to another
 	 * track on the same session, as Go's `Dialer.CheckRedirect` and
-	 * `http.Client.CheckRedirect` do. `via` holds the redirects already
-	 * followed for this subscription, oldest first, as a copy. Return
+	 * `http.Client.CheckRedirect` do. `via` holds the initial subscription
+	 * (`{ uri: "", broadcastPath, trackName }`) followed by each redirect
+	 * already followed for this subscription, oldest first, as a copy. Return
 	 * `undefined` to follow, {@link StopRedirect} to get the redirect back as a
 	 * {@link RedirectError}, or any other error to get it back as that error's
 	 * {@link RedirectError} cause. A redirect to another session is never
@@ -659,6 +660,9 @@ export class Session {
 					group.cancel(GroupErrorCode.SubscribeCanceled).catch(() => {})
 				),
 			]);
+			const history = via.length === 0
+				? [{ uri: "", broadcastPath: path, trackName: name }]
+				: via;
 			return this.#followRedirect(
 				{
 					uri: resp.redirect.connectUri,
@@ -666,7 +670,7 @@ export class Session {
 					trackName: resp.redirect.trackName,
 				},
 				config,
-				via,
+				history,
 			);
 		}
 		if (!resp.ok && !resp.end) {
@@ -704,7 +708,8 @@ export class Session {
 	}
 
 	// #followRedirect subscribes where a publisher redirected a subscription,
-	// when it is on this session and checkRedirect allows it.
+	// when it is on this session and checkRedirect allows it. via begins with
+	// the initial subscription followed by each redirect already followed.
 	#followRedirect(
 		to: Redirect,
 		config: TrackConfig | undefined,
@@ -713,13 +718,14 @@ export class Session {
 		if (to.uri !== "") {
 			return Promise.resolve([undefined, new RedirectError(to)]);
 		}
+		const followed = Math.max(via.length - 1, 0);
 		let refusal: Error | undefined;
-		if (via.length >= maxRedirects) {
+		if (followed >= maxRedirects) {
 			refusal = new TooManyRedirectsError();
 		} else if (this.#checkRedirect) {
 			// A copy, so checkRedirect cannot change the history it is judged by.
 			refusal = this.#checkRedirect({ ...to }, via.map((v) => ({ ...v })));
-		} else if (via.length >= defaultMaxRedirects) {
+		} else if (followed >= defaultMaxRedirects) {
 			refusal = new TooManyRedirectsError();
 		}
 		if (refusal === StopRedirect) {

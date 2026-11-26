@@ -2,8 +2,9 @@ import type { AnnouncementWriter } from "./announce_stream.ts";
 import { Announcement, routeSuffix } from "./announce_stream.ts";
 import type { BroadcastPath } from "./broadcast_path.ts";
 import { NotFoundTrackHandler } from "./broadcast.ts";
+import { SubscribeErrorCode } from "./error.ts";
 
-import type { TrackWriter } from "./track_writer.ts";
+import type { RedirectTarget, TrackWriter } from "./track_writer.ts";
 import type { TrackPrefix } from "./track_prefix.ts";
 import { DEFAULT_TIMESCALE, type Info } from "./info.ts";
 
@@ -303,4 +304,27 @@ export interface TrackInfoProvider {
 	 * when the track does not exist.
 	 */
 	trackInfo(name: string): Info | undefined;
+}
+
+/**
+ * Returns a {@link TrackHandler} that answers every subscription it receives
+ * with a redirect to `to`, as Go's `moqt.RedirectHandler` and
+ * `http.RedirectHandler` do. An omitted or empty `trackName` keeps the
+ * subscriber's track name. When {@link TrackWriter.redirect} returns an error
+ * (for example, {@link RedirectNotSupportedError}), the subscription is closed
+ * with {@link SubscribeErrorCode.TrackNotFound}.
+ */
+export function redirectHandler(to: RedirectTarget): TrackHandler {
+	const target: RedirectTarget = {
+		broadcastPath: to.broadcastPath,
+		...(to.trackName !== undefined ? { trackName: to.trackName } : {}),
+	};
+	return {
+		async serveTrack(trackWriter: TrackWriter): Promise<void> {
+			const err = await trackWriter.redirect(target);
+			if (err !== undefined) {
+				await trackWriter.closeWithError(SubscribeErrorCode.TrackNotFound);
+			}
+		},
+	};
 }

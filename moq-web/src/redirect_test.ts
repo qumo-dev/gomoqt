@@ -13,7 +13,7 @@ import {
 } from "./internal/message/mod.ts";
 import { MESSAGE_TYPE_SUBSCRIBE_OK, MESSAGE_TYPE_SUBSCRIBE_REDIRECT } from "./subscribe_stream.ts";
 import { BiStreamTypes, UniStreamTypes } from "./stream_type.ts";
-import { TrackMux } from "./track_mux.ts";
+import { redirectHandler, TrackMux } from "./track_mux.ts";
 import type { BroadcastPath } from "./broadcast_path.ts";
 import type { TrackWriter } from "./track_writer.ts";
 import type { SendStream } from "./internal/webtransport/mod.ts";
@@ -24,6 +24,7 @@ import {
 	RedirectNotSupportedError,
 	SessionErrorCode,
 	StopRedirect,
+	SubscribeErrorCode,
 	SubscriptionAnsweredError,
 	TooManyRedirectsError,
 } from "./error.ts";
@@ -275,11 +276,14 @@ Deno.test("Session.subscribe asks checkRedirect", async (t) => {
 	const veto = new Error("vetoed");
 	const calls: Array<{ to: string; via: string[] }> = [];
 	const checkRedirect = (to: Redirect, via: Redirect[]): Error | undefined => {
+		assert(via.length >= 1, "via[0] holds the initial subscription");
+		assertEquals(via[0]?.uri, "");
+		assertEquals(via[0]?.trackName, "video");
 		calls.push({ to: to.broadcastPath, via: via.map((v) => v.broadcastPath) });
 		// Changing via must not change the history of later calls.
 		for (const v of via) v.broadcastPath = "/tampered";
 		if (to.broadcastPath === "/stop") return StopRedirect;
-		if (to.broadcastPath === "/real" && via.length > 0) return veto;
+		if (to.broadcastPath === "/real" && via.length > 1) return veto;
 		return undefined;
 	};
 
@@ -302,9 +306,9 @@ Deno.test("Session.subscribe asks checkRedirect", async (t) => {
 		assertEquals(err, undefined);
 		assertEquals(track?.broadcastPath, "/c");
 		assertEquals(calls, [
-			{ to: "/a", via: [] },
-			{ to: "/b", via: ["/a"] },
-			{ to: "/c", via: ["/a", "/b"] },
+			{ to: "/a", via: ["/start"] },
+			{ to: "/b", via: ["/start", "/a"] },
+			{ to: "/c", via: ["/start", "/a", "/b"] },
 		]);
 	});
 
@@ -329,6 +333,42 @@ Deno.test("Session.subscribe asks checkRedirect", async (t) => {
 		assertInstanceOf(err, RedirectError);
 		assertEquals(err.redirect.broadcastPath, "/stop");
 		assertEquals(err.cause, undefined);
+	});
+
+	await t.step("can enforce a prefix policy from via[0]", async () => {
+		const outOfScope = new Error("redirect outside subscribed prefix");
+		const mock = new MockWebTransportSession({
+			openStreamResponses: [
+				await redirectResponse({ broadcastPath: "/victim/secret", trackName: "video" }),
+				await okResponse(),
+			],
+		});
+		const session = new Session({
+			transport: mock,
+			checkRedirect: (to, via) => {
+				const origin = via[0]?.broadcastPath ?? "";
+				if (
+					origin.startsWith("/.abr/") && to.broadcastPath !== origin.slice("/.abr".length)
+				) {
+					return outOfScope;
+				}
+				return undefined;
+			},
+		});
+		await session.ready;
+
+		const [track, err] = await session.subscribe("/.abr/acme/evil", "video");
+
+		assertEquals(track, undefined);
+		assertInstanceOf(err, RedirectError);
+		assertEquals(err.redirect.broadcastPath, "/victim/secret");
+		assertEquals(err.cause, outOfScope);
+		assertEquals(
+			mock.openStreamWrittenData.length,
+			1,
+			"must not subscribe to the vetoed target",
+		);
+		await session.close();
 	});
 });
 
@@ -571,4 +611,118 @@ Deno.test("SetupMessage.followsRedirect reads one varint version", async (t) => 
 			assertEquals(sm.followsRedirect(), tt.want);
 		});
 	}
+});
+
+Deno.test("redirectHandler", async (t) => {
+	await t.step("keeps the subscriber's track name when omitted or empty", async (st) => {
+		const cases: Record<string, { broadcastPath: BroadcastPath; trackName?: string }> = {
+			"omitted": { broadcastPath: "/acme/cam" },
+			"empty": { broadcastPath: "/acme/cam", trackName: "" },
+		};
+		for (const [name, to] of Object.entries(cases)) {
+			await st.step(name, async () => {
+				const h = redirectHandler(to);
+				const written = await serve(true, (tw) => Promise.resolve(h.serveTrack(tw)));
+
+				const { msg, rest } = await sentRedirect(written);
+				assertEquals(
+					[msg.connectUri, msg.broadcastPath, msg.trackName],
+					["", "/acme/cam", "video"],
+				);
+				assertEquals(rest, 0);
+			});
+		}
+	});
+
+	await t.step("renames the track when trackName is set", async () => {
+		const h = redirectHandler({ broadcastPath: "/acme/cam", trackName: "video-hd" });
+		const written = await serve(true, (tw) => Promise.resolve(h.serveTrack(tw)));
+
+		const { msg, rest } = await sentRedirect(written);
+		assertEquals(
+			[msg.connectUri, msg.broadcastPath, msg.trackName],
+			["", "/acme/cam", "video-hd"],
+		);
+		assertEquals(rest, 0);
+	});
+
+	await t.step("copies target defensively at construction", async () => {
+		const to: { broadcastPath: BroadcastPath; trackName?: string } = {
+			broadcastPath: "/acme/cam",
+			trackName: "hd",
+		};
+		const h = redirectHandler(to);
+		to.broadcastPath = "/mutated";
+		to.trackName = "mutated";
+
+		const written = await serve(true, (tw) => Promise.resolve(h.serveTrack(tw)));
+
+		const { msg } = await sentRedirect(written);
+		assertEquals([msg.broadcastPath, msg.trackName], ["/acme/cam", "hd"]);
+	});
+
+	await t.step("closes with TrackNotFound when redirect fails", async (st) => {
+		const cases: Record<
+			string,
+			{ follows: boolean; to: { broadcastPath: BroadcastPath; trackName?: string } }
+		> = {
+			"peer does not follow redirects": {
+				follows: false,
+				to: { broadcastPath: "/acme/cam" },
+			},
+			"invalid target path": {
+				follows: true,
+				to: { broadcastPath: "acme/cam" as BroadcastPath },
+			},
+		};
+		for (const [name, tt] of Object.entries(cases)) {
+			await st.step(name, async () => {
+				const h = redirectHandler(tt.to);
+				const closedCodes: number[] = [];
+				const written = await serve(tt.follows, async (tw) => {
+					const origCloseWithError = tw.closeWithError.bind(tw);
+					tw.closeWithError = async (code) => {
+						closedCodes.push(code);
+						await origCloseWithError(code);
+					};
+					await h.serveTrack(tw);
+				});
+
+				assertEquals(written.length, 0);
+				assertEquals(closedCodes, [SubscribeErrorCode.TrackNotFound]);
+			});
+		}
+	});
+
+	await t.step("works with TrackMux.publish", async () => {
+		const done = Promise.withResolvers<void>();
+		const mux = new class extends TrackMux {
+			override async serveTrack(tw: TrackWriter): Promise<void> {
+				try {
+					await super.serveTrack(tw);
+				} finally {
+					done.resolve();
+				}
+			}
+		}();
+		await mux.publish(
+			new Promise<void>(() => {}),
+			"/public/cam",
+			redirectHandler({ broadcastPath: "/acme/cam" }),
+		);
+
+		const mock = new MockWebTransportSession({
+			acceptUniStreamData: [await subscriberSetup(true)],
+			acceptStreamData: [await incomingSubscribe("/public/cam", "video")],
+		});
+		const session = new Session({ transport: mock, mux });
+		await session.ready;
+		await done.promise;
+		await session.close();
+
+		const written = concat(mock.acceptStreamWrittenData[0] ?? []);
+		const { msg, rest } = await sentRedirect(written);
+		assertEquals([msg.broadcastPath, msg.trackName], ["/acme/cam", "video"]);
+		assertEquals(rest, 0);
+	});
 });

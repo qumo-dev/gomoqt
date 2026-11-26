@@ -570,7 +570,8 @@ func (sess *Session) Subscribe(ctx context.Context, path BroadcastPath, name Tra
 	return sess.subscribe(ctx, path, name, config, nil)
 }
 
-// subscribe is Subscribe after following the redirects in via.
+// subscribe is Subscribe after following any redirects in via, which starts
+// with the initial subscription once redirected.
 func (sess *Session) subscribe(ctx context.Context, path BroadcastPath, name TrackName, config *SubscribeConfig, via []Redirect) (*TrackReader, error) {
 	if ctx == nil {
 		return nil, errors.New("nil context")
@@ -681,6 +682,9 @@ func (sess *Session) subscribe(ctx context.Context, path BroadcastPath, name Tra
 		// Nothing follows the redirect: stop reading, so the stream completes.
 		stream.CancelRead(transport.StreamErrorCode(SubscribeErrorCodeInternal))
 		_ = track.Close() // not actionable: the stream is already over
+		if len(via) == 0 {
+			via = []Redirect{{BroadcastPath: path, TrackName: name}}
+		}
 		return sess.followRedirect(ctx, redirectFromMessage(resp.redirect), config, via)
 	default:
 		cancelStreamWithError(stream, transport.StreamErrorCode(SubscribeErrorCodeInternal))
@@ -716,15 +720,18 @@ func (sess *Session) followRedirect(ctx context.Context, to Redirect, config *Su
 
 // allowRedirect reports whether Subscribe follows to after via: up to
 // maxRedirects, as checkRedirect decides, or defaultMaxRedirects without it.
+// via starts with the initial subscription, followed by each redirect already
+// followed.
 func (sess *Session) allowRedirect(to Redirect, via []Redirect) error {
-	if len(via) >= maxRedirects {
+	followed := max(len(via)-1, 0)
+	if followed >= maxRedirects {
 		return ErrTooManyRedirects
 	}
 	if sess.checkRedirect != nil {
 		// A copy, so checkRedirect cannot change the history it is judged by.
 		return sess.checkRedirect(to, slices.Clone(via))
 	}
-	if len(via) >= defaultMaxRedirects {
+	if followed >= defaultMaxRedirects {
 		return ErrTooManyRedirects
 	}
 	return nil
