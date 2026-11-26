@@ -51,12 +51,13 @@ You can adjust the subscription parameters at any time by calling the `TrackRead
 
 A publisher may answer a subscription with a redirect instead of serving it. `Session.Subscribe` follows a redirect to another track on the same session by itself and returns the reader of the track it ended at: check `tr.BroadcastPath` and `tr.TrackName` to see which. A redirect to another session returns a `*moqt.RedirectError`; dial its `Redirect.URI` and subscribe there.
 
-`CheckRedirect` on the `Dialer` (or the `Server`, for a server that subscribes to its clients) decides whether a redirect within the session is followed, from its target and the redirects already followed for the subscription, as `http.Client.CheckRedirect` does for HTTP. Return `moqt.ErrStopRedirect` to get it back as a `*moqt.RedirectError` instead. Without it, `Subscribe` follows two in a row and returns `moqt.ErrTooManyRedirects` on the third; with it, `Subscribe` still stops after ten.
+`CheckRedirect` on the `Dialer` (or the `Server`, for a server that subscribes to its clients) decides whether a redirect within the session is followed, from its target and the subscription history in `via`, as `http.Client.CheckRedirect` does for HTTP. `via[0]` holds the initial subscription (`BroadcastPath` and `TrackName`), followed by each redirect already followed. Return `moqt.ErrStopRedirect` to get it back as a `*moqt.RedirectError` instead. Without it, `Subscribe` follows two in a row and returns `moqt.ErrTooManyRedirects` on the third; with it, `Subscribe` still stops after ten.
 
 ```go
     dialer := moqt.Dialer{
         CheckRedirect: func(to moqt.Redirect, via []moqt.Redirect) error {
-            if !strings.HasPrefix(string(to.BroadcastPath), "/acme/") {
+            if len(via) > 0 && strings.HasPrefix(string(via[0].BroadcastPath), "/public/") &&
+                !strings.HasPrefix(string(to.BroadcastPath), "/acme/") {
                 return moqt.ErrStopRedirect // the caller decides
             }
             return nil
@@ -72,7 +73,13 @@ A publisher may answer a subscription with a redirect instead of serving it. `Se
     }
 ```
 
-On the publishing side, a track handler calls `TrackWriter.Redirect` before the first group. An empty `TrackName` keeps the subscriber's, so one call redirects a whole broadcast:
+On the publishing side, `moqt.RedirectHandler` answers every subscription with a redirect and closes with `moqt.SubscribeErrorCodeNotFound` if the subscriber does not follow redirects. An empty `TrackName` keeps the subscriber's, so one handler redirects a whole broadcast:
+
+```go
+    mux.Publish(ctx, "/public/cam", moqt.RedirectHandler(moqt.Redirect{BroadcastPath: "/acme/cam"}))
+```
+
+Call `TrackWriter.Redirect` directly when you need a custom fallback (such as serving the track locally if redirects are not supported):
 
 ```go
     mux.PublishFunc(ctx, "/public/cam", func(tw *moqt.TrackWriter) {

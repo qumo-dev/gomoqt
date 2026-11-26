@@ -349,12 +349,13 @@ func TestSession_allowRedirect(t *testing.T) {
 		via     int
 		wantErr error
 	}{
-		"default, first":           {via: 0},
-		"default, second":          {via: 1},
-		"default, third":           {via: 2, wantErr: ErrTooManyRedirects},
-		"hook allows past default": {check: allowAll, via: 5},
-		"hook allows, hard limit":  {check: allowAll, via: maxRedirects, wantErr: ErrTooManyRedirects},
-		"hook vetoes first":        {check: func(Redirect, []Redirect) error { return errVeto }, wantErr: errVeto},
+		"empty via safety":         {via: 0},
+		"default, first":           {via: 1},
+		"default, second":          {via: 2},
+		"default, third":           {via: 3, wantErr: ErrTooManyRedirects},
+		"hook allows past default": {check: allowAll, via: 6},
+		"hook allows, hard limit":  {check: allowAll, via: maxRedirects + 1, wantErr: ErrTooManyRedirects},
+		"hook vetoes first":        {check: func(Redirect, []Redirect) error { return errVeto }, via: 1, wantErr: errVeto},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -381,4 +382,125 @@ func TestSession_followRedirect_InvalidPath(t *testing.T) {
 	redirect, ok := errors.AsType[*RedirectError](err)
 	require.True(t, ok, "want a *RedirectError, got %v", err)
 	assert.Equal(t, BroadcastPath("live/x"), redirect.Redirect.BroadcastPath)
+}
+
+func TestRedirectHandler(t *testing.T) {
+	follows := func(context.Context, string) error { return nil }
+
+	t.Run("redirects and keeps or renames track", func(t *testing.T) {
+		tests := map[string]struct {
+			to   Redirect
+			want message.SubscribeRedirectMessage
+		}{
+			"keeps subscriber track name": {
+				to:   Redirect{BroadcastPath: "/real"},
+				want: message.SubscribeRedirectMessage{BroadcastPath: "/real", TrackName: "trackname"},
+			},
+			"renames track and sets URI": {
+				to:   Redirect{URI: "moqt://relay-b.example/", BroadcastPath: "/real", TrackName: "audio"},
+				want: message.SubscribeRedirectMessage{ConnectURI: "moqt://relay-b.example/", BroadcastPath: "/real", TrackName: "audio"},
+			},
+		}
+		for name, tt := range tests {
+			t.Run(name, func(t *testing.T) {
+				tw, buf := newTrackWriterDropTestSender(t)
+				tw.redirectAllowed = follows
+
+				RedirectHandler(tt.to).ServeTrack(tw)
+
+				b := buf.Bytes()
+				require.NotEmpty(t, b)
+				assert.Equal(t, byte(message.MessageTypeSubscribeRedirect), b[0])
+				r := bytes.NewReader(b[1:])
+				var got message.SubscribeRedirectMessage
+				require.NoError(t, got.Decode(r))
+				assert.Equal(t, tt.want, got)
+				assert.Zero(t, r.Len())
+			})
+		}
+	})
+
+	t.Run("closes with NOT_FOUND on redirect error", func(t *testing.T) {
+		tests := map[string]struct {
+			allowed func(context.Context, string) error
+			to      Redirect
+		}{
+			"peer does not follow redirects": {
+				allowed: func(context.Context, string) error { return ErrRedirectNotSupported },
+				to:      Redirect{BroadcastPath: "/real"},
+			},
+			"invalid broadcast path": {
+				allowed: follows,
+				to:      Redirect{BroadcastPath: "live/x"},
+			},
+			"client sets URI": {
+				allowed: func(context.Context, string) error { return ErrClientRedirectURI },
+				to:      Redirect{URI: "moqt://relay-b.example/", BroadcastPath: "/real"},
+			},
+		}
+		for name, tt := range tests {
+			t.Run(name, func(t *testing.T) {
+				stream := &fakeQUICStream{}
+				substr := newReceiveSubscribeStream(SubscribeID(1), stream, &SubscribeConfig{})
+				tw := newTrackWriter("/alias", "video", substr, nil, func() {})
+				tw.redirectAllowed = tt.allowed
+
+				RedirectHandler(tt.to).ServeTrack(tw)
+
+				assert.Zero(t, stream.WriteCalls())
+				assert.Equal(t,
+					[]transport.StreamErrorCode{transport.StreamErrorCode(SubscribeErrorCodeNotFound)},
+					stream.CancelWriteCodes(),
+				)
+			})
+		}
+	})
+
+	t.Run("nil TrackWriter is a no-op", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			RedirectHandler(Redirect{BroadcastPath: "/real"}).ServeTrack(nil)
+		})
+	})
+
+	t.Run("works with TrackMux.Publish and TrackMux.Handle", func(t *testing.T) {
+		tests := map[string]struct {
+			path     BroadcastPath
+			register func(*TrackMux)
+		}{
+			"Publish": {
+				path: "/alias",
+				register: func(mux *TrackMux) {
+					mux.Publish(t.Context(), "/alias", RedirectHandler(Redirect{BroadcastPath: "/real"}))
+				},
+			},
+			"Handle": {
+				path: "/old/cam1",
+				register: func(mux *TrackMux) {
+					mux.Handle(t.Context(), "/old/{name}", RedirectHandler(Redirect{BroadcastPath: "/real"}))
+				},
+			},
+		}
+		for name, tt := range tests {
+			t.Run(name, func(t *testing.T) {
+				mux := NewTrackMux(0)
+				tt.register(mux)
+
+				stream := &fakeQUICStream{}
+				substr := newReceiveSubscribeStream(SubscribeID(1), stream, &SubscribeConfig{})
+				tw := newTrackWriter(tt.path, "video", substr, nil, func() {})
+				tw.redirectAllowed = follows
+
+				mux.ServeTrack(tw)
+
+				b := stream.Written()
+				require.NotEmpty(t, b)
+				assert.Equal(t, byte(message.MessageTypeSubscribeRedirect), b[0])
+				r := bytes.NewReader(b[1:])
+				var got message.SubscribeRedirectMessage
+				require.NoError(t, got.Decode(r))
+				assert.Equal(t, message.SubscribeRedirectMessage{BroadcastPath: "/real", TrackName: "video"}, got)
+				assert.Zero(t, r.Len())
+			})
+		}
+	})
 }

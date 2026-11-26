@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,17 +16,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// redirectTo serves every subscription with a redirect to to, as an
-// application's handler on a TrackMux does, and refuses a subscriber that
-// does not follow redirects.
-func redirectTo(to Redirect) func(*TrackWriter) {
-	return func(tw *TrackWriter) {
-		if err := tw.Redirect(tw.Context(), to); err != nil {
-			tw.CloseWithError(SubscribeErrorCodeNotFound)
-		}
-	}
-}
 
 // publishEcho serves one group whose only frame names the track and the
 // priority the subscriber asked for, so a test can tell which track it
@@ -50,12 +40,12 @@ var elsewhereRedirect = Redirect{URI: "moqt://relay-b.example/", BroadcastPath: 
 func newRedirectMux(ctx context.Context) *TrackMux {
 	mux := NewTrackMux(0)
 	mux.PublishFunc(ctx, "/real", publishEcho)
-	mux.PublishFunc(ctx, "/alias", redirectTo(Redirect{BroadcastPath: "/real"}))
-	mux.PublishFunc(ctx, "/alias-of-alias", redirectTo(Redirect{BroadcastPath: "/alias"}))
-	mux.PublishFunc(ctx, "/renamed", redirectTo(Redirect{BroadcastPath: "/real", TrackName: "audio"}))
-	mux.PublishFunc(ctx, "/loop-a", redirectTo(Redirect{BroadcastPath: "/loop-b"}))
-	mux.PublishFunc(ctx, "/loop-b", redirectTo(Redirect{BroadcastPath: "/loop-a"}))
-	mux.PublishFunc(ctx, "/elsewhere", redirectTo(elsewhereRedirect))
+	mux.Publish(ctx, "/alias", RedirectHandler(Redirect{BroadcastPath: "/real"}))
+	mux.Publish(ctx, "/alias-of-alias", RedirectHandler(Redirect{BroadcastPath: "/alias"}))
+	mux.Publish(ctx, "/renamed", RedirectHandler(Redirect{BroadcastPath: "/real", TrackName: "audio"}))
+	mux.Publish(ctx, "/loop-a", RedirectHandler(Redirect{BroadcastPath: "/loop-b"}))
+	mux.Publish(ctx, "/loop-b", RedirectHandler(Redirect{BroadcastPath: "/loop-a"}))
+	mux.Publish(ctx, "/elsewhere", RedirectHandler(elsewhereRedirect))
 	return mux
 }
 
@@ -191,7 +181,8 @@ func TestSession_Subscribe_Redirect(t *testing.T) {
 }
 
 // TestSession_Subscribe_Redirect_CheckRedirect checks that Dialer.CheckRedirect
-// sees each redirect with the ones followed before it, and what its answers do.
+// sees each redirect with the initial subscription and the ones followed before
+// it, and what its answers do.
 func TestSession_Subscribe_Redirect_CheckRedirect(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
@@ -204,6 +195,11 @@ func TestSession_Subscribe_Redirect_CheckRedirect(t *testing.T) {
 	var calls []call
 	errVeto := errors.New("vetoed")
 	sess := dialRedirectServer(t, ctx, "moqt", addr, func(to Redirect, via []Redirect) error {
+		assert.NotEmpty(t, via)
+		if len(via) > 0 {
+			assert.Empty(t, via[0].URI)
+			assert.Equal(t, TrackName("video"), via[0].TrackName)
+		}
 		c := call{to: to.BroadcastPath}
 		for _, v := range via {
 			c.via = append(c.via, v.BroadcastPath)
@@ -216,7 +212,7 @@ func TestSession_Subscribe_Redirect_CheckRedirect(t *testing.T) {
 		switch {
 		case to.BroadcastPath == "/loop-b":
 			return ErrStopRedirect
-		case to.BroadcastPath == "/real" && len(via) > 0:
+		case to.BroadcastPath == "/real" && len(via) > 1:
 			return errVeto
 		}
 		return nil
@@ -232,18 +228,18 @@ func TestSession_Subscribe_Redirect_CheckRedirect(t *testing.T) {
 		"follows": {
 			path:      "/alias",
 			wantPath:  "/real",
-			wantCalls: []call{{to: "/real"}},
+			wantCalls: []call{{to: "/real", via: []BroadcastPath{"/alias"}}},
 		},
 		"vetoes the second": {
 			path:      "/alias-of-alias",
 			wantErr:   errVeto,
 			wantTo:    "/real",
-			wantCalls: []call{{to: "/alias"}, {to: "/real", via: []BroadcastPath{"/alias"}}},
+			wantCalls: []call{{to: "/alias", via: []BroadcastPath{"/alias-of-alias"}}, {to: "/real", via: []BroadcastPath{"/alias-of-alias", "/alias"}}},
 		},
 		"stops": {
 			path:      "/loop-a",
 			wantTo:    "/loop-b",
-			wantCalls: []call{{to: "/loop-b"}},
+			wantCalls: []call{{to: "/loop-b", via: []BroadcastPath{"/loop-a"}}},
 		},
 		"not asked about another session": {
 			path:      "/elsewhere",
@@ -275,6 +271,70 @@ func TestSession_Subscribe_Redirect_CheckRedirect(t *testing.T) {
 	}
 }
 
+// TestSession_Subscribe_Redirect_PrefixPolicy checks that a session-level
+// CheckRedirect can enforce prefix-scoped redirect rules from via[0].
+func TestSession_Subscribe_Redirect_PrefixPolicy(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+
+	var victimCalls atomic.Int32
+	mux := NewTrackMux(0)
+	mux.PublishFunc(ctx, "/live/cam1", publishEcho)
+	mux.PublishFunc(ctx, "/victim/secret", func(tw *TrackWriter) {
+		victimCalls.Add(1)
+		publishEcho(tw)
+	})
+	mux.Publish(ctx, "/.abr/live/cam1", RedirectHandler(Redirect{BroadcastPath: "/live/cam1"}))
+	mux.Publish(ctx, "/.abr/acme/evil", RedirectHandler(Redirect{BroadcastPath: "/victim/secret"}))
+	mux.HandleFunc(ctx, "/legacy/{name}", func(tw *TrackWriter) {
+		if err := tw.Redirect(tw.Context(), Redirect{BroadcastPath: BroadcastPath("/live/" + tw.PathValue("name"))}); err != nil {
+			tw.CloseWithError(SubscribeErrorCodeNotFound)
+		}
+	})
+
+	addr := startRedirectServer(t, mux, nil)
+	errOutOfScope := errors.New("redirect outside subscribed prefix")
+	sess := dialRedirectServer(t, ctx, "moqt", addr, func(to Redirect, via []Redirect) error {
+		origin := string(via[0].BroadcastPath)
+		if rest, ok := strings.CutPrefix(origin, "/.abr"); ok {
+			if to.BroadcastPath != BroadcastPath(rest) {
+				return errOutOfScope
+			}
+			return nil
+		}
+		if !strings.HasPrefix(string(to.BroadcastPath), "/live/") {
+			return errOutOfScope
+		}
+		return nil
+	}, nil)
+
+	t.Run("allows scoped redirect", func(t *testing.T) {
+		tr, err := sess.Subscribe(ctx, "/.abr/live/cam1", "video", nil)
+		require.NoError(t, err)
+		defer tr.Close()
+		assert.Equal(t, BroadcastPath("/live/cam1"), tr.BroadcastPath)
+		assert.Equal(t, "video:0", readEcho(t, ctx, tr))
+	})
+
+	t.Run("vetoes cross-prefix redirect before subscribing", func(t *testing.T) {
+		tr, err := sess.Subscribe(ctx, "/.abr/acme/evil", "video", nil)
+		assert.Nil(t, tr)
+		assert.ErrorIs(t, err, errOutOfScope)
+		redirect, ok := errors.AsType[*RedirectError](err)
+		require.True(t, ok, "want a *RedirectError, got %v", err)
+		assert.Equal(t, BroadcastPath("/victim/secret"), redirect.Redirect.BroadcastPath)
+		assert.Zero(t, victimCalls.Load())
+	})
+
+	t.Run("allows HandleFunc PathValue redirect", func(t *testing.T) {
+		tr, err := sess.Subscribe(ctx, "/legacy/cam1", "video", nil)
+		require.NoError(t, err)
+		defer tr.Close()
+		assert.Equal(t, BroadcastPath("/live/cam1"), tr.BroadcastPath)
+		assert.Equal(t, "video:0", readEcho(t, ctx, tr))
+	})
+}
+
 // TestSession_Subscribe_Redirect_ServerToClient runs the other direction: a
 // server subscribes to what a client publishes, and the client redirects.
 func TestSession_Subscribe_Redirect_ServerToClient(t *testing.T) {
@@ -287,7 +347,7 @@ func TestSession_Subscribe_Redirect_ServerToClient(t *testing.T) {
 	clientErrs := make(chan error, 1)
 	clientMux := NewTrackMux(0)
 	clientMux.PublishFunc(ctx, "/real", publishEcho)
-	clientMux.PublishFunc(ctx, "/alias", redirectTo(Redirect{BroadcastPath: "/real"}))
+	clientMux.Publish(ctx, "/alias", RedirectHandler(Redirect{BroadcastPath: "/real"}))
 	clientMux.PublishFunc(ctx, "/elsewhere", func(tw *TrackWriter) {
 		err := tw.Redirect(tw.Context(), elsewhereRedirect)
 		clientErrs <- err
